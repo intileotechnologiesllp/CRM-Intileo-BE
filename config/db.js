@@ -16,12 +16,6 @@ sequelize
     console.error("Unable to connect to the database:", error);
   });
 
-sequelize.sync({ alter: true }) // Use `alter: true` to update the schema without dropping data
-  .then(() => {
-    console.log("Database synchronized successfully.");
-  })
-  .catch((error) => {
-    console.error("Error synchronizing the database:", error);
-  });
+
 
 module.exports = sequelize;
