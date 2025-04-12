@@ -3,9 +3,9 @@ const sectoralScopeController = require("../../../../controllers/admin/masters/s
 
 const router = express.Router();
 
-router.post("/", sectoralScopeController.createSectoralScope); // Add sectoral scope
-router.put("/:id", sectoralScopeController.editSectoralScope); // Edit sectoral scope
-router.delete("/:id", sectoralScopeController.deleteSectoralScope); // Delete sectoral scope
-router.get("/", sectoralScopeController.getSectoralScopes); // Get sectoral scopes
+router.post("/create", sectoralScopeController.createSectoralScope); // Add sectoral scope
+router.put("/edit/:id", sectoralScopeController.editSectoralScope); // Edit sectoral scope
+router.delete("/delete/:id", sectoralScopeController.deleteSectoralScope); // Delete sectoral scope
+router.get("/get", sectoralScopeController.getSectoralScopes); // Get sectoral scopes
 
 module.exports = router;

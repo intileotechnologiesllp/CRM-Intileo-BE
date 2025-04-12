@@ -19,6 +19,8 @@ const countryRoutes = require("./routes/admin/masters/country/countryRoutes"); /
 const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // Import region routes
 const app = express();
 
+const cors = require("cors");
+app.use(cors());
 // Middleware
 app.use(express.json());
 
@@ -42,5 +44,5 @@ sequelize
   .catch((err) => console.error("Error syncing database:", err));
 
 // Start server
-const PORT = 3000;
+const PORT = process.env.PORT || 3056;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

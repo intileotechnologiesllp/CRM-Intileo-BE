@@ -4,7 +4,10 @@ const Designation = require("../../../../models/admin/masters/designationModel")
 
 // Validation schema for designation
 const designationSchema = Joi.object({
-  designation_desc: Joi.string().min(3).max(100).required(), // Must be a string between 3 and 100 characters
+  designation_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "Designation description cannot be empty",
+    "any.required": "Designation description is required",
+  }),
 });
 
 // Add Designation

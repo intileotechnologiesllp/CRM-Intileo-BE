@@ -1,9 +1,24 @@
+const Joi = require("joi");
 const OrganizationType = require("../../../../models/admin/masters/organizationModel");
 const { Op } = require("sequelize");
+
+// Joi Validation Schema
+const organizationSchema = Joi.object({
+  organization_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "Organization description cannot be empty",
+    "any.required": "Organization description is required",
+  }),
+});
 
 // Add Organization Type
 exports.createOrganizationType = async (req, res) => {
   const { organization_desc } = req.body;
+
+  // Validate the request body
+  const { error } = organizationSchema.validate({ organization_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const newOrganizationType = await OrganizationType.create({
@@ -26,6 +41,12 @@ exports.createOrganizationType = async (req, res) => {
 exports.editOrganizationType = async (req, res) => {
   const { id } = req.params;
   const { organization_desc } = req.body;
+
+  // Validate the request body
+  const { error } = organizationSchema.validate({ organization_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const organizationType = await OrganizationType.findByPk(id);

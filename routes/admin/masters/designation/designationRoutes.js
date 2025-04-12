@@ -1,11 +1,11 @@
 const express = require("express");
-const designationController = require("../../../../controllers/admin/masters/designation/designationController"); // Import the controller
+const designationController = require("../../../../controllers/admin/masters/designation/designationController");
 
 const router = express.Router();
 
-router.post("/", designationController.createDesignation); // Add designation
-router.put("/:id", designationController.editDesignation); // Edit designation
-router.delete("/:id", designationController.deleteDesignation); // Delete designation
-router.get("/", designationController.getDesignations); // Get designations (with search, pagination, and sorting)
+router.post("/create", designationController.createDesignation); // Add designation
+router.put("/edit/:id", designationController.editDesignation); // Edit designation
+router.delete("/delete/:id", designationController.deleteDesignation); // Delete designation
+router.get("/get", designationController.getDesignations); // Get designations
 
 module.exports = router;

@@ -1,8 +1,21 @@
+const Joi = require("joi");
 const Department = require("../../../../models/admin/masters/departmentModel");
+const { Op } = require("sequelize");
+
+// Validation schema for department
+const departmentSchema = Joi.object({
+  department_desc: Joi.string().min(3).max(100).required(), // Must be a string between 3 and 100 characters
+});
 
 // Add Department
 exports.createDepartment = async (req, res) => {
   const { department_desc } = req.body;
+
+  // Validate the request body
+  const { error } = departmentSchema.validate({ department_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const newDepartment = await Department.create({
@@ -25,6 +38,12 @@ exports.createDepartment = async (req, res) => {
 exports.editDepartment = async (req, res) => {
   const { id } = req.params;
   const { department_desc } = req.body;
+
+  // Validate the request body
+  const { error } = departmentSchema.validate({ department_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const department = await Department.findByPk(id);
@@ -68,7 +87,7 @@ exports.deleteDepartment = async (req, res) => {
   }
 };
 
-// Search, paginate, and sort Departments
+// Get Departments
 exports.getDepartments = async (req, res) => {
   const {
     search,
@@ -85,7 +104,7 @@ exports.getDepartments = async (req, res) => {
     const whereClause = {
       ...(search && {
         department_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by department_desc
+          [Op.like]: `%${search}%`, // Search by department_desc
         },
       }),
       ...(createdBy && { createdBy }), // Filter by createdBy
