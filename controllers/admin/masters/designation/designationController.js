@@ -24,12 +24,20 @@ exports.createDesignation = async (req, res) => {
     const designation = await Designation.create({
       designation_desc,
       createdBy: "admin",
-      mode: "added",
+      mode: "added"
     });
 
-    res
-      .status(201)
-      .json({ message: "Designation created successfully", designation });
+    res.status(201).json({
+      message: "Designation created successfully",
+      designation: {
+        designationId: designation.designationId, // Include designationId in the response
+        designation_desc: designation.designation_desc,
+        createdBy: designation.createdBy,
+        mode: designation.mode,
+        createdAt: designation.createdAt,
+        updatedAt: designation.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error creating designation:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -38,7 +46,7 @@ exports.createDesignation = async (req, res) => {
 
 // Edit Designation
 exports.editDesignation = async (req, res) => {
-  const { id } = req.params;
+  const { designationId } = req.params; // Use designationId instead of id
   const { designation_desc } = req.body;
 
   // Validate the request body
@@ -48,7 +56,7 @@ exports.editDesignation = async (req, res) => {
   }
 
   try {
-    const designation = await Designation.findByPk(id);
+    const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
       return res.status(404).json({ message: "Designation not found" });
     }
@@ -58,9 +66,16 @@ exports.editDesignation = async (req, res) => {
       mode: "modified", // Set mode to "modified"
     });
 
-    res
-      .status(200)
-      .json({ message: "Designation updated successfully", designation });
+    res.status(200).json({
+      message: "Designation updated successfully",
+      designation: {
+        designationId: designation.designationId, // Include designationId in the response
+        designation_desc: designation.designation_desc,
+        mode: designation.mode,
+        createdAt: designation.createdAt,
+        updatedAt: designation.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error updating designation:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -69,10 +84,10 @@ exports.editDesignation = async (req, res) => {
 
 // Delete Designation
 exports.deleteDesignation = async (req, res) => {
-  const { id } = req.params;
+  const { designationId } = req.params; // Use designationId instead of id
 
   try {
-    const designation = await Designation.findByPk(id);
+    const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
       return res.status(404).json({ message: "Designation not found" });
     }
@@ -82,7 +97,10 @@ exports.deleteDesignation = async (req, res) => {
 
     await designation.destroy();
 
-    res.status(200).json({ message: "Designation deleted successfully" });
+    res.status(200).json({
+      message: "Designation deleted successfully",
+      designationId, // Include designationId in the response
+    });
   } catch (error) {
     console.error("Error deleting designation:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -101,7 +119,7 @@ exports.getDesignations = async (req, res) => {
     order = "DESC",
   } = req.query;
 
-  // Validate query parameters
+  // Validate query parameters using Joi
   const querySchema = Joi.object({
     search: Joi.string().optional(),
     createdBy: Joi.string().optional(),
@@ -140,7 +158,14 @@ exports.getDesignations = async (req, res) => {
       total: designations.count,
       pages: Math.ceil(designations.count / limit),
       currentPage: parseInt(page),
-      designations: designations.rows,
+      designations: designations.rows.map((designation) => ({
+        designationId: designation.designationId, // Include designationId in the response
+        designation_desc: designation.designation_desc,
+        mode: designation.mode,
+        createdBy: designation.createdBy,
+        createdAt: designation.createdAt,
+        updatedAt: designation.updatedAt,
+      })),
     });
   } catch (error) {
     console.error("Error fetching designations:", error);
