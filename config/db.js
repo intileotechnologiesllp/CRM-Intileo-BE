@@ -7,14 +7,14 @@ const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, proces
   logging: false,
 });
 
-// sequelize
-//   .authenticate()
-//   .then(() => {
-//     console.log("Database connected successfully.");
-//   })
-//   .catch((error) => {
-//     console.error("Unable to connect to the database:", error);
-//   });
+sequelize
+  .authenticate()
+  .then(() => {
+    console.log("Database connected successfully.");
+  })
+  .catch((error) => {
+    console.error("Unable to connect to the database:", error);
+  });
 
 sequelize.sync({ alter: true }) // Use `alter: true` to update the schema without dropping data
   .then(() => {
