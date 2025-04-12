@@ -37,7 +37,7 @@ app.use("/api/regions", regionRoutes); // Register region routes
 
 // Sync database
 sequelize
-  .sync({ alter: true }) // Use `alter: true` to create or update the table schema
+  .sync({ alter: true }) // Use `alter: true` to update the schema without dropping tables
   .then(() => console.log("Database synced successfully"))
   .catch((err) => console.error("Error syncing database:", err));
 

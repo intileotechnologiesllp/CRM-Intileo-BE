@@ -4,22 +4,17 @@ const Country = require("./countryModel");
 
 const Region = sequelize.define("Region", {
   region_desc: {
-    type: DataTypes.TEXT,
+    type: DataTypes.STRING,
     allowNull: false,
   },
   countryId: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Country, // Reference the Country model
+      model: Country,
       key: "id",
     },
-    onDelete: "CASCADE", // Delete regions if the country is deleted
-  },
-  creationDate: {
-    type: DataTypes.DATE,
-    allowNull: false,
-    defaultValue: DataTypes.NOW,
+    onDelete: "CASCADE",
   },
   createdBy: {
     type: DataTypes.STRING,
@@ -29,9 +24,14 @@ const Region = sequelize.define("Region", {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  creationDate: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW, // Set default value to the current timestamp
+  },
 });
 
-// Define the relationship
+// Define associations
 Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
 Region.belongsTo(Country, { foreignKey: "countryId" });
 

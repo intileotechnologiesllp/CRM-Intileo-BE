@@ -1,5 +1,6 @@
 const Region = require("../../../../models/admin/masters/regionModel");
 const Country = require("../../../../models/admin/masters/countryModel");
+console.log(Region);
 
 // Add Region
 exports.createRegion = async (req, res) => {
@@ -37,6 +38,25 @@ exports.getRegionsByCountry = async (req, res) => {
     res.status(200).json(regions);
   } catch (error) {
     console.error("Error fetching regions:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get Regions with Country Details
+exports.getRegionsWithCountry = async (req, res) => {
+  try {
+    const regions = await Region.findAll({
+      include: [
+        {
+          model: Country,
+          attributes: ["id", "country_desc"], // Fetch only necessary fields
+        },
+      ],
+    });
+
+    res.status(200).json(regions);
+  } catch (error) {
+    console.error("Error fetching regions with country details:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

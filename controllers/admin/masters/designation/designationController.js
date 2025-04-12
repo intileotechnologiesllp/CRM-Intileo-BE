@@ -1,14 +1,27 @@
+const Joi = require("joi");
+const { Op } = require("sequelize");
 const Designation = require("../../../../models/admin/masters/designationModel");
+
+// Validation schema for designation
+const designationSchema = Joi.object({
+  designation_desc: Joi.string().min(3).max(100).required(), // Must be a string between 3 and 100 characters
+});
 
 // Add Designation
 exports.createDesignation = async (req, res) => {
   const { designation_desc } = req.body;
 
+  // Validate the request body
+  const { error } = designationSchema.validate({ designation_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
     const designation = await Designation.create({
       designation_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
+      createdBy: "admin",
+      mode: "added",
     });
 
     res
@@ -24,6 +37,12 @@ exports.createDesignation = async (req, res) => {
 exports.editDesignation = async (req, res) => {
   const { id } = req.params;
   const { designation_desc } = req.body;
+
+  // Validate the request body
+  const { error } = designationSchema.validate({ designation_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const designation = await Designation.findByPk(id);
@@ -79,12 +98,28 @@ exports.getDesignations = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "designation_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
     // Build the whereClause with filters
     const whereClause = {
       ...(search && {
         designation_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by designation_desc
+          [Op.like]: `%${search}%`, // Search by designation_desc
         },
       }),
       ...(createdBy && { createdBy }), // Filter by createdBy
