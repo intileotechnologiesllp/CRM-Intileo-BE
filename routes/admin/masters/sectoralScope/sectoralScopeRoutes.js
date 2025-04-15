@@ -1,5 +1,6 @@
 const express = require("express");
-const sectoralscopeController = require("../../../../controllers/admin/masters/sectoralscope/sectoralscopeController");
+// const sectoralscopeController = require("../../../../controllers/admin/masters/sectoralscope/sectoralscopeController");
+const sectoralscopeController = require("../../../../controllers/admin/masters/sectoralScope/sectoralScopeController");
 
 const router = express.Router();
 
