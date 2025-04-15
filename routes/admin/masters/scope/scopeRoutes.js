@@ -3,9 +3,9 @@ const scopeController = require("../../../../controllers/admin/masters/scope/sco
 
 const router = express.Router();
 
-router.post("/create", scopeController.createScope); // Add scope
-router.put("/edit/:id", scopeController.editScope); // Edit scope
-router.delete("/delete/:id", scopeController.deleteScope); // Delete scope
-router.get("/get", scopeController.getScopes); // Get scopes
+router.post("/create", scopeController.createscope); // Add scope
+router.post("/edit/:scopeId", scopeController.editscope); // Edit scope
+router.post("/delete/:scopeId", scopeController.deletescope); // Delete scope
+router.get("/get", scopeController.getscopes); // Get scopes
 
 module.exports = router;

@@ -1,34 +1,64 @@
+const Joi = require("joi");
+const { Op } = require("sequelize");
 const Currency = require("../../../../models/admin/masters/currencyModel");
 
-// Add Currency
-exports.createCurrency = async (req, res) => {
+// Validation schema for currency
+const currencySchema = Joi.object({
+  currency_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "currency description cannot be empty",
+    "any.required": "currency description is required",
+  }),
+});
+
+// Add currency
+exports.createcurrency = async (req, res) => {
   const { currency_desc } = req.body;
+
+  // Validate the request body
+  const { error } = currencySchema.validate({ currency_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const currency = await Currency.create({
       currency_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
+      createdBy: "admin",
+      mode: "added"
     });
 
-    res
-      .status(201)
-      .json({ message: "Currency created successfully", currency });
+    res.status(201).json({
+      message: "currency created successfully",
+      currency: {
+        currencyId: currency.currencyId, // Include currencyId in the response
+        currency_desc: currency.currency_desc,
+        createdBy: currency.createdBy,
+        mode: currency.mode,
+        createdAt: currency.createdAt,
+        updatedAt: currency.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error creating currency:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Currency
-exports.editCurrency = async (req, res) => {
-  const { id } = req.params;
+// Edit currency
+exports.editcurrency = async (req, res) => {
+  const { currencyId } = req.params; // Use currencyId instead of id
   const { currency_desc } = req.body;
 
+  // Validate the request body
+  const { error } = currencySchema.validate({ currency_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
-    const currency = await Currency.findByPk(id);
+    const currency = await Currency.findByPk(currencyId); // Find currency by currencyId
     if (!currency) {
-      return res.status(404).json({ message: "Currency not found" });
+      return res.status(404).json({ message: "currency not found" });
     }
 
     await currency.update({
@@ -36,23 +66,30 @@ exports.editCurrency = async (req, res) => {
       mode: "modified", // Set mode to "modified"
     });
 
-    res
-      .status(200)
-      .json({ message: "Currency updated successfully", currency });
+    res.status(200).json({
+      message: "currency updated successfully",
+      currency: {
+        currencyId: currency.currencyId, // Include currencyId in the response
+        currency_desc: currency.currency_desc,
+        mode: currency.mode,
+        createdAt: currency.createdAt,
+        updatedAt: currency.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error updating currency:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Currency
-exports.deleteCurrency = async (req, res) => {
-  const { id } = req.params;
+// Delete currency
+exports.deletecurrency = async (req, res) => {
+  const { currencyId } = req.params; // Use currencyId instead of id
 
   try {
-    const currency = await Currency.findByPk(id);
+    const currency = await Currency.findByPk(currencyId); // Find currency by currencyId
     if (!currency) {
-      return res.status(404).json({ message: "Currency not found" });
+      return res.status(404).json({ message: "currency not found" });
     }
 
     // Update mode to "deleted" before deleting
@@ -60,15 +97,18 @@ exports.deleteCurrency = async (req, res) => {
 
     await currency.destroy();
 
-    res.status(200).json({ message: "Currency deleted successfully" });
+    res.status(200).json({
+      message: "currency deleted successfully",
+      currencyId, // Include currencyId in the response
+    });
   } catch (error) {
     console.error("Error deleting currency:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Search, paginate, and sort currencies
-exports.getCurrencies = async (req, res) => {
+// Search, paginate, and sort currencys
+exports.getcurrencys = async (req, res) => {
   const {
     search,
     createdBy,
@@ -79,19 +119,35 @@ exports.getCurrencies = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "currency_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
     // Build the whereClause with filters
     const whereClause = {
       ...(search && {
         currency_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by currency_desc
+          [Op.like]: `%${search}%`, // Search by currency_desc
         },
       }),
       ...(createdBy && { createdBy }), // Filter by createdBy
       ...(mode && { mode }), // Filter by mode
     };
 
-    const currencies = await Currency.findAndCountAll({
+    const currencys = await Currency.findAndCountAll({
       where: whereClause, // Apply filters
       order: [[sortBy, order]], // Sorting
       limit: parseInt(limit), // Pagination limit
@@ -99,13 +155,20 @@ exports.getCurrencies = async (req, res) => {
     });
 
     res.status(200).json({
-      total: currencies.count,
-      pages: Math.ceil(currencies.count / limit),
+      total: currencys.count,
+      pages: Math.ceil(currencys.count / limit),
       currentPage: parseInt(page),
-      currencies: currencies.rows,
+      currencys: currencys.rows.map((currency) => ({
+        currencyId: currency.currencyId, // Include currencyId in the response
+        currency_desc: currency.currency_desc,
+        mode: currency.mode,
+        createdBy: currency.createdBy,
+        createdAt: currency.createdAt,
+        updatedAt: currency.updatedAt,
+      })),
     });
   } catch (error) {
-    console.error("Error fetching currencies:", error);
+    console.error("Error fetching currencys:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

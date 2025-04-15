@@ -1,143 +1,64 @@
-const Designation = require("../../../../models/admin/masters/designationModel");
+const Joi = require("joi");
+const { Op } = require("sequelize");
 const Scope = require("../../../../models/admin/masters/scopeModel");
 
-// Add Designation
-exports.createDesignation = async (req, res) => {
-  const { designation_desc } = req.body;
+// Validation schema for scope
+const scopeSchema = Joi.object({
+  scope_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "scope description cannot be empty",
+    "any.required": "scope description is required",
+  }),
+});
 
-  try {
-    const designation = await Designation.create({
-      designation_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
-    });
-
-    res
-      .status(201)
-      .json({ message: "Designation created successfully", designation });
-  } catch (error) {
-    console.error("Error creating designation:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Edit Designation
-exports.editDesignation = async (req, res) => {
-  const { id } = req.params;
-  const { designation_desc } = req.body;
-
-  try {
-    const designation = await Designation.findByPk(id);
-    if (!designation) {
-      return res.status(404).json({ message: "Designation not found" });
-    }
-
-    await designation.update({
-      designation_desc,
-      mode: "modified", // Set mode to "modified"
-    });
-
-    res
-      .status(200)
-      .json({ message: "Designation updated successfully", designation });
-  } catch (error) {
-    console.error("Error updating designation:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Delete Designation
-exports.deleteDesignation = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const designation = await Designation.findByPk(id);
-    if (!designation) {
-      return res.status(404).json({ message: "Designation not found" });
-    }
-
-    // Update mode to "deleted" before deleting
-    await designation.update({ mode: "deleted" });
-
-    await designation.destroy();
-
-    res.status(200).json({ message: "Designation deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting designation:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Search, paginate, and sort designations
-exports.getDesignations = async (req, res) => {
-  const {
-    search,
-    createdBy,
-    mode,
-    page = 1,
-    limit = 10,
-    sortBy = "creationDate",
-    order = "DESC",
-  } = req.query;
-
-  try {
-    // Build the whereClause with filters
-    const whereClause = {
-      ...(search && {
-        designation_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by designation_desc
-        },
-      }),
-      ...(createdBy && { createdBy }), // Filter by createdBy
-      ...(mode && { mode }), // Filter by mode
-    };
-
-    const designations = await Designation.findAndCountAll({
-      where: whereClause, // Apply filters
-      order: [[sortBy, order]], // Sorting
-      limit: parseInt(limit), // Pagination limit
-      offset: (page - 1) * limit, // Pagination offset
-    });
-
-    res.status(200).json({
-      total: designations.count,
-      pages: Math.ceil(designations.count / limit),
-      currentPage: parseInt(page),
-      designations: designations.rows,
-    });
-  } catch (error) {
-    console.error("Error fetching designations:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Add Scope
-exports.createScope = async (req, res) => {
+// Add scope
+exports.createscope = async (req, res) => {
   const { scope_desc } = req.body;
+
+  // Validate the request body
+  const { error } = scopeSchema.validate({ scope_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     const scope = await Scope.create({
       scope_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
+      createdBy: "admin",
+      mode: "added"
     });
 
-    res.status(201).json({ message: "Scope created successfully", scope });
+    res.status(201).json({
+      message: "scope created successfully",
+      scope: {
+        scopeId: scope.scopeId, // Include scopeId in the response
+        scope_desc: scope.scope_desc,
+        createdBy: scope.createdBy,
+        mode: scope.mode,
+        createdAt: scope.createdAt,
+        updatedAt: scope.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error creating scope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Scope
-exports.editScope = async (req, res) => {
-  const { id } = req.params;
+// Edit scope
+exports.editscope = async (req, res) => {
+  const { scopeId } = req.params; // Use scopeId instead of id
   const { scope_desc } = req.body;
 
+  // Validate the request body
+  const { error } = scopeSchema.validate({ scope_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
-    const scope = await Scope.findByPk(id);
+    const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
-      return res.status(404).json({ message: "Scope not found" });
+      return res.status(404).json({ message: "scope not found" });
     }
 
     await scope.update({
@@ -145,21 +66,30 @@ exports.editScope = async (req, res) => {
       mode: "modified", // Set mode to "modified"
     });
 
-    res.status(200).json({ message: "Scope updated successfully", scope });
+    res.status(200).json({
+      message: "scope updated successfully",
+      scope: {
+        scopeId: scope.scopeId, // Include scopeId in the response
+        scope_desc: scope.scope_desc,
+        mode: scope.mode,
+        createdAt: scope.createdAt,
+        updatedAt: scope.updatedAt,
+      },
+    });
   } catch (error) {
     console.error("Error updating scope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Scope
-exports.deleteScope = async (req, res) => {
-  const { id } = req.params;
+// Delete scope
+exports.deletescope = async (req, res) => {
+  const { scopeId } = req.params; // Use scopeId instead of id
 
   try {
-    const scope = await Scope.findByPk(id);
+    const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
-      return res.status(404).json({ message: "Scope not found" });
+      return res.status(404).json({ message: "scope not found" });
     }
 
     // Update mode to "deleted" before deleting
@@ -167,7 +97,10 @@ exports.deleteScope = async (req, res) => {
 
     await scope.destroy();
 
-    res.status(200).json({ message: "Scope deleted successfully" });
+    res.status(200).json({
+      message: "scope deleted successfully",
+      scopeId, // Include scopeId in the response
+    });
   } catch (error) {
     console.error("Error deleting scope:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -175,7 +108,7 @@ exports.deleteScope = async (req, res) => {
 };
 
 // Search, paginate, and sort scopes
-exports.getScopes = async (req, res) => {
+exports.getscopes = async (req, res) => {
   const {
     search,
     createdBy,
@@ -186,12 +119,28 @@ exports.getScopes = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "scope_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
     // Build the whereClause with filters
     const whereClause = {
       ...(search && {
         scope_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by scope_desc
+          [Op.like]: `%${search}%`, // Search by scope_desc
         },
       }),
       ...(createdBy && { createdBy }), // Filter by createdBy
@@ -209,7 +158,14 @@ exports.getScopes = async (req, res) => {
       total: scopes.count,
       pages: Math.ceil(scopes.count / limit),
       currentPage: parseInt(page),
-      scopes: scopes.rows,
+      scopes: scopes.rows.map((scope) => ({
+        scopeId: scope.scopeId, // Include scopeId in the response
+        scope_desc: scope.scope_desc,
+        mode: scope.mode,
+        createdBy: scope.createdBy,
+        createdAt: scope.createdAt,
+        updatedAt: scope.updatedAt,
+      })),
     });
   } catch (error) {
     console.error("Error fetching scopes:", error);

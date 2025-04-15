@@ -4,8 +4,8 @@ const designationController = require("../../../../controllers/admin/masters/des
 const router = express.Router();
 
 router.post("/create", designationController.createDesignation); // Add designation
-router.put("/edit/:designationId", designationController.editDesignation); // Edit designation
-router.delete("/delete/:designationId", designationController.deleteDesignation); // Delete designation
+router.post("/edit/:designationId", designationController.editDesignation); // Edit designation
+router.post("/delete/:designationId", designationController.deleteDesignation); // Delete designation
 router.get("/get", designationController.getDesignations); // Get designations
 
 module.exports = router;

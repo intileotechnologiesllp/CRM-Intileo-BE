@@ -1,14 +1,17 @@
 const Joi = require("joi");
-const Department = require("../../../../models/admin/masters/departmentModel");
 const { Op } = require("sequelize");
+const Department = require("../../../../models/admin/masters/departmentModel");
 
 // Validation schema for department
 const departmentSchema = Joi.object({
-  department_desc: Joi.string().min(3).max(100).required(), // Must be a string between 3 and 100 characters
+  department_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "department description cannot be empty",
+    "any.required": "department description is required",
+  }),
 });
 
-// Add Department
-exports.createDepartment = async (req, res) => {
+// Add department
+exports.createdepartment = async (req, res) => {
   const { department_desc } = req.body;
 
   // Validate the request body
@@ -18,25 +21,32 @@ exports.createDepartment = async (req, res) => {
   }
 
   try {
-    const newDepartment = await Department.create({
+    const department = await Department.create({
       department_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
+      createdBy: "admin",
+      mode: "added",
     });
 
     res.status(201).json({
-      message: "Department created successfully",
-      department: newDepartment,
+      message: "department created successfully",
+      department: {
+        departmentId: department.departmentId, // Include departmentId in the response
+        department_desc: department.department_desc,
+        createdBy: department.createdBy,
+        mode: department.mode,
+        createdAt: department.createdAt,
+        updatedAt: department.updatedAt,
+      },
     });
   } catch (error) {
-    console.error("Error creating Department:", error);
+    console.error("Error creating department:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Department
-exports.editDepartment = async (req, res) => {
-  const { id } = req.params;
+// Edit department
+exports.editdepartment = async (req, res) => {
+  const { departmentId } = req.params; // Use departmentId instead of id
   const { department_desc } = req.body;
 
   // Validate the request body
@@ -46,9 +56,9 @@ exports.editDepartment = async (req, res) => {
   }
 
   try {
-    const department = await Department.findByPk(id);
+    const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
-      return res.status(404).json({ message: "Department not found" });
+      return res.status(404).json({ message: "department not found" });
     }
 
     await department.update({
@@ -56,23 +66,30 @@ exports.editDepartment = async (req, res) => {
       mode: "modified", // Set mode to "modified"
     });
 
-    res
-      .status(200)
-      .json({ message: "Department updated successfully", department });
+    res.status(200).json({
+      message: "department updated successfully",
+      department: {
+        departmentId: department.departmentId, // Include departmentId in the response
+        department_desc: department.department_desc,
+        mode: department.mode,
+        createdAt: department.createdAt,
+        updatedAt: department.updatedAt,
+      },
+    });
   } catch (error) {
-    console.error("Error updating Department:", error);
+    console.error("Error updating department:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Department
-exports.deleteDepartment = async (req, res) => {
-  const { id } = req.params;
+// Delete department
+exports.deletedepartment = async (req, res) => {
+  const { departmentId } = req.params; // Use departmentId instead of id
 
   try {
-    const department = await Department.findByPk(id);
+    const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
-      return res.status(404).json({ message: "Department not found" });
+      return res.status(404).json({ message: "department not found" });
     }
 
     // Update mode to "deleted" before deleting
@@ -80,15 +97,18 @@ exports.deleteDepartment = async (req, res) => {
 
     await department.destroy();
 
-    res.status(200).json({ message: "Department deleted successfully" });
+    res.status(200).json({
+      message: "department deleted successfully",
+      departmentId, // Include departmentId in the response
+    });
   } catch (error) {
-    console.error("Error deleting Department:", error);
+    console.error("Error deleting department:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Get Departments
-exports.getDepartments = async (req, res) => {
+// Search, paginate, and sort departments
+exports.getdepartments = async (req, res) => {
   const {
     search,
     createdBy,
@@ -98,6 +118,22 @@ exports.getDepartments = async (req, res) => {
     sortBy = "creationDate",
     order = "DESC",
   } = req.query;
+
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "department_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
     // Build the whereClause with filters
@@ -122,10 +158,17 @@ exports.getDepartments = async (req, res) => {
       total: departments.count,
       pages: Math.ceil(departments.count / limit),
       currentPage: parseInt(page),
-      departments: departments.rows,
+      departments: departments.rows.map((department) => ({
+        departmentId: department.departmentId, // Include departmentId in the response
+        department_desc: department.department_desc,
+        mode: department.mode,
+        createdBy: department.createdBy,
+        createdAt: department.createdAt,
+        updatedAt: department.updatedAt,
+      })),
     });
   } catch (error) {
-    console.error("Error fetching Departments:", error);
+    console.error("Error fetching departments:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

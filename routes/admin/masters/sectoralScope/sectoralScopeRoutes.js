@@ -1,11 +1,11 @@
 const express = require("express");
-const sectoralScopeController = require("../../../../controllers/admin/masters/sectoralScope/sectoralScopeController");
+const sectoralscopeController = require("../../../../controllers/admin/masters/sectoralscope/sectoralscopeController");
 
 const router = express.Router();
 
-router.post("/create", sectoralScopeController.createSectoralScope); // Add sectoral scope
-router.put("/edit/:id", sectoralScopeController.editSectoralScope); // Edit sectoral scope
-router.delete("/delete/:id", sectoralScopeController.deleteSectoralScope); // Delete sectoral scope
-router.get("/get", sectoralScopeController.getSectoralScopes); // Get sectoral scopes
+router.post("/create", sectoralscopeController.createsectoralscope); // Add sectoralscope
+router.post("/edit/:sectoralscopeId", sectoralscopeController.editsectoralscope); // Edit sectoralscope
+router.post("/delete/:sectoralscopeId", sectoralscopeController.deletesectoralscope); // Delete sectoralscope
+router.get("/get", sectoralscopeController.getsectoralscopes); // Get sectoralscopes
 
 module.exports = router;

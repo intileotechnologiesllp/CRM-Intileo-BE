@@ -3,9 +3,9 @@ const organizationController = require("../../../../controllers/admin/masters/or
 
 const router = express.Router();
 
-router.post("/create", organizationController.createOrganizationType); // Add organization type
-router.put("/edit/:id", organizationController.editOrganizationType); // Edit organization type
-router.delete("/delete/:id", organizationController.deleteOrganizationType); // Delete organization type
-router.get("/get", organizationController.getOrganizationTypes); // Get organization types
+router.post("/create", organizationController.createorganization); // Add organization
+router.post("/edit/:organizationId", organizationController.editorganization); // Edit organization
+router.post("/delete/:organizationId", organizationController.deleteorganization); // Delete organization
+router.get("/get", organizationController.getorganizations); // Get organizations
 
 module.exports = router;

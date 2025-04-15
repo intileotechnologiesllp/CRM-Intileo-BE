@@ -1,74 +1,114 @@
-const SectoralScope = require("../../../../models/admin/masters/sectoralScopeModel");
+const Joi = require("joi");
+const { Op } = require("sequelize");
+const Sectoralscope = require("../../../../models/admin/masters/sectoralscopeModel");
 
-// Add Sectoral Scope
-exports.createSectoralScope = async (req, res) => {
-  const { sectoral_scope_desc } = req.body;
+// Validation schema for sectoralscope
+const sectoralscopeSchema = Joi.object({
+  sectoralscope_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "sectoralscope description cannot be empty",
+    "any.required": "sectoralscope description is required",
+  }),
+});
+
+// Add sectoralscope
+exports.createsectoralscope = async (req, res) => {
+  const { sectoralscope_desc } = req.body;
+
+  // Validate the request body
+  const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
-    const sectoralScope = await SectoralScope.create({
-      sectoral_scope_desc,
-      createdBy: "admin", // Set createdBy to "admin"
-      mode: "added", // Set mode to "added"
+    const sectoralscope = await Sectoralscope.create({
+      sectoralscope_desc,
+      createdBy: "admin",
+      mode: "added"
     });
 
-    res
-      .status(201)
-      .json({ message: "Sectoral Scope created successfully", sectoralScope });
+    res.status(201).json({
+      message: "sectoralscope created successfully",
+      sectoralscope: {
+        sectoralscopeId: sectoralscope.sectoralscopeId, // Include sectoralscopeId in the response
+        sectoralscope_desc: sectoralscope.sectoralscope_desc,
+        createdBy: sectoralscope.createdBy,
+        mode: sectoralscope.mode,
+        createdAt: sectoralscope.createdAt,
+        updatedAt: sectoralscope.updatedAt,
+      },
+    });
   } catch (error) {
-    console.error("Error creating sectoral scope:", error);
+    console.error("Error creating sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Sectoral Scope
-exports.editSectoralScope = async (req, res) => {
-  const { id } = req.params;
-  const { sectoral_scope_desc } = req.body;
+// Edit sectoralscope
+exports.editsectoralscope = async (req, res) => {
+  const { sectoralscopeId } = req.params; // Use sectoralscopeId instead of id
+  const { sectoralscope_desc } = req.body;
+
+  // Validate the request body
+  const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
 
   try {
-    const sectoralScope = await SectoralScope.findByPk(id);
-    if (!sectoralScope) {
-      return res.status(404).json({ message: "Sectoral Scope not found" });
+    const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
+    if (!sectoralscope) {
+      return res.status(404).json({ message: "sectoralscope not found" });
     }
 
-    await sectoralScope.update({
-      sectoral_scope_desc,
+    await sectoralscope.update({
+      sectoralscope_desc,
       mode: "modified", // Set mode to "modified"
     });
 
-    res
-      .status(200)
-      .json({ message: "Sectoral Scope updated successfully", sectoralScope });
+    res.status(200).json({
+      message: "sectoralscope updated successfully",
+      sectoralscope: {
+        sectoralscopeId: sectoralscope.sectoralscopeId, // Include sectoralscopeId in the response
+        sectoralscope_desc: sectoralscope.sectoralscope_desc,
+        mode: sectoralscope.mode,
+        createdAt: sectoralscope.createdAt,
+        updatedAt: sectoralscope.updatedAt,
+      },
+    });
   } catch (error) {
-    console.error("Error updating sectoral scope:", error);
+    console.error("Error updating sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Sectoral Scope
-exports.deleteSectoralScope = async (req, res) => {
-  const { id } = req.params;
+// Delete sectoralscope
+exports.deletesectoralscope = async (req, res) => {
+  const { sectoralscopeId } = req.params; // Use sectoralscopeId instead of id
 
   try {
-    const sectoralScope = await SectoralScope.findByPk(id);
-    if (!sectoralScope) {
-      return res.status(404).json({ message: "Sectoral Scope not found" });
+    const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
+    if (!sectoralscope) {
+      return res.status(404).json({ message: "sectoralscope not found" });
     }
 
     // Update mode to "deleted" before deleting
-    await sectoralScope.update({ mode: "deleted" });
+    await sectoralscope.update({ mode: "deleted" });
 
-    await sectoralScope.destroy();
+    await sectoralscope.destroy();
 
-    res.status(200).json({ message: "Sectoral Scope deleted successfully" });
+    res.status(200).json({
+      message: "sectoralscope deleted successfully",
+      sectoralscopeId, // Include sectoralscopeId in the response
+    });
   } catch (error) {
-    console.error("Error deleting sectoral scope:", error);
+    console.error("Error deleting sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Search, paginate, and sort sectoral scopes
-exports.getSectoralScopes = async (req, res) => {
+// Search, paginate, and sort sectoralscopes
+exports.getsectoralscopes = async (req, res) => {
   const {
     search,
     createdBy,
@@ -79,19 +119,35 @@ exports.getSectoralScopes = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "sectoralscope_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
     // Build the whereClause with filters
     const whereClause = {
       ...(search && {
-        sectoral_scope_desc: {
-          [require("sequelize").Op.like]: `%${search}%`, // Search by sectoral_scope_desc
+        sectoralscope_desc: {
+          [Op.like]: `%${search}%`, // Search by sectoralscope_desc
         },
       }),
       ...(createdBy && { createdBy }), // Filter by createdBy
       ...(mode && { mode }), // Filter by mode
     };
 
-    const sectoralScopes = await SectoralScope.findAndCountAll({
+    const sectoralscopes = await Sectoralscope.findAndCountAll({
       where: whereClause, // Apply filters
       order: [[sortBy, order]], // Sorting
       limit: parseInt(limit), // Pagination limit
@@ -99,13 +155,20 @@ exports.getSectoralScopes = async (req, res) => {
     });
 
     res.status(200).json({
-      total: sectoralScopes.count,
-      pages: Math.ceil(sectoralScopes.count / limit),
+      total: sectoralscopes.count,
+      pages: Math.ceil(sectoralscopes.count / limit),
       currentPage: parseInt(page),
-      sectoralScopes: sectoralScopes.rows,
+      sectoralscopes: sectoralscopes.rows.map((sectoralscope) => ({
+        sectoralscopeId: sectoralscope.sectoralscopeId, // Include sectoralscopeId in the response
+        sectoralscope_desc: sectoralscope.sectoralscope_desc,
+        mode: sectoralscope.mode,
+        createdBy: sectoralscope.createdBy,
+        createdAt: sectoralscope.createdAt,
+        updatedAt: sectoralscope.updatedAt,
+      })),
     });
   } catch (error) {
-    console.error("Error fetching sectoral scopes:", error);
+    console.error("Error fetching sectoralscopes:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

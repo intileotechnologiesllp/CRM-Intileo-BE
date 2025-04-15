@@ -1,75 +1,114 @@
-const Status = require("../../../../models/admin/masters/statusModel");
+const Joi = require("joi");
 const { Op } = require("sequelize");
+const Status = require("../../../../models/admin/masters/statusModel");
 
-// Add Status
-exports.createStatus = async (req, res) => {
+// Validation schema for status
+const statusSchema = Joi.object({
+  status_desc: Joi.string().min(3).max(100).required().messages({
+    "string.empty": "status description cannot be empty",
+    "any.required": "status description is required",
+  }),
+});
+
+// Add status
+exports.createstatus = async (req, res) => {
   const { status_desc } = req.body;
 
+  // Validate the request body
+  const { error } = statusSchema.validate({ status_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
-    const newStatus = await Status.create({
+    const status = await Status.create({
       status_desc,
-      createdBy: "admin", // Static admin for now
-      mode: "added",
+      createdBy: "admin",
+      mode: "added"
     });
 
     res.status(201).json({
-      message: "Status created successfully",
-      status: newStatus,
+      message: "status created successfully",
+      status: {
+        statusId: status.statusId, // Include statusId in the response
+        status_desc: status.status_desc,
+        createdBy: status.createdBy,
+        mode: status.mode,
+        createdAt: status.createdAt,
+        updatedAt: status.updatedAt,
+      },
     });
   } catch (error) {
-    console.error("Error creating Status:", error);
+    console.error("Error creating status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Status
-exports.editStatus = async (req, res) => {
-  const { id } = req.params;
+// Edit status
+exports.editstatus = async (req, res) => {
+  const { statusId } = req.params; // Use statusId instead of id
   const { status_desc } = req.body;
 
+  // Validate the request body
+  const { error } = statusSchema.validate({ status_desc });
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
-    const status = await Status.findByPk(id);
+    const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
-      return res.status(404).json({ message: "Status not found" });
+      return res.status(404).json({ message: "status not found" });
     }
 
     await status.update({
       status_desc,
-      mode: "modified",
+      mode: "modified", // Set mode to "modified"
     });
 
     res.status(200).json({
-      message: "Status updated successfully",
-      status,
+      message: "status updated successfully",
+      status: {
+        statusId: status.statusId, // Include statusId in the response
+        status_desc: status.status_desc,
+        mode: status.mode,
+        createdAt: status.createdAt,
+        updatedAt: status.updatedAt,
+      },
     });
   } catch (error) {
-    console.error("Error updating Status:", error);
+    console.error("Error updating status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Status
-exports.deleteStatus = async (req, res) => {
-  const { id } = req.params;
+// Delete status
+exports.deletestatus = async (req, res) => {
+  const { statusId } = req.params; // Use statusId instead of id
 
   try {
-    const status = await Status.findByPk(id);
+    const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
-      return res.status(404).json({ message: "Status not found" });
+      return res.status(404).json({ message: "status not found" });
     }
 
+    // Update mode to "deleted" before deleting
     await status.update({ mode: "deleted" });
+
     await status.destroy();
 
-    res.status(200).json({ message: "Status deleted successfully" });
+    res.status(200).json({
+      message: "status deleted successfully",
+      statusId, // Include statusId in the response
+    });
   } catch (error) {
-    console.error("Error deleting Status:", error);
+    console.error("Error deleting status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Get Statuses with Filters
-exports.getStatuses = async (req, res) => {
+// Search, paginate, and sort statuss
+exports.getstatuss = async (req, res) => {
   const {
     search,
     createdBy,
@@ -80,32 +119,56 @@ exports.getStatuses = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "status_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
+    // Build the whereClause with filters
     const whereClause = {
       ...(search && {
         status_desc: {
-          [Op.like]: `%${search}%`,
+          [Op.like]: `%${search}%`, // Search by status_desc
         },
       }),
-      ...(createdBy && { createdBy }),
-      ...(mode && { mode }),
+      ...(createdBy && { createdBy }), // Filter by createdBy
+      ...(mode && { mode }), // Filter by mode
     };
 
-    const statuses = await Status.findAndCountAll({
-      where: whereClause,
-      order: [[sortBy, order]],
-      limit: parseInt(limit),
-      offset: (page - 1) * limit,
+    const statuss = await Status.findAndCountAll({
+      where: whereClause, // Apply filters
+      order: [[sortBy, order]], // Sorting
+      limit: parseInt(limit), // Pagination limit
+      offset: (page - 1) * limit, // Pagination offset
     });
 
     res.status(200).json({
-      total: statuses.count,
-      pages: Math.ceil(statuses.count / limit),
+      total: statuss.count,
+      pages: Math.ceil(statuss.count / limit),
       currentPage: parseInt(page),
-      statuses: statuses.rows,
+      statuss: statuss.rows.map((status) => ({
+        statusId: status.statusId, // Include statusId in the response
+        status_desc: status.status_desc,
+        mode: status.mode,
+        createdBy: status.createdBy,
+        createdAt: status.createdAt,
+        updatedAt: status.updatedAt,
+      })),
     });
   } catch (error) {
-    console.error("Error fetching Statuses:", error);
+    console.error("Error fetching statuss:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

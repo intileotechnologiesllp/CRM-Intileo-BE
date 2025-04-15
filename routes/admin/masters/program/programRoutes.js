@@ -3,9 +3,9 @@ const programController = require("../../../../controllers/admin/masters/program
 
 const router = express.Router();
 
-router.post("/create", programController.createProgram); // Add program
-router.put("/edit/:id", programController.editProgram); // Edit program
-router.delete("/delete/:id", programController.deleteProgram); // Delete program
-router.get("/get", programController.getPrograms); // Get programs
+router.post("/create", programController.createprogram); // Add program
+router.post("/edit/:programId", programController.editprogram); // Edit program
+router.post("/delete/:programId", programController.deleteprogram); // Delete program
+router.get("/get", programController.getprograms); // Get programs
 
 module.exports = router;

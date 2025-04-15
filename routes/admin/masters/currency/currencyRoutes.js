@@ -3,9 +3,9 @@ const currencyController = require("../../../../controllers/admin/masters/curren
 
 const router = express.Router();
 
-router.post("/create", currencyController.createCurrency); // Add currency
-router.put("/edit/:id", currencyController.editCurrency); // Edit currency
-router.delete("/delete/:id", currencyController.deleteCurrency); // Delete currency
-router.get("/get", currencyController.getCurrencies); // Get currencies
+router.post("/create", currencyController.createcurrency); // Add currency
+router.post("/edit/:currencyId", currencyController.editcurrency); // Edit currency
+router.post("/delete/:currencyId", currencyController.deletecurrency); // Delete currency
+router.get("/get", currencyController.getcurrencys); // Get currencys
 
 module.exports = router;

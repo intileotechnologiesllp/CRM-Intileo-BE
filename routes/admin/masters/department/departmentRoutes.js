@@ -3,9 +3,9 @@ const departmentController = require("../../../../controllers/admin/masters/depa
 
 const router = express.Router();
 
-router.post("/create", departmentController.createDepartment); // Add department
-router.put("/edit/:id", departmentController.editDepartment); // Edit department
-router.delete("/delete/:id", departmentController.deleteDepartment); // Delete department
-router.get("/get", departmentController.getDepartments); // Get departments
+router.post("/create", departmentController.createdepartment); // Add department
+router.post("/edit/:departmentId", departmentController.editdepartment); // Edit department
+router.post("/delete/:departmentId", departmentController.deletedepartment); // Delete department
+router.get("/get", departmentController.getdepartments); // Get departments
 
 module.exports = router;

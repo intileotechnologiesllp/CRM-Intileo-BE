@@ -1,17 +1,17 @@
 const Joi = require("joi");
-const OrganizationType = require("../../../../models/admin/masters/organizationModel");
 const { Op } = require("sequelize");
+const Organization = require("../../../../models/admin/masters/organizationModel");
 
-// Joi Validation Schema
+// Validation schema for organization
 const organizationSchema = Joi.object({
   organization_desc: Joi.string().min(3).max(100).required().messages({
-    "string.empty": "Organization description cannot be empty",
-    "any.required": "Organization description is required",
+    "string.empty": "organization description cannot be empty",
+    "any.required": "organization description is required",
   }),
 });
 
-// Add Organization Type
-exports.createOrganizationType = async (req, res) => {
+// Add organization
+exports.createorganization = async (req, res) => {
   const { organization_desc } = req.body;
 
   // Validate the request body
@@ -21,25 +21,32 @@ exports.createOrganizationType = async (req, res) => {
   }
 
   try {
-    const newOrganizationType = await OrganizationType.create({
+    const organization = await Organization.create({
       organization_desc,
-      createdBy: "admin", // Static admin for now
-      mode: "added",
+      createdBy: "admin",
+      mode: "added"
     });
 
     res.status(201).json({
-      message: "Organization Type created successfully",
-      organizationType: newOrganizationType,
+      message: "organization created successfully",
+      organization: {
+        organizationId: organization.organizationId, // Include organizationId in the response
+        organization_desc: organization.organization_desc,
+        createdBy: organization.createdBy,
+        mode: organization.mode,
+        createdAt: organization.createdAt,
+        updatedAt: organization.updatedAt,
+      },
     });
   } catch (error) {
-    console.error("Error creating Organization Type:", error);
+    console.error("Error creating organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Edit Organization Type
-exports.editOrganizationType = async (req, res) => {
-  const { id } = req.params;
+// Edit organization
+exports.editorganization = async (req, res) => {
+  const { organizationId } = req.params; // Use organizationId instead of id
   const { organization_desc } = req.body;
 
   // Validate the request body
@@ -49,48 +56,59 @@ exports.editOrganizationType = async (req, res) => {
   }
 
   try {
-    const organizationType = await OrganizationType.findByPk(id);
-    if (!organizationType) {
-      return res.status(404).json({ message: "Organization Type not found" });
+    const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
+    if (!organization) {
+      return res.status(404).json({ message: "organization not found" });
     }
 
-    await organizationType.update({
+    await organization.update({
       organization_desc,
-      mode: "modified",
+      mode: "modified", // Set mode to "modified"
     });
 
     res.status(200).json({
-      message: "Organization Type updated successfully",
-      organizationType,
+      message: "organization updated successfully",
+      organization: {
+        organizationId: organization.organizationId, // Include organizationId in the response
+        organization_desc: organization.organization_desc,
+        mode: organization.mode,
+        createdAt: organization.createdAt,
+        updatedAt: organization.updatedAt,
+      },
     });
   } catch (error) {
-    console.error("Error updating Organization Type:", error);
+    console.error("Error updating organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete Organization Type
-exports.deleteOrganizationType = async (req, res) => {
-  const { id } = req.params;
+// Delete organization
+exports.deleteorganization = async (req, res) => {
+  const { organizationId } = req.params; // Use organizationId instead of id
 
   try {
-    const organizationType = await OrganizationType.findByPk(id);
-    if (!organizationType) {
-      return res.status(404).json({ message: "Organization Type not found" });
+    const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
+    if (!organization) {
+      return res.status(404).json({ message: "organization not found" });
     }
 
-    await organizationType.update({ mode: "deleted" });
-    await organizationType.destroy();
+    // Update mode to "deleted" before deleting
+    await organization.update({ mode: "deleted" });
 
-    res.status(200).json({ message: "Organization Type deleted successfully" });
+    await organization.destroy();
+
+    res.status(200).json({
+      message: "organization deleted successfully",
+      organizationId, // Include organizationId in the response
+    });
   } catch (error) {
-    console.error("Error deleting Organization Type:", error);
+    console.error("Error deleting organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Get Organization Types with Filters
-exports.getOrganizationTypes = async (req, res) => {
+// Search, paginate, and sort organizations
+exports.getorganizations = async (req, res) => {
   const {
     search,
     createdBy,
@@ -101,32 +119,56 @@ exports.getOrganizationTypes = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  // Validate query parameters using Joi
+  const querySchema = Joi.object({
+    search: Joi.string().optional(),
+    createdBy: Joi.string().optional(),
+    mode: Joi.string().valid("added", "modified", "deleted").optional(),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    sortBy: Joi.string().valid("creationDate", "organization_desc").optional(),
+    order: Joi.string().valid("ASC", "DESC").optional(),
+  });
+
+  const { error } = querySchema.validate(req.query);
+  if (error) {
+    return res.status(400).json({ message: error.details[0].message }); // Return validation error
+  }
+
   try {
+    // Build the whereClause with filters
     const whereClause = {
       ...(search && {
         organization_desc: {
-          [Op.like]: `%${search}%`,
+          [Op.like]: `%${search}%`, // Search by organization_desc
         },
       }),
-      ...(createdBy && { createdBy }),
-      ...(mode && { mode }),
+      ...(createdBy && { createdBy }), // Filter by createdBy
+      ...(mode && { mode }), // Filter by mode
     };
 
-    const organizationTypes = await OrganizationType.findAndCountAll({
-      where: whereClause,
-      order: [[sortBy, order]],
-      limit: parseInt(limit),
-      offset: (page - 1) * limit,
+    const organizations = await Organization.findAndCountAll({
+      where: whereClause, // Apply filters
+      order: [[sortBy, order]], // Sorting
+      limit: parseInt(limit), // Pagination limit
+      offset: (page - 1) * limit, // Pagination offset
     });
 
     res.status(200).json({
-      total: organizationTypes.count,
-      pages: Math.ceil(organizationTypes.count / limit),
+      total: organizations.count,
+      pages: Math.ceil(organizations.count / limit),
       currentPage: parseInt(page),
-      organizationTypes: organizationTypes.rows,
+      organizations: organizations.rows.map((organization) => ({
+        organizationId: organization.organizationId, // Include organizationId in the response
+        organization_desc: organization.organization_desc,
+        mode: organization.mode,
+        createdBy: organization.createdBy,
+        createdAt: organization.createdAt,
+        updatedAt: organization.updatedAt,
+      })),
     });
   } catch (error) {
-    console.error("Error fetching Organization Types:", error);
+    console.error("Error fetching organizations:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
