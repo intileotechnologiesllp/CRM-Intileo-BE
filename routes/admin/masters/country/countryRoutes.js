@@ -4,9 +4,9 @@ console.log("countryController", countryController); // Debugging line to check 
 
 const router = express.Router();
 
-router.post("/", countryController.createCountry); // Add country
-router.get("/", countryController.getCountries); // Get countries
-router.put("/:id", countryController.editCountry); // Edit country
-router.delete("/:id", countryController.deleteCountry); // Delete country
+router.post("/create", countryController.createCountry); // Add country
+router.get("/get", countryController.getCountries); // Get countries
+router.post("/edit/:countryID", countryController.editCountry); // Edit country
+router.post("/delete/:countryID", countryController.deleteCountry); // Delete country
 
 module.exports = router;

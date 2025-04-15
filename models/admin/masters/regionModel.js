@@ -3,19 +3,32 @@ const sequelize = require("../../../config/db");
 const Country = require("./countryModel");
 
 const Region = sequelize.define("Region", {
+  regionID: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true,
+  },
   region_desc: {
     type: DataTypes.STRING,
     allowNull: false,
+    validate: {
+      notNull: {
+        msg: "Region description is required",
+      },
+      notEmpty: {
+        msg: "Region description cannot be empty",
+      },
+    },
   },
   countryId: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
       model: Country,
-      key: "id",
+      key: "countryID",
     },
-    onDelete: "CASCADE",
   },
+
   createdBy: {
     type: DataTypes.STRING,
     allowNull: false,
@@ -28,11 +41,10 @@ const Region = sequelize.define("Region", {
     type: DataTypes.DATE,
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
-  },
+  }
 });
 
-// Define associations
-Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
-Region.belongsTo(Country, { foreignKey: "countryId" });
+Region.belongsTo(Country, { foreignKey: "countryID", as: "country" });
+Country.hasMany(Region, { foreignKey: "countryID", as: "regions" });
 
 module.exports = Region;

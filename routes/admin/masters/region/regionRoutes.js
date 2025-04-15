@@ -3,10 +3,10 @@ const regionController = require("../../../../controllers/admin/masters/region/r
 
 const router = express.Router();
 
-router.post("/", regionController.createRegion); // Add region
-router.get("/:countryId", regionController.getRegionsByCountry); // Get regions by country
-router.get("/", regionController.getRegionsWithCountry); // Get regions with country details
-router.put("/:id", regionController.editRegion); // Edit region
-router.delete("/:id", regionController.deleteRegion); // Delete region
+router.post("/create", regionController.createRegion); // Add region
+router.get("/:countryId", regionController.getRegions); // Get regions by country
+//router.get("/", regionController.getRegionsWithCountry); // Get regions with country details
+router.post("/edit/:regionID", regionController.editRegion); // Edit region
+router.post("/delete/:regionID", regionController.deleteRegion); // Delete region
 
 module.exports = router;
