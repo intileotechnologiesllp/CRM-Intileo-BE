@@ -1,9 +1,10 @@
 const express = require("express");
 const regionController = require("../../../../controllers/admin/masters/region/regionController");
-
+//const auditTrailMiddleware = require("../../../../middleware/auditTrailMiddleware"); // Import the audit trail middleware
+const auditTrailMiddleware = require("../../../../middlewares/auditTrailMiddleware");
 const router = express.Router();
 
-router.post("/create", regionController.createRegion); // Add region
+router.post("/create", auditTrailMiddleware("Region", "CREATE"),regionController.createRegion); // Add region
 router.get("/:countryId", regionController.getRegions); // Get regions by country
 //router.get("/", regionController.getRegionsWithCountry); // Get regions with country details
 router.post("/edit/:regionID", regionController.editRegion); // Edit region

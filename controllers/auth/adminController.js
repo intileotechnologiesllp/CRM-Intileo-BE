@@ -13,6 +13,7 @@ exports.signIn = async (req, res) => {
 
   try {
     // Validate loginType
+    const loginType = "admin";
     if (!["admin", "general", "master"].includes(loginType)) {
       return res
         .status(400)
