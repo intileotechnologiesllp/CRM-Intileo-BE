@@ -26,10 +26,10 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  projectLocation: {
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
+  // projectLocation: {
+  //   type: DataTypes.STRING,
+  //   allowNull: true,
+  // },
 });
 
 module.exports = LeadDetails;
