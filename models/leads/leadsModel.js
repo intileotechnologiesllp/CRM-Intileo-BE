@@ -3,7 +3,7 @@ const sequelize = require("../../config/db");
 
 const Lead = sequelize.define("Lead", {
   // Primary Key
-  id: {
+  leadId: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     autoIncrement: true,
@@ -90,6 +90,10 @@ const Lead = sequelize.define("Lead", {
   userId: {
     type: DataTypes.INTEGER,
     allowNull: false, // User ID of the creator (e.g., admin)
+  },
+  isArchived: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false, // Default to false (not archived)
   },
   
 
