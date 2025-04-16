@@ -1,26 +1,41 @@
-const adminService = require("../services/adminServices");
-const LoginHistory = require("../models/loginHistoryModel.js");
+const adminService = require("../../services/adminServices.js");
+const LoginHistory = require("../../models/loginHistoryModel.js");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
-const Admin = require("../models/adminModel");
-const MasterUser = require("../models/masterUserModel"); // Import MasterUser model
+const Admin = require("../../models/adminModel.js");
+const MasterUser = require("../../models/masterUserModel.js"); // Import MasterUser model
 const jwt = require("jsonwebtoken");
 
 exports.signIn = async (req, res) => {
-  const { email, password, longitude, latitude, ipAddress } = req.body;
+  const { email, password, longitude, latitude, ipAddress, loginType } =
+    req.body;
 
   try {
+    // Validate loginType
+    if (!["admin", "general", "master"].includes(loginType)) {
+      return res
+        .status(400)
+        .json({
+          message:
+            "Invalid login type. Must be 'admin', 'general', or 'master'.",
+        });
+    }
+
+    // Authenticate the user
     const admin = await adminService.signIn(email, password);
 
+    // Generate JWT token
     const token = jwt.sign(
-      { id: admin.id, email: admin.email },
+      { id: admin.id, email: admin.email, loginType },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
+    // Log the login history
     await LoginHistory.create({
-      adminId: admin.id,
+      userId: admin.id,
+      loginType, // Include the login type
       ipAddress: ipAddress || null,
       longitude: longitude || null,
       latitude: latitude || null,

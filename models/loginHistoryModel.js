@@ -2,7 +2,7 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
 
 const LoginHistory = sequelize.define("LoginHistory", {
-  adminId: {
+  userId: {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
@@ -21,6 +21,16 @@ const LoginHistory = sequelize.define("LoginHistory", {
   latitude: {
     type: DataTypes.STRING,
     allowNull: true,
+  },
+  loginType: { // New field to handle login type
+    type: DataTypes.ENUM("admin", "general", "master"),
+    allowNull: false,
+    validate: {
+      isIn: {
+        args: [["admin", "general", "master"]],
+        msg: "Invalid login type. Must be 'admin', 'general', or 'master'.",
+      },
+    },
   },
 });
 

@@ -1,11 +1,11 @@
 const express = require("express");
-const adminController = require("../controllers/adminController");
-const { verifyToken } = require("../middlewares/authMiddleware");
+const adminController = require("../../controllers/auth/adminController");
+const { verifyToken } = require("../../middlewares/authMiddleware");
 const {
   validateSignIn,
   validateCreateAdmin,
-} = require("../middlewares/adminValidation");
-const { handleValidationErrors } = require("../middlewares/errorMiddleware");
+} = require("../../middlewares/adminValidation");
+const { handleValidationErrors } = require("../../middlewares/errorMiddleware");
 
 const router = express.Router();
 
@@ -20,7 +20,6 @@ router.post(
   "/create",
   validateCreateAdmin,
   handleValidationErrors,
-  verifyToken,
   adminController.createAdmin
 );
 
