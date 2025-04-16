@@ -296,10 +296,12 @@ exports.logout = async (req, res) => {
 };
 
 exports.getLoginHistory = async (req, res) => {
+  const { userId } = req.query; // Get userId from query parameters
+
   try {
-    // Fetch login history for the authenticated user
+    // Fetch login history for the specified user or all users
     const loginHistory = await LoginHistory.findAll({
-      // where: { userId: req.adminId }, // Fetch history for the logged-in user
+      where: userId ? { userId } : {}, // Filter by userId if provided
       order: [["loginTime", "DESC"]], // Sort by login time in descending order
     });
 
