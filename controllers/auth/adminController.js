@@ -299,7 +299,7 @@ exports.getLoginHistory = async (req, res) => {
   try {
     // Fetch login history for the authenticated user
     const loginHistory = await LoginHistory.findAll({
-      where: { userId: req.adminId }, // Fetch history for the logged-in user
+      // where: { userId: req.adminId }, // Fetch history for the logged-in user
       order: [["loginTime", "DESC"]], // Sort by login time in descending order
     });
 

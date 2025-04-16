@@ -38,7 +38,7 @@ router.delete(
 ); // Delete master user
 router.get("/master-users", verifyToken, adminController.getAllMasterUsers); // Show all master users
 router.post("/logout", verifyToken,adminController.logout);
-router.get("/login-history", verifyToken, adminController.getLoginHistory);
+router.get("/login-history", adminController.getLoginHistory);
 
 
 module.exports = router;
