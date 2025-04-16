@@ -1,22 +1,20 @@
-const AuditTrail = require("../models/reports/auditTrailModel");
+const AuditTrail = require("../models/auditTrailModel");
 
 exports.logAuditTrail = async (
   entity,
   action,
   entityId,
   performedBy,
+  ipAddress,
   changes = null
 ) => {
   try {
-    if (!entityId) {
-      throw new Error("entityId is required for logging audit trail");
-    }
-
     await AuditTrail.create({
       entity,
       action,
       entityId,
       performedBy,
+      ipAddress,
       changes,
     });
   } catch (error) {

@@ -17,6 +17,7 @@ const programRoutes = require("./routes/admin/masters/program/programRoutes"); /
 const currencyRoutes = require("./routes/admin/masters/currency/currencyRoutes"); // Import currency routes
 const countryRoutes = require("./routes/admin/masters/country/countryRoutes"); // Import country routes
 const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // Import region routes
+const leadsRoutes = require("./routes/leads/leadRoutes") // Import leads routes
 const app = express();
 
 const cors = require("cors");
@@ -36,6 +37,7 @@ app.use("/api/programs", programRoutes); // Register program routes
 app.use("/api/currencies", currencyRoutes); // Register currency routes
 app.use("/api/countries", countryRoutes); // Register country routes
 app.use("/api/regions", regionRoutes); // Register region routes
+app.use("/api/leads", leadsRoutes); 
 
 // Sync database
 sequelize

@@ -7,6 +7,7 @@ const Admin = require("../../models/adminModel.js");
 const MasterUser = require("../../models/masterUserModel.js"); // Import MasterUser model
 const jwt = require("jsonwebtoken");
 const moment = require("moment-timezone");
+const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress, loginType } =
@@ -49,9 +50,22 @@ exports.signIn = async (req, res) => {
       loginTime: loginTimeIST,
     });
 
+    // Log successful sign-in attempt in the audit trail
+    await logAuditTrail("Admin", "SIGN_IN", admin.id, email, {
+      status: "SUCCESS",
+      loginTime: loginTimeIST,
+    });
+
     res.status(200).json({ message: "Sign-in successful", token });
   } catch (error) {
     console.error("Error during admin sign-in:", error);
+
+    // Log failed sign-in attempt in the audit trail
+    await logAuditTrail("Admin", "SIGN_IN", null, email, {
+      status: "FAILED",
+      reason: error.message || "Internal server error",
+    });
+
     res.status(401).json({ message: error.message });
   }
 };
