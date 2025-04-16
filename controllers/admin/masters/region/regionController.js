@@ -2,8 +2,7 @@ const Joi = require("joi");
 const { Op } = require("sequelize");
 const Region = require("../../../../models/admin/masters/regionModel");
 const Country = require("../../../../models/admin/masters/countryModel");
-console.log(Region);
-
+const { logAuditTrail } = require("../../../../utils/auditTrailLogger");
 // Add Region
 exports.createRegion = async (req, res) => {
   const regionSchema = Joi.object({
@@ -24,7 +23,7 @@ exports.createRegion = async (req, res) => {
     return res.status(400).json({ message: error.details[0].message });
   }
 
-  const { region_desc, countryId } = req.body;
+  const { region_desc, countryId, } = req.body;
 
   try {
     const country = await Country.findByPk(countryId);
@@ -38,6 +37,10 @@ exports.createRegion = async (req, res) => {
       createdBy: "admin", // Set createdBy to "admin"
       mode: "added", // Set mode to "added"
     });
+
+        // // Ensure entityId is passed correctly
+        // await logAuditTrail("Region", "CREATE", region.id, "admin", { region_desc, countryId });
+
 
     res.status(201).json({ message: "Region created successfully", region });
   } catch (error) {

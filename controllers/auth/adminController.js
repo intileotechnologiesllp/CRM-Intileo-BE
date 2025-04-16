@@ -6,6 +6,7 @@ const bcrypt = require("bcrypt");
 const Admin = require("../../models/adminModel.js");
 const MasterUser = require("../../models/masterUserModel.js"); // Import MasterUser model
 const jwt = require("jsonwebtoken");
+const moment = require("moment-timezone");
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress, loginType } =
@@ -15,12 +16,9 @@ exports.signIn = async (req, res) => {
     // Validate loginType
     const loginType = "admin";
     if (!["admin", "general", "master"].includes(loginType)) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Invalid login type. Must be 'admin', 'general', or 'master'.",
-        });
+      return res.status(400).json({
+        message: "Invalid login type. Must be 'admin', 'general', or 'master'.",
+      });
     }
 
     // Authenticate the user
@@ -33,6 +31,14 @@ exports.signIn = async (req, res) => {
       { expiresIn: "1d" }
     );
 
+    // Get the current UTC time
+    const loginTimeUTC = new Date();
+
+    // Convert login time to IST
+    const loginTimeIST = moment(loginTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
     // Log the login history
     await LoginHistory.create({
       userId: admin.id,
@@ -40,6 +46,7 @@ exports.signIn = async (req, res) => {
       ipAddress: ipAddress || null,
       longitude: longitude || null,
       latitude: latitude || null,
+      loginTime: loginTimeIST,
     });
 
     res.status(200).json({ message: "Sign-in successful", token });
@@ -232,6 +239,80 @@ exports.getAllMasterUsers = async (req, res) => {
     res.status(200).json({ masterUsers });
   } catch (error) {
     console.error("Error fetching master users:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    // Extract userId (adminId) from the middleware
+    const userId = req.adminId;
+
+    // Find the latest login history entry for the user
+    const loginHistory = await LoginHistory.findOne({
+      where: { userId },
+      order: [["loginTime", "DESC"]],
+    });
+
+    if (!loginHistory) {
+      return res
+        .status(404)
+        .json({ message: "Login history not found for the user" });
+    }
+
+    // Update the logout time
+    const logoutTimeUTC = new Date(); // Current UTC time
+    const loginTime = new Date(loginHistory.loginTime);
+
+    // Convert logout time to IST
+    const logoutTimeIST = moment(logoutTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Calculate the duration
+    const durationMs = logoutTimeUTC - loginTime; // Duration in milliseconds
+    const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
+    const durationMinutes = Math.floor(
+      (durationMs % (1000 * 60 * 60)) / (1000 * 60)
+    );
+
+    const duration = `${durationHours} hours ${durationMinutes} minutes`;
+
+    // Update the login history record
+    await loginHistory.update({
+      logoutTime: logoutTimeIST, // Store logout time in IST
+      duration,
+    });
+
+    res.status(200).json({
+      message: "Logout successful",
+      logoutTime: logoutTimeIST, // Return logout time in IST
+      duration,
+    });
+  } catch (error) {
+    console.error("Error during logout:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getLoginHistory = async (req, res) => {
+  try {
+    // Fetch login history for the authenticated user
+    const loginHistory = await LoginHistory.findAll({
+      where: { userId: req.adminId }, // Fetch history for the logged-in user
+      order: [["loginTime", "DESC"]], // Sort by login time in descending order
+    });
+
+    if (!loginHistory || loginHistory.length === 0) {
+      return res.status(404).json({ message: "No login history found" });
+    }
+
+    res.status(200).json({
+      message: "Login history fetched successfully",
+      loginHistory,
+    });
+  } catch (error) {
+    console.error("Error fetching login history:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

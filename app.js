@@ -25,7 +25,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes
-app.use("/api/admin", adminRoutes);
+app.use("/api/", adminRoutes);
 app.use("/api/designations", designationRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/organizations", organizationRoutes); // Register organization routes

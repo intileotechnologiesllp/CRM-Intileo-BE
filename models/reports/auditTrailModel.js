@@ -9,7 +9,7 @@ const AuditTrail = sequelize.define("AuditTrail", {
   },
   entity: {
     type: DataTypes.STRING,
-    allowNull: false, // The entity being modified (e.g., "Region", "Country")
+    allowNull: false, 
   },
   action: {
     type: DataTypes.ENUM("CREATE", "UPDATE", "DELETE"),
