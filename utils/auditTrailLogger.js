@@ -1,23 +1,22 @@
 const AuditTrail = require("../models/auditTrailModel");
 
 exports.logAuditTrail = async (
-  entity,
-  action,
-  entityId,
-  performedBy,
-  ipAddress,
-  changes = null
+  programId = null,
+  mode = null,
+  createdBy = null,
+  error_desc = null,
+  creatorId = null
 ) => {
   try {
     await AuditTrail.create({
-      entity,
-      action,
-      entityId,
-      performedBy,
-      ipAddress,
-      changes,
+      programId,
+      mode,
+      createdBy,
+      error_desc,
+      creatorId,
+      timestamp: new Date(), // Automatically log the timestamp
     });
-  } catch (error) {
-    console.error("Error logging audit trail:", error);
+  } catch (err) {
+    console.error("Error logging audit trail:", err);
   }
 };

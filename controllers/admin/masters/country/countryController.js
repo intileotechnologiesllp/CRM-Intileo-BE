@@ -2,6 +2,8 @@ const Country = require("../../../../models/admin/masters/countryModel");
 const Region = require("../../../../models/admin/masters/regionModel");
 const Joi = require("joi");
 const { Op } = require("sequelize");
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants");
 
 // Add Country
 exports.createCountry = async (req, res) => {
@@ -16,6 +18,13 @@ exports.createCountry = async (req, res) => {
 
   const { error } = countrySchema.validate(req.body);
   if (error) {
+    // await logAuditTrail(
+    //   PROGRAMS.COUNTRY_MANAGEMENT, // Program ID for country management
+    //   "CREATE_COUNTRY", // Mode
+    //   req.adminId, // Admin ID from the authenticated request
+    //   null,
+    //   error.details[0].message // Error description
+    // );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -27,6 +36,7 @@ exports.createCountry = async (req, res) => {
       createdBy: "admin", // Set createdBy to "admin"
       mode: "added", // Set mode to "added"
     });
+    
 
     res.status(201).json({ message: "Country created successfully", country });
   } catch (error) {
