@@ -13,7 +13,7 @@ const designationSchema = Joi.object({
 // Add Designation
 exports.createDesignation = async (req, res) => {
   const { designation_desc } = req.body;
-
+  
   // Validate the request body
   const { error } = designationSchema.validate({ designation_desc });
   if (error) {
@@ -22,6 +22,7 @@ exports.createDesignation = async (req, res) => {
 
   try {
     const designation = await Designation.create({
+     
       designation_desc,
       createdBy: "admin",
       mode: "added"
