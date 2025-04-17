@@ -193,6 +193,7 @@ exports.verifyOtp = async (req, res) => {
     //   admin.id, // No user ID for failed sign-in
     //   null      // Error description
     // );
+    //
 
     res.status(200).json({ message: "OTP verified successfully" });
   } catch (error) {
