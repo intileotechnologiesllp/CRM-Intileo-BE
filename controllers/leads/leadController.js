@@ -68,13 +68,7 @@ exports.createLead = async (req, res) => {
       status,
       userId: req.adminId, // Associate the lead with the authenticated user
     });
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_CREATION", // Mode
-      req.role, // No user ID for failed sign-in
-      null, // Error description
-      req.adminId
-    );
+
     res.status(201).json({ message: "Lead created successfully", lead });
   } catch (error) {
     console.error("Error creating lead:", error);
@@ -117,13 +111,6 @@ exports.archiveLead = async (req, res) => {
 
     lead.isArchived = true; // Set the lead as archived
     await lead.save();
-await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_ARCHIVE", // Mode
-      req.role, // No user ID for failed sign-in
-      null, // Error description
-      req.adminId,
-    );
     res.status(200).json({ message: "Lead archived successfully", lead });
   } catch (error) {
     console.error("Error archiving lead:", error);
@@ -156,13 +143,7 @@ exports.unarchiveLead = async (req, res) => {
 
     lead.isArchived = false; // Set the lead as unarchived
     await lead.save();
-   await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UNARCHIVE", // Mode
-      req.role, // No user ID for failed sign-in
-      null, // Error description
-      req.adminId
-    );
+
     res.status(200).json({ message: "Lead unarchived successfully", lead });
   } catch (error) {
     console.error("Error unarchiving lead:", error);
@@ -216,13 +197,6 @@ exports.getLeads = async (req, res) => {
       offset: parseInt(offset), // Skip records for pagination
       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
     });
-await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_FETCH", // Mode
-      req.role, // No user ID for failed sign-in
-      null,
-      req.adminId // Error description
-    );
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count, // Total number of records
@@ -262,13 +236,6 @@ exports.updateLead = async (req, res) => {
 
     // Update the lead with the provided data
     await lead.update(updatedData);
-await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UPDATE", // Mode
-      req.role, // No user ID for failed sign-in
-      null, // Error description
-      req.adminId
-    );
     res.status(200).json({ message: "Lead updated successfully", lead });
   } catch (error) {
     console.error("Error updating lead:", error);
@@ -301,13 +268,6 @@ exports.deleteLead = async (req, res) => {
 
     // Delete the lead
     await lead.destroy();
-await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_DELETE", // Mode
-      req.role, // No user ID for failed sign-in
-      null, // Error description
-      req.adminId
-    );
     res.status(200).json({ message: "Lead deleted successfully" });
   } catch (error) {
     console.error("Error deleting lead:", error);
