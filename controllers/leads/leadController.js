@@ -25,6 +25,9 @@ exports.createLead = async (req, res) => {
     status,
   } = req.body;
 
+  console.log(req.role,"role of the user............");
+  
+
   try {
     // Ensure only admins can create leads
     // if (req.user.role !== "admin") {
@@ -35,12 +38,13 @@ exports.createLead = async (req, res) => {
 
     // Create the lead with the userId from the authenticated user
     if (!["admin", "general", "master"].includes(req.role)) {
-      // await logAuditTrail(
-      //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      //   "LEAD_CREATION", // Mode
-      //   null, // No user ID for failed sign-in
-      //   "Access denied. You do not have permission to create leads.", // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_CREATION", // Mode
+        null, // No user ID for failed sign-in
+        "Access denied. You do not have permission to create leads.", // Error description
+        null
+      );
       return res.status(403).json({ message: "Access denied. You do not have permission to create leads." });
     }
     const lead = await Lead.create({
@@ -64,21 +68,23 @@ exports.createLead = async (req, res) => {
       status,
       userId: req.adminId, // Associate the lead with the authenticated user
     });
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_CREATION", // Mode
-    //   req.adminId, // No user ID for failed sign-in
-    //   null // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_CREATION", // Mode
+      req.role, // No user ID for failed sign-in
+      null, // Error description
+      req.adminId
+    );
     res.status(201).json({ message: "Lead created successfully", lead });
   } catch (error) {
     console.error("Error creating lead:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_CREATION", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error creating lead: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_CREATION", // Mode
+      null, // No user ID for failed sign-in
+      "Error creating lead: " + error.message ,// Error description
+      null
+    );
     res.status(500).json(error);
   }
 };
