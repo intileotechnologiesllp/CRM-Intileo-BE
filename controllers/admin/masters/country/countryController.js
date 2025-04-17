@@ -18,13 +18,13 @@ exports.createCountry = async (req, res) => {
 
   const { error } = countrySchema.validate(req.body);
   if (error) {
-    // await logAuditTrail(
-    //   PROGRAMS.COUNTRY_MANAGEMENT, // Program ID for country management
-    //   "CREATE_COUNTRY", // Mode
-    //   req.adminId, // Admin ID from the authenticated request
-    //   null,
-    //   error.details[0].message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "CREATE_COUNTRY", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -33,14 +33,19 @@ exports.createCountry = async (req, res) => {
   try {
     const country = await Country.create({
       country_desc,
-      createdBy: "admin", // Set createdBy to "admin"
+      createdBy: req.role, // Set createdBy to "admin"
       mode: "added", // Set mode to "added"
     });
-    
-
     res.status(201).json({ message: "Country created successfully", country });
   } catch (error) {
     console.error("Error creating country:", error);
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "GET_COUNTRIES", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -70,6 +75,13 @@ exports.getCountries = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "GET_COUNTRIES", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -98,7 +110,6 @@ exports.getCountries = async (req, res) => {
       limit: parseInt(limit), // Pagination limit
       offset: (page - 1) * limit, // Pagination offset
     });
-
     res.status(200).json({
       total: countries.count,
       pages: Math.ceil(countries.count / limit),
@@ -107,6 +118,13 @@ exports.getCountries = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching countries with regions:", error);
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "GET_COUNTRIES", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -124,6 +142,13 @@ exports.editCountry = async (req, res) => {
 
   const { error } = countrySchema.validate(req.body);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "EDIT_COUNTRY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -133,6 +158,13 @@ exports.editCountry = async (req, res) => {
   try {
     const country = await Country.findByPk(countryID);
     if (!country) {
+      await logAuditTrail(
+        PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+        "EDIT_COUNTRY", // Mode
+        req.role, // Admin ID from the authenticated request
+        "Country not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Country not found" });
     }
 
@@ -140,10 +172,16 @@ exports.editCountry = async (req, res) => {
       country_desc,
       mode: "modified", // Set mode to "modified"
     });
-
     res.status(200).json({ message: "Country updated successfully", country });
   } catch (error) {
     console.error("Error updating country:", error);
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "EDIT_COUNTRY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -167,6 +205,13 @@ exports.deleteCountry = async (req, res) => {
   try {
     const country = await Country.findByPk(countryID);
     if (!country) {
+      await logAuditTrail(
+        PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+        "DELETE_COUNTRY", // Mode
+        req.role, // Admin ID from the authenticated request
+        "Country not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Country not found" });
     }
 
@@ -174,10 +219,16 @@ exports.deleteCountry = async (req, res) => {
     await country.update({ mode: "deleted" });
 
     await country.destroy();
-
     res.status(200).json({ message: "Country deleted successfully" });
   } catch (error) {
     console.error("Error deleting country:", error);
+    await logAuditTrail(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "DELETE_COUNTRY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };

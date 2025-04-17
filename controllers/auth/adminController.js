@@ -76,36 +76,16 @@ exports.signIn = async (req, res) => {
       loginTime: loginTimeIST,
     });
 
-    // Log successful sign-in attempt in the audit trail
-    // await logAuditTrail("Admin", "SIGN_IN", admin.id, email, {
-    //   status: "SUCCESS",
-    //   loginTime: loginTimeIST,
-    // });
-
-    await logAuditTrail(
-      PROGRAMS.AUTHENTICATION, // Program ID for authentication
-      "SIGN_IN",
-      loginType,
-      null, // No error for successful sign-in
-      admin.id
-    );
-
     res.status(200).json({ message: "Sign-in successful", token });
   } catch (error) {
     console.error("Error during admin sign-in:", error);
 
-    // Log failed sign-in attempt in the audit trail
-    // await logAuditTrail("Admin", "SIGN_IN", null, email, {
-    //   status: "FAILED",
-    //   reason: error.message || "Internal server error",
-    // });
-
     await logAuditTrail(
       PROGRAMS.AUTHENTICATION, // Program ID for authentication
       "SIGN_IN",
-      null, // No user ID for failed sign-in
+      adminType, // No user ID for failed sign-in
       error.message || "Internal server error", // Error description
-      null
+      admin.id // Include admin ID in the log
     );
 
     res.status(401).json({ message: error.message });

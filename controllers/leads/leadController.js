@@ -105,32 +105,35 @@ exports.archiveLead = async (req, res) => {
   try {
     const lead = await Lead.findByPk(leadId); // Find lead by leadId
     if (!lead) {
-      // await logAuditTrail(
-      //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      //   "LEAD_ARCHIVE", // Mode
-      //   req.adminId, // No user ID for failed sign-in
-      //   "Lead not found" // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_ARCHIVE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Lead not found" });
     }
 
     lead.isArchived = true; // Set the lead as archived
     await lead.save();
-// await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_ARCHIVE", // Mode
-//       req.adminId, // No user ID for failed sign-in
-//       null // Error description
-//     );
+await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_ARCHIVE", // Mode
+      req.role, // No user ID for failed sign-in
+      null, // Error description
+      req.adminId,
+    );
     res.status(200).json({ message: "Lead archived successfully", lead });
   } catch (error) {
     console.error("Error archiving lead:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_ARCHIVE", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error archiving lead: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_ARCHIVE", // Mode
+      null, // No user ID for failed sign-in
+      "Error archiving lead: " + error.message, // Error description
+      null
+    );
     res.status(500).json(error);
   }
 };
@@ -141,32 +144,35 @@ exports.unarchiveLead = async (req, res) => {
   try {
     const lead = await Lead.findByPk(leadId); // Find lead by leadId
     if (!lead) {
-      // await logAuditTrail(
-      //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      //   "LEAD_UNARCHIVE", // Mode
-      //   req.adminId, // No user ID for failed sign-in
-      //   "Lead not found" // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UNARCHIVE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Lead not found" });
     }
 
     lead.isArchived = false; // Set the lead as unarchived
     await lead.save();
-  //  await logAuditTrail(
-  //     PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-  //     "LEAD_UNARCHIVE", // Mode
-  //     req.adminId, // No user ID for failed sign-in
-  //     null // Error description
-  //   );
+   await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UNARCHIVE", // Mode
+      req.role, // No user ID for failed sign-in
+      null, // Error description
+      req.adminId
+    );
     res.status(200).json({ message: "Lead unarchived successfully", lead });
   } catch (error) {
     console.error("Error unarchiving lead:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_UNARCHIVE", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error unarchiving lead: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UNARCHIVE", // Mode
+      null, // No user ID for failed sign-in
+      "Error unarchiving lead: " + error.message, // Error description
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -210,12 +216,13 @@ exports.getLeads = async (req, res) => {
       offset: parseInt(offset), // Skip records for pagination
       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
     });
-// await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_FETCH", // Mode
-//       req.adminId, // No user ID for failed sign-in
-//       null // Error description
-//     );
+await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_FETCH", // Mode
+      req.role, // No user ID for failed sign-in
+      null,
+      req.adminId // Error description
+    );
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count, // Total number of records
@@ -225,12 +232,13 @@ exports.getLeads = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_FETCH", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error fetching leads: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_FETCH", // Mode
+      null, // No user ID for failed sign-in
+      "Error fetching leads: " + error.message, // Error description
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -242,32 +250,35 @@ exports.updateLead = async (req, res) => {
   try {
     const lead = await Lead.findByPk(leadId); // Find the lead by leadId
     if (!lead) {
-      // await logAuditTrail(
-      //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      //   "LEAD_UPDATE", // Mode
-      //   req.adminId, // No user ID for failed sign-in
-      //   "Lead not found" // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UPDATE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Lead not found" });
     }
 
     // Update the lead with the provided data
     await lead.update(updatedData);
-// await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_UPDATE", // Mode
-//       req.adminId, // No user ID for failed sign-in
-//       null // Error description
-//     );
+await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE", // Mode
+      req.role, // No user ID for failed sign-in
+      null, // Error description
+      req.adminId
+    );
     res.status(200).json({ message: "Lead updated successfully", lead });
   } catch (error) {
     console.error("Error updating lead:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_UPDATE", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error updating lead: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE", // Mode
+      null, // No user ID for failed sign-in
+      "Error updating lead: " + error.message, // Error description
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -278,32 +289,35 @@ exports.deleteLead = async (req, res) => {
   try {
     const lead = await Lead.findByPk(leadId); // Find the lead by leadId
     if (!lead) {
-      // await logAuditTrail(
-      //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      //   "LEAD_DELETE", // Mode
-      //   req.adminId, // No user ID for failed sign-in
-      //   "Lead not found" // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_DELETE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Lead not found" });
     }
 
     // Delete the lead
     await lead.destroy();
-// await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_DELETE", // Mode
-//       req.adminId, // No user ID for failed sign-in
-//       null // Error description
-//     );
+await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_DELETE", // Mode
+      req.role, // No user ID for failed sign-in
+      null, // Error description
+      req.adminId
+    );
     res.status(200).json({ message: "Lead deleted successfully" });
   } catch (error) {
     console.error("Error deleting lead:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_DELETE", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error deleting lead: " + error.message // Error description
-    // );
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_DELETE", // Mode
+      null, // No user ID for failed sign-in
+      "Error deleting lead: " + error.message, // Error description
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
