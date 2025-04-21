@@ -23,6 +23,10 @@ const Organization = sequelize.define("Organization", {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  createdById: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
   mode: {
     type: DataTypes.STRING,
     allowNull: true,

@@ -32,6 +32,7 @@ exports.createsectoralscope = async (req, res) => {
     const sectoralscope = await Sectoralscope.create({
       sectoralscope_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 

@@ -4,6 +4,7 @@ const Joi = require("joi");
 const { Op } = require("sequelize");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants");
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 
 // Add Country
 exports.createCountry = async (req, res) => {
@@ -18,13 +19,7 @@ exports.createCountry = async (req, res) => {
 
   const { error } = countrySchema.validate(req.body);
   if (error) {
-    await logAuditTrail(
-      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-      "CREATE_COUNTRY", // Mode
-       req.role, // Admin ID from the authenticated request
-      error.details[0].message, // Error description
-      req.adminId
-    );
+    
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -33,15 +28,25 @@ exports.createCountry = async (req, res) => {
   try {
     const country = await Country.create({
       country_desc,
-      createdBy: req.role, // Set createdBy to "admin"
+      createdBy:req.role, // Set createdBy to "admin"
+      createdById: req.adminId, // Set createdById to the authenticated admin ID
       mode: "added", // Set mode to "added"
     });
+    // await historyLogger(
+    //   PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+    //   "CREATE", // Mode
+    //   req.adminId, // Created by (Admin ID)
+    //   country.id, // Record ID (Country ID)
+    //   null // Modified by (Admin ID)
+    //   `Country "${country_desc}" created by "${createdBy}"`, // Description
+    //   { country_desc } // Changes logged as JSON
+    // );
     res.status(201).json({ message: "Country created successfully", country });
   } catch (error) {
     console.error("Error creating country:", error);
     await logAuditTrail(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-      "GET_COUNTRIES", // Mode
+      "CREATE_COUNTRIES", // Mode
       req.role, // Admin ID from the authenticated request
       error.message, // Error description
       req.adminId
@@ -172,6 +177,15 @@ exports.editCountry = async (req, res) => {
       country_desc,
       mode: "modified", // Set mode to "modified"
     });
+    await historyLogger(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "EDIT", // Mode
+      req.adminId, // Modified by (Admin ID)
+      countryID, // Record ID (Country ID)
+      null, // Created by (Admin ID)
+      `Country "${country_desc}" modified by "${req.role}"`, // Description
+      { country_desc } // Changes logged as JSON
+    );
     res.status(200).json({ message: "Country updated successfully", country });
   } catch (error) {
     console.error("Error updating country:", error);

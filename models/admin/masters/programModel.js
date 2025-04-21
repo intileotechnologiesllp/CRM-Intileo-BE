@@ -23,6 +23,10 @@ const Program = sequelize.define("Program", {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  createdById: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
   mode: {
     type: DataTypes.STRING,
     allowNull: true,

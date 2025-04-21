@@ -17,6 +17,7 @@ const PROGRAMS = {
   SCOPE_MASTER: 16, // Program ID for scope management
   SECTORAL_SCOPE_MASTER: 17, // Program ID for sectoral scope management
   STATUS_MASTER: 18, // Program ID for status management
+  MASTER_USER_MANAGEMENT: 19, // Program ID for master user management
 
 };
 

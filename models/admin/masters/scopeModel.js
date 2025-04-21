@@ -23,6 +23,10 @@ const Scope = sequelize.define("Scope", {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  createdById: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
   mode: {
     type: DataTypes.STRING,
     allowNull: true,

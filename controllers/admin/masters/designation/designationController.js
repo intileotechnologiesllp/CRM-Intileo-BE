@@ -33,6 +33,7 @@ exports.createDesignation = async (req, res) => {
      
       designation_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 

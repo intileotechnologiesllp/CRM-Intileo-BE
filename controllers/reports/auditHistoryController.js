@@ -1,5 +1,6 @@
-const auditHistory = require("../../models/auditTrailModel");
+const auditHistory = require("../../models/reports/auditTrailModel");
 const { Op } = require("sequelize");
+const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 
 exports.getAuditHistory = async (req, res) => {
   try {
@@ -47,12 +48,26 @@ exports.getAuditHistory = async (req, res) => {
       return res.status(404).json({ message: "No audit history found" });
     }
 
+    // Map programId to program names
+    const mappedAuditHistory = rows.map((history) => ({
+      id: history.id,
+      programId: history.programId,
+      programName: Object.keys(PROGRAMS).find(
+        (key) => PROGRAMS[key] === history.programId
+      ), // Map programId to program name
+      mode: history.mode,
+      createdBy: history.createdBy,
+      error_desc: history.error_desc,
+      creatorId: history.creatorId,
+      timestamp: history.timestamp,
+    }));
+
     // Return paginated response
     res.status(200).json({
       totalRecords: count,
       totalPages: Math.ceil(count / limit),
       currentPage: parseInt(page),
-      auditHistory: rows,
+      auditHistory: mappedAuditHistory,
     });
   } catch (error) {
     console.error("Error fetching audit history:", error);
