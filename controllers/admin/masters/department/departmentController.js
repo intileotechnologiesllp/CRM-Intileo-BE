@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Department = require("../../../../models/admin/masters/departmentModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for department
 const departmentSchema = Joi.object({
   department_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createdepartment = async (req, res) => {
   // Validate the request body
   const { error } = departmentSchema.validate({ department_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "CREATE_DEPARTMENT", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -40,6 +48,13 @@ exports.createdepartment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating department:", error);
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "CREATE_DEPARTMENT", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -52,12 +67,26 @@ exports.editdepartment = async (req, res) => {
   // Validate the request body
   const { error } = departmentSchema.validate({ department_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "EDIT_DEPARTMENT", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
+      await logAuditTrail(
+        PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+        "EDIT_DEPARTMENT", // Mode
+         req.role, // Admin ID from the authenticated request
+        "department not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "department not found" });
     }
 
@@ -78,6 +107,13 @@ exports.editdepartment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating department:", error);
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for country management
+      "EDIT_DEPARTMENT", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -89,6 +125,13 @@ exports.deletedepartment = async (req, res) => {
   try {
     const department = await Department.findByPk(departmentId); // Find department by departmentId
     if (!department) {
+      await logAuditTrail(
+        PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+        "DELETE_DEPARTMENT", // Mode
+         req.role, // Admin ID from the authenticated request
+        "department not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "department not found" });
     }
 
@@ -102,7 +145,15 @@ exports.deletedepartment = async (req, res) => {
       departmentId, // Include departmentId in the response
     });
   } catch (error) {
+  
     console.error("Error deleting department:", error);
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for country management
+      "DELETE_DEPARTMENT", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -132,6 +183,14 @@ exports.getdepartments = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "GET_DEPARTMENTS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +227,13 @@ exports.getdepartments = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "GET_DEPARTMENTS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching departments:", error);
     res.status(500).json({ message: "Internal server error" });
   }

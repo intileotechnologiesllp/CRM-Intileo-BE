@@ -4,10 +4,10 @@ console.log("countryController", countryController); // Debugging line to check 
 const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
 const router = express.Router();
 
-router.post("/create", countryController.createCountry); // Add country
-router.get("/get", countryController.getCountries); // Get countries
-router.post("/edit/:countryID",countryController.editCountry); // Edit country
-router.post("/delete/:countryID",countryController.deleteCountry); // Delete country
+router.post("/create", verifyToken,countryController.createCountry); // Add country
+router.get("/get", verifyToken,countryController.getCountries); // Get countries
+router.post("/edit/:countryID",verifyToken,countryController.editCountry); // Edit country
+router.post("/delete/:countryID",verifyToken,countryController.deleteCountry); // Delete country
 
 // router.post("/create", verifyToken,countryController.createCountry); // Add country
 // router.get("/get", verifyToken,countryController.getCountries); // Get countries

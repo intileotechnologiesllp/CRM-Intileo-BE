@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Currency = require("../../../../models/admin/masters/currencyModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for currency
 const currencySchema = Joi.object({
   currency_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createcurrency = async (req, res) => {
   // Validate the request body
   const { error } = currencySchema.validate({ currency_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "CREATE_CURRENCY", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -40,6 +48,13 @@ exports.createcurrency = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating currency:", error);
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "CREATE_CURRENCY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -52,6 +67,13 @@ exports.editcurrency = async (req, res) => {
   // Validate the request body
   const { error } = currencySchema.validate({ currency_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "EDIT_CURRENCY", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -78,6 +100,13 @@ exports.editcurrency = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating currency:", error);
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "EDIT_CURRENCY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    ); // Program ID for country management
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -89,6 +118,14 @@ exports.deletecurrency = async (req, res) => {
   try {
     const currency = await Currency.findByPk(currencyId); // Find currency by currencyId
     if (!currency) {
+      await logAuditTrail(
+        PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+        "DELETE_CURRENCY", // Mode
+         req.role, // Admin ID from the authenticated request
+        "currency not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "currency not found" });
     }
 
@@ -103,6 +140,13 @@ exports.deletecurrency = async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting currency:", error);
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "DELETE_CURRENCY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -132,6 +176,14 @@ exports.getcurrencys = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "GET_CURRENCYS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -169,6 +221,13 @@ exports.getcurrencys = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching currencys:", error);
+    await logAuditTrail(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for country management
+      "GET_CURRENCY", // Mode
+      req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
