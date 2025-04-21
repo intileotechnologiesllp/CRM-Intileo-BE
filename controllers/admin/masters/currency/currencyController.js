@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Currency = require("../../../../models/admin/masters/currencyModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for currency
 const currencySchema = Joi.object({
   currency_desc: Joi.string().min(3).max(100).required().messages({
@@ -35,7 +36,15 @@ exports.createcurrency = async (req, res) => {
       createdById: req.adminId, // Use the authenticated admin ID
       mode: "added"
     });
-
+  await historyLogger(
+    PROGRAMS.CURRENCY_MASTER, // Program ID for currency management
+    "CURRENCY_CREATED", // Mode
+    currency.createdById, // Created by (Admin ID)
+    currency.currencyId, // Record ID (Country ID)
+    null,
+    `Country "${currency_desc}" created by "${currency.createdBy}"`, // Description
+    { currency_desc } // Changes logged as JSON
+    );
     res.status(201).json({
       message: "currency created successfully",
       currency: {
@@ -83,11 +92,37 @@ exports.editcurrency = async (req, res) => {
     if (!currency) {
       return res.status(404).json({ message: "currency not found" });
     }
+    const originalData = {
+      currency_desc: currency.currency_desc,
+    };
 
     await currency.update({
       currency_desc,
       mode: "modified", // Set mode to "modified"
     });
+
+            // Capture the updated data
+            const updatedData = {
+              currency_desc,
+            };
+        
+            // Calculate the changes
+            const changes = {};
+            for (const key in updatedData) {
+              if (originalData[key] !== updatedData[key]) {
+                changes[key] = { from: originalData[key], to: updatedData[key] };
+              }
+            }
+            await historyLogger(
+              PROGRAMS.CURRENCY_MASTER, // Program ID for currency management
+              "CURRENCY_UPDATED", // Mode
+              currency.createdById, // Admin ID from the authenticated request
+              currencyId, // Record ID (Currency ID)
+              req.adminId,
+              `Currency "${currency_desc}" updated by "${req.role}"`, // Description
+              changes // Changes logged as JSON
+            );
+
 
     res.status(200).json({
       message: "currency updated successfully",
