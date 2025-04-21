@@ -51,6 +51,7 @@ exports.createRegion = async (req, res) => {
       region_desc,
       countryId,
       createdBy: "admin", // Set createdBy to "admin"
+      createdById: req.adminId,
       mode: "added", // Set mode to "added"
     });
 
@@ -134,6 +135,7 @@ exports.createRegions = async (req, res) => {
         region_desc: region.region_desc,
         countryId, // Use the single countryId provided in the request
         createdBy: "admin", // Set createdBy to "admin"
+        createdById: req.adminId,
         mode: "added", // Set mode to "added"
       }))
     );

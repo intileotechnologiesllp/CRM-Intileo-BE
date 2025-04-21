@@ -33,6 +33,7 @@ exports.createorganization = async (req, res) => {
     const organization = await Organization.create({
       organization_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 

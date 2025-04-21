@@ -32,6 +32,7 @@ exports.createdepartment = async (req, res) => {
     const department = await Department.create({
       department_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added",
     });
 

@@ -32,6 +32,7 @@ exports.createstatus = async (req, res) => {
     const status = await Status.create({
       status_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 

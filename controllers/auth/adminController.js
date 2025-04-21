@@ -1,10 +1,10 @@
 const adminService = require("../../services/adminServices.js");
-const LoginHistory = require("../../models/loginHistoryModel.js");
+const LoginHistory = require("../../models/reports/loginHistoryModel.js");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
 const Admin = require("../../models/adminModel.js");
-const MasterUser = require("../../models/masterUserModel.js"); // Import MasterUser model
+const MasterUser = require("../../models/master/masterUserModel.js"); // Import MasterUser model
 const jwt = require("jsonwebtoken");
 const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
@@ -26,13 +26,13 @@ exports.signIn = async (req, res) => {
     // Authenticate the user
     const admin = await adminService.signIn(email, password);
     console.log(loginType);
-    
+
     if (!admin) {
       // Log failed sign-in attempt
       await logAuditTrail(
         PROGRAMS.AUTHENTICATION, // Program ID for authentication
         "SIGN_IN",
-        "Invalid email" ,// Error description
+        "Invalid email", // Error description
         null
       );
       return res.status(404).json({ message: "User not found" });
@@ -46,8 +46,8 @@ exports.signIn = async (req, res) => {
         PROGRAMS.AUTHENTICATION, // Program ID for authentication
         "SIGN_IN",
         loginType, // User ID
-        "Invalid password",// Error description
-        admin.id,
+        "Invalid password", // Error description
+        admin.id
       );
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -151,7 +151,7 @@ exports.forgotPassword = async (req, res) => {
     res.status(200).json({ message: "OTP sent to your email address." });
   } catch (error) {
     console.error("Error during forgot password:", error);
-   await logAuditTrail(
+    await logAuditTrail(
       PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
       "forgot_password",
       null, // No user ID for failed sign-in
@@ -167,7 +167,7 @@ exports.verifyOtp = async (req, res) => {
   try {
     const admin = await adminService.findAdminByEmail(email);
     if (!admin) {
-     await logAuditTrail(
+      await logAuditTrail(
         PROGRAMS.VERIFY_OTP, // Program ID for authentication
         "VERIFY_OTP",
         null, // No user ID for failed sign-in
@@ -178,7 +178,7 @@ exports.verifyOtp = async (req, res) => {
 
     // Check if OTP is valid
     if (admin.otp !== otp || new Date() > admin.otpExpiration) {
-await logAuditTrail(
+      await logAuditTrail(
         PROGRAMS.VERIFY_OTP, // Program ID for authentication
         "VERIFY_OTP",
         "admin", // No user ID for failed sign-in
@@ -187,7 +187,6 @@ await logAuditTrail(
       );
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
-
 
     res.status(200).json({ message: "OTP verified successfully" });
   } catch (error) {
@@ -242,95 +241,6 @@ exports.resetPassword = async (req, res) => {
       admin.id
     );
     console.error("Error during password reset:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Create a master user
-exports.createMasterUser = async (req, res) => {
-  const { name, email, designation, password, department } = req.body;
-
-  try {
-    // Hash the password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create the master user
-    const masterUser = await MasterUser.create({
-      name,
-      email,
-      designation,
-      password: hashedPassword,
-      department,
-    });
-
-    res
-      .status(201)
-      .json({ message: "Master user created successfully", masterUser });
-  } catch (error) {
-    console.error("Error creating master user:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Edit a master user
-exports.editMasterUser = async (req, res) => {
-  const { id } = req.params;
-  const { name, email, designation, password, department } = req.body;
-
-  try {
-    const masterUser = await MasterUser.findByPk(id);
-    if (!masterUser) {
-      return res.status(404).json({ message: "Master user not found" });
-    }
-
-    // Hash the password if it is being updated
-    const updatedData = {
-      name,
-      email,
-      designation,
-      department,
-    };
-
-    if (password) {
-      updatedData.password = await bcrypt.hash(password, 10);
-    }
-
-    await masterUser.update(updatedData);
-
-    res
-      .status(200)
-      .json({ message: "Master user updated successfully", masterUser });
-  } catch (error) {
-    console.error("Error editing master user:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Delete a master user
-exports.deleteMasterUser = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const masterUser = await MasterUser.findByPk(id);
-    if (!masterUser) {
-      return res.status(404).json({ message: "Master user not found" });
-    }
-
-    await masterUser.destroy();
-    res.status(200).json({ message: "Master user deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting master user:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Show all master users
-exports.getAllMasterUsers = async (req, res) => {
-  try {
-    const masterUsers = await MasterUser.findAll();
-    res.status(200).json({ masterUsers });
-  } catch (error) {
-    console.error("Error fetching master users:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

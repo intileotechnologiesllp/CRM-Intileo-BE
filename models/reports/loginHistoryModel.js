@@ -1,5 +1,5 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
+const sequelize = require("../../config/db");
 
 const LoginHistory = sequelize.define("LoginHistory", {
   userId: {
@@ -22,7 +22,8 @@ const LoginHistory = sequelize.define("LoginHistory", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  loginType: { // New field to handle login type
+  loginType: {
+    // New field to handle login type
     type: DataTypes.ENUM("admin", "general", "master"),
     allowNull: false,
     validate: {
@@ -41,6 +42,5 @@ const LoginHistory = sequelize.define("LoginHistory", {
     allowNull: true,
   },
 });
-
 
 module.exports = LoginHistory;

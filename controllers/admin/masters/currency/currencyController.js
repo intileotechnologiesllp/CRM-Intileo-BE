@@ -32,6 +32,7 @@ exports.createcurrency = async (req, res) => {
     const currency = await Currency.create({
       currency_desc,
       createdBy: "admin",
+      createdById: req.adminId, // Use the authenticated admin ID
       mode: "added"
     });
 

@@ -32,6 +32,7 @@ exports.createscope = async (req, res) => {
     const scope = await Scope.create({
       scope_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 

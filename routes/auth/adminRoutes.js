@@ -29,14 +29,7 @@ router.post("/verify-otp", adminController.verifyOtp);
 router.post("/reset-password", adminController.resetPassword);
 
 // Master user routes
-router.post("/master-users", verifyToken, adminController.createMasterUser); // Create master user
-router.put("/master-users/:id", verifyToken, adminController.editMasterUser); // Edit master user
-router.delete(
-  "/master-users/:id",
-  verifyToken,
-  adminController.deleteMasterUser
-); // Delete master user
-router.get("/master-users", verifyToken, adminController.getAllMasterUsers); // Show all master users
+
 router.post("/logout", verifyToken,adminController.logout);
 router.get("/login-history", adminController.getLoginHistory);
 

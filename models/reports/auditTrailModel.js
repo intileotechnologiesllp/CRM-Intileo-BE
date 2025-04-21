@@ -7,25 +7,25 @@ const AuditTrail = sequelize.define("AuditTrail", {
     primaryKey: true,
     autoIncrement: true,
   },
-  entity: {
-    type: DataTypes.STRING,
-    allowNull: false, 
-  },
-  action: {
-    type: DataTypes.ENUM("CREATE", "UPDATE", "DELETE"),
-    allowNull: false, // The type of action performed
-  },
-  entityId: {
+  programId: {
     type: DataTypes.INTEGER,
-    allowNull: false, // The ID of the entity being modified
+    allowNull: true, // The ID of the program associated with the action
   },
-  performedBy: {
+  mode: {
+    type: DataTypes.STRING(50), // Changed from ENUM to STRING for flexibility
+    allowNull: true, // Allows storing any string value for the mode
+  },
+  createdBy: {
     type: DataTypes.STRING,
-    allowNull: false, // The user who performed the action
+    allowNull: true, // The user who performed the action (e.g., email or userId)
   },
-  changes: {
-    type: DataTypes.JSON,
-    allowNull: true, // JSON object to store the changes made
+  error_desc: {
+    type: DataTypes.TEXT,
+    allowNull: true, // Error message if an error occurred
+  },
+  creatorId: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // The ID of the user who performed the action
   },
   timestamp: {
     type: DataTypes.DATE,

@@ -1,4 +1,4 @@
-const AuditTrail = require("../models/auditTrailModel");
+const AuditTrail = require("../models/reports/auditTrailModel");
 
 exports.logAuditTrail = async (
   programId = null,

@@ -1,9 +1,9 @@
 require("dotenv").config();
 const express = require("express");
 const sequelize = require("./config/db"); // Import Sequelize instance
-const LoginHistory = require("./models/loginHistoryModel"); // Import models
+const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models
 const Admin = require("./models/adminModel"); // Import models
-const MasterUser = require("./models/masterUserModel"); // Import MasterUser model
+const MasterUser = require("./models/master/masterUserModel"); // Import MasterUser model
 const Designation = require("./models/admin/masters/designationModel"); // Import Designation model
 const Department = require("./models/admin/masters/departmentModel"); // Import the Department model
 const adminRoutes = require("./routes/auth/adminRoutes"); // Import admin routes
@@ -17,8 +17,9 @@ const programRoutes = require("./routes/admin/masters/program/programRoutes"); /
 const currencyRoutes = require("./routes/admin/masters/currency/currencyRoutes"); // Import currency routes
 const countryRoutes = require("./routes/admin/masters/country/countryRoutes"); // Import country routes
 const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // Import region routes
-const leadsRoutes = require("./routes/leads/leadRoutes") // Import leads routes
+const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
+const masterUserRoutes = require("./routes/auth/masterUserRoutes");
 const app = express();
 
 const cors = require("cors");
@@ -38,8 +39,9 @@ app.use("/api/programs", programRoutes); // Register program routes
 app.use("/api/currencies", currencyRoutes); // Register currency routes
 app.use("/api/countries", countryRoutes); // Register country routes
 app.use("/api/regions", regionRoutes); // Register region routes
-app.use("/api/leads", leadsRoutes); 
+app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
+app.use("/api/master-user", masterUserRoutes); // Register master user routes
 
 // Sync database
 sequelize

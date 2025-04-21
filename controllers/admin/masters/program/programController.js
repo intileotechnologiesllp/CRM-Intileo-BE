@@ -33,6 +33,7 @@ exports.createprogram = async (req, res) => {
     const program = await Program.create({
       program_desc,
       createdBy: "admin",
+      createdById: req.adminId,
       mode: "added"
     });
 
