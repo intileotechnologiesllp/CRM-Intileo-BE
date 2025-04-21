@@ -3,17 +3,22 @@ const History = require("../models/reports/historyModel");
 exports.logHistory = async (
   programId = null,
   mode = null,
-  createdBy = null,
+  createdById = null,
   recordId = null,
   modifiedBy = null,
   description = null,
   changes = null
 ) => {
   try {
+    if (typeof description !== "string") {
+        description = JSON.stringify(description); // Convert to string if it's an object or array
+      }
+
+
     await History.create({
       programId,
       mode,
-      createdBy,
+      createdById,
       recordId,
       modifiedBy,
       description,

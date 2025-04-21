@@ -32,15 +32,20 @@ exports.createCountry = async (req, res) => {
       createdById: req.adminId, // Set createdById to the authenticated admin ID
       mode: "added", // Set mode to "added"
     });
-    // await historyLogger(
-    //   PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-    //   "CREATE", // Mode
-    //   req.adminId, // Created by (Admin ID)
-    //   country.id, // Record ID (Country ID)
-    //   null // Modified by (Admin ID)
-    //   `Country "${country_desc}" created by "${createdBy}"`, // Description
-    //   { country_desc } // Changes logged as JSON
-    // );
+    console.log(country.countryID);
+    console.log(country.createdById,"id of admin");
+     // Get the creator ID from the country object
+
+    
+    await historyLogger(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "CREATE", // Mode
+      country.createdById, // Created by (Admin ID)
+      country.countryID, // Record ID (Country ID)
+      null,
+      `Country "${country_desc}" created by "${country.createdBy}"`, // Description
+      { country_desc } // Changes logged as JSON
+    );
     res.status(201).json({ message: "Country created successfully", country });
   } catch (error) {
     console.error("Error creating country:", error);
@@ -173,16 +178,34 @@ exports.editCountry = async (req, res) => {
       return res.status(404).json({ message: "Country not found" });
     }
 
+    const originalData = {
+      country_desc: country.country_desc,
+    };
+
     await country.update({
       country_desc,
       mode: "modified", // Set mode to "modified"
     });
+
+        // Capture the updated data
+        const updatedData = {
+          country_desc,
+        };
+    
+        // Calculate the changes
+        const changes = {};
+        for (const key in updatedData) {
+          if (originalData[key] !== updatedData[key]) {
+            changes[key] = { from: originalData[key], to: updatedData[key] };
+          }
+        }
+
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "EDIT", // Mode
-      req.adminId, // Modified by (Admin ID)
+      country.createdById,
       countryID, // Record ID (Country ID)
-      null, // Created by (Admin ID)
+      req.adminId,
       `Country "${country_desc}" modified by "${req.role}"`, // Description
       { country_desc } // Changes logged as JSON
     );
@@ -228,7 +251,15 @@ exports.deleteCountry = async (req, res) => {
       );
       return res.status(404).json({ message: "Country not found" });
     }
-
+    await historyLogger(
+      PROGRAMS.COUNTRY_MASTER, // Program ID for country management
+      "DELETE", // Mode
+      country.createdById,
+      countryID, // Record ID (Country ID)
+      req.adminId,
+      `Country "${country.country_desc}" deleted by "${req.role}"`, // Description
+      null // Changes logged as JSON
+    );
     // Update mode to "deleted" before deleting
     await country.update({ mode: "deleted" });
 
