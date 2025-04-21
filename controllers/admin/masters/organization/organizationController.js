@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Organization = require("../../../../models/admin/masters/organizationModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for organization
 const organizationSchema = Joi.object({
   organization_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,14 @@ exports.createorganization = async (req, res) => {
   // Validate the request body
   const { error } = organizationSchema.validate({ organization_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "CREATE_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -39,6 +48,13 @@ exports.createorganization = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for designation management
+      "CREATE_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -52,12 +68,26 @@ exports.editorganization = async (req, res) => {
   // Validate the request body
   const { error } = organizationSchema.validate({ organization_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "EDIT_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
     if (!organization) {
+      await logAuditTrail(
+        PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+        "EDIT_ORGANIZATION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "organization not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "organization not found" });
     }
 
@@ -77,6 +107,13 @@ exports.editorganization = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "EDIT_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -89,6 +126,14 @@ exports.deleteorganization = async (req, res) => {
   try {
     const organization = await Organization.findByPk(organizationId); // Find organization by organizationId
     if (!organization) {
+      await logAuditTrail(
+        PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+        "DELETE_ORGANIZATION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "organization not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "organization not found" });
     }
 
@@ -102,6 +147,13 @@ exports.deleteorganization = async (req, res) => {
       organizationId, // Include organizationId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "DELETE_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting organization:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -132,6 +184,14 @@ exports.getorganizations = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "GET_ORGANIZATIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +228,13 @@ exports.getorganizations = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for organization management
+      "GET_ORGANIZATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching organizations:", error);
     res.status(500).json({ message: "Internal server error" });
   }

@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Region = require("../../../../models/admin/masters/regionModel");
 const Country = require("../../../../models/admin/masters/countryModel");
 const { logAuditTrail } = require("../../../../utils/auditTrailLogger");
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Add Region
 exports.createRegion = async (req, res) => {
   const regionSchema = Joi.object({
@@ -20,6 +21,13 @@ exports.createRegion = async (req, res) => {
 
   const { error } = regionSchema.validate(req.body);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "CREATE_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message });
   }
 
@@ -28,6 +36,14 @@ exports.createRegion = async (req, res) => {
   try {
     const country = await Country.findByPk(countryId);
     if (!country) {
+      await logAuditTrail(
+        PROGRAMS.REGION_MASTER, // Program ID for region management
+        "CREATE_REGION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Country not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "Country not found" });
     }
 
@@ -44,6 +60,13 @@ exports.createRegion = async (req, res) => {
 
     res.status(201).json({ message: "Region created successfully", region });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "CREATE_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating region:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -78,6 +101,14 @@ exports.createRegions = async (req, res) => {
   // Validate request body
   const { error } = schema.validate(req.body);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "CREATE_BULK_REGIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message });
   }
 
@@ -87,6 +118,13 @@ exports.createRegions = async (req, res) => {
     // Check if the country exists
     const country = await Country.findByPk(countryId);
     if (!country) {
+      await logAuditTrail(
+        PROGRAMS.REGION_MASTER, // Program ID for region management
+        "CREATE_BULK_REGIONS", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Country not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Country not found" });
     }
 
@@ -105,6 +143,13 @@ exports.createRegions = async (req, res) => {
       regions: createdRegions,
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "CREATE_BULK_REGIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating regions:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -167,6 +212,14 @@ exports.getRegions = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "GET_REGIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message });
   }
 
@@ -202,6 +255,13 @@ exports.getRegions = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching regions:", error);
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "GET_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -223,6 +283,13 @@ exports.editRegion = async (req, res) => {
 
   const { error } = regionSchema.validate(req.body);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "EDIT_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message });
   }
 
@@ -232,6 +299,14 @@ exports.editRegion = async (req, res) => {
   try {
     const region = await Region.findByPk(regionID);
     if (!region) {
+      await logAuditTrail(
+        PROGRAMS.REGION_MASTER, // Program ID for region management
+        "EDIT_REGION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Region not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "Region not found" });
     }
 
@@ -243,6 +318,13 @@ exports.editRegion = async (req, res) => {
 
     res.status(200).json({ message: "Region updated successfully", region });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "EDIT_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating region:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -267,6 +349,13 @@ exports.deleteRegion = async (req, res) => {
   try {
     const region = await Region.findByPk(regionID);
     if (!region) {
+      await logAuditTrail(
+        PROGRAMS.REGION_MASTER, // Program ID for region management
+        "DELETE_REGION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Region not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Region not found" });
     }
 
@@ -276,6 +365,13 @@ exports.deleteRegion = async (req, res) => {
 
     res.status(200).json({ message: "Region deleted successfully" });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "DELETE_REGION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting region:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -312,6 +408,13 @@ exports.bulkEditRegions = async (req, res) => {
   // Validate request body
   const { error } = schema.validate(req.body);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "BULK_EDIT_REGIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message });
   }
 
@@ -326,6 +429,13 @@ exports.bulkEditRegions = async (req, res) => {
       // Find the region by ID
       const region = await Region.findByPk(regionID);
       if (!region) {
+        await logAuditTrail(
+          PROGRAMS.REGION_MASTER, // Program ID for region management
+          "BULK_EDIT_REGIONS", // Mode
+           req.role, // Admin ID from the authenticated request
+          `Region with ID ${regionID} not found`, // Error description
+          req.adminId
+        );
         return res
           .status(404)
           .json({ message: `Region with ID ${regionID} not found` });
@@ -346,6 +456,13 @@ exports.bulkEditRegions = async (req, res) => {
       regions: updatedRegions,
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.REGION_MASTER, // Program ID for region management
+      "BULK_EDIT_REGIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating regions:", error);
     res.status(500).json({ message: "Internal server error" });
   }

@@ -111,13 +111,13 @@ exports.forgotPassword = async (req, res) => {
     // Check if the admin exists
     const admin = await adminService.findAdminByEmail(email);
     if (!admin) {
-      // await logAuditTrail(
-      //   PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
-      //   "forgot_password",
-      //   null, // No user ID for failed sign-in
-      //   "user not found"  // Error description
-      // );
-      return res.status(404).json({ message: "Admin not found" });
+      await logAuditTrail(
+        PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
+        "forgot_password",
+        null, // No user ID for failed sign-in
+        "user not found" // Error description
+      );
+      return res.status(404).json({ message: "user not found" });
     }
 
     // Generate OTP
@@ -151,12 +151,12 @@ exports.forgotPassword = async (req, res) => {
     res.status(200).json({ message: "OTP sent to your email address." });
   } catch (error) {
     console.error("Error during forgot password:", error);
-    // await logAuditTrail(
-    //   PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
-    //   "forgot_password",
-    //      null, // No user ID for failed sign-in
-    //      error.message ||  "Internal server error"     // Error description
-    // );
+   await logAuditTrail(
+      PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
+      "forgot_password",
+      null, // No user ID for failed sign-in
+      error.message || "Internal server error" // Error description
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -167,36 +167,37 @@ exports.verifyOtp = async (req, res) => {
   try {
     const admin = await adminService.findAdminByEmail(email);
     if (!admin) {
-      // await logAuditTrail(
-      //   PROGRAMS.VERIFY_OTP, // Program ID for authentication
-      //   "VERIFY_OTP",
-      //   null, // No user ID for failed sign-in
-      //   "user not found" // Error description
-      // );
-      return res.status(404).json({ message: "Admin not found" });
+     await logAuditTrail(
+        PROGRAMS.VERIFY_OTP, // Program ID for authentication
+        "VERIFY_OTP",
+        null, // No user ID for failed sign-in
+        "user not found" // Error description
+      );
+      return res.status(404).json({ message: "user not found" });
     }
 
     // Check if OTP is valid
     if (admin.otp !== otp || new Date() > admin.otpExpiration) {
-      // await logAuditTrail(
-      //   PROGRAMS.VERIFY_OTP, // Program ID for authentication
-      //   "VERIFY_OTP",
-      //   null, // No user ID for failed sign-in
-      //   "Invalid or expired OTP" // Error description
-      // );
+await logAuditTrail(
+        PROGRAMS.VERIFY_OTP, // Program ID for authentication
+        "VERIFY_OTP",
+        "admin", // No user ID for failed sign-in
+        "Invalid or expired OTP", // Error description
+        admin.id
+      );
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
-    // await logAuditTrail(
-    //   PROGRAMS.VERIFY_OTP, // Program ID for authentication
-    //   "VERIFY_OTP",
-    //   admin.id, // No user ID for failed sign-in
-    //   null      // Error description
-    // );
-    //
 
     res.status(200).json({ message: "OTP verified successfully" });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.VERIFY_OTP, // Program ID for authentication
+      "VERIFY_OTP",
+      "admin", // No user ID for failed sign-in
+      error.message, // Error description
+      admin.id
+    );
     console.error("Error during OTP verification:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -208,12 +209,12 @@ exports.resetPassword = async (req, res) => {
   try {
     const admin = await adminService.findAdminByEmail(email);
     if (!admin) {
-      // await logAuditTrail(
-      //   PROGRAMS.RESET_PASSWORD, // Program ID for authentication
-      //   "RESET_PASSWORD",
-      //   null, // No user ID for failed sign-in
-      //   "user not found" // Error description
-      // );
+      await logAuditTrail(
+        PROGRAMS.RESET_PASSWORD, // Program ID for authentication
+        "RESET_PASSWORD",
+        null, // No user ID for failed sign-in
+        "Admin not found" // Error description
+      );
       return res.status(404).json({ message: "Admin not found" });
     }
 
@@ -233,6 +234,13 @@ exports.resetPassword = async (req, res) => {
     // );
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.RESET_PASSWORD, // Program ID for authentication
+      "RESET_PASSWORD",
+      "admin", // No user ID for failed sign-in
+      error.message, // Error description
+      admin.id
+    );
     console.error("Error during password reset:", error);
     res.status(500).json({ message: "Internal server error" });
   }
