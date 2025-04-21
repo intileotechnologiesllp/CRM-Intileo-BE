@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Scope = require("../../../../models/admin/masters/scopeModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for scope
 const scopeSchema = Joi.object({
   scope_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createscope = async (req, res) => {
   // Validate the request body
   const { error } = scopeSchema.validate({ scope_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "CREATE_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -39,6 +47,13 @@ exports.createscope = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "CREATE_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating scope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -52,12 +67,26 @@ exports.editscope = async (req, res) => {
   // Validate the request body
   const { error } = scopeSchema.validate({ scope_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "EDIT_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
+      await logAuditTrail(
+        PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+        "EDIT_SCOPE", // Mode
+         req.role, // Admin ID from the authenticated request
+        "scope not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "scope not found" });
     }
 
@@ -77,6 +106,13 @@ exports.editscope = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "EDIT_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating scope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -89,6 +125,14 @@ exports.deletescope = async (req, res) => {
   try {
     const scope = await Scope.findByPk(scopeId); // Find scope by scopeId
     if (!scope) {
+      await logAuditTrail(
+        PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+        "DELETE_SCOPE", // Mode
+         req.role, // Admin ID from the authenticated request
+        "scope not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "scope not found" });
     }
 
@@ -102,6 +146,13 @@ exports.deletescope = async (req, res) => {
       scopeId, // Include scopeId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "DELETE_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting scope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -132,6 +183,13 @@ exports.getscopes = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "GET_SCOPES", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +226,13 @@ exports.getscopes = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SCOPE_MASTER, // Program ID for scope management
+      "GET_SCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching scopes:", error);
     res.status(500).json({ message: "Internal server error" });
   }

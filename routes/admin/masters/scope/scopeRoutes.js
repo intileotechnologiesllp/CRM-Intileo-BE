@@ -1,11 +1,11 @@
 const express = require("express");
 const scopeController = require("../../../../controllers/admin/masters/scope/scopeController");
-
+const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
 const router = express.Router();
 
-router.post("/create", scopeController.createscope); // Add scope
-router.post("/edit/:scopeId", scopeController.editscope); // Edit scope
-router.post("/delete/:scopeId", scopeController.deletescope); // Delete scope
-router.get("/get", scopeController.getscopes); // Get scopes
+router.post("/create",verifyToken, scopeController.createscope); // Add scope
+router.post("/edit/:scopeId",verifyToken, scopeController.editscope); // Edit scope
+router.post("/delete/:scopeId",verifyToken, scopeController.deletescope); // Delete scope
+router.get("/get",verifyToken, scopeController.getscopes); // Get scopes
 
 module.exports = router;

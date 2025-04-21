@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Sectoralscope = require("../../../../models/admin/masters/sectoralScopeModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for sectoralscope
 const sectoralscopeSchema = Joi.object({
   sectoralscope_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createsectoralscope = async (req, res) => {
   // Validate the request body
   const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "CREATE_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -39,6 +47,13 @@ exports.createsectoralscope = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "CREATE_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -52,12 +67,26 @@ exports.editsectoralscope = async (req, res) => {
   // Validate the request body
   const { error } = sectoralscopeSchema.validate({ sectoralscope_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "EDIT_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
     if (!sectoralscope) {
+      await logAuditTrail(
+        PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+        "EDIT_SECTORALSCOPE", // Mode
+         req.role, // Admin ID from the authenticated request
+        "sectoralscope not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "sectoralscope not found" });
     }
 
@@ -77,6 +106,13 @@ exports.editsectoralscope = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "EDIT_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -89,6 +125,13 @@ exports.deletesectoralscope = async (req, res) => {
   try {
     const sectoralscope = await Sectoralscope.findByPk(sectoralscopeId); // Find sectoralscope by sectoralscopeId
     if (!sectoralscope) {
+      await logAuditTrail(
+        PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+        "DELETE_SECTORALSCOPE", // Mode
+         req.role, // Admin ID from the authenticated request
+        "sectoralscope not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "sectoralscope not found" });
     }
 
@@ -102,6 +145,13 @@ exports.deletesectoralscope = async (req, res) => {
       sectoralscopeId, // Include sectoralscopeId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "DELETE_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting sectoralscope:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -132,6 +182,13 @@ exports.getsectoralscopes = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "GET_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +225,13 @@ exports.getsectoralscopes = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for sectoralscope management
+      "GET_SECTORALSCOPE", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching sectoralscopes:", error);
     res.status(500).json({ message: "Internal server error" });
   }

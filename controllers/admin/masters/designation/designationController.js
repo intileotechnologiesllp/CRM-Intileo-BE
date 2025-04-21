@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Designation = require("../../../../models/admin/masters/designationModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for designation
 const designationSchema = Joi.object({
   designation_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createDesignation = async (req, res) => {
   // Validate the request body
   const { error } = designationSchema.validate({ designation_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+      "CREATE_DESIGNATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -40,7 +48,15 @@ exports.createDesignation = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
+      "CREATE_DESIGNATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating designation:", error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -53,12 +69,26 @@ exports.editDesignation = async (req, res) => {
   // Validate the request body
   const { error } = designationSchema.validate({ designation_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+      "EDIT_DESIGNATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
+      await logAuditTrail(
+        PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+        "EDIT_DESIGNATION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Designation not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Designation not found" });
     }
 
@@ -78,6 +108,13 @@ exports.editDesignation = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
+      "EDIT_DESIGNATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating designation:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -90,6 +127,13 @@ exports.deleteDesignation = async (req, res) => {
   try {
     const designation = await Designation.findByPk(designationId); // Find designation by designationId
     if (!designation) {
+      await logAuditTrail(
+        PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+        "DELETE_DESIGNATION", // Mode
+         req.role, // Admin ID from the authenticated request
+        "Designation not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Designation not found" });
     }
 
@@ -103,6 +147,13 @@ exports.deleteDesignation = async (req, res) => {
       designationId, // Include designationId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
+      "DELETE_DESIGNATION", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting designation:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -133,6 +184,13 @@ exports.getDesignations = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+      "GET_DESIGNATIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -169,6 +227,13 @@ exports.getDesignations = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for designation management
+      "GET_DESIGNATIONS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching designations:", error);
     res.status(500).json({ message: "Internal server error" });
   }

@@ -1,6 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Program = require("../../../../models/admin/masters/programModel");
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 
 // Validation schema for program
 const programSchema = Joi.object({
@@ -17,6 +19,13 @@ exports.createprogram = async (req, res) => {
   // Validate the request body
   const { error } = programSchema.validate({ program_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "CREATE_PROGRAM", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -40,6 +49,13 @@ exports.createprogram = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating program:", error);
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "CREATE_PROGRAM", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -52,12 +68,27 @@ exports.editprogram = async (req, res) => {
   // Validate the request body
   const { error } = programSchema.validate({ program_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "EDIT_PROGRAM", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const program = await Program.findByPk(programId); // Find program by programId
     if (!program) {
+      await logAuditTrail(
+        PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+        "EDIT_PROGRAM", // Mode
+         req.role, // Admin ID from the authenticated request
+        "program not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "program not found" });
     }
 
@@ -77,7 +108,14 @@ exports.editprogram = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error updating program:", error);
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "EDIT_PROGRAM", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
+   console.error("Error updating program:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -89,6 +127,14 @@ exports.deleteprogram = async (req, res) => {
   try {
     const program = await Program.findByPk(programId); // Find program by programId
     if (!program) {
+      await logAuditTrail(
+        PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+        "DELETE_PROGRAM", // Mode
+         req.role, // Admin ID from the authenticated request
+        "program not found", // Error description
+        req.adminId
+      );
+
       return res.status(404).json({ message: "program not found" });
     }
 
@@ -102,6 +148,13 @@ exports.deleteprogram = async (req, res) => {
       programId, // Include programId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "DELETE_PROGRAM", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting program:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -132,6 +185,13 @@ exports.getprograms = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "GET_PROGRAMS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +228,13 @@ exports.getprograms = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for program management
+      "GET_PROGRAMS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching programs:", error);
     res.status(500).json({ message: "Internal server error" });
   }

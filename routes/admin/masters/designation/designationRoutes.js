@@ -1,11 +1,11 @@
 const express = require("express");
 const designationController = require("../../../../controllers/admin/masters/designation/designationController");
-
+const verifyToken = require("../../../../middlewares/authMiddleware").verifyToken; // Import verifyToken middleware if needed
 const router = express.Router();
 
-router.post("/create", designationController.createDesignation); // Add designation
-router.post("/edit/:designationId", designationController.editDesignation); // Edit designation
-router.post("/delete/:designationId", designationController.deleteDesignation); // Delete designation
-router.get("/get", designationController.getDesignations); // Get designations
+router.post("/create", verifyToken,designationController.createDesignation); // Add designation
+router.post("/edit/:designationId",verifyToken, designationController.editDesignation); // Edit designation
+router.post("/delete/:designationId",verifyToken, designationController.deleteDesignation); // Delete designation
+router.get("/get",verifyToken, designationController.getDesignations); // Get designations
 
 module.exports = router;

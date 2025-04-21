@@ -1,7 +1,8 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const Status = require("../../../../models/admin/masters/statusModel");
-
+const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
 // Validation schema for status
 const statusSchema = Joi.object({
   status_desc: Joi.string().min(3).max(100).required().messages({
@@ -17,6 +18,13 @@ exports.createstatus = async (req, res) => {
   // Validate the request body
   const { error } = statusSchema.validate({ status_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "CREATE_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -39,6 +47,13 @@ exports.createstatus = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "CREATE_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error creating status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -52,12 +67,26 @@ exports.editstatus = async (req, res) => {
   // Validate the request body
   const { error } = statusSchema.validate({ status_desc });
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "EDIT_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
   try {
     const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
+      await logAuditTrail(
+        PROGRAMS.STATUS_MASTER, // Program ID for status management
+        "EDIT_STATUS", // Mode
+         req.role, // Admin ID from the authenticated request
+        "status not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "status not found" });
     }
 
@@ -77,6 +106,13 @@ exports.editstatus = async (req, res) => {
       },
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "EDIT_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error updating status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -89,6 +125,13 @@ exports.deletestatus = async (req, res) => {
   try {
     const status = await Status.findByPk(statusId); // Find status by statusId
     if (!status) {
+      await logAuditTrail(
+        PROGRAMS.STATUS_MASTER, // Program ID for status management
+        "DELETE_STATUS", // Mode
+         req.role, // Admin ID from the authenticated request
+        "status not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "status not found" });
     }
 
@@ -102,6 +145,13 @@ exports.deletestatus = async (req, res) => {
       statusId, // Include statusId in the response
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "DELETE_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error deleting status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -132,6 +182,14 @@ exports.getstatuss = async (req, res) => {
 
   const { error } = querySchema.validate(req.query);
   if (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "GET_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.details[0].message, // Error description
+      req.adminId
+    );
+
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -168,6 +226,13 @@ exports.getstatuss = async (req, res) => {
       })),
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.STATUS_MASTER, // Program ID for status management
+      "GET_STATUS", // Mode
+       req.role, // Admin ID from the authenticated request
+      error.message, // Error description
+      req.adminId
+    );
     console.error("Error fetching statuss:", error);
     res.status(500).json({ message: "Internal server error" });
   }
