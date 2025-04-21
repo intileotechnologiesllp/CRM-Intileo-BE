@@ -72,6 +72,16 @@ exports.createLead = async (req, res) => {
     res.status(201).json({ message: "Lead created successfully", lead });
   } catch (error) {
     console.error("Error creating lead:", error);
+
+
+    // await logAuditTrail(
+    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+    //   "LEAD_CREATION", // Mode
+    //   null, // No user ID for failed sign-in
+    //   "Error creating lead: " + error.message // Error description
+    // );
+
+
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_CREATION", // Mode

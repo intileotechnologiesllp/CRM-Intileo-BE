@@ -1,6 +1,6 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
-const Sectoralscope = require("../../../../models/admin/masters/sectoralscopeModel");
+const Sectoralscope = require("../../../../models/admin/masters/sectoralScopeModel");
 
 // Validation schema for sectoralscope
 const sectoralscopeSchema = Joi.object({
