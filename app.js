@@ -24,6 +24,7 @@ const masterUserRoutes = require("./routes/auth/masterUserRoutes");
 const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
+console.log("Serving static files from:", path.join(__dirname, "public"),"........//.....//")
 const cors = require("cors");
 app.use(cors());
 // Middleware
