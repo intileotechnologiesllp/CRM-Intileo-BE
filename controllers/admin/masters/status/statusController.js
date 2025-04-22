@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Status = require("../../../../models/admin/masters/statusModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for status
 const statusSchema = Joi.object({
   status_desc: Joi.string().min(3).max(100).required().messages({
@@ -35,7 +36,15 @@ exports.createstatus = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.STATUS_MASTER, // Program ID for currency management
+      "CREATE_STATUS", // Mode
+      status.createdById, // Created by (Admin ID)
+      status.statusId, // Record ID (Country ID)
+      null,
+      `Status "${status_desc}" created by "${status.createdBy}"`, // Description
+      { status_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "status created successfully",
       status: {
@@ -90,12 +99,33 @@ exports.editstatus = async (req, res) => {
       );
       return res.status(404).json({ message: "status not found" });
     }
+    const originalData = {
+      status_desc: status.status_desc,
+    }
 
     await status.update({
       status_desc,
       mode: "modified", // Set mode to "modified"
     });
-
+    const updatedData = {
+      status_desc,
+    };
+    // Calculate the changes 
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
+    await historyLogger(
+      PROGRAMS.STATUS_MASTER, // Program ID for currency management
+      "EDIT_STATUS", // Mode
+      status.createdById, // Admin ID from the authenticated request
+      statusId, // Record ID (Currency ID)
+      req.adminId,
+      `Status "${status_desc}" updated by "${req.role}"`, // Description
+      changes // Changes logged as JSON
+    );
     res.status(200).json({
       message: "status updated successfully",
       status: {
@@ -140,7 +170,15 @@ exports.deletestatus = async (req, res) => {
     await status.update({ mode: "deleted" });
 
     await status.destroy();
-
+    await historyLogger(
+      PROGRAMS.STATUS_MASTER, // Program ID for currency management
+      "DELETE_STATUS", // Mode
+      status.createdById, // Admin ID from the authenticated request
+      statusId, // Record ID (Currency ID)
+      req.adminId,
+      `Status "${status.status_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "status deleted successfully",
       statusId, // Include statusId in the response

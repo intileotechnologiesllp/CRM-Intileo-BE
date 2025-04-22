@@ -2,7 +2,7 @@ const Lead = require("../../models/leads/leadsModel");
 const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
-
+const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 exports.createLead = async (req, res) => {
   const {
     contactPerson,
@@ -68,18 +68,19 @@ exports.createLead = async (req, res) => {
       status,
       userId: req.adminId, // Associate the lead with the authenticated user
     });
-
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_CREATION", // Mode
+       lead.userId, // Created by (Admin ID)
+      lead.leadId, // Record ID (Country ID)
+      null,
+      `Lead is created by  ${req.role}`, // Description
+       null // Changes logged as JSON
+      );
     res.status(201).json({ message: "Lead created successfully", lead });
   } catch (error) {
     console.error("Error creating lead:", error);
 
-
-    // await logAuditTrail(
-    //   PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-    //   "LEAD_CREATION", // Mode
-    //   null, // No user ID for failed sign-in
-    //   "Error creating lead: " + error.message // Error description
-    // );
 
 
     await logAuditTrail(
@@ -111,6 +112,15 @@ exports.archiveLead = async (req, res) => {
 
     lead.isArchived = true; // Set the lead as archived
     await lead.save();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_ARCHIVE", // Mode
+      lead.userId, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead is archived by "${req.role}"`, // Description
+      null 
+    );
     res.status(200).json({ message: "Lead archived successfully", lead });
   } catch (error) {
     console.error("Error archiving lead:", error);
@@ -143,7 +153,15 @@ exports.unarchiveLead = async (req, res) => {
 
     lead.isArchived = false; // Set the lead as unarchived
     await lead.save();
-
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_UNARCHIVE", // Mode
+      lead.userId, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead is unarchived by "${req.role}"`, // Description
+      null 
+    );
     res.status(200).json({ message: "Lead unarchived successfully", lead });
   } catch (error) {
     console.error("Error unarchiving lead:", error);
@@ -233,9 +251,69 @@ exports.updateLead = async (req, res) => {
       );
       return res.status(404).json({ message: "Lead not found" });
     }
+        // Capture the original data before the update
+        const originalData = {
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+          title: lead.title,
+          valueLabels: lead.valueLabels,
+          expectedCloseDate: lead.expectedCloseDate,
+          sourceChannel: lead.sourceChannel,
+          sourceChannelID: lead.sourceChannelID,
+          serviceType: lead.serviceType,
+          scopeOfServiceType: lead.scopeOfServiceType,
+          phone: lead.phone,
+          email: lead.email,
+          company: lead.company,
+          proposalValue: lead.proposalValue,
+          esplProposalNo: lead.esplProposalNo,
+          projectLocation: lead.projectLocation,
+          organizationCountry: lead.organizationCountry,
+          proposalSentDate: lead.proposalSentDate,
+          status: lead.status,
+        };
 
     // Update the lead with the provided data
     await lead.update(updatedData);
+        // Capture the updated data
+        const updatedLead = {
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+          title: lead.title,
+          valueLabels: lead.valueLabels,
+          expectedCloseDate: lead.expectedCloseDate,
+          sourceChannel: lead.sourceChannel,
+          sourceChannelID: lead.sourceChannelID,
+          serviceType: lead.serviceType,
+          scopeOfServiceType: lead.scopeOfServiceType,
+          phone: lead.phone,
+          email: lead.email,
+          company: lead.company,
+          proposalValue: lead.proposalValue,
+          esplProposalNo: lead.esplProposalNo,
+          projectLocation: lead.projectLocation,
+          organizationCountry: lead.organizationCountry,
+          proposalSentDate: lead.proposalSentDate,
+          status: lead.status,
+        };
+    
+        // Calculate the changes
+        const changes = {};
+        for (const key in updatedLead) {
+          if (originalData[key] !== updatedLead[key]) {
+            changes[key] = { from: originalData[key], to: updatedLead[key] };
+          }
+        }
+
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
+          "LEAD_UPDATE", // Mode
+          lead.userId, // Created by (Admin ID)
+          leadId, // Record ID (Lead ID)
+          req.adminId, // Modified by (Admin ID)
+          `Lead with ID ${leadId} updated by user ${req.role}`, // Description
+          changes // Changes logged as JSON
+        );
     res.status(200).json({ message: "Lead updated successfully", lead });
   } catch (error) {
     console.error("Error updating lead:", error);
@@ -268,6 +346,15 @@ exports.deleteLead = async (req, res) => {
 
     // Delete the lead
     await lead.destroy();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_DELETE", // Mode
+      lead.userId, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead "${lead}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({ message: "Lead deleted successfully" });
   } catch (error) {
     console.error("Error deleting lead:", error);

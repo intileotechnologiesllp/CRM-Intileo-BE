@@ -21,7 +21,7 @@ const MasterUser = sequelize.define("MasterUser", {
   },
   password: {
     type: DataTypes.STRING,
-    allowNull: true, // Password can be null initially
+    allowNull: true,
   },
   designation: {
     type: DataTypes.STRING,
@@ -42,6 +42,14 @@ const MasterUser = sequelize.define("MasterUser", {
   isActive: {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
+  },
+  resetToken: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  resetTokenExpiry: {
+    type: DataTypes.DATE,
+    allowNull: true,
   },
 });
 

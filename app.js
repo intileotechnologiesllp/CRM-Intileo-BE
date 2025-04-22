@@ -20,6 +20,7 @@ const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // I
 const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
+const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
 const app = express();
 
 const cors = require("cors");
@@ -42,6 +43,8 @@ app.use("/api/regions", regionRoutes); // Register region routes
 app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
+app.use("/api/get-history", historyRoutes); // Register history routes
+
 
 // Sync database
 sequelize

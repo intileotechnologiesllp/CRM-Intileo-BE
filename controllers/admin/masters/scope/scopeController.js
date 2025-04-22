@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Scope = require("../../../../models/admin/masters/scopeModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for scope
 const scopeSchema = Joi.object({
   scope_desc: Joi.string().min(3).max(100).required().messages({
@@ -35,7 +36,15 @@ exports.createscope = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.SCOPE_MASTER, // Program ID for currency management
+      "CREATE_SCOPE", // Mode
+      scope.createdById, // Created by (Admin ID)
+      scope.scopeId, // Record ID (Country ID)
+      null,
+      `Scope "${scope_desc}" created by "${scope.createdBy}"`, // Description
+      { scope_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "scope created successfully",
       scope: {
@@ -90,11 +99,33 @@ exports.editscope = async (req, res) => {
       );
       return res.status(404).json({ message: "scope not found" });
     }
-
+    const originalData = {
+      scope_desc: scope.scope_desc,
+  }
     await scope.update({
       scope_desc,
       mode: "modified", // Set mode to "modified"
     });
+
+    const updatedData = {
+      scope_desc,
+    };
+    // Calculate the changes 
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
+    await historyLogger(
+      PROGRAMS.SCOPE_MASTER, // Program ID for currency management
+      "EDIT_SCOPE", // Mode
+      scope.createdById, // Admin ID from the authenticated request
+      scopeId, // Record ID (Currency ID)
+      req.adminId,
+      `Scope "${scope_desc}" updated by "${req.role}"`, // Description
+      changes // Changes logged as JSON
+    );
 
     res.status(200).json({
       message: "scope updated successfully",
@@ -141,7 +172,15 @@ exports.deletescope = async (req, res) => {
     await scope.update({ mode: "deleted" });
 
     await scope.destroy();
-
+    await historyLogger(
+      PROGRAMS.SCOPE_MASTER, // Program ID for currency management
+      "DELETE_SCOPE", // Mode
+      scope.createdById, // Admin ID from the authenticated request
+      scopeId, // Record ID (Currency ID)
+      req.adminId,
+      `Scope "${scope.scope_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "scope deleted successfully",
       scopeId, // Include scopeId in the response

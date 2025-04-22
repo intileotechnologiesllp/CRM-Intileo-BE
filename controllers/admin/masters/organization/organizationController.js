@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Organization = require("../../../../models/admin/masters/organizationModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for organization
 const organizationSchema = Joi.object({
   organization_desc: Joi.string().min(3).max(100).required().messages({
@@ -36,7 +37,15 @@ exports.createorganization = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for department management
+      "CREATE_ORGANIZATION", // Mode
+      organization.createdById, // Created by (Admin ID)
+      organization.organizationId, // Record ID (Department ID) 
+      null,
+      `Organization "${organization_desc}" created by "${organization.createdBy}"`, // Description
+      { organization_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "organization created successfully",
       organization: {
@@ -91,12 +100,33 @@ exports.editorganization = async (req, res) => {
       );
       return res.status(404).json({ message: "organization not found" });
     }
-
+   const originalData = {
+      organization_desc: organization.organization_desc,
+   }
     await organization.update({
       organization_desc,
       mode: "modified", // Set mode to "modified"
     });
 
+    const updatedData = {
+      organization_desc,
+    };
+            // Calculate the changes
+            const changes = {};
+            for (const key in updatedData) {
+              if (originalData[key] !== updatedData[key]) {
+                changes[key] = { from: originalData[key], to: updatedData[key] };
+              }
+            }
+            await historyLogger(
+              PROGRAMS.ORGANIZATION_MASTER, // Program ID for currency management
+              "EDIT_ORGANIZATION", // Mode
+              organization.createdById, // Admin ID from the authenticated request
+              organizationId, // Record ID (Currency ID)
+              req.adminId,
+              `Organization "${organization_desc}" updated by "${req.role}"`, // Description
+              changes // Changes logged as JSON
+            );
     res.status(200).json({
       message: "organization updated successfully",
       organization: {
@@ -142,7 +172,15 @@ exports.deleteorganization = async (req, res) => {
     await organization.update({ mode: "deleted" });
 
     await organization.destroy();
-
+    await historyLogger(
+      PROGRAMS.ORGANIZATION_MASTER, // Program ID for currency management
+      "DELETE_ORGANIZATION", // Mode
+      organization.createdById, // Admin ID from the authenticated request
+      organizationId, // Record ID (Currency ID)
+      req.adminId,
+      `Organization "${organization.organization_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "organization deleted successfully",
       organizationId, // Include organizationId in the response

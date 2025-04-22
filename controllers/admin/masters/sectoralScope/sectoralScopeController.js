@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Sectoralscope = require("../../../../models/admin/masters/sectoralScopeModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for sectoralscope
 const sectoralscopeSchema = Joi.object({
   sectoralscope_desc: Joi.string().min(3).max(100).required().messages({
@@ -35,7 +36,15 @@ exports.createsectoralscope = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
+      "CREATE_SECTORALSCOPE", // Mode
+      sectoralscope.createdById, // Created by (Admin ID)
+      sectoralscope.sectoralscopeId, // Record ID (Country ID)
+      null,
+      `Sectoralscope "${sectoralscope_desc}" created by "${sectoralscope.createdBy}"`, // Description
+      { sectoralscope_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "sectoralscope created successfully",
       sectoralscope: {
@@ -90,12 +99,32 @@ exports.editsectoralscope = async (req, res) => {
       );
       return res.status(404).json({ message: "sectoralscope not found" });
     }
-
+const originalData = {
+      sectoralscope_desc: sectoralscope.sectoralscope_desc,
+}
     await sectoralscope.update({
       sectoralscope_desc,
       mode: "modified", // Set mode to "modified"
     });
-
+    const updatedData = {
+      sectoralscope_desc,
+    };
+    // Calculate the changes 
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
+    await historyLogger(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
+      "EDIT_SECTORALSCOPE", // Mode
+      sectoralscope.createdById, // Admin ID from the authenticated request
+      sectoralscopeId, // Record ID (Currency ID)
+      req.adminId,
+      `Sectoralscope "${sectoralscope_desc}" updated by "${req.role}"`, // Description
+      changes // Changes logged as JSON
+    );
     res.status(200).json({
       message: "sectoralscope updated successfully",
       sectoralscope: {
@@ -140,7 +169,15 @@ exports.deletesectoralscope = async (req, res) => {
     await sectoralscope.update({ mode: "deleted" });
 
     await sectoralscope.destroy();
-
+    await historyLogger(
+      PROGRAMS.SECTORAL_SCOPE_MASTER, // Program ID for currency management
+      "DELETE_SECTORALSCOPE", // Mode
+      sectoralscope.createdById, // Admin ID from the authenticated request
+      sectoralscopeId, // Record ID (Currency ID)
+      req.adminId,
+      `Sectoralscope "${sectoralscope.sectoralscope_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "sectoralscope deleted successfully",
       sectoralscopeId, // Include sectoralscopeId in the response
