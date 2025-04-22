@@ -237,10 +237,11 @@ exports.resetPassword = async (req, res) => {
 
   try {
     // Verify if the token is valid and not expired
+    const bufferTime = 5 * 60 * 1000;
     const user = await MasterUser.findOne({
       where: {
         resetToken: token,
-        resetTokenExpiry: { [Op.gt]: Date.now() }, // Ensure token is not expired
+        resetTokenExpiry: { [Op.gt]: Date.now()-bufferTime }, // Ensure token is not expired
       },
     });
 
