@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Department = require("../../../../models/admin/masters/departmentModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for department
 const departmentSchema = Joi.object({
   department_desc: Joi.string().min(3).max(100).required().messages({
@@ -35,7 +36,15 @@ exports.createdepartment = async (req, res) => {
       createdById: req.adminId,
       mode: "added",
     });
-
+    await historyLogger(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for department management
+      "CREATE_DEPARTMENT", // Mode
+      department.createdById, // Created by (Admin ID)
+      department.departmentId, // Record ID (Department ID) 
+      null,
+      `Department "${department_desc}" created by "${department.createdBy}"`, // Description
+      { department_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "department created successfully",
       department: {
@@ -90,12 +99,32 @@ exports.editdepartment = async (req, res) => {
       );
       return res.status(404).json({ message: "department not found" });
     }
-
+   const originalData = {
+      department_desc: department.department_desc, 
+   } 
     await department.update({
       department_desc,
       mode: "modified", // Set mode to "modified"
     });
-
+   const updatedData = {
+      department_desc,
+    };
+            // Calculate the changes
+            const changes = {};
+            for (const key in updatedData) {
+              if (originalData[key] !== updatedData[key]) {
+                changes[key] = { from: originalData[key], to: updatedData[key] };
+              }
+            }
+            await historyLogger(
+              PROGRAMS.DEPARTMENT_MASTER, // Program ID for currency management
+              "EDIT_DEPARTMENT", // Mode
+              department.createdById, // Admin ID from the authenticated request
+              departmentId, // Record ID (Currency ID)
+              req.adminId,
+              `Department "${department_desc}" updated by "${req.role}"`, // Description
+              changes // Changes logged as JSON
+            );
     res.status(200).json({
       message: "department updated successfully",
       department: {
@@ -140,7 +169,15 @@ exports.deletedepartment = async (req, res) => {
     await department.update({ mode: "deleted" });
 
     await department.destroy();
-
+    await historyLogger(
+      PROGRAMS.DEPARTMENT_MASTER, // Program ID for currency management
+      "DELETE_DEPARTMENT", // Mode
+      department.createdById, // Admin ID from the authenticated request
+      departmentId, // Record ID (Currency ID)
+      req.adminId,
+      `Department "${department.department_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "department deleted successfully",
       departmentId, // Include departmentId in the response

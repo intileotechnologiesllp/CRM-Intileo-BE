@@ -27,6 +27,4 @@ const masterUserSchema = Joi.object({
   isActive: Joi.boolean().optional(),
 });
 
-module.exports = {
-  masterUserSchema,
-};
+module.exports = masterUserSchema;

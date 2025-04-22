@@ -39,7 +39,7 @@ exports.createCountry = async (req, res) => {
     
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-      "CREATE", // Mode
+      "CREATE_COUNTRIES", // Mode
       country.createdById, // Created by (Admin ID)
       country.countryID, // Record ID (Country ID)
       null,
@@ -202,11 +202,11 @@ exports.editCountry = async (req, res) => {
 
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-      "EDIT", // Mode
+      "EDIT_COUNTRY", // Mode
       country.createdById,
       countryID, // Record ID (Country ID)
       req.adminId,
-      `Country "${country_desc}" modified by "${req.role}"`, // Description
+      `Country "${country_desc}" updated by "${req.role}"`, // Description
       { country_desc } // Changes logged as JSON
     );
     res.status(200).json({ message: "Country updated successfully", country });
@@ -253,7 +253,7 @@ exports.deleteCountry = async (req, res) => {
     }
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
-      "DELETE", // Mode
+      "DELETE_COUNTRY", // Mode
       country.createdById,
       countryID, // Record ID (Country ID)
       req.adminId,

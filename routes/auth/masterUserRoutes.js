@@ -8,12 +8,14 @@ console.log(masterUserController);
 router.post("/create", verifyToken, masterUserController.createMasterUser);
 
 // Get all master users
-router.get("/", verifyToken, masterUserController.getMasterUsers);
+router.get("/get", verifyToken, masterUserController.getMasterUsers);
 
 // Update a master user
-router.put("/:id", verifyToken, masterUserController.updateMasterUser);
+// router.post("/edit/:id", verifyToken, masterUserController.updateMasterUser);
 
 // Delete a master user
-router.delete("/:id", verifyToken, masterUserController.deleteMasterUser);
+router.post("/delete/:id", verifyToken, masterUserController.deleteMasterUser);
+router.get("/reset-password", masterUserController.handleResetLink);
+router.post("/reset-password", masterUserController.resetPassword);
 
 module.exports = router;

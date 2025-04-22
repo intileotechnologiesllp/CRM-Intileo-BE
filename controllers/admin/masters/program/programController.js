@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Program = require("../../../../models/admin/masters/programModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 
 // Validation schema for program
 const programSchema = Joi.object({
@@ -36,7 +37,15 @@ exports.createprogram = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for department management
+      "CREATE_PROGRAM", // Mode
+      program.createdById, // Created by (Admin ID)
+      program.programId, // Record ID (Department ID) 
+      null,
+      `Program "${program_desc}" created by "${program.createdBy}"`, // Description
+      { program_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "program created successfully",
       program: {
@@ -92,12 +101,34 @@ exports.editprogram = async (req, res) => {
 
       return res.status(404).json({ message: "program not found" });
     }
-
+  const originalData = {
+      program_desc: program.program_desc,
+  }
     await program.update({
       program_desc,
       mode: "modified", // Set mode to "modified"
     });
 
+    const updatedData = {
+      program_desc,
+    };
+    // Calculate the changes 
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
+    await historyLogger(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for currency management
+      "EDIT_PROGRAM", // Mode
+      program.createdById, // Admin ID from the authenticated request
+      programId, // Record ID (Currency ID)
+      req.adminId,
+      `Program "${program_desc}" updated by "${req.role}"`, // Description
+      changes // Changes logged as JSON
+    );
+  
     res.status(200).json({
       message: "program updated successfully",
       program: {
@@ -143,7 +174,15 @@ exports.deleteprogram = async (req, res) => {
     await program.update({ mode: "deleted" });
 
     await program.destroy();
-
+    await historyLogger(
+      PROGRAMS.PROGRAM_MASTER, // Program ID for currency management
+      "DELETE_PROGRAM", // Mode
+      program.createdById, // Admin ID from the authenticated request
+      programId, // Record ID (Currency ID)
+      req.adminId,
+      `Program "${program.program_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "program deleted successfully",
       programId, // Include programId in the response

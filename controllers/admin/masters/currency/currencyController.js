@@ -38,7 +38,7 @@ exports.createcurrency = async (req, res) => {
     });
   await historyLogger(
     PROGRAMS.CURRENCY_MASTER, // Program ID for currency management
-    "CURRENCY_CREATED", // Mode
+    "CREATE_CURRENCY", // Mode
     currency.createdById, // Created by (Admin ID)
     currency.currencyId, // Record ID (Country ID)
     null,
@@ -115,7 +115,7 @@ exports.editcurrency = async (req, res) => {
             }
             await historyLogger(
               PROGRAMS.CURRENCY_MASTER, // Program ID for currency management
-              "CURRENCY_UPDATED", // Mode
+              "EDIT_CURRENCY", // Mode
               currency.createdById, // Admin ID from the authenticated request
               currencyId, // Record ID (Currency ID)
               req.adminId,
@@ -169,7 +169,15 @@ exports.deletecurrency = async (req, res) => {
     await currency.update({ mode: "deleted" });
 
     await currency.destroy();
-
+   await historyLogger(
+      PROGRAMS.CURRENCY_MASTER, // Program ID for currency management
+      "DELETE_CURRENCY", // Mode
+      currency.createdById, // Admin ID from the authenticated request
+      currencyId, // Record ID (Currency ID)
+      req.adminId,
+      `Currency "${currency.currency_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "currency deleted successfully",
       currencyId, // Include currencyId in the response

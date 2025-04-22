@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Designation = require("../../../../models/admin/masters/designationModel");
 const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 // Validation schema for designation
 const designationSchema = Joi.object({
   designation_desc: Joi.string().min(3).max(100).required().messages({
@@ -36,7 +37,15 @@ exports.createDesignation = async (req, res) => {
       createdById: req.adminId,
       mode: "added"
     });
-
+    await historyLogger(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for department management
+      "CREATE_DESIGNATION", // Mode
+      designation.createdById, // Created by (Admin ID)
+      designation.designationId, // Record ID (Department ID) 
+      null,
+      `Designation "${designation_desc}" created by "${designation.createdBy}"`, // Description
+      { designation_desc } // Changes logged as JSON
+      );
     res.status(201).json({
       message: "Designation created successfully",
       designation: {
@@ -92,12 +101,33 @@ exports.editDesignation = async (req, res) => {
       );
       return res.status(404).json({ message: "Designation not found" });
     }
-
+    const originalData = {
+      designation_desc: designation.designation_desc,
+    }
     await designation.update({
       designation_desc,
       mode: "modified", // Set mode to "modified"
     });
 
+    const updatedData = {
+      designation_desc,
+    };
+    // Calculate the changes 
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
+    await historyLogger(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for currency management
+      "EDIT_DESIGNATION", // Mode
+      designation.createdById, // Admin ID from the authenticated request
+      designationId, // Record ID (Currency ID)
+      req.adminId,
+      `Designation "${designation_desc}" updated by "${req.role}"`, // Description
+      changes // Changes logged as JSON
+    );
     res.status(200).json({
       message: "Designation updated successfully",
       designation: {
@@ -142,7 +172,15 @@ exports.deleteDesignation = async (req, res) => {
     await designation.update({ mode: "deleted" });
 
     await designation.destroy();
-
+    await historyLogger(
+      PROGRAMS.DESIGNATION_MASTER, // Program ID for currency management
+      "DELETE_DESIGNATION", // Mode
+      designation.createdById, // Admin ID from the authenticated request
+      designationId, // Record ID (Currency ID)
+      req.adminId,
+      `Designation "${designation.designation_desc}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
     res.status(200).json({
       message: "Designation deleted successfully",
       designationId, // Include designationId in the response
