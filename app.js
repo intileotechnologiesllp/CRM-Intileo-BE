@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const sequelize = require("./config/db"); // Import Sequelize instance
 const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models
 const Admin = require("./models/adminModel"); // Import models
@@ -22,7 +23,7 @@ const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Im
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
 const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
 const app = express();
-
+app.use(express.static(path.join(__dirname, "public")));
 const cors = require("cors");
 app.use(cors());
 // Middleware

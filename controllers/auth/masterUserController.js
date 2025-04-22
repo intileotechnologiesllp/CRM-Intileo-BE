@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
 const { Op } = require("sequelize");
-const path = require("path");
+// const path = require("path");
 
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
@@ -284,7 +284,8 @@ exports.handleResetLink = async (req, res) => {
 
     // If the token is valid, redirect to the frontend reset password page
     // res.redirect(`${process.env.FRONTEND_URL}/reset-password?token=${token}`);
-    res.sendFile(path.join(__dirname, "../../index.html"));
+    // res.sendFile(path.join(__dirname, "../../index.html"));
+    res.redirect(`/index.html?token=${token}`);
   } catch (error) {
     console.error("Error verifying reset token:", error);
     res.status(500).json({ message: "Internal server error" });
