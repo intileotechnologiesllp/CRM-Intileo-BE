@@ -128,11 +128,15 @@
                   document.getElementById("message").textContent = data.message;
                   document.getElementById("resetPasswordForm").style.display =
                     "none";
+                } else if (data.expired) {
+                  // Redirect to expired.html if the token is expired
+                  window.location.href = `/expired.html?token=${token}`;
                 } else {
                   document.getElementById("message").className = "error";
                   document.getElementById("message").textContent = data.message;
                 }
               } catch (error) {
+                console.error("Error during password reset:", error);
                 document.getElementById("message").className = "error";
                 document.getElementById("message").textContent =
                   "An error occurred. Please try again.";
