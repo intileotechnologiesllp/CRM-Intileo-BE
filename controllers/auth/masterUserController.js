@@ -12,7 +12,7 @@ const { log } = require("console");
 
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
-  const { name, email, designation, department,loginType } = req.body;
+  const { name, email, designation, department, loginType } = req.body;
 
   const { error } = masterUserSchema.validate(req.body);
   if (error) {
@@ -47,7 +47,7 @@ exports.createMasterUser = async (req, res) => {
       department,
       resetToken,
       resetTokenExpiry: Date.now() + 5 * 60 * 1000, // Token valid for 5 minute
-      loginType:"master",
+      loginType: "master",
       creatorId: adminId,
       createdBy: adminName,
     });
@@ -150,7 +150,6 @@ exports.getMasterUsers = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {
@@ -323,6 +322,58 @@ exports.resendResetLink = async (req, res) => {
     });
   } catch (error) {
     console.error("Error resending reset link:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Toggle Master User Status
+exports.toggleMasterUserStatus = async (req, res) => {
+  const { masterUserID } = req.params; // Master User ID from the request parameters
+  const { isActive } = req.body; // New status (true for active, false for inactive)
+
+  try {
+    // Find the Master User by ID
+    const masterUser = await MasterUser.findByPk(masterUserID);
+    if (!masterUser) {
+      await logAuditTrail(
+        PROGRAMS.MASTER_USER_MANAGEMENT,
+        "TOGGLE_MASTER_USER_STATUS",
+        req.role,
+        "Master user not found",
+        req.adminId
+      );
+      return res.status(404).json({ message: "Master user not found" });
+    }
+
+    // Update the isActive status
+    await masterUser.update({ isActive });
+
+  
+  await historyLogger(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "TOGGLE_MASTER_USER_STATUS",
+      masterUser.creatorId,
+      masterUser.masterUserID,
+      req.adminId,
+      `Master user "${masterUser.name}" status updated to "${
+        isActive ? "Active" : "Inactive"
+      }"`,
+      { isActive }
+    );
+    res.status(200).json({
+      message: `Master user status updated to ${
+        isActive ? "Active" : "Inactive"
+      }`,
+    });
+  } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "TOGGLE_MASTER_USER_STATUS",
+      req.role,
+      error.message || "Internal server error",
+      req.adminId
+    );
+    console.error("Error toggling master user status:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
