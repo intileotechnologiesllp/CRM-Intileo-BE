@@ -46,7 +46,7 @@ exports.createMasterUser = async (req, res) => {
       designation,
       department,
       resetToken,
-      resetTokenExpiry: Date.now() + 1 * 60 * 1000, // Token valid for 5 minute
+      resetTokenExpiry: Date.now() + 5 * 60 * 1000, // Token valid for 5 minute
       creatorId: adminId,
       createdBy: adminName,
     });
