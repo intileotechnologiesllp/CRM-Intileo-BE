@@ -68,7 +68,7 @@ exports.createMasterUser = async (req, res) => {
       html: `<p>Hello ${name},</p>
              <p>You have been added as a master user. Please click the link below to set your password:</p>
              <a href="${resetLink}">Set Password</a>
-             <p>This link will expire in 1 hour.</p>`,
+             <p>This link will expire in 5 minute.</p>`,
     });
 
     // Log the creation in the audit trail
