@@ -42,7 +42,7 @@ exports.createcurrency = async (req, res) => {
     currency.createdById, // Created by (Admin ID)
     currency.currencyId, // Record ID (Country ID)
     null,
-    `Country "${currency_desc}" created by "${currency.createdBy}"`, // Description
+    `Country "${currency_desc}" created by "${req.role}"`, // Description
     { currency_desc } // Changes logged as JSON
     );
     res.status(201).json({

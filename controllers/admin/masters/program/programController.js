@@ -43,7 +43,7 @@ exports.createprogram = async (req, res) => {
       program.createdById, // Created by (Admin ID)
       program.programId, // Record ID (Department ID) 
       null,
-      `Program "${program_desc}" created by "${program.createdBy}"`, // Description
+      `Program "${program_desc}" created by "${req.role}"`, // Description
       { program_desc } // Changes logged as JSON
       );
     res.status(201).json({
