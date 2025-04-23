@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
 const { Op } = require("sequelize");
+const { log } = require("console");
 // const path = require("path");
 
 // Create a Master User
@@ -45,7 +46,7 @@ exports.createMasterUser = async (req, res) => {
       designation,
       department,
       resetToken,
-      resetTokenExpiry: Date.now() + 3600000, // Token valid for 1 hour
+      resetTokenExpiry: Date.now() + 1 * 60 * 1000, // Token valid for 5 minute
       creatorId: adminId,
       createdBy: adminName,
     });
@@ -149,46 +150,6 @@ exports.getMasterUsers = async (req, res) => {
   }
 };
 
-// Update a Master User
-// exports.updateMasterUser = async (req, res) => {
-//   const { id } = req.params;
-//   const { name, email, designation, department, isActive } = req.body;
-
-//   try {
-//     const adminId = req.user?.id; // Admin ID from the authenticated request
-
-//     // Find the master user by ID
-//     const masterUser = await MasterUser.findByPk(id);
-//     if (!masterUser) {
-//       return res.status(404).json({ message: "Master user not found" });
-//     }
-
-//     // Update the master user
-//     await masterUser.update({
-//       name,
-//       email,
-//       designation,
-//       department,
-//       isActive,
-//     });
-
-//     // Log the update in the audit trail
-//     await logAuditTrail(
-//       PROGRAMS.MASTER_USER_MANAGEMENT,
-//       "UPDATE_MASTER_USER",
-//       adminId,
-//       null,
-//       masterUser.masterUserID
-//     );
-
-//     res
-//       .status(200)
-//       .json({ message: "Master user updated successfully", masterUser });
-//   } catch (error) {
-//     console.error("Error updating master user:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 // Delete a Master User
 exports.deleteMasterUser = async (req, res) => {
@@ -233,26 +194,33 @@ exports.deleteMasterUser = async (req, res) => {
 
 // Reset Password
 exports.resetPassword = async (req, res) => {
-  const { token, newPassword } = req.body; // Extract token and new password from the request body
+  const { token, newPassword } = req.body;
 
   try {
-    // Verify if the token is valid and not expired
-    const bufferTime = 5 * 60 * 1000;
     const user = await MasterUser.findOne({
       where: {
         resetToken: token,
-        resetTokenExpiry: { [Op.gt]: Date.now()-bufferTime }, // Ensure token is not expired
+        resetTokenExpiry: { [Op.gt]: Date.now() }, // Ensure token is not expired
       },
     });
 
     if (!user) {
-      return res.status(400).json({ message: "Invalid or expired token" });
+      const expiredUser = await MasterUser.findOne({
+        where: { resetToken: token },
+      });
+
+      if (expiredUser) {
+        return res.status(400).json({
+          message: "This reset link has expired. Please request a new one.",
+          expired: true, // Add an expired flag
+        });
+      }
+
+      return res.status(400).json({ message: "Invalid token." });
     }
 
-    // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update the user's password and clear the reset token
     await user.update({
       password: hashedPassword,
       resetToken: null,
@@ -280,15 +248,80 @@ exports.handleResetLink = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(400).json({ message: "Invalid or expired token" });
+      // Check if the token exists but is expired
+      const expiredUser = await MasterUser.findOne({
+        where: {
+          resetToken: token,
+        },
+      });
+
+      if (expiredUser) {
+        // Redirect to the expired link page with the token
+        return res.redirect(`/expired.html?token=${token}`);
+      }
+
+      return res.status(400).json({ message: "Invalid token." });
     }
 
     // If the token is valid, redirect to the frontend reset password page
-    // res.redirect(`${process.env.FRONTEND_URL}/reset-password?token=${token}`);
-    // res.sendFile(path.join(__dirname, "../../index.html"));
     res.redirect(`/index.html?token=${token}`);
   } catch (error) {
     console.error("Error verifying reset token:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Resend Reset Link
+exports.resendResetLink = async (req, res) => {
+  const { token } = req.query; // Extract the token from the query parameters
+
+  try {
+    // Check if the token exists in the database
+    const user = await MasterUser.findOne({
+      where: {
+        resetToken: token, // Check if the token exists
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Invalid token." });
+    }
+
+    // Generate a new reset token
+    const newResetToken = crypto.randomBytes(32).toString("hex");
+
+    // Update the user's reset token and expiry time
+    await user.update({
+      resetToken: newResetToken,
+      resetTokenExpiry: Date.now() + 5 * 60 * 1000, // Token valid for 5 minutes
+    });
+
+    // Send the reset link via email
+    const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${newResetToken}`;
+    const transporter = nodemailer.createTransport({
+      service: "Gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: "Password Reset Request",
+      html: `<p>Hello,</p>
+             <p>You requested a password reset. Please click the link below to reset your password:</p>
+             <a href="${resetLink}">Reset Password</a>
+             <p>This link will expire in 5 minutes.</p>`,
+    });
+
+    // Send success response
+    res.status(200).json({
+      message: "Password reset link sent successfully to your email.",
+    });
+  } catch (error) {
+    console.error("Error resending reset link:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

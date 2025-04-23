@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Link Expired</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
+      .container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 400px;
+        text-align: center;
+      }
+      h1 {
+        font-size: 24px;
+        margin-bottom: 20px;
+      }
+      p {
+        margin-bottom: 20px;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      .error {
+        color: red;
+        margin-bottom: 10px;
+      }
+      .success {
+        color: green;
+        margin-bottom: 10px;
+      }
+      .info {
+        color: blue;
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Link Expired</h1>
+      <p class="error">
+        This reset link has expired. Please request a new one.
+      </p>
+      <button id="resendLinkButton">Resend Reset Link</button>
+      <div id="message" class="success"></div>
+    </div>
+
+    <script>
+          let FRONTEND_URL = "";
+
+// Fetch environment variables from the backend
+fetch("/api/env")
+  .then((response) => response.json())
+  .then((env) => {
+    FRONTEND_URL = env.FRONTEND_URL;
+      document
+        .getElementById("resendLinkButton")
+        .addEventListener("click", async () => {
+          const messageElement = document.getElementById("message");
+          const token = new URLSearchParams(window.location.search).get(
+            "token"
+          );
+
+          if (!token) {
+            messageElement.textContent = "Invalid or missing token.";
+            return;
+          }
+
+          // Show loading message
+          messageElement.className = "info";
+          messageElement.textContent = "Processing your request...";
+
+          try {
+            const response = await fetch(
+              `${FRONTEND_URL}/api/master-user/resend-reset-link?token=${token}`,
+              {
+                method: "GET",
+              }
+            );
+
+            const data = await response.json();
+
+            if (response.ok) {
+              messageElement.className = "success";
+              messageElement.textContent = data.message;
+            } else {
+              messageElement.className = "error";
+              messageElement.textContent = data.message;
+            }
+          } catch (error) {
+            console.error("Error resending reset link:", error);
+            messageElement.className = "error";
+            messageElement.textContent = "An error occurred. Please try again.";
+          }
+        });
+      })
+        .catch((error) => {
+          console.error("Error fetching environment variables:", error);
+          document.getElementById("message").textContent =
+            "Failed to load configuration.";
+        });
+    </script>
+  </body>
+</html>
