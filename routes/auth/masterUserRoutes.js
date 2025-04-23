@@ -19,7 +19,8 @@ router.post("/create", verifyToken, masterUserController.createMasterUser);
 
 // Get all master users
 router.get("/get", verifyToken, masterUserController.getMasterUsers);
-
+// Toggle Master User Status (Activate/Deactivate)
+router.post("/toggle-status/:masterUserID", verifyToken,masterUserController.toggleMasterUserStatus);
 
 
 // Delete a master user
