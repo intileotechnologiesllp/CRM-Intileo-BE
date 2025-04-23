@@ -29,7 +29,12 @@ const cors = require("cors");
 app.use(cors());
 // Middleware
 app.use(express.json());
-
+// Expose environment variables to the frontend
+app.get("/api/env", (req, res) => {
+  res.json({
+    FRONTEND_URL: process.env.FRONTEND_URL,
+  });
+});
 // Routes
 app.use("/api/", adminRoutes);
 app.use("/api/designations", designationRoutes);

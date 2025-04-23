@@ -83,52 +83,66 @@
     </div>
 
     <script>
-      // Extract the token from the URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get("token");
+      let FRONTEND_URL = "";
 
-      if (!token) {
-        document.getElementById("message").textContent =
-          "Invalid or missing token.";
-        document.getElementById("resetPasswordForm").style.display = "none";
-      }
+      // Fetch environment variables from the backend
+      fetch("/api/env")
+        .then((response) => response.json())
+        .then((env) => {
+          FRONTEND_URL = env.FRONTEND_URL;
 
-      // Handle form submission
-      document
-        .getElementById("resetPasswordForm")
-        .addEventListener("submit", async (e) => {
-          e.preventDefault();
+          // Extract the token from the URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const token = urlParams.get("token");
 
-          const newPassword = document.getElementById("newPassword").value;
-
-          try {
-            const response = await fetch(
-              "http://164.52.223.86:3013/api/master-user/reset-password",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ token, newPassword }), // Include the token in the request body
-              }
-            );
-
-            const data = await response.json();
-
-            if (response.ok) {
-              document.getElementById("message").className = "success";
-              document.getElementById("message").textContent = data.message;
-              document.getElementById("resetPasswordForm").style.display =
-                "none";
-            } else {
-              document.getElementById("message").className = "error";
-              document.getElementById("message").textContent = data.message;
-            }
-          } catch (error) {
-            document.getElementById("message").className = "error";
+          if (!token) {
             document.getElementById("message").textContent =
-              "An error occurred. Please try again.";
+              "Invalid or missing token.";
+            document.getElementById("resetPasswordForm").style.display = "none";
           }
+
+          // Handle form submission
+          document
+            .getElementById("resetPasswordForm")
+            .addEventListener("submit", async (e) => {
+              e.preventDefault();
+
+              const newPassword = document.getElementById("newPassword").value;
+
+              try {
+                const response = await fetch(
+                  `${FRONTEND_URL}/api/master-user/reset-password`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ token, newPassword }), // Include the token in the request body
+                  }
+                );
+
+                const data = await response.json();
+
+                if (response.ok) {
+                  document.getElementById("message").className = "success";
+                  document.getElementById("message").textContent = data.message;
+                  document.getElementById("resetPasswordForm").style.display =
+                    "none";
+                } else {
+                  document.getElementById("message").className = "error";
+                  document.getElementById("message").textContent = data.message;
+                }
+              } catch (error) {
+                document.getElementById("message").className = "error";
+                document.getElementById("message").textContent =
+                  "An error occurred. Please try again.";
+              }
+            });
+        })
+        .catch((error) => {
+          console.error("Error fetching environment variables:", error);
+          document.getElementById("message").textContent =
+            "Failed to load configuration.";
         });
     </script>
   </body>
