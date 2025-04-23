@@ -42,7 +42,7 @@ exports.createscope = async (req, res) => {
       scope.createdById, // Created by (Admin ID)
       scope.scopeId, // Record ID (Country ID)
       null,
-      `Scope "${scope_desc}" created by "${scope.createdBy}"`, // Description
+      `Scope "${scope_desc}" created by "${req.role}"`, // Description
       { scope_desc } // Changes logged as JSON
       );
     res.status(201).json({

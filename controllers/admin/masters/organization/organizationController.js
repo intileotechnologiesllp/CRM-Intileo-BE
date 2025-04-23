@@ -43,7 +43,7 @@ exports.createorganization = async (req, res) => {
       organization.createdById, // Created by (Admin ID)
       organization.organizationId, // Record ID (Department ID) 
       null,
-      `Organization "${organization_desc}" created by "${organization.createdBy}"`, // Description
+      `Organization "${organization_desc}" created by "${req.role}"`, // Description
       { organization_desc } // Changes logged as JSON
       );
     res.status(201).json({

@@ -42,7 +42,7 @@ exports.createstatus = async (req, res) => {
       status.createdById, // Created by (Admin ID)
       status.statusId, // Record ID (Country ID)
       null,
-      `Status "${status_desc}" created by "${status.createdBy}"`, // Description
+      `Status "${status_desc}" created by "${req.role}"`, // Description
       { status_desc } // Changes logged as JSON
       );
     res.status(201).json({

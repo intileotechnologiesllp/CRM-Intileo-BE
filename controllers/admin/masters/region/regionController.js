@@ -61,7 +61,7 @@ exports.createRegion = async (req, res) => {
       region.createdById, // Created by (Admin ID)
       region.regionID, // Record ID (Department ID)
       null,
-      `Region "${region_desc}" created by "${region.createdBy}"`, // Description
+      `Region "${region_desc}" created by "${req.role}"`, // Description
       { region_desc } // Changes logged as JSON
     );
 

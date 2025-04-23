@@ -43,7 +43,7 @@ exports.createDesignation = async (req, res) => {
       designation.createdById, // Created by (Admin ID)
       designation.designationId, // Record ID (Department ID) 
       null,
-      `Designation "${designation_desc}" created by "${designation.createdBy}"`, // Description
+      `Designation "${designation_desc}" created by "${req.role}"`, // Description
       { designation_desc } // Changes logged as JSON
       );
     res.status(201).json({

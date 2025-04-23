@@ -19,6 +19,10 @@ const Admin = sequelize.define("Admin", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  loginType:{
+    type: DataTypes.STRING,
+    allowNull: false,
+  }
 });
 
 module.exports = Admin;

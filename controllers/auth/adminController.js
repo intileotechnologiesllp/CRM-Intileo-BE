@@ -11,52 +11,61 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the
 const PROGRAMS = require("../../utils/programConstants");
 
 exports.signIn = async (req, res) => {
-  const { email, password, longitude, latitude, ipAddress, loginType } =
-    req.body;
+  const { email, password, longitude, latitude, ipAddress } = req.body;
+
+  let user = null;
+  let loginType = null;
 
   try {
-    // Validate loginType
-    const loginType = "admin";
-    if (!["admin", "general", "master"].includes(loginType)) {
-      return res.status(400).json({
-        message: "Invalid login type. Must be 'admin', 'general', or 'master'.",
-      });
+    // Check if the user exists in the Admin table
+    user = await Admin.findOne({ where: { email } });
+    if (user) {
+      loginType = "admin";
+    } else {
+      // Check if the user exists in the MasterUser table
+      user = await MasterUser.findOne({ where: { email } });
+      if (user) {
+        loginType = "master";
+      }
     }
 
-    // Authenticate the user
-    const admin = await adminService.signIn(email, password);
-    console.log(loginType);
-
-    if (!admin) {
+    if (!user) {
       // Log failed sign-in attempt
       await logAuditTrail(
-        PROGRAMS.AUTHENTICATION, // Program ID for authentication
+        PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
-        "Invalid email", // Error description
+        "Invalid email",
         null
       );
       return res.status(404).json({ message: "User not found" });
     }
 
     // Verify the password
-    const isPasswordValid = await bcrypt.compare(password, admin.password);
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       // Log failed sign-in attempt
       await logAuditTrail(
-        PROGRAMS.AUTHENTICATION, // Program ID for authentication
+        PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
-        loginType, // User ID
-        "Invalid password", // Error description
-        admin.id
+        loginType,
+        "Invalid password",
+        loginType === "admin" ? user.id : user.masterUserID // Use the correct ID field
       );
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid password" });
     }
+
     // Generate JWT token
     const token = jwt.sign(
-      { id: admin.id, email: admin.email, loginType },
+      {
+        id: loginType === "admin" ? user.id : user.masterUserID, // Use the correct ID field
+        email: user.email,
+        loginType,
+      },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
+
+    console.log(token.loginType, "token");
 
     // Get the current UTC time
     const loginTimeUTC = new Date();
@@ -68,27 +77,32 @@ exports.signIn = async (req, res) => {
 
     // Log the login history
     await LoginHistory.create({
-      userId: admin.id,
-      loginType, // Include the login type
+      userId: loginType === "admin" ? user.id : user.masterUserID, // Use the correct ID field
+      loginType,
       ipAddress: ipAddress || null,
       longitude: longitude || null,
       latitude: latitude || null,
       loginTime: loginTimeIST,
     });
 
-    res.status(200).json({ message: "Sign-in successful", token });
+    res.status(200).json({
+      message: `${
+        loginType === "admin" ? "Admin" : "Master User"
+      } sign-in successful`,
+      token,
+    });
   } catch (error) {
     console.error("Error during admin sign-in:", error);
 
     await logAuditTrail(
-      PROGRAMS.AUTHENTICATION, // Program ID for authentication
+      PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
-      adminType, // No user ID for failed sign-in
-      error.message || "Internal server error", // Error description
-      admin.id // Include admin ID in the log
+      loginType || "unknown",
+      error.message || "Internal server error",
+      user ? (loginType === "admin" ? user.id : user.masterUserID) : null // Use the correct ID field
     );
 
-    res.status(401).json({ message: error.message });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -108,29 +122,39 @@ exports.forgotPassword = async (req, res) => {
   const { email } = req.body;
 
   try {
-    // Check if the admin exists
-    const admin = await adminService.findAdminByEmail(email);
-    if (!admin) {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "master";
+    }
+
+    if (!user) {
       await logAuditTrail(
-        PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
+        PROGRAMS.FORGOT_PASSWORD,
         "forgot_password",
-        null, // No user ID for failed sign-in
-        "user not found" // Error description
+        null,
+        "User not found"
       );
-      return res.status(404).json({ message: "user not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Generate OTP
     const otp = crypto.randomInt(100000, 999999).toString();
 
-    await adminService.saveOtp(admin.id, otp);
+    // Save OTP and expiration
+    await user.update({
+      otp,
+      otpExpiration: Date.now() + 10 * 60 * 1000, // OTP valid for 10 minutes
+    });
 
     // Send OTP via email
     const transporter = nodemailer.createTransport({
-      service: "gmail", // Use your email service provider
+      service: "gmail",
       auth: {
-        user: process.env.EMAIL_USER, // Your email address
-        pass: process.env.EMAIL_PASS, // Your email password
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
 
@@ -142,20 +166,15 @@ exports.forgotPassword = async (req, res) => {
     };
 
     await transporter.sendMail(mailOptions);
-    // await logAuditTrail(
-    //   PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
-    //   "forgot_password",
-    //   admin.id, // No user ID for failed sign-in
-    //   null      // Error description
-    // );
+
     res.status(200).json({ message: "OTP sent to your email address." });
   } catch (error) {
     console.error("Error during forgot password:", error);
     await logAuditTrail(
-      PROGRAMS.FORGOT_PASSWORD, // Program ID for authentication
+      PROGRAMS.FORGOT_PASSWORD,
       "forgot_password",
-      null, // No user ID for failed sign-in
-      error.message || "Internal server error" // Error description
+      null,
+      error.message || "Internal server error"
     );
     res.status(500).json({ message: "Internal server error" });
   }
@@ -165,39 +184,45 @@ exports.verifyOtp = async (req, res) => {
   const { email, otp } = req.body;
 
   try {
-    const admin = await adminService.findAdminByEmail(email);
-    if (!admin) {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "master";
+    }
+
+    if (!user) {
       await logAuditTrail(
-        PROGRAMS.VERIFY_OTP, // Program ID for authentication
+        PROGRAMS.VERIFY_OTP,
         "VERIFY_OTP",
-        null, // No user ID for failed sign-in
-        "user not found" // Error description
+        null,
+        "User not found"
       );
-      return res.status(404).json({ message: "user not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Check if OTP is valid
-    if (admin.otp !== otp || new Date() > admin.otpExpiration) {
+    if (user.otp !== otp || new Date() > user.otpExpiration) {
       await logAuditTrail(
-        PROGRAMS.VERIFY_OTP, // Program ID for authentication
+        PROGRAMS.VERIFY_OTP,
         "VERIFY_OTP",
-        "admin", // No user ID for failed sign-in
-        "Invalid or expired OTP", // Error description
-        admin.id
+        loginType,
+        "Invalid or expired OTP",
+        loginType === "admin" ? user.id : user.masterUserID
       );
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
     res.status(200).json({ message: "OTP verified successfully" });
   } catch (error) {
-    await logAuditTrail(
-      PROGRAMS.VERIFY_OTP, // Program ID for authentication
-      "VERIFY_OTP",
-      "admin", // No user ID for failed sign-in
-      error.message, // Error description
-      admin.id
-    );
     console.error("Error during OTP verification:", error);
+    await logAuditTrail(
+      PROGRAMS.VERIFY_OTP,
+      "VERIFY_OTP",
+      "unknown",
+      error.message || "Internal server error"
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -206,41 +231,43 @@ exports.resetPassword = async (req, res) => {
   const { email, newPassword } = req.body;
 
   try {
-    const admin = await adminService.findAdminByEmail(email);
-    if (!admin) {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "master";
+    }
+
+    if (!user) {
       await logAuditTrail(
-        PROGRAMS.RESET_PASSWORD, // Program ID for authentication
+        PROGRAMS.RESET_PASSWORD,
         "RESET_PASSWORD",
-        null, // No user ID for failed sign-in
-        "Admin not found" // Error description
+        null,
+        "User not found"
       );
-      return res.status(404).json({ message: "Admin not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     // Update the password
-    await Admin.update(
-      { password: hashedPassword, otp: null, otpExpiration: null },
-      { where: { email } }
-    );
-    // await logAuditTrail(
-    //   PROGRAMS.RESET_PASSWORD, // Program ID for authentication
-    //   "RESET_PASSWORD",
-    //   admin.id, // No user ID for failed sign-in
-    //   null      // Error description
-    // );
+    await user.update({
+      password: hashedPassword,
+      otp: null,
+      otpExpiration: null,
+    });
+
     res.status(200).json({ message: "Password reset successfully" });
   } catch (error) {
-    await logAuditTrail(
-      PROGRAMS.RESET_PASSWORD, // Program ID for authentication
-      "RESET_PASSWORD",
-      "admin", // No user ID for failed sign-in
-      error.message, // Error description
-      admin.id
-    );
     console.error("Error during password reset:", error);
+    await logAuditTrail(
+      PROGRAMS.RESET_PASSWORD,
+      "RESET_PASSWORD",
+      loginType || "unknown",
+      error.message || "Internal server error"
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };

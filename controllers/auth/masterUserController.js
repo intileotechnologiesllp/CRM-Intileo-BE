@@ -12,7 +12,7 @@ const { log } = require("console");
 
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
-  const { name, email, designation, department } = req.body;
+  const { name, email, designation, department,loginType } = req.body;
 
   const { error } = masterUserSchema.validate(req.body);
   if (error) {
@@ -47,6 +47,7 @@ exports.createMasterUser = async (req, res) => {
       department,
       resetToken,
       resetTokenExpiry: Date.now() + 5 * 60 * 1000, // Token valid for 5 minute
+      loginType:"master",
       creatorId: adminId,
       createdBy: adminName,
     });

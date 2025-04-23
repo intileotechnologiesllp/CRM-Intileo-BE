@@ -42,7 +42,7 @@ exports.createsectoralscope = async (req, res) => {
       sectoralscope.createdById, // Created by (Admin ID)
       sectoralscope.sectoralscopeId, // Record ID (Country ID)
       null,
-      `Sectoralscope "${sectoralscope_desc}" created by "${sectoralscope.createdBy}"`, // Description
+      `Sectoralscope "${sectoralscope_desc}" created by "${req.role}"`, // Description
       { sectoralscope_desc } // Changes logged as JSON
       );
     res.status(201).json({

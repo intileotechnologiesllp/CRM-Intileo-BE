@@ -42,7 +42,7 @@ exports.createdepartment = async (req, res) => {
       department.createdById, // Created by (Admin ID)
       department.departmentId, // Record ID (Department ID) 
       null,
-      `Department "${department_desc}" created by "${department.createdBy}"`, // Description
+      `Department "${department_desc}" created by "${req.role}"`, // Description
       { department_desc } // Changes logged as JSON
       );
     res.status(201).json({

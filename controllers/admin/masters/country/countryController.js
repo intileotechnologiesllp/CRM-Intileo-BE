@@ -43,7 +43,7 @@ exports.createCountry = async (req, res) => {
       country.createdById, // Created by (Admin ID)
       country.countryID, // Record ID (Country ID)
       null,
-      `Country "${country_desc}" created by "${country.createdBy}"`, // Description
+      `Country "${country_desc}" created by "${req.role}"`, // Description
       { country_desc } // Changes logged as JSON
     );
     res.status(201).json({ message: "Country created successfully", country });

@@ -13,7 +13,7 @@ exports.signIn = async (email, password) => {
 
 exports.createAdmin = async (email, password) => {
   const hashedPassword = await bcrypt.hash(password, 10);
-  return await Admin.create({ email, password: hashedPassword });
+  return await Admin.create({ email, password: hashedPassword, loginType: "admin" });
 };
 
 exports.findAdminByEmail = async (email) => {
