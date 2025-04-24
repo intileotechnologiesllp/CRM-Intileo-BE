@@ -12,7 +12,15 @@ const { log } = require("console");
 
 // Create a Master User
 exports.createMasterUser = async (req, res) => {
-  const { name, email, designation, department, loginType } = req.body;
+  const {
+    name,
+    email,
+    designation,
+    department,
+    key,
+    password,
+    loginType = "master",
+  } = req.body;
 
   const { error } = masterUserSchema.validate(req.body);
   if (error) {
@@ -36,44 +44,53 @@ exports.createMasterUser = async (req, res) => {
       return res.status(400).json({ message: "Email already exists" });
     }
 
-    // Generate a secure token for password reset
-    const resetToken = crypto.randomBytes(32).toString("hex");
+    let resetToken = null; // Initialize reset token
+    let resetTokenExpiry = null; // Initialize reset token expiry
 
-    // Create a new master user with the reset token
+    // If the key is "general", generate a secure token for password reset
+    if (key === "general") {
+      resetToken = crypto.randomBytes(32).toString("hex");
+      resetTokenExpiry = Date.now() + 5 * 60 * 1000; // Token valid for 5 minutes
+    }
+
+    // Create a new master user
     const masterUser = await MasterUser.create({
       name,
       email,
-      designation,
-      department,
+      designation: key === "admin" ? null : designation, // Remove designation if key is "admin"
+      department: key === "admin" ? null : department, // Remove department if key is "admin"
+      password: key === "admin" ? await bcrypt.hash(password, 10) : null, // Use provided password for admin
       resetToken,
-      resetTokenExpiry: Date.now() + 5 * 60 * 1000, // Token valid for 5 minute
-      loginType: "master",
+      resetTokenExpiry,
+      loginType, // Default to "master" if not provided
       creatorId: adminId,
       createdBy: adminName,
+      userType: key === "admin" ? "admin" : "general", // Set userType based on the key
     });
 
-    // Send a password reset email
-    const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${resetToken}`;
-    const transporter = nodemailer.createTransport({
-      service: "Gmail", // Use your email service
-      auth: {
-        user: process.env.EMAIL_USER, // Your email address
-        pass: process.env.EMAIL_PASS, // Your email password
-      },
-    });
+    // If the key is "general", send a password reset email
+    if (key === "general") {
+      const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${resetToken}`;
+      const transporter = nodemailer.createTransport({
+        service: "Gmail", // Use your email service
+        auth: {
+          user: process.env.EMAIL_USER, // Your email address
+          pass: process.env.EMAIL_PASS, // Your email password
+        },
+      });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Set Your Password",
-      html: `<p>Hello ${name},</p>
-             <p>You have been added as a master user. Please click the link below to set your password:</p>
-             <a href="${resetLink}">Set Password</a>
-             <p>This link will expire in 5 minute.</p>`,
-    });
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: "Set Your Password",
+        html: `<p>Hello ${name},</p>
+               <p>You have been added as a master user. Please click the link below to set your password:</p>
+               <a href="${resetLink}">Set Password</a>
+               <p>This link will expire in 5 minutes.</p>`,
+      });
+    }
 
     // Log the creation in the audit trail
-
     await historyLogger(
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "CREATE_MASTER_USER",
@@ -81,12 +98,25 @@ exports.createMasterUser = async (req, res) => {
       masterUser.masterUserID,
       null,
       `Master user "${name}" created by "${adminName}"`,
-      { name, email, designation, department }
+      { name, email, designation, department, key, loginType }
     );
+
+    // Send response
     res.status(201).json({
-      message:
-        "Master user created successfully. Password reset link sent to email.",
-      masterUser,
+      message: `Master user created successfully.${
+        key === "admin"
+          ? " Password saved."
+          : " Password reset link sent to email."
+      }`,
+      masterUser: {
+        masterUserID: masterUser.masterUserID,
+        name: masterUser.name,
+        email: masterUser.email,
+        userType: masterUser.userType, // Include userType in the response
+        // loginType: masterUser.loginType, // Include loginType in the response
+        ...(key !== "admin" && { designation: masterUser.designation }), // Include designation only if key is not "admin"
+        ...(key !== "admin" && { department: masterUser.department }), // Include department only if key is not "admin"
+      },
     });
   } catch (error) {
     console.error("Error creating master user:", error);
@@ -112,13 +142,14 @@ exports.getMasterUsers = async (req, res) => {
     sortBy = "createdAt",
     sortOrder = "DESC",
     search = "",
+    key, // Filter by userType (admin or general)
   } = req.query;
 
   try {
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
-    // Build the where clause for searching
+    // Build the where clause for searching and filtering by userType
     const whereClause = {};
     if (search) {
       whereClause[Op.or] = [
@@ -127,6 +158,11 @@ exports.getMasterUsers = async (req, res) => {
         { designation: { [Op.like]: `%${search}%` } },
         { department: { [Op.like]: `%${search}%` } },
       ];
+    }
+
+    // Add userType filter if key is provided
+    if (key) {
+      whereClause.userType = key;
     }
 
     // Fetch master users with pagination, sorting, and searching
@@ -348,8 +384,7 @@ exports.toggleMasterUserStatus = async (req, res) => {
     // Update the isActive status
     await masterUser.update({ isActive });
 
-  
-  await historyLogger(
+    await historyLogger(
       PROGRAMS.MASTER_USER_MANAGEMENT,
       "TOGGLE_MASTER_USER_STATUS",
       masterUser.creatorId,
