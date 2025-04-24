@@ -39,9 +39,10 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.STRING,
     allowNull: false, // Admin who created the user
   },
-  isActive: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true,
+  status: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: "active", // Default status
   },
   resetToken: {
     type: DataTypes.STRING,
@@ -66,6 +67,11 @@ const MasterUser = sequelize.define("MasterUser", {
   userType: {
     type: DataTypes.STRING,
     allowNull: false, // "admin" or "general"
+  },
+  mobileNumber: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
   }
 });
 

@@ -15,11 +15,13 @@ exports.createMasterUser = async (req, res) => {
   const {
     name,
     email,
+    mobileNumber,
     designation,
     department,
     key,
     password,
     loginType = "master",
+    status
   } = req.body;
 
   const { error } = masterUserSchema.validate(req.body);
@@ -38,10 +40,16 @@ exports.createMasterUser = async (req, res) => {
     const adminId = req.adminId; // Admin ID from the authenticated request
     const adminName = req.role; // Admin name from the authenticated request
 
-    // Check if the email already exists
-    const existingUser = await MasterUser.findOne({ where: { email } });
+    // Check if the email or mobile number already exists
+    const existingUser = await MasterUser.findOne({
+      where: {
+        [Op.or]: [{ email }, { mobileNumber }],
+      },
+    });
     if (existingUser) {
-      return res.status(400).json({ message: "Email already exists" });
+      return res
+        .status(400)
+        .json({ message: "Email or mobile number already exists" });
     }
 
     let resetToken = null; // Initialize reset token
@@ -57,6 +65,7 @@ exports.createMasterUser = async (req, res) => {
     const masterUser = await MasterUser.create({
       name,
       email,
+      mobileNumber,
       designation: key === "admin" ? null : designation, // Remove designation if key is "admin"
       department: key === "admin" ? null : department, // Remove department if key is "admin"
       password: key === "admin" ? await bcrypt.hash(password, 10) : null, // Use provided password for admin
@@ -66,6 +75,7 @@ exports.createMasterUser = async (req, res) => {
       creatorId: adminId,
       createdBy: adminName,
       userType: key === "admin" ? "admin" : "general", // Set userType based on the key
+      status, // Use status from req.body or default to "active"
     });
 
     // If the key is "general", send a password reset email
@@ -98,7 +108,16 @@ exports.createMasterUser = async (req, res) => {
       masterUser.masterUserID,
       null,
       `Master user "${name}" created by "${adminName}"`,
-      { name, email, designation, department, key, loginType }
+      {
+        name,
+        email,
+        mobileNumber,
+        designation,
+        department,
+        key,
+        loginType,
+        status,
+      }
     );
 
     // Send response
@@ -112,8 +131,9 @@ exports.createMasterUser = async (req, res) => {
         masterUserID: masterUser.masterUserID,
         name: masterUser.name,
         email: masterUser.email,
+        mobileNumber: masterUser.mobileNumber,
         userType: masterUser.userType, // Include userType in the response
-        // loginType: masterUser.loginType, // Include loginType in the response
+        status: masterUser.status, // Include status in the response
         ...(key !== "admin" && { designation: masterUser.designation }), // Include designation only if key is not "admin"
         ...(key !== "admin" && { department: masterUser.department }), // Include department only if key is not "admin"
       },
