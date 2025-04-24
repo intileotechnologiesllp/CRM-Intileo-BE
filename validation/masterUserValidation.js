@@ -14,6 +14,15 @@ const masterUserSchema = Joi.object({
     "string.email": "Email must be a valid email address.",
     "any.required": "Email is required.",
   }),
+  mobileNumber: Joi.string()
+    .pattern(/^[0-9]{10,15}$/)
+    .required()
+    .messages({
+      "string.base": "Mobile number must be a string.",
+      "string.empty": "Mobile number is required.",
+      "string.pattern.base": "Mobile number must be between 10 and 15 digits.",
+      "any.required": "Mobile number is required.",
+    }),
   designation: Joi.string()
     .when("key", {
       is: "general",
@@ -36,11 +45,6 @@ const masterUserSchema = Joi.object({
       "string.empty": "Department is required for general users.",
       "any.required": "Department is required for general users.",
     }),
-  // loginType: Joi.string().valid("master").required().messages({
-  //   "string.base": "Login type must be a string.",
-  //   "string.empty": "Login type is required.",
-  //   "any.required": "Login type is required.",
-  // }),
   key: Joi.string().valid("admin", "general").required().messages({
     "string.base": "Key must be a string.",
     "string.empty": "Key is required.",
@@ -57,6 +61,15 @@ const masterUserSchema = Joi.object({
       "string.empty": "Password is required for admin users.",
       "any.required": "Password is required for admin users.",
     }),
+  // loginType: Joi.string().valid("master").default("master").messages({
+  //   "string.base": "Login type must be a string.",
+  //   "string.empty": "Login type is required.",
+  // }),
+  status: Joi.string().valid("active", "inactive").default("active").messages({
+    "string.base": "Status must be a string.",
+    "string.empty": "Status is required.",
+    "any.only": "Status must be either 'active' or 'inactive'.",
+  }),
 });
 
 module.exports = masterUserSchema;
