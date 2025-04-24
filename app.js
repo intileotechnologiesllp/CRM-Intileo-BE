@@ -22,6 +22,7 @@ const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
 const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
+const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes"); // Import privileges routes
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 console.log("Serving static files from:", path.join(__dirname, "public"),"........//.....//")
@@ -51,6 +52,7 @@ app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
 app.use("/api/get-history", historyRoutes); // Register history routes
+app.use("/api/privileges", privilegesRoutes); // Register privileges routes
 
 
 // Sync database

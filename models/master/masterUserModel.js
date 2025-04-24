@@ -25,11 +25,11 @@ const MasterUser = sequelize.define("MasterUser", {
   },
   designation: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   department:{
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   creatorId: {
     type: DataTypes.INTEGER,
@@ -62,6 +62,10 @@ const MasterUser = sequelize.define("MasterUser", {
   otpExpiration: {
     type: DataTypes.DATE,
     allowNull: true,
+  },
+  userType: {
+    type: DataTypes.STRING,
+    allowNull: false, // "admin" or "general"
   }
 });
 
