@@ -25,7 +25,7 @@ exports.signIn = async (req, res) => {
       // Check if the user exists in the MasterUser table
       user = await MasterUser.findOne({ where: { email } });
       if (user) {
-        loginType = "master";
+        loginType = "general";
       }
     }
 
@@ -126,7 +126,7 @@ exports.forgotPassword = async (req, res) => {
 
     if (!user) {
       user = await MasterUser.findOne({ where: { email } });
-      loginType = "master";
+      loginType = "general";
     }
 
     if (!user) {
@@ -188,7 +188,7 @@ exports.verifyOtp = async (req, res) => {
 
     if (!user) {
       user = await MasterUser.findOne({ where: { email } });
-      loginType = "master";
+      loginType = "general";
     }
 
     if (!user) {
@@ -235,7 +235,7 @@ exports.resetPassword = async (req, res) => {
 
     if (!user) {
       user = await MasterUser.findOne({ where: { email } });
-      loginType = "master";
+      loginType = "general";
     }
 
     if (!user) {

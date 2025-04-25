@@ -27,7 +27,7 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  department:{
+  department: {
     type: DataTypes.STRING,
     allowNull: true,
   },
@@ -52,7 +52,7 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.DATE,
     allowNull: true,
   },
-  loginType:{
+  loginType: {
     type: DataTypes.STRING,
     allowNull: false,
   },
@@ -72,7 +72,19 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.STRING,
     allowNull: false,
     unique: true,
-  }
+  },
+});
+
+const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
+
+MasterUser.hasOne(MasterUserPrivileges, {
+  foreignKey: "masterUserID",
+  as: "privileges", // Alias for the association
+});
+
+MasterUserPrivileges.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "user", // Alias for the reverse association
 });
 
 module.exports = MasterUser;

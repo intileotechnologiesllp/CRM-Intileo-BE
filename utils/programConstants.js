@@ -18,7 +18,6 @@ const PROGRAMS = {
   SECTORAL_SCOPE_MASTER: 17, // Program ID for sectoral scope management
   STATUS_MASTER: 18, // Program ID for status management
   MASTER_USER_MANAGEMENT: 19, // Program ID for master user management
-  SUBADMIN_MANAGEMENT: 20, // Program ID for subadmin management
 };
 
 module.exports = PROGRAMS;
