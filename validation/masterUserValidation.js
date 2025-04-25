@@ -24,7 +24,7 @@ const masterUserSchema = Joi.object({
       "any.required": "Mobile number is required.",
     }),
   designation: Joi.string()
-    .when("key", {
+    .when("userType", {
       is: "general",
       then: Joi.required(),
       otherwise: Joi.optional(),
@@ -35,7 +35,7 @@ const masterUserSchema = Joi.object({
       "any.required": "Designation is required for general users.",
     }),
   department: Joi.string()
-    .when("key", {
+    .when("userType", {
       is: "general",
       then: Joi.required(),
       otherwise: Joi.optional(),
@@ -45,13 +45,13 @@ const masterUserSchema = Joi.object({
       "string.empty": "Department is required for general users.",
       "any.required": "Department is required for general users.",
     }),
-  key: Joi.string().valid("admin", "general").required().messages({
-    "string.base": "Key must be a string.",
-    "string.empty": "Key is required.",
-    "any.required": "Key is required.",
+  userType: Joi.string().valid("admin", "general").required().messages({
+    "string.base": "userType must be a string.",
+    "string.empty": "userType is required.",
+    "any.required": "userType is required.",
   }),
   password: Joi.string()
-    .when("key", {
+    .when("userType", {
       is: "admin",
       then: Joi.required(),
       otherwise: Joi.optional(),

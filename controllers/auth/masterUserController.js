@@ -18,10 +18,10 @@ exports.createMasterUser = async (req, res) => {
     mobileNumber,
     designation,
     department,
-    key,
+    userType,
     password,
-    loginType = "master",
-    status
+    loginType = userType === "admin" ? "admin" : "general", // Dynamically set loginType based on userType
+    status,
   } = req.body;
 
   const { error } = masterUserSchema.validate(req.body);
@@ -55,8 +55,8 @@ exports.createMasterUser = async (req, res) => {
     let resetToken = null; // Initialize reset token
     let resetTokenExpiry = null; // Initialize reset token expiry
 
-    // If the key is "general", generate a secure token for password reset
-    if (key === "general") {
+    // If the userType is "general", generate a secure token for password reset
+    if (userType === "general") {
       resetToken = crypto.randomBytes(32).toString("hex");
       resetTokenExpiry = Date.now() + 5 * 60 * 1000; // Token valid for 5 minutes
     }
@@ -66,20 +66,20 @@ exports.createMasterUser = async (req, res) => {
       name,
       email,
       mobileNumber,
-      designation: key === "admin" ? null : designation, // Remove designation if key is "admin"
-      department: key === "admin" ? null : department, // Remove department if key is "admin"
-      password: key === "admin" ? await bcrypt.hash(password, 10) : null, // Use provided password for admin
+      designation: userType === "admin" ? null : designation, // Remove designation if userType is "admin"
+      department: userType === "admin" ? null : department, // Remove department if userType is "admin"
+      password: userType === "admin" ? await bcrypt.hash(password, 10) : null, // Use provided password for admin
       resetToken,
       resetTokenExpiry,
-      loginType, // Default to "master" if not provided
+      loginType, // Dynamically set loginType based on userType
       creatorId: adminId,
       createdBy: adminName,
-      userType: key === "admin" ? "admin" : "general", // Set userType based on the key
+      userType: userType === "admin" ? "admin" : "general", // Set userType based on the userType
       status, // Use status from req.body or default to "active"
     });
 
-    // If the key is "general", send a password reset email
-    if (key === "general") {
+    // If the userType is "general", send a password reset email
+    if (userType === "general") {
       const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${resetToken}`;
       const transporter = nodemailer.createTransport({
         service: "Gmail", // Use your email service
@@ -114,7 +114,7 @@ exports.createMasterUser = async (req, res) => {
         mobileNumber,
         designation,
         department,
-        key,
+        userType,
         loginType,
         status,
       }
@@ -123,7 +123,7 @@ exports.createMasterUser = async (req, res) => {
     // Send response
     res.status(201).json({
       message: `Master user created successfully.${
-        key === "admin"
+        userType === "admin"
           ? " Password saved."
           : " Password reset link sent to email."
       }`,
@@ -134,8 +134,8 @@ exports.createMasterUser = async (req, res) => {
         mobileNumber: masterUser.mobileNumber,
         userType: masterUser.userType, // Include userType in the response
         status: masterUser.status, // Include status in the response
-        ...(key !== "admin" && { designation: masterUser.designation }), // Include designation only if key is not "admin"
-        ...(key !== "admin" && { department: masterUser.department }), // Include department only if key is not "admin"
+        ...(userType !== "admin" && { designation: masterUser.designation }), // Include designation only if userType is not "admin"
+        ...(userType !== "admin" && { department: masterUser.department }), // Include department only if userType is not "admin"
       },
     });
   } catch (error) {
@@ -162,7 +162,7 @@ exports.getMasterUsers = async (req, res) => {
     sortBy = "createdAt",
     sortOrder = "DESC",
     search = "",
-    key, // Filter by userType (admin or general)
+    userType, // Filter by userType (admin or general)
   } = req.query;
 
   try {
@@ -180,9 +180,9 @@ exports.getMasterUsers = async (req, res) => {
       ];
     }
 
-    // Add userType filter if key is provided
-    if (key) {
-      whereClause.userType = key;
+    // Add userType filter if userType is provided
+    if (userType) {
+      whereClause.userType = userType;
     }
 
     // Fetch master users with pagination, sorting, and searching

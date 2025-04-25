@@ -7,6 +7,9 @@ const { model } = require("mongoose");
 
 // Create a new privilege
 router.post("/create", verifyToken, masterUserPrivilegesController.createPrivileges);
+router.post("/update", verifyToken, masterUserPrivilegesController.updatePrivileges);
+router.get("/get", verifyToken, masterUserPrivilegesController.getUsersWithPrivileges);
+router.post("/delete/:masterUserID", verifyToken, masterUserPrivilegesController.deletePrivileges);
 
 
 module.exports = router;
