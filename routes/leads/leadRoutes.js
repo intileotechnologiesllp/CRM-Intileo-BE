@@ -19,5 +19,6 @@ router.post("/edit/:leadId", verifyToken, leadController.updateLead);
 router.post("/delete/:leadId", verifyToken, leadController.deleteLead);
 
 router.get("/get", verifyToken, leadController.getLeads);
+router.post("/updateLables", verifyToken, leadController.updateAllLabels);
 
 module.exports = router;

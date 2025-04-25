@@ -1,6 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-
+const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
 const Lead = sequelize.define("Lead", {
   // Primary Key
   leadId: {
@@ -106,6 +106,18 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+});
+
+// Define the one-to-one relationship
+Lead.hasOne(LeadDetails, {
+  foreignKey: "leadId",
+  as: "details",
+  onDelete: "CASCADE",
+});
+
+LeadDetails.belongsTo(Lead, {
+  foreignKey: "leadId",
+  as: "lead",
 });
 
 module.exports = Lead;

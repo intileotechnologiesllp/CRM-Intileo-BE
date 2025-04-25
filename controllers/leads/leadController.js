@@ -1,4 +1,5 @@
 const Lead = require("../../models/leads/leadsModel");
+const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
 const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
@@ -25,8 +26,7 @@ exports.createLead = async (req, res) => {
     status,
   } = req.body;
 
-  console.log(req.role,"role of the user............");
-  
+  console.log(req.role, "role of the user............");
 
   try {
     // Ensure only admins can create leads
@@ -45,7 +45,9 @@ exports.createLead = async (req, res) => {
         "Access denied. You do not have permission to create leads.", // Error description
         null
       );
-      return res.status(403).json({ message: "Access denied. You do not have permission to create leads." });
+      return res.status(403).json({
+        message: "Access denied. You do not have permission to create leads.",
+      });
     }
     const lead = await Lead.create({
       contactPerson,
@@ -71,23 +73,21 @@ exports.createLead = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_CREATION", // Mode
-       lead.userId, // Created by (Admin ID)
+      lead.userId, // Created by (Admin ID)
       lead.leadId, // Record ID (Country ID)
       null,
       `Lead is created by  ${req.role}`, // Description
-       null // Changes logged as JSON
-      );
+      null // Changes logged as JSON
+    );
     res.status(201).json({ message: "Lead created successfully", lead });
   } catch (error) {
     console.error("Error creating lead:", error);
-
-
 
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
       "LEAD_CREATION", // Mode
       null, // No user ID for failed sign-in
-      "Error creating lead: " + error.message ,// Error description
+      "Error creating lead: " + error.message, // Error description
       null
     );
     res.status(500).json(error);
@@ -119,7 +119,7 @@ exports.archiveLead = async (req, res) => {
       leadId, // Record ID (Currency ID)
       req.adminId,
       `Lead is archived by "${req.role}"`, // Description
-      null 
+      null
     );
     res.status(200).json({ message: "Lead archived successfully", lead });
   } catch (error) {
@@ -160,7 +160,7 @@ exports.unarchiveLead = async (req, res) => {
       leadId, // Record ID (Currency ID)
       req.adminId,
       `Lead is unarchived by "${req.role}"`, // Description
-      null 
+      null
     );
     res.status(200).json({ message: "Lead unarchived successfully", lead });
   } catch (error) {
@@ -208,19 +208,27 @@ exports.getLeads = async (req, res) => {
     // Pagination
     const offset = (page - 1) * limit;
 
-    // Fetch leads with pagination, filtering, sorting, and searching
+    // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
+      include: [
+        {
+          model: LeadDetails,
+          as: "details", // Use the alias defined in the association
+          required: false, // Include leads even if they don't have leadDetails
+        },
+      ],
       limit: parseInt(limit), // Number of records per page
       offset: parseInt(offset), // Skip records for pagination
       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
     });
+
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count, // Total number of records
       totalPages: Math.ceil(leads.count / limit), // Total number of pages
       currentPage: parseInt(page), // Current page
-      leads: leads.rows, // Leads data
+      leads: leads.rows, // Leads data with leadDetails
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
@@ -237,7 +245,7 @@ exports.getLeads = async (req, res) => {
 
 exports.updateLead = async (req, res) => {
   const { leadId } = req.params; // Use leadId from the request parameters
-  const updatedData = req.body; // Data to update
+  const { leadDetails, ...updatedData } = req.body; // Separate leadDetails from other data
 
   try {
     const lead = await Lead.findByPk(leadId); // Find the lead by leadId
@@ -251,69 +259,90 @@ exports.updateLead = async (req, res) => {
       );
       return res.status(404).json({ message: "Lead not found" });
     }
-        // Capture the original data before the update
-        const originalData = {
-          contactPerson: lead.contactPerson,
-          organization: lead.organization,
-          title: lead.title,
-          valueLabels: lead.valueLabels,
-          expectedCloseDate: lead.expectedCloseDate,
-          sourceChannel: lead.sourceChannel,
-          sourceChannelID: lead.sourceChannelID,
-          serviceType: lead.serviceType,
-          scopeOfServiceType: lead.scopeOfServiceType,
-          phone: lead.phone,
-          email: lead.email,
-          company: lead.company,
-          proposalValue: lead.proposalValue,
-          esplProposalNo: lead.esplProposalNo,
-          projectLocation: lead.projectLocation,
-          organizationCountry: lead.organizationCountry,
-          proposalSentDate: lead.proposalSentDate,
-          status: lead.status,
-        };
+
+    // Capture the original data before the update
+    const originalData = {
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      title: lead.title,
+      valueLabels: lead.valueLabels,
+      expectedCloseDate: lead.expectedCloseDate,
+      sourceChannel: lead.sourceChannel,
+      sourceChannelID: lead.sourceChannelID,
+      serviceType: lead.serviceType,
+      scopeOfServiceType: lead.scopeOfServiceType,
+      phone: lead.phone,
+      email: lead.email,
+      company: lead.company,
+      proposalValue: lead.proposalValue,
+      esplProposalNo: lead.esplProposalNo,
+      projectLocation: lead.projectLocation,
+      organizationCountry: lead.organizationCountry,
+      proposalSentDate: lead.proposalSentDate,
+      status: lead.status,
+    };
 
     // Update the lead with the provided data
     await lead.update(updatedData);
-        // Capture the updated data
-        const updatedLead = {
-          contactPerson: lead.contactPerson,
-          organization: lead.organization,
-          title: lead.title,
-          valueLabels: lead.valueLabels,
-          expectedCloseDate: lead.expectedCloseDate,
-          sourceChannel: lead.sourceChannel,
-          sourceChannelID: lead.sourceChannelID,
-          serviceType: lead.serviceType,
-          scopeOfServiceType: lead.scopeOfServiceType,
-          phone: lead.phone,
-          email: lead.email,
-          company: lead.company,
-          proposalValue: lead.proposalValue,
-          esplProposalNo: lead.esplProposalNo,
-          projectLocation: lead.projectLocation,
-          organizationCountry: lead.organizationCountry,
-          proposalSentDate: lead.proposalSentDate,
-          status: lead.status,
-        };
-    
-        // Calculate the changes
-        const changes = {};
-        for (const key in updatedLead) {
-          if (originalData[key] !== updatedLead[key]) {
-            changes[key] = { from: originalData[key], to: updatedLead[key] };
-          }
-        }
 
-        await historyLogger(
-          PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
-          "LEAD_UPDATE", // Mode
-          lead.userId, // Created by (Admin ID)
-          leadId, // Record ID (Lead ID)
-          req.adminId, // Modified by (Admin ID)
-          `Lead with ID ${leadId} updated by user ${req.role}`, // Description
-          changes // Changes logged as JSON
-        );
+    // Handle leadDetails if provided
+    if (leadDetails) {
+      const existingLeadDetails = await LeadDetails.findOne({
+        where: { leadId },
+      });
+
+      if (existingLeadDetails) {
+        // Update existing leadDetails
+        await existingLeadDetails.update(leadDetails);
+      } else {
+        // Create new leadDetails
+        await LeadDetails.create({
+          leadId,
+          ...leadDetails,
+        });
+      }
+    }
+
+    // Capture the updated data
+    const updatedLead = {
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      title: lead.title,
+      valueLabels: lead.valueLabels,
+      expectedCloseDate: lead.expectedCloseDate,
+      sourceChannel: lead.sourceChannel,
+      sourceChannelID: lead.sourceChannelID,
+      serviceType: lead.serviceType,
+      scopeOfServiceType: lead.scopeOfServiceType,
+      phone: lead.phone,
+      email: lead.email,
+      company: lead.company,
+      proposalValue: lead.proposalValue,
+      esplProposalNo: lead.esplProposalNo,
+      projectLocation: lead.projectLocation,
+      organizationCountry: lead.organizationCountry,
+      proposalSentDate: lead.proposalSentDate,
+      status: lead.status,
+    };
+
+    // Calculate the changes
+    const changes = {};
+    for (const key in updatedLead) {
+      if (originalData[key] !== updatedLead[key]) {
+        changes[key] = { from: originalData[key], to: updatedLead[key] };
+      }
+    }
+
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
+      "LEAD_UPDATE", // Mode
+      lead.userId, // Created by (Admin ID)
+      leadId, // Record ID (Lead ID)
+      req.adminId, // Modified by (Admin ID)
+      `Lead with ID ${leadId} updated by user ${req.role}`, // Description
+      changes // Changes logged as JSON
+    );
+
     res.status(200).json({ message: "Lead updated successfully", lead });
   } catch (error) {
     console.error("Error updating lead:", error);
@@ -363,6 +392,46 @@ exports.deleteLead = async (req, res) => {
       "LEAD_DELETE", // Mode
       null, // No user ID for failed sign-in
       "Error deleting lead: " + error.message, // Error description
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.updateAllLabels = async (req, res) => {
+  try {
+    const { valueLabels } = req.body; // Get valueLabels from the request body
+
+    // Validate input
+    if (!valueLabels) {
+      return res.status(400).json({ message: "valueLabels is required." });
+    }
+
+    // Update valueLabels for all records
+    const [updatedCount] = await Lead.update(
+      { valueLabels }, // Set the new value for valueLabels
+      { where: {} } // Update all records
+    );
+
+    // Log the update in the audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE_ALL_LABELS", // Mode
+      req.adminId, // Admin ID of the user making the update
+      `Updated valueLabels for ${updatedCount} records`, // Description
+      null
+    );
+
+    res.status(200).json({
+      message: `Value labels updated successfully for ${updatedCount} records.`,
+    });
+  } catch (error) {
+    console.error("Error updating all labels:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE_ALL_LABELS", // Mode
+      null, // No user ID for failed operation
+      "Error updating all labels: " + error.message, // Error description
       null
     );
     res.status(500).json({ message: "Internal server error" });
