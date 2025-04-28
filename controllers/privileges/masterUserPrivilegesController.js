@@ -138,7 +138,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     sortOrder = "DESC",
-  } = req.query;
+  } = req.body || {};
 
   try {
     // Validate the input
@@ -174,20 +174,18 @@ exports.getUsersWithPrivileges = async (req, res) => {
           "updatedAt",
         ], // Exclude specific fields
       },
-      include:
-        userType === "general"
-          ? [
-              {
-                model: MasterUserPrivileges,
-                as: "privileges", // Use the alias defined in the association
-                required: false, // Include users even if they don't have privileges
-              },
-            ]
-          : [],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [[sortBy, sortOrder.toUpperCase()]],
-    });
+
+    include: [
+      {
+        model: MasterUserPrivileges,
+        as: "privileges", // Use the alias defined in the association
+        required: false, // Include users even if they don't have privileges
+      },
+    ],
+    limit: parseInt(limit),
+    offset: parseInt(offset),
+    order: [[sortBy, sortOrder.toUpperCase()]],
+  });
 
     // Return paginated response
     res.status(200).json({

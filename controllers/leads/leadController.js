@@ -186,8 +186,27 @@ exports.getLeads = async (req, res) => {
     order = "DESC",
   } = req.query;
 
+  const { valueLabels } = req.body || {}; // Get valueLabels from the request body
+
   try {
     const whereClause = {};
+
+    // Update valueLabels for all records if provided
+    if (valueLabels) {
+      const [updatedCount] = await Lead.update(
+        { valueLabels }, // Set the new value for valueLabels
+        { where: {} } // Update all records
+      );
+
+      // Log the update in the audit trail
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UPDATE_ALL_LABELS", // Mode
+        req.adminId, // Admin ID of the user making the update
+        `Updated valueLabels for ${updatedCount} records`, // Description
+        null
+      );
+    }
 
     // Filter by archive status if `isArchived` is provided
     if (isArchived !== undefined) {
