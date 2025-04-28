@@ -1,3 +1,5 @@
+const LeadColumn = require("../models/admin/masters/leadColumnsModel");
+
 const PROGRAMS = {
   AUTHENTICATION: 1, // Program ID for authentication (e.g., sign-in, sign-out)
   LEAD_MANAGEMENT: 2, // Program ID for lead management
@@ -18,6 +20,8 @@ const PROGRAMS = {
   SECTORAL_SCOPE_MASTER: 17, // Program ID for sectoral scope management
   STATUS_MASTER: 18, // Program ID for status management
   MASTER_USER_MANAGEMENT: 19, // Program ID for master user management
+  LEAD_COLUMN_MASTER: 20, // Program ID for lead column management
+  
 };
 
 module.exports = PROGRAMS;

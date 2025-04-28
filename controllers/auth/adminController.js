@@ -65,7 +65,6 @@ exports.signIn = async (req, res) => {
       { expiresIn: "1d" }
     );
 
-
     // Get the current UTC time
     const loginTimeUTC = new Date();
 

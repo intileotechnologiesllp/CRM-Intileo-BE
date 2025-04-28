@@ -22,8 +22,11 @@ const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
 const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
-const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes"); // Import privileges routes
+const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes");
+const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js") // Import privileges routes
+const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
 const app = express();
+require("./utils/cronJob.js")
 app.use(express.static(path.join(__dirname, "public")));
 console.log("Serving static files from:", path.join(__dirname, "public"),"........//.....//")
 const cors = require("cors");
@@ -53,6 +56,9 @@ app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history 
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
 app.use("/api/get-history", historyRoutes); // Register history routes
 app.use("/api/privileges", privilegesRoutes); // Register privileges routes
+app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
+app.use("/api/email", emailRoutes); // Register email routes
+
 
 
 // Sync database

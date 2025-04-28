@@ -1,5 +1,6 @@
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel");
 const MasterUser = require("../../models/master/masterUserModel");
+const Program = require("../../models/admin/masters/programModel")
 exports.createPrivileges = async (req, res) => {
   const { masterUserID, permissions, mode } = req.body;
 
@@ -180,6 +181,14 @@ exports.getUsersWithPrivileges = async (req, res) => {
         model: MasterUserPrivileges,
         as: "privileges", // Use the alias defined in the association
         required: false, // Include users even if they don't have privileges
+        // include: [
+        //   {
+        //     model: Program, // Join with the Program model
+        //     as: "program", // Use the alias defined in the association
+        //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
+        //   },
+        // ],
+          
       },
     ],
     limit: parseInt(limit),

@@ -1,0 +1,12 @@
+const express = require("express");
+const router = express.Router();
+const emailController = require("../../controllers/email/emailController");
+
+// Fetch inbox emails
+router.get("/fetch-inbox", emailController.fetchInboxEmails);
+router.get("/fetch-recent-email", emailController.fetchRecentEmail);
+router.get("/fetch-drafts", emailController.fetchDraftEmails);
+router.get("/fetch-archive", emailController.fetchArchiveEmails);
+
+
+module.exports = router;

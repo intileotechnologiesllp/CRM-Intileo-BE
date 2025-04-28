@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+const Program = require("../../models/admin/masters/programModel"); // Import the Program model
 
 const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
   privilegeID: {
@@ -16,6 +17,15 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     },
     onDelete: "CASCADE",
   },
+  // programId: {
+  //   type: DataTypes.INTEGER,
+  //   allowNull: false, // Ensure this field cannot be null
+  //   references: {
+  //     model: "Programs", // Table name for Program
+  //     key: "programId",
+  //   },
+  //   onDelete: "CASCADE", // Delete privileges if the associated program is deleted
+  // },
   permissions: {
     type: DataTypes.JSON, // Store permissions as a JSON object
     allowNull: false,
@@ -35,5 +45,17 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     allowNull: true,
   }
 });
+
+
+// Define associations
+// Program.hasOne(MasterUserPrivileges, {
+//   foreignKey: "programId",
+//   as: "privileges",
+// });
+
+// MasterUserPrivileges.belongsTo(Program, {
+//   foreignKey: "programId",
+//   as: "program",
+// });
 
 module.exports = MasterUserPrivileges;
