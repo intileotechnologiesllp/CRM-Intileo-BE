@@ -432,3 +432,82 @@ exports.toggleMasterUserStatus = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+exports.updateMasterUser = async (req, res) => {
+  const { masterUserID } = req.params; // Master User ID from the request parameters
+  const { name, email, mobileNumber, designation, department, status } =
+    req.body; // Fields to update
+
+  try {
+    // Find the master user by ID
+    const masterUser = await MasterUser.findByPk(masterUserID);
+    if (!masterUser) {
+      await logAuditTrail(
+        PROGRAMS.MASTER_USER_MANAGEMENT,
+        "UPDATE_MASTER_USER",
+        req.role,
+        "Master user not found",
+        req.adminId
+      );
+      return res.status(404).json({ message: "Master user not found" });
+    }
+
+    // Check if the email or mobile number already exists for another user
+    if (email || mobileNumber) {
+      const whereClause = {
+        [Op.or]: [],
+        masterUserID: { [Op.ne]: masterUserID }, // Exclude the current user
+      };
+
+      if (email) whereClause[Op.or].push({ email });
+      if (mobileNumber) whereClause[Op.or].push({ mobileNumber });
+
+      if (whereClause[Op.or].length > 0) {
+        const existingUser = await MasterUser.findOne({ where: whereClause });
+        if (existingUser) {
+          return res
+            .status(400)
+            .json({ message: "Email or mobile number already exists" });
+        }
+      }
+    }
+
+    // Update the master user details
+    const updatedFields = {
+      ...(name && { name }),
+      ...(email && { email }),
+      ...(mobileNumber && { mobileNumber }),
+      ...(designation && { designation }),
+      ...(department && { department }),
+      ...(status && { status }),
+    };
+
+    await masterUser.update(updatedFields);
+
+    // Log the update in the audit trail
+    await historyLogger(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "UPDATE_MASTER_USER",
+      masterUser.creatorId,
+      masterUser.masterUserID,
+      req.adminId,
+      `Master user "${masterUser.name}" updated by "${req.role}"`,
+      updatedFields
+    );
+
+    res.status(200).json({
+      message: "Master user updated successfully",
+      masterUser,
+    });
+  } catch (error) {
+    console.error("Error updating master user:", error);
+    await logAuditTrail(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "UPDATE_MASTER_USER",
+      req.role,
+      error.message || "Internal server error",
+      req.adminId
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
