@@ -1,11 +1,17 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../../config/db");
+const MasterUserPrivileges = require("../../privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
 
 const Program = sequelize.define("Program", {
   programId: {
     type: DataTypes.INTEGER,
     primaryKey: true, // Set as primary key
     autoIncrement: true, // Auto-increment the ID
+    // references: {
+    //   model: "MasterUserPrivileges", // Table name for MasterUser
+    //   key: "programId",
+    // },
+    // onDelete: "CASCADE",
   },
   program_desc: {
     type: DataTypes.STRING,
@@ -37,5 +43,6 @@ const Program = sequelize.define("Program", {
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
 });
+
 
 module.exports = Program;
