@@ -1,11 +1,13 @@
 const Imap = require("imap-simple");
 const Email = require("../../models/email/emailModel");
 const { htmlToText } = require("html-to-text");
+const { simpleParser } = require("mailparser");
+const Attachment = require("../../models/email/attachmentModel");
 
 const imapConfig = {
   imap: {
-    user: process.env.EMAIL_USER, // Your email address
-    password: process.env.EMAIL_PASS, // Your email password
+    user: process.env.SENDER_EMAIL, // Your email address
+    password: process.env.SENDER_PASSWORD, // Your email password
     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
     port: 993, // IMAP port
     tls: true, // Use TLS
@@ -40,7 +42,7 @@ const formatDateForIMAP = (date) => {
 
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
-  const { batchSize = 5, page = 1 } = req.query; // Batch size and page number from query params
+  const { batchSize = 5, page = 1 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
@@ -49,29 +51,23 @@ exports.fetchInboxEmails = async (req, res) => {
     console.log("Opening INBOX...");
     await connection.openBox("INBOX");
 
-    console.log("Searching for emails...");
-    const startTime = Date.now();
-
-    // Fetch emails from the last 7 days
+    console.log("Fetching emails from the last 7 days...");
     const sinceDate = formatDateForIMAP(
       new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    ); // 7 days ago
-    console.log(`Using SINCE date: ${sinceDate}`); // Log the formatted date
+    );
+    console.log(`Using SINCE date: ${sinceDate}`);
 
-    // Ensure the date is passed as a string
     const searchCriteria = [["SINCE", sinceDate]];
     const fetchOptions = {
-      bodies: ["HEADER", "TEXT"],
+      bodies: "",
       struct: true,
     };
 
     const messages = await connection.search(searchCriteria, fetchOptions);
 
-    const endTime = Date.now();
-    console.log(`Emails fetched in ${(endTime - startTime) / 1000} seconds.`);
     console.log(`Total emails found: ${messages.length}`);
 
-    // Calculate pagination
+    // Pagination logic
     const startIndex = (page - 1) * batchSize;
     const endIndex = startIndex + parseInt(batchSize);
     const batchMessages = messages.slice(startIndex, endIndex);
@@ -81,40 +77,69 @@ exports.fetchInboxEmails = async (req, res) => {
       return res.status(200).json({ message: "No more emails to fetch." });
     }
 
-    console.log(`Processing ${batchMessages.length} emails...`);
+    const inboxEmails = [];
+
     for (const message of batchMessages) {
-      const header = message.parts.find((part) => part.which === "HEADER").body;
-      const body = message.parts.find((part) => part.which === "TEXT").body;
-      const plainTextBody = htmlToText(body || "", {
-        wordwrap: 130, // Wrap text at 130 characters
-      });
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
       const emailData = {
-        messageId: header["message-id"] ? header["message-id"][0] : null,
-        sender: header.from ? header.from[0] : null,
-        recipient: header.to ? header.to[0] : null,
-        subject: header.subject ? header.subject[0] : null,
-        body: plainTextBody || null,
+        messageId: parsedEmail.messageId || null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: parsedEmail.text || parsedEmail.html || null,
         folder: "inbox",
-        createdAt: header.date ? new Date(header.date[0]) : new Date(),
+        createdAt: parsedEmail.date || new Date(),
       };
 
       console.log(`Processing email: ${emailData.messageId}`);
+      inboxEmails.push(emailData);
+
       const existingEmail = await Email.findOne({
         where: { messageId: emailData.messageId },
       });
+
+      let savedEmail;
       if (!existingEmail) {
-        await Email.create(emailData);
+        savedEmail = await Email.create(emailData);
         console.log(`Email saved: ${emailData.messageId}`);
       } else {
         console.log(`Email already exists: ${emailData.messageId}`);
+        savedEmail = existingEmail;
+      }
+
+      // Save attachments
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const attachments = parsedEmail.attachments.map((attachment) => ({
+          emailID: savedEmail.emailID,
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          size: attachment.size,
+        }));
+
+        await Attachment.bulkCreate(attachments);
+        console.log(
+          `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+        );
       }
     }
 
-    connection.end(); // Close the connection
+    connection.end();
     console.log("IMAP connection closed.");
 
     res.status(200).json({
-      message: `Fetched and saved ${batchMessages.length} emails.`,
+      message: `Fetched and saved ${inboxEmails.length} emails.`,
       currentPage: parseInt(page),
       totalEmails: messages.length,
     });
@@ -134,22 +159,19 @@ exports.fetchRecentEmail = async (req, res) => {
     await connection.openBox("INBOX");
 
     console.log("Fetching the most recent email...");
-    const startTime = Date.now();
     const sinceDate = formatDateForIMAP(
       new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     );
-    // Fetch only the latest email using UID
-    // const searchCriteria = ["UID", "*"]; // Fetch the latest email by UID
+    console.log(`Using SINCE date: ${sinceDate}`);
+
     const searchCriteria = [["SINCE", sinceDate]];
     const fetchOptions = {
-      bodies: ["HEADER", "TEXT"],
+      bodies: "",
       struct: true,
     };
 
     const messages = await connection.search(searchCriteria, fetchOptions);
 
-    const endTime = Date.now();
-    console.log(`Emails fetched in ${(endTime - startTime) / 1000} seconds.`);
     console.log(`Total emails found: ${messages.length}`);
 
     if (messages.length === 0) {
@@ -159,32 +181,58 @@ exports.fetchRecentEmail = async (req, res) => {
 
     // Get the most recent email
     const recentMessage = messages[messages.length - 1];
-    const header = recentMessage.parts.find(
-      (part) => part.which === "HEADER"
-    ).body;
-    const body = recentMessage.parts.find((part) => part.which === "TEXT").body;
-    const plainTextBody = htmlToText(body || "", {
-      wordwrap: 130, // Wrap text at 130 characters
-    });
+    const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+    if (!rawBody) {
+      console.log("No body found for the most recent email.");
+      return res
+        .status(200)
+        .json({ message: "No body found for the most recent email." });
+    }
+
+    // Parse the raw email body using simpleParser
+    const parsedEmail = await simpleParser(rawBody);
+
     const emailData = {
-      messageId: header["message-id"] ? header["message-id"][0] : null,
-      sender: header.from ? header.from[0] : null,
-      recipient: header.to ? header.to[0] : null,
-      subject: header.subject ? header.subject[0] : null,
-      body: plainTextBody || null,
+      messageId: parsedEmail.messageId || null,
+      sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+      senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+      recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+      recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+      subject: parsedEmail.subject || null,
+      body: parsedEmail.text || parsedEmail.html || null,
       folder: "inbox",
-      createdAt: header.date ? new Date(header.date[0]) : new Date(),
+      createdAt: parsedEmail.date || new Date(),
     };
 
     console.log(`Processing recent email: ${emailData.messageId}`);
     const existingEmail = await Email.findOne({
       where: { messageId: emailData.messageId },
     });
+
+    let savedEmail;
     if (!existingEmail) {
-      await Email.create(emailData);
+      savedEmail = await Email.create(emailData);
       console.log(`Recent email saved: ${emailData.messageId}`);
     } else {
       console.log(`Recent email already exists: ${emailData.messageId}`);
+      savedEmail = existingEmail;
+    }
+
+    // Save attachments
+    if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+      const attachments = parsedEmail.attachments.map((attachment) => ({
+        emailID: savedEmail.emailID,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+      }));
+
+      await Attachment.bulkCreate(attachments);
+      console.log(
+        `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+      );
     }
 
     connection.end(); // Close the connection
@@ -200,7 +248,7 @@ exports.fetchRecentEmail = async (req, res) => {
   }
 };
 
-// Fetch and store 2 emails from the Drafts folder using batching
+// Fetch and store emails from the Drafts folder using batching
 exports.fetchDraftEmails = async (req, res) => {
   const { batchSize = 2, page = 1 } = req.query;
 
@@ -217,7 +265,7 @@ exports.fetchDraftEmails = async (req, res) => {
 
     console.log("Fetching emails from Drafts...");
     const fetchOptions = {
-      bodies: ["HEADER", "TEXT"],
+      bodies: "",
       struct: true,
     };
 
@@ -238,20 +286,27 @@ exports.fetchDraftEmails = async (req, res) => {
     const draftEmails = [];
 
     for (const message of batchMessages) {
-      const header = message.parts.find((part) => part.which === "HEADER").body;
-      const body = message.parts.find((part) => part.which === "TEXT").body;
-      const plainTextBody = htmlToText(body || "", {
-        wordwrap: 130, // Wrap text at 130 characters
-      });
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
 
       const emailData = {
-        messageId: header["message-id"] ? header["message-id"][0] : null,
-        sender: header.from ? header.from[0] : null,
-        recipient: header.to ? header.to[0] : null,
-        subject: header.subject ? header.subject[0] : null,
-        body: plainTextBody || null,
+        messageId: parsedEmail.messageId || null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: parsedEmail.text || parsedEmail.html || null, // Prefer plain text, fallback to HTML
         folder: "drafts",
-        createdAt: header.date ? new Date(header.date[0]) : new Date(),
+        createdAt: parsedEmail.date || new Date(),
       };
 
       console.log(`Processing draft email: ${emailData.messageId}`);
@@ -286,58 +341,65 @@ exports.fetchDraftEmails = async (req, res) => {
 
 // Fetch and store emails from the Archive folder using batching
 exports.fetchArchiveEmails = async (req, res) => {
-  const { batchSize = 2, page = 1, days = 7 } = req.query; // Default batch size is 2, and fetch emails from the last 7 days
+  const { batchSize = 5, page = 1, days = 7 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
 
     console.log("Opening Archive folder...");
-    await connection.openBox("[Gmail]/All Mail"); // Adjust the folder name based on the output of getBoxes()
+    await connection.openBox("[Gmail]/All Mail");
 
-    console.log("Fetching emails from Archive...");
+    console.log("Fetching emails from the last 7 days...");
     const sinceDate = formatDateForIMAP(
       new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-    ); // Fetch emails from the last 'days'
+    );
     console.log(`Using SINCE date: ${sinceDate}`);
 
+    const searchCriteria = [["SINCE", sinceDate]];
     const fetchOptions = {
-      bodies: ["HEADER", "TEXT"],
+      bodies: "",
       struct: true,
     };
 
-    // Ensure the date is passed as a string
-    const searchCriteria = [["SINCE", sinceDate]];
-    const messages = await connection.search(searchCriteria, fetchOptions); // Fetch emails since the specified date
-    console.log(`Total archive emails found: ${messages.length}`);
+    const messages = await connection.search(searchCriteria, fetchOptions);
 
-    if (messages.length === 0) {
-      console.log("No archive emails found.");
-      return res.status(200).json({ message: "No archive emails found." });
-    }
+    console.log(`Total archive emails found: ${messages.length}`);
 
     // Pagination logic
     const startIndex = (page - 1) * batchSize;
     const endIndex = startIndex + parseInt(batchSize);
     const batchMessages = messages.slice(startIndex, endIndex);
 
+    if (batchMessages.length === 0) {
+      console.log("No more emails to fetch.");
+      return res.status(200).json({ message: "No more emails to fetch." });
+    }
+
     const archiveEmails = [];
 
     for (const message of batchMessages) {
-      const header = message.parts.find((part) => part.which === "HEADER").body;
-      const body = message.parts.find((part) => part.which === "TEXT").body;
-      const plainTextBody = htmlToText(body || "", {
-        wordwrap: 130,
-      });
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
 
       const emailData = {
-        messageId: header["message-id"] ? header["message-id"][0] : null,
-        sender: header.from ? header.from[0] : null,
-        recipient: header.to ? header.to[0] : null,
-        subject: header.subject ? header.subject[0] : null,
-        body: plainTextBody || null,
+        messageId: parsedEmail.messageId || null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: parsedEmail.text || parsedEmail.html || null,
         folder: "archive",
-        createdAt: header.date ? new Date(header.date[0]) : new Date(),
+        createdAt: parsedEmail.date || new Date(),
       };
 
       console.log(`Processing archive email: ${emailData.messageId}`);
@@ -361,10 +423,164 @@ exports.fetchArchiveEmails = async (req, res) => {
       message: `Fetched and saved ${archiveEmails.length} archive emails.`,
       currentPage: parseInt(page),
       totalArchives: messages.length,
-      archives: archiveEmails,
     });
   } catch (error) {
     console.error("Error fetching archive emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Get emails with pagination, filtering, and searching
+exports.getEmails = async (req, res) => {
+  const { page = 1, pageSize = 10, folder, search, isRead } = req.query;
+
+  try {
+    // Build the query filters dynamically
+    const filters = {};
+
+    // Filter by folder (e.g., inbox, drafts, archive)
+    if (folder) {
+      filters.folder = folder;
+    }
+
+    // Filter by read/unread status
+    if (isRead !== undefined) {
+      filters.isRead = isRead === "true"; // Convert string to boolean
+    }
+
+    // Search by subject, sender, or recipient
+    if (search) {
+      filters[Sequelize.Op.or] = [
+        { subject: { [Sequelize.Op.like]: `%${search}%` } },
+        { sender: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // Pagination logic
+    const offset = (page - 1) * pageSize;
+    const limit = parseInt(pageSize);
+
+    // Fetch emails from the database
+    const { count, rows: emails } = await Email.findAndCountAll({
+      where: filters,
+      offset,
+      limit,
+      order: [["createdAt", "DESC"]], // Sort by most recent emails
+    });
+
+    // Group emails by conversation (thread)
+    const threads = {};
+    emails.forEach((email) => {
+      const threadId = email.inReplyTo || email.messageId; // Use inReplyTo or messageId as thread identifier
+      if (!threads[threadId]) {
+        threads[threadId] = [];
+      }
+      threads[threadId].push(email);
+    });
+
+    // Return the paginated response with threads
+    res.status(200).json({
+      message: "Emails fetched successfully.",
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(count / pageSize),
+      totalEmails: count,
+      threads: Object.values(threads), // Return grouped threads
+    });
+  } catch (error) {
+    console.error("Error fetching emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Fetch and store emails from the Sent folder using batching
+exports.fetchSentEmails = async (req, res) => {
+  const { batchSize = 5, page = 1 } = req.query;
+
+  try {
+    console.log("Connecting to IMAP server...");
+    const connection = await Imap.connect(imapConfig);
+
+    console.log("Opening Sent folder...");
+    await connection.openBox("[Gmail]/Sent Mail");
+
+    console.log("Fetching emails from Sent...");
+    const sinceDate = formatDateForIMAP(
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    );
+    console.log(`Using SINCE date: ${sinceDate}`);
+
+    const searchCriteria = [["SINCE", sinceDate]];
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    console.log(`Total sent emails found: ${messages.length}`);
+
+    // Pagination logic
+    const startIndex = (page - 1) * batchSize;
+    const endIndex = startIndex + parseInt(batchSize);
+    const batchMessages = messages.slice(startIndex, endIndex);
+
+    if (batchMessages.length === 0) {
+      console.log("No more emails to fetch.");
+      return res.status(200).json({ message: "No more emails to fetch." });
+    }
+
+    const sentEmails = [];
+
+    for (const message of batchMessages) {
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        inReplyTo: parsedEmail.headers.get("in-reply-to") || null, // Extract inReplyTo header
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: parsedEmail.text || parsedEmail.html || null,
+        folder: "sent",
+        createdAt: parsedEmail.date || new Date(),
+      };
+
+      console.log(`Processing sent email: ${emailData.messageId}`);
+      sentEmails.push(emailData);
+
+      const existingEmail = await Email.findOne({
+        where: { messageId: emailData.messageId },
+      });
+      if (!existingEmail) {
+        await Email.create(emailData);
+        console.log(`Sent email saved: ${emailData.messageId}`);
+      } else {
+        console.log(`Sent email already exists: ${emailData.messageId}`);
+      }
+    }
+
+    connection.end();
+    console.log("IMAP connection closed.");
+
+    res.status(200).json({
+      message: `Fetched and saved ${sentEmails.length} sent emails.`,
+      currentPage: parseInt(page),
+      totalSent: messages.length,
+    });
+  } catch (error) {
+    console.error("Error fetching sent emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
