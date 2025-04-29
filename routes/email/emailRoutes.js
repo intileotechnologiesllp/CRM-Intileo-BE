@@ -7,6 +7,9 @@ router.get("/fetch-inbox", emailController.fetchInboxEmails);
 router.get("/fetch-recent-email", emailController.fetchRecentEmail);
 router.get("/fetch-drafts", emailController.fetchDraftEmails);
 router.get("/fetch-archive", emailController.fetchArchiveEmails);
+router.get("/get-emails", emailController.getEmails);
+router.get("/fetch-sent", emailController.fetchSentEmails);
+
 
 
 module.exports = router;

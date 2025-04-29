@@ -1,115 +1,90 @@
-const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
-
-exports.updateLead = async (req, res) => {
-  const { leadId } = req.params; // Use leadId from the request parameters
-  const { leadDetails, ...updatedData } = req.body; // Separate leadDetails from other data
-
+exports.fetchRecentEmail = async (req, res) => {
   try {
-    const lead = await Lead.findByPk(leadId); // Find the lead by leadId
-    if (!lead) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_UPDATE", // Mode
-        req.role, // No user ID for failed sign-in
-        "Lead not found", // Error description
-        req.adminId
-      );
-      return res.status(404).json({ message: "Lead not found" });
-    }
+    console.log("Connecting to IMAP server...");
+    const connection = await Imap.connect(imapConfig);
 
-    // Capture the original data before the update
-    const originalData = {
-      contactPerson: lead.contactPerson,
-      organization: lead.organization,
-      title: lead.title,
-      valueLabels: lead.valueLabels,
-      expectedCloseDate: lead.expectedCloseDate,
-      sourceChannel: lead.sourceChannel,
-      sourceChannelID: lead.sourceChannelID,
-      serviceType: lead.serviceType,
-      scopeOfServiceType: lead.scopeOfServiceType,
-      phone: lead.phone,
-      email: lead.email,
-      company: lead.company,
-      proposalValue: lead.proposalValue,
-      esplProposalNo: lead.esplProposalNo,
-      projectLocation: lead.projectLocation,
-      organizationCountry: lead.organizationCountry,
-      proposalSentDate: lead.proposalSentDate,
-      status: lead.status,
-    };
+    console.log("Opening INBOX...");
+    await connection.openBox("INBOX");
 
-    // Update the lead with the provided data
-    await lead.update(updatedData);
-
-    // Handle leadDetails if provided
-    if (leadDetails) {
-      const existingLeadDetails = await LeadDetails.findOne({
-        where: { leadId },
-      });
-
-      if (existingLeadDetails) {
-        // Update existing leadDetails
-        await existingLeadDetails.update(leadDetails);
-      } else {
-        // Create new leadDetails
-        await LeadDetails.create({
-          leadId,
-          ...leadDetails,
-        });
-      }
-    }
-
-    // Capture the updated data
-    const updatedLead = {
-      contactPerson: lead.contactPerson,
-      organization: lead.organization,
-      title: lead.title,
-      valueLabels: lead.valueLabels,
-      expectedCloseDate: lead.expectedCloseDate,
-      sourceChannel: lead.sourceChannel,
-      sourceChannelID: lead.sourceChannelID,
-      serviceType: lead.serviceType,
-      scopeOfServiceType: lead.scopeOfServiceType,
-      phone: lead.phone,
-      email: lead.email,
-      company: lead.company,
-      proposalValue: lead.proposalValue,
-      esplProposalNo: lead.esplProposalNo,
-      projectLocation: lead.projectLocation,
-      organizationCountry: lead.organizationCountry,
-      proposalSentDate: lead.proposalSentDate,
-      status: lead.status,
-    };
-
-    // Calculate the changes
-    const changes = {};
-    for (const key in updatedLead) {
-      if (originalData[key] !== updatedLead[key]) {
-        changes[key] = { from: originalData[key], to: updatedLead[key] };
-      }
-    }
-
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
-      "LEAD_UPDATE", // Mode
-      lead.userId, // Created by (Admin ID)
-      leadId, // Record ID (Lead ID)
-      req.adminId, // Modified by (Admin ID)
-      `Lead with ID ${leadId} updated by user ${req.role}`, // Description
-      changes // Changes logged as JSON
+    console.log("Fetching the most recent email...");
+    const sinceDate = formatDateForIMAP(
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     );
+    console.log(`Using SINCE date: ${sinceDate}`);
 
-    res.status(200).json({ message: "Lead updated successfully", lead });
+    const searchCriteria = ["ALL"]; // Fetch all emails
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    console.log(`Total emails found: ${messages.length}`);
+
+    if (messages.length === 0) {
+      console.log("No emails found.");
+      return res.status(200).json({ message: "No emails found." });
+    }
+
+    // Get the most recent email
+    const recentMessage = messages[messages.length - 1];
+    const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+    if (!rawBody) {
+      console.log("No body found for the most recent email.");
+      return res
+        .status(200)
+        .json({ message: "No body found for the most recent email." });
+    }
+
+    // Parse the raw email body using simpleParser
+    const parsedEmail = await simpleParser(rawBody);
+
+    // Check for replies
+    const inReplyTo = parsedEmail.headers.get("in-reply-to");
+    if (inReplyTo) {
+      console.log(`This email is a reply to: ${inReplyTo}`);
+    } else {
+      console.log("This email is not a reply.");
+    }
+
+    const emailData = {
+      messageId: parsedEmail.messageId || null,
+      sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+      senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+      recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+      recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+      subject: parsedEmail.subject || null,
+      body: parsedEmail.text || parsedEmail.html || null,
+      folder: "inbox",
+      createdAt: parsedEmail.date || new Date(),
+    };
+
+    console.log(`Processing recent email: ${emailData.messageId}`);
+    const existingEmail = await Email.findOne({
+      where: { messageId: emailData.messageId },
+    });
+
+    let savedEmail;
+    if (!existingEmail) {
+      savedEmail = await Email.create(emailData);
+      console.log(`Recent email saved: ${emailData.messageId}`);
+    } else {
+      console.log(`Recent email already exists: ${emailData.messageId}`);
+      savedEmail = existingEmail;
+    }
+
+    connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
+
+    res.status(200).json({
+      message: "Fetched and saved the most recent email.",
+      email: emailData,
+    });
   } catch (error) {
-    console.error("Error updating lead:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UPDATE", // Mode
-      null, // No user ID for failed sign-in
-      "Error updating lead: " + error.message, // Error description
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error fetching recent email:", error);
+    res.status(500).json({ message: "Internal server error." });
   }
 };
