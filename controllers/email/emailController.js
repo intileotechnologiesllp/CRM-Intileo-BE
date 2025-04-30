@@ -6,6 +6,7 @@ const Attachment = require("../../models/email/attachmentModel");
 const Template = require("../../models/email/templateModel");
 const { Sequelize } = require("sequelize");
 const nodemailer = require("nodemailer");
+const { saveAttachments } = require("../../services/attachmentService");
 
 const imapConfig = {
   imap: {
@@ -45,7 +46,7 @@ const formatDateForIMAP = (date) => {
 
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
-  const { batchSize = 5, page = 1 } = req.query;
+  const { batchSize = 50, page = 1 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
@@ -122,18 +123,14 @@ exports.fetchInboxEmails = async (req, res) => {
         savedEmail = existingEmail;
       }
 
-      // Save attachments
+      // Save attachments using saveAttachments function
       if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        const attachments = parsedEmail.attachments.map((attachment) => ({
-          emailID: savedEmail.emailID,
-          filename: attachment.filename,
-          contentType: attachment.contentType,
-          size: attachment.size,
-        }));
-
-        await Attachment.bulkCreate(attachments);
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
         console.log(
-          `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
         );
       }
     }
@@ -224,15 +221,13 @@ exports.fetchRecentEmail = async (req, res) => {
     }
 
     // Save attachments
+    const attachments = [];
     if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      const attachments = parsedEmail.attachments.map((attachment) => ({
-        emailID: savedEmail.emailID,
-        filename: attachment.filename,
-        contentType: attachment.contentType,
-        size: attachment.size,
-      }));
-
-      await Attachment.bulkCreate(attachments);
+      const savedAttachments = await saveAttachments(
+        parsedEmail.attachments,
+        savedEmail.emailID
+      );
+      attachments.push(...savedAttachments);
       console.log(
         `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
       );
@@ -244,6 +239,7 @@ exports.fetchRecentEmail = async (req, res) => {
     res.status(200).json({
       message: "Fetched and saved the most recent email.",
       email: emailData,
+      attachments, // Include attachments in the response
     });
   } catch (error) {
     console.error("Error fetching recent email:", error);
@@ -253,7 +249,7 @@ exports.fetchRecentEmail = async (req, res) => {
 
 // Fetch and store emails from the Drafts folder using batching
 exports.fetchDraftEmails = async (req, res) => {
-  const { batchSize = 2, page = 1 } = req.query;
+  const { batchSize = 50, page = 1 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
@@ -325,6 +321,16 @@ exports.fetchDraftEmails = async (req, res) => {
       } else {
         console.log(`Draft email already exists: ${emailData.messageId}`);
       }
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
+      }
     }
 
     connection.end(); // Close the connection
@@ -344,7 +350,7 @@ exports.fetchDraftEmails = async (req, res) => {
 
 // Fetch and store emails from the Archive folder using batching
 exports.fetchArchiveEmails = async (req, res) => {
-  const { batchSize = 5, page = 1, days = 7 } = req.query;
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
@@ -416,6 +422,16 @@ exports.fetchArchiveEmails = async (req, res) => {
         console.log(`Archive email saved: ${emailData.messageId}`);
       } else {
         console.log(`Archive email already exists: ${emailData.messageId}`);
+      }
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
       }
     }
 
@@ -498,7 +514,7 @@ exports.getEmails = async (req, res) => {
 
 // Fetch and store emails from the Sent folder using batching
 exports.fetchSentEmails = async (req, res) => {
-  const { batchSize = 5, page = 1 } = req.query;
+  const { batchSize = 50, page = 1 } = req.query;
 
   try {
     console.log("Connecting to IMAP server...");
@@ -571,6 +587,16 @@ exports.fetchSentEmails = async (req, res) => {
         console.log(`Sent email saved: ${emailData.messageId}`);
       } else {
         console.log(`Sent email already exists: ${emailData.messageId}`);
+      }
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
       }
     }
 
@@ -668,6 +694,13 @@ exports.composeEmail = async (req, res) => {
       }
     }
 
+    // Prepare attachments for nodemailer
+    const formattedAttachments = attachments?.map((attachment) => ({
+      filename: attachment.filename,
+      path: attachment.path, // Use the file path for the attachment
+      contentType: attachment.contentType, // Optional: MIME type
+    }));
+
     // Create a transporter using your email credentials
     const transporter = nodemailer.createTransport({
       service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
@@ -684,7 +717,7 @@ exports.composeEmail = async (req, res) => {
       subject: finalSubject, // Final subject after placeholder replacement
       text: finalBody, // Final body after placeholder replacement
       html: finalBody, // HTML body (optional)
-      attachments, // Attachments (optional)
+      attachments: formattedAttachments, // Attachments with file paths
     };
 
     // Send the email
@@ -707,6 +740,17 @@ exports.composeEmail = async (req, res) => {
 
     const savedEmail = await Email.create(emailData);
     console.log("Composed email saved in the database:", savedEmail);
+
+    // Save attachments using saveAttachments function
+    if (attachments && attachments.length > 0) {
+      const savedAttachments = await saveAttachments(
+        attachments,
+        savedEmail.emailID
+      );
+      console.log(
+        `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+      );
+    }
 
     res.status(200).json({
       message: "Email sent and saved successfully.",
