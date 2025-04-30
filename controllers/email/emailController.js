@@ -196,10 +196,19 @@ exports.fetchRecentEmail = async (req, res) => {
 
     const emailData = {
       messageId: parsedEmail.messageId || null,
+      inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+      references: parsedEmail.headers.get("references") || null,
       sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
       senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-      recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
-      recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+      recipient: parsedEmail.to
+        ? parsedEmail.to.value.map((to) => to.address).join(", ")
+        : null,
+      cc: parsedEmail.cc
+        ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+        : null,
+      bcc: parsedEmail.bcc
+        ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+        : null,
       subject: parsedEmail.subject || null,
       body: parsedEmail.text || parsedEmail.html || null,
       folder: "inbox",
@@ -233,6 +242,32 @@ exports.fetchRecentEmail = async (req, res) => {
       );
     }
 
+    // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
+
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
+
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
+
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
@@ -240,6 +275,7 @@ exports.fetchRecentEmail = async (req, res) => {
       message: "Fetched and saved the most recent email.",
       email: emailData,
       attachments, // Include attachments in the response
+      relatedEmails, // Include related emails in the response
     });
   } catch (error) {
     console.error("Error fetching recent email:", error);
@@ -566,10 +602,22 @@ exports.fetchSentEmails = async (req, res) => {
       const emailData = {
         messageId: parsedEmail.messageId || null,
         inReplyTo: parsedEmail.headers.get("in-reply-to") || null, // Extract inReplyTo header
+        references: parsedEmail.headers.get("references")
+          ? Array.isArray(parsedEmail.headers.get("references"))
+            ? parsedEmail.headers.get("references").join(" ") // Convert array to string
+            : parsedEmail.headers.get("references") // Use string directly
+          : null,
         sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
         senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
-        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        recipient: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.address).join(", ")
+          : null,
+        cc: parsedEmail.cc
+          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+          : null,
+        bcc: parsedEmail.bcc
+          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+          : null,
         subject: parsedEmail.subject || null,
         body: parsedEmail.text || parsedEmail.html || null,
         folder: "sent",
@@ -582,12 +630,16 @@ exports.fetchSentEmails = async (req, res) => {
       const existingEmail = await Email.findOne({
         where: { messageId: emailData.messageId },
       });
+
+      let savedEmail;
       if (!existingEmail) {
-        await Email.create(emailData);
+        savedEmail = await Email.create(emailData);
         console.log(`Sent email saved: ${emailData.messageId}`);
       } else {
         console.log(`Sent email already exists: ${emailData.messageId}`);
+        savedEmail = existingEmail;
       }
+
       // Save attachments using saveAttachments function
       if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
         const savedAttachments = await saveAttachments(
@@ -615,50 +667,85 @@ exports.fetchSentEmails = async (req, res) => {
 };
 
 exports.getOneEmail = async (req, res) => {
+  // const { emailId } = req.params;
+
+  // try {
+  //   // Fetch the email by emailId
+  //   const email = await Email.findOne({
+  //     where: { emailID: emailId },
+  //   });
+
+  //   if (!email) {
+  //     return res.status(404).json({ message: "Email not found." });
+  //   }
+
+  //   // Initialize the response with the main email
+  //   const response = {
+  //     email,
+  //   };
+
+  //   // Check if the email has an inReplyTo field
+  //   if (email.inReplyTo) {
+  //     console.log(`Fetching related emails for thread: ${email.inReplyTo}`);
+
+  //     // Fetch related emails in the same thread
+  //     const relatedEmails = await Email.findAll({
+  //       where: {
+  //         [Sequelize.Op.or]: [
+  //           { messageId: email.inReplyTo }, // The parent email
+  //           { inReplyTo: email.inReplyTo }, // Other replies in the thread
+  //         ],
+  //       },
+  //       order: [["createdAt", "ASC"]], // Sort by date
+  //     });
+
+  //     // Add related emails to the response only if they exist
+  //     if (relatedEmails.length > 0) {
+  //       response.relatedEmails = relatedEmails;
+  //     }
+  //   }
+
+  //   res.status(200).json({
+  //     message: "Email fetched successfully.",
+  //     data: response,
+  //   });
+  // } catch (error) {
+  //   console.error("Error fetching email:", error);
+  //   res.status(500).json({ message: "Internal server error." });
+  // }
   const { emailId } = req.params;
 
   try {
-    // Fetch the email by emailId
-    const email = await Email.findOne({
+    // Fetch the main email by emailId
+    const mainEmail = await Email.findOne({
       where: { emailID: emailId },
     });
 
-    if (!email) {
+    if (!mainEmail) {
       return res.status(404).json({ message: "Email not found." });
     }
 
-    // Initialize the response with the main email
-    const response = {
-      email,
-    };
+    console.log(`Fetching related emails for thread: ${mainEmail.messageId}`);
 
-    // Check if the email has an inReplyTo field
-    if (email.inReplyTo) {
-      console.log(`Fetching related emails for thread: ${email.inReplyTo}`);
-
-      // Fetch related emails in the same thread
-      const relatedEmails = await Email.findAll({
-        where: {
-          [Sequelize.Op.or]: [
-            { messageId: email.inReplyTo }, // The parent email
-            { inReplyTo: email.inReplyTo }, // Other replies in the thread
-          ],
-        },
-        order: [["createdAt", "ASC"]], // Sort by date
-      });
-
-      // Add related emails to the response only if they exist
-      if (relatedEmails.length > 0) {
-        response.relatedEmails = relatedEmails;
-      }
-    }
+    // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: mainEmail.inReplyTo }, // Parent email
+          { inReplyTo: mainEmail.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
 
     res.status(200).json({
-      message: "Email fetched successfully.",
-      data: response,
+      message: "Related emails fetched successfully.",
+      mainEmail,
+      relatedEmails,
     });
   } catch (error) {
-    console.error("Error fetching email:", error);
+    console.error("Error fetching related emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
