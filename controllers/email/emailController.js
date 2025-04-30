@@ -11,7 +11,7 @@ const imapConfig = {
     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
     port: 993, // IMAP port
     tls: true, // Use TLS
-    authTimeout: 10000,
+    authTimeout: 30000,
     tlsOptions: {
       rejectUnauthorized: false, // Allow self-signed certificates
     },
