@@ -58,6 +58,19 @@ const Email = sequelize.define("Email", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  cc: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  bcc: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  references: {
+    type: DataTypes.TEXT,
+    allowNull: true, // Allow NULL values
+  },
+  
 });
 
 
