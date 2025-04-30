@@ -3,6 +3,9 @@ const Email = require("../../models/email/emailModel");
 const { htmlToText } = require("html-to-text");
 const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
+const Template = require("../../models/email/templateModel");
+const { Sequelize } = require("sequelize");
+const nodemailer = require("nodemailer");
 
 const imapConfig = {
   imap: {
@@ -582,5 +585,205 @@ exports.fetchSentEmails = async (req, res) => {
   } catch (error) {
     console.error("Error fetching sent emails:", error);
     res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.getOneEmail = async (req, res) => {
+  const { emailId } = req.params;
+
+  try {
+    // Fetch the email by emailId
+    const email = await Email.findOne({
+      where: { emailID: emailId },
+    });
+
+    if (!email) {
+      return res.status(404).json({ message: "Email not found." });
+    }
+
+    // Initialize the response with the main email
+    const response = {
+      email,
+    };
+
+    // Check if the email has an inReplyTo field
+    if (email.inReplyTo) {
+      console.log(`Fetching related emails for thread: ${email.inReplyTo}`);
+
+      // Fetch related emails in the same thread
+      const relatedEmails = await Email.findAll({
+        where: {
+          [Sequelize.Op.or]: [
+            { messageId: email.inReplyTo }, // The parent email
+            { inReplyTo: email.inReplyTo }, // Other replies in the thread
+          ],
+        },
+        order: [["createdAt", "ASC"]], // Sort by date
+      });
+
+      // Add related emails to the response only if they exist
+      if (relatedEmails.length > 0) {
+        response.relatedEmails = relatedEmails;
+      }
+    }
+
+    res.status(200).json({
+      message: "Email fetched successfully.",
+      data: response,
+    });
+  } catch (error) {
+    console.error("Error fetching email:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.composeEmail = async (req, res) => {
+  const { to, subject, text, html, attachments, templateID, placeholders } =
+    req.body;
+
+  try {
+    let finalSubject = subject;
+    let finalBody = text || html;
+
+    // If a templateID is provided, fetch the template and replace placeholders
+    if (templateID) {
+      const template = await Template.findOne({
+        where: { templateID },
+      });
+
+      if (!template) {
+        return res.status(404).json({ message: "Template not found." });
+      }
+
+      // Replace placeholders in the template subject and body
+      finalSubject = template.subject;
+      finalBody = template.body;
+
+      if (placeholders) {
+        for (const key in placeholders) {
+          const placeholder = `{{${key}}}`;
+          finalSubject = finalSubject.replace(placeholder, placeholders[key]);
+          finalBody = finalBody.replace(placeholder, placeholders[key]);
+        }
+      }
+    }
+
+    // Create a transporter using your email credentials
+    const transporter = nodemailer.createTransport({
+      service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
+      auth: {
+        user: process.env.SENDER_EMAIL, // Your email address
+        pass: process.env.SENDER_PASSWORD, // Your email password or app password
+      },
+    });
+
+    // Define the email options
+    const mailOptions = {
+      from: process.env.SENDER_EMAIL, // Sender's email address
+      to, // Recipient's email address
+      subject: finalSubject, // Final subject after placeholder replacement
+      text: finalBody, // Final body after placeholder replacement
+      html: finalBody, // HTML body (optional)
+      attachments, // Attachments (optional)
+    };
+
+    // Send the email
+    const info = await transporter.sendMail(mailOptions);
+
+    console.log("Email sent: ", info.messageId);
+
+    // Save the email in the database
+    const emailData = {
+      messageId: info.messageId,
+      sender: process.env.SENDER_EMAIL,
+      senderName: process.env.SENDER_NAME, // Replace with the sender's name if available
+      recipient: to,
+      recipientName: null, // You can extract the recipient's name if needed
+      subject: finalSubject,
+      body: finalBody,
+      folder: "sent", // Mark as sent
+      createdAt: new Date(),
+    };
+
+    const savedEmail = await Email.create(emailData);
+    console.log("Composed email saved in the database:", savedEmail);
+
+    res.status(200).json({
+      message: "Email sent and saved successfully.",
+      messageId: info.messageId,
+    });
+  } catch (error) {
+    console.error("Error sending email:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to send email.", error: error.message });
+  }
+};
+
+exports.createTemplate = async (req, res) => {
+  const { name, subject, body, placeholders } = req.body;
+
+  try {
+    // Save the template in the database
+    const templateData = {
+      name,
+      subject,
+      body,
+      placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
+    };
+
+    const savedTemplate = await Template.create(templateData);
+    console.log("Template created successfully:", savedTemplate);
+
+    res.status(200).json({
+      message: "Template created successfully.",
+      template: savedTemplate,
+    });
+  } catch (error) {
+    console.error("Error creating template:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to create template.", error: error.message });
+  }
+};
+
+exports.getTemplates = async (req, res) => {
+  try {
+    console.log("error..................///");
+
+    const templates = await Template.findAll();
+    res.status(200).json({
+      message: "Templates fetched successfully.",
+      templates,
+    });
+  } catch (error) {
+    console.error("Error fetching templates:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch templates.", error: error.message });
+  }
+};
+
+exports.getTemplateById = async (req, res) => {
+  const { templateID } = req.params;
+
+  try {
+    const template = await Template.findOne({
+      where: { templateID },
+    });
+
+    if (!template) {
+      return res.status(404).json({ message: "Template not found." });
+    }
+
+    res.status(200).json({
+      message: "Template fetched successfully.",
+      template,
+    });
+  } catch (error) {
+    console.error("Error fetching template:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch template.", error: error.message });
   }
 };
