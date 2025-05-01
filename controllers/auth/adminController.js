@@ -72,6 +72,7 @@ exports.signIn = async (req, res) => {
     const loginTimeIST = moment(loginTimeUTC)
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
+console.log(user.name,"name...................//");
 
     // Log the login history
     await LoginHistory.create({
@@ -81,11 +82,12 @@ exports.signIn = async (req, res) => {
       longitude: longitude || null,
       latitude: latitude || null,
       loginTime: loginTimeIST,
+      username:loginType==="admin" ? user.name : user.name, // Use the correct field for username
     });
 
     res.status(200).json({
       message: `${
-        loginType === "admin" ? "Admin" : "Master User"
+        loginType === "admin" ? "Admin" : "Gneral User"
       } sign-in successful`,
       token,
     });

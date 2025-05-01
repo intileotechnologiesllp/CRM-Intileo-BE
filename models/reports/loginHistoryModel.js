@@ -41,6 +41,10 @@ const LoginHistory = sequelize.define("LoginHistory", {
     type: DataTypes.STRING, // New column for duration (e.g., "2 hours 15 minutes")
     allowNull: true,
   },
+  username:{
+    type: DataTypes.STRING,
+    allowNull: true, // New field for username
+  }
 });
 
 module.exports = LoginHistory;
