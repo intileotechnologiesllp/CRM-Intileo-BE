@@ -30,7 +30,7 @@ const Attachment = sequelize.define("Attachment", {
   },
   filePath: {
     type: DataTypes.STRING, // Path to the file in the storage system
-    allowNull: false,
+    allowNull: true,
   },
 });
 
