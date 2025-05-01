@@ -7,6 +7,27 @@ const Template = require("../../models/email/templateModel");
 const { Sequelize } = require("sequelize");
 const nodemailer = require("nodemailer");
 const { saveAttachments } = require("../../services/attachmentService");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+// Ensure the upload directory exists
+const uploadDir = path.join(__dirname, "../../uploads/attachments");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+// Configure Multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, "../../uploads/attachments")); // Directory to store attachments
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname); // Generate a unique filename
+  },
+});
+
+const upload = multer({ storage });
 
 const imapConfig = {
   imap: {
@@ -527,11 +548,29 @@ exports.getEmails = async (req, res) => {
     // Fetch emails from the database
     const { count, rows: emails } = await Email.findAndCountAll({
       where: filters,
+      include: [
+        {
+          model: Attachment,
+          as: "attachments", // Alias defined in the relationship
+        },
+      ],
       offset,
       limit,
       order: [["createdAt", "DESC"]], // Sort by most recent emails
     });
 
+    // Add baseURL to attachment paths
+    const baseURL = process.env.LOCALHOST_URL;
+    const emailsWithAttachments = emails.map((email) => {
+      const attachments = email.attachments.map((attachment) => ({
+        ...attachment.toJSON(),
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+      }));
+      return {
+        ...email.toJSON(),
+        attachments,
+      };
+    });
     // Calculate unviewCount for the specified folder or all folders
     const unviewCount = await Email.count({
       where: {
@@ -557,7 +596,8 @@ exports.getEmails = async (req, res) => {
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
       unviewCount, // Include the unviewCount field
-      threads: Object.values(threads), // Return grouped threads
+      // threads: Object.values(threads), // Return grouped threads
+      threads: emailsWithAttachments,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
@@ -687,9 +727,15 @@ exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
 
   try {
-    // Fetch the main email by emailId
+    // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
       where: { emailID: emailId },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments", // Alias defined in the relationship
+        },
+      ],
     });
 
     if (!mainEmail) {
@@ -697,12 +743,14 @@ exports.getOneEmail = async (req, res) => {
     }
 
     console.log(`Fetching related emails for thread: ${mainEmail.messageId}`);
+
     // Update the isRead column to true
     if (!mainEmail.isRead) {
       await mainEmail.update({ isRead: true });
       console.log(`Email marked as read: ${mainEmail.messageId}`);
     }
-    // Fetch related emails in the same thread
+
+    // Fetch related emails in the same thread, including their attachments
     const relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
@@ -711,6 +759,12 @@ exports.getOneEmail = async (req, res) => {
           { references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` } }, // Emails in the same thread
         ],
       },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments", // Alias defined in the relationship
+        },
+      ],
       order: [["createdAt", "ASC"]], // Sort by date
     });
 
@@ -720,6 +774,20 @@ exports.getOneEmail = async (req, res) => {
     // Clean the body of each related email
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
+    });
+
+    // Add baseURL to attachment paths
+    const baseURL = process.env.LOCALHOST_URL;
+    mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
+      ...attachment,
+      path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+    }));
+
+    relatedEmails.forEach((email) => {
+      email.attachments = email.attachments.map((attachment) => ({
+        ...attachment,
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+      }));
     });
 
     // Combine the main email and related emails in the response
@@ -736,106 +804,120 @@ exports.getOneEmail = async (req, res) => {
   }
 };
 
-exports.composeEmail = async (req, res) => {
-  const { to, subject, text, html, attachments, templateID, placeholders } =
-    req.body;
+exports.composeEmail = [
+  upload.array("attachments"), // Use Multer to handle multiple file uploads
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html, templateID, placeholders } =
+      req.body;
 
-  try {
-    let finalSubject = subject;
-    let finalBody = text || html;
+    try {
+      let finalSubject = subject;
+      let finalBody = text || html;
 
-    // If a templateID is provided, fetch the template and replace placeholders
-    if (templateID) {
-      const template = await Template.findOne({
-        where: { templateID },
-      });
+      // If a templateID is provided, fetch the template and replace placeholders
+      if (templateID) {
+        const template = await Template.findOne({
+          where: { templateID },
+        });
 
-      if (!template) {
-        return res.status(404).json({ message: "Template not found." });
-      }
+        if (!template) {
+          return res.status(404).json({ message: "Template not found." });
+        }
 
-      // Replace placeholders in the template subject and body
-      finalSubject = template.subject;
-      finalBody = template.body;
+        // Replace placeholders in the template subject and body
+        finalSubject = template.subject;
+        finalBody = template.body;
 
-      if (placeholders) {
-        for (const key in placeholders) {
-          const placeholder = `{{${key}}}`;
-          finalSubject = finalSubject.replace(placeholder, placeholders[key]);
-          finalBody = finalBody.replace(placeholder, placeholders[key]);
+        if (placeholders) {
+          for (const key in placeholders) {
+            const placeholder = `{{${key}}}`;
+            finalSubject = finalSubject.replace(placeholder, placeholders[key]);
+            finalBody = finalBody.replace(placeholder, placeholders[key]);
+          }
         }
       }
-    }
 
-    // Prepare attachments for nodemailer
-    const formattedAttachments = attachments?.map((attachment) => ({
-      filename: attachment.filename,
-      path: attachment.path, // Use the file path for the attachment
-      contentType: attachment.contentType, // Optional: MIME type
-    }));
+      // Prepare attachments for nodemailer
+      const formattedAttachments = req.files.map((file) => ({
+        filename: file.originalname,
+        path: file.path, // Use the file path from Multer
+      }));
 
-    // Create a transporter using your email credentials
-    const transporter = nodemailer.createTransport({
-      service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
-      auth: {
-        user: process.env.SENDER_EMAIL, // Your email address
-        pass: process.env.SENDER_PASSWORD, // Your email password or app password
-      },
-    });
+      // Create a transporter using your email credentials
+      const transporter = nodemailer.createTransport({
+        service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
+        auth: {
+          user: process.env.SENDER_EMAIL, // Your email address
+          pass: process.env.SENDER_PASSWORD, // Your email password or app password
+        },
+      });
 
-    // Define the email options
-    const mailOptions = {
-      from: process.env.SENDER_EMAIL, // Sender's email address
-      to, // Recipient's email address
-      subject: finalSubject, // Final subject after placeholder replacement
-      text: finalBody, // Final body after placeholder replacement
-      html: finalBody, // HTML body (optional)
-      attachments: formattedAttachments, // Attachments with file paths
-    };
+      // Define the email options
+      const mailOptions = {
+        from: process.env.SENDER_EMAIL, // Sender's email address
+        to, // Recipient's email address
+        cc, // CC recipients
+        bcc, // BCC recipients
+        subject: finalSubject, // Final subject after placeholder replacement
+        text: finalBody, // Final body after placeholder replacement
+        html: finalBody, // HTML body (optional)
+        attachments: formattedAttachments, // Attachments with file paths
+      };
 
-    // Send the email
-    const info = await transporter.sendMail(mailOptions);
+      // Send the email
+      const info = await transporter.sendMail(mailOptions);
 
-    console.log("Email sent: ", info.messageId);
+      console.log("Email sent: ", info.messageId);
 
-    // Save the email in the database
-    const emailData = {
-      messageId: info.messageId,
-      sender: process.env.SENDER_EMAIL,
-      senderName: process.env.SENDER_NAME, // Replace with the sender's name if available
-      recipient: to,
-      recipientName: null, // You can extract the recipient's name if needed
-      subject: finalSubject,
-      body: finalBody,
-      folder: "sent", // Mark as sent
-      createdAt: new Date(),
-    };
+      // Save the email in the database
+      const emailData = {
+        messageId: info.messageId,
+        sender: process.env.SENDER_EMAIL,
+        senderName: process.env.SENDER_NAME, // Replace with the sender's name if available
+        recipient: to,
+        cc, // Save CC recipients
+        bcc, // Save BCC recipients
+        recipientName: null, // You can extract the recipient's name if needed
+        subject: finalSubject,
+        body: finalBody,
+        folder: "sent", // Mark as sent
+        createdAt: new Date(),
+      };
 
-    const savedEmail = await Email.create(emailData);
-    console.log("Composed email saved in the database:", savedEmail);
+      const savedEmail = await Email.create(emailData);
+      console.log("Composed email saved in the database:", savedEmail);
 
-    // Save attachments using saveAttachments function
-    if (attachments && attachments.length > 0) {
-      const savedAttachments = await saveAttachments(
-        attachments,
-        savedEmail.emailID
-      );
+      // Save attachments in the database
+      const savedAttachments = req.files.map((file) => ({
+        emailID: savedEmail.emailID,
+        filename: file.originalname,
+        path: file.path,
+      }));
+
+      await Attachment.bulkCreate(savedAttachments);
       console.log(
         `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
       );
-    }
 
-    res.status(200).json({
-      message: "Email sent and saved successfully.",
-      messageId: info.messageId,
-    });
-  } catch (error) {
-    console.error("Error sending email:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to send email.", error: error.message });
-  }
-};
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      }));
+
+      res.status(200).json({
+        message: "Email sent and saved successfully.",
+        messageId: info.messageId,
+        attachments: attachmentLinks, // Include attachment links in the response
+      });
+    } catch (error) {
+      console.error("Error sending email:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to send email.", error: error.message });
+    }
+  },
+];
 
 exports.createTemplate = async (req, res) => {
   const { name, subject, body, placeholders } = req.body;
