@@ -986,3 +986,41 @@ exports.getTemplateById = async (req, res) => {
       .json({ message: "Failed to fetch template.", error: error.message });
   }
 };
+exports.getUnreadCounts = async (req, res) => {
+  try {
+    // Define all possible folders
+    const allFolders = ["inbox", "drafts", "sent", "archive"];
+
+    // Fetch the count of unread emails grouped by folder
+    const unreadCounts = await Email.findAll({
+      attributes: [
+        "folder", // Group by folder
+        [Sequelize.fn("COUNT", Sequelize.col("emailID")), "unreadCount"], // Count unread emails
+      ],
+      where: {
+        isRead: false, // Only fetch unread emails
+      },
+      group: ["folder"], // Group by folder
+    });
+
+    // Convert the result into a dictionary with folder names as keys
+    const counts = unreadCounts.reduce((acc, item) => {
+      acc[item.folder] = parseInt(item.dataValues.unreadCount, 10);
+      return acc;
+    }, {});
+
+    // Ensure all folders are included in the response, even if they have zero unread emails
+    const response = allFolders.reduce((acc, folder) => {
+      acc[folder] = counts[folder] || 0; // Default to 0 if the folder is not in the result
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      message: "Unread counts fetched successfully.",
+      unreadCounts: response,
+    });
+  } catch (error) {
+    console.error("Error fetching unread counts:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};

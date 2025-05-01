@@ -13,7 +13,8 @@ router.get("/getoneEmail/:emailId", emailController.getOneEmail);
 router.post("/compose", emailController.composeEmail);
 router.post("/create-template", emailController.createTemplate);
 router.get("/get-templates", emailController.getTemplates);
-router.get("/template/:templateID", emailController.getTemplateById);
+router.get("/template/:templateID", emailController.getTemplateById)
+router.get("/unread-counts", emailController.getUnreadCounts);
 
 
 
