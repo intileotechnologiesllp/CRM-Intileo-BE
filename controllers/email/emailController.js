@@ -596,8 +596,8 @@ exports.getEmails = async (req, res) => {
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
       unviewCount, // Include the unviewCount field
-      // threads: Object.values(threads), // Return grouped threads
-      threads: emailsWithAttachments,
+      threads: Object.values(threads), // Return grouped threads
+      // threads: emailsWithAttachments,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
