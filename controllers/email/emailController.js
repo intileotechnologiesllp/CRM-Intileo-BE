@@ -21,6 +21,14 @@ const imapConfig = {
     },
   },
 };
+const cleanEmailBody = (body) => {
+  // Remove quoted replies (e.g., lines starting with ">")
+  return body
+    .split("\n")
+    .filter((line) => !line.startsWith(">"))
+    .join("\n")
+    .trim();
+};
 
 // Helper function to format date to DD-MMM-YYYY
 const formatDateForIMAP = (date) => {
@@ -102,7 +110,7 @@ exports.fetchInboxEmails = async (req, res) => {
         recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
         recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
         subject: parsedEmail.subject || null,
-        body: parsedEmail.text || parsedEmail.html || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "inbox",
         createdAt: parsedEmail.date || new Date(),
       };
@@ -210,7 +218,7 @@ exports.fetchRecentEmail = async (req, res) => {
         ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
         : null,
       subject: parsedEmail.subject || null,
-      body: parsedEmail.text || parsedEmail.html || null,
+      body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
       folder: "inbox",
       createdAt: parsedEmail.date || new Date(),
     };
@@ -339,7 +347,7 @@ exports.fetchDraftEmails = async (req, res) => {
         recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
         recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
         subject: parsedEmail.subject || null,
-        body: parsedEmail.text || parsedEmail.html || null, // Prefer plain text, fallback to HTML
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""), // Prefer plain text, fallback to HTML
         folder: "drafts",
         createdAt: parsedEmail.date || new Date(),
       };
@@ -442,7 +450,7 @@ exports.fetchArchiveEmails = async (req, res) => {
         recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
         recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
         subject: parsedEmail.subject || null,
-        body: parsedEmail.text || parsedEmail.html || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "archive",
         createdAt: parsedEmail.date || new Date(),
       };
@@ -524,6 +532,14 @@ exports.getEmails = async (req, res) => {
       order: [["createdAt", "DESC"]], // Sort by most recent emails
     });
 
+    // Calculate unviewCount for the specified folder or all folders
+    const unviewCount = await Email.count({
+      where: {
+        ...filters,
+        isRead: false, // Count only unread emails
+      },
+    });
+
     // Group emails by conversation (thread)
     const threads = {};
     emails.forEach((email) => {
@@ -534,12 +550,13 @@ exports.getEmails = async (req, res) => {
       threads[threadId].push(email);
     });
 
-    // Return the paginated response with threads
+    // Return the paginated response with threads and unviewCount
     res.status(200).json({
       message: "Emails fetched successfully.",
       currentPage: parseInt(page),
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
+      unviewCount, // Include the unviewCount field
       threads: Object.values(threads), // Return grouped threads
     });
   } catch (error) {
@@ -619,7 +636,7 @@ exports.fetchSentEmails = async (req, res) => {
           ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
           : null,
         subject: parsedEmail.subject || null,
-        body: parsedEmail.text || parsedEmail.html || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "sent",
         createdAt: parsedEmail.date || new Date(),
       };
@@ -680,7 +697,11 @@ exports.getOneEmail = async (req, res) => {
     }
 
     console.log(`Fetching related emails for thread: ${mainEmail.messageId}`);
-
+    // Update the isRead column to true
+    if (!mainEmail.isRead) {
+      await mainEmail.update({ isRead: true });
+      console.log(`Email marked as read: ${mainEmail.messageId}`);
+    }
     // Fetch related emails in the same thread
     const relatedEmails = await Email.findAll({
       where: {
@@ -691,6 +712,14 @@ exports.getOneEmail = async (req, res) => {
         ],
       },
       order: [["createdAt", "ASC"]], // Sort by date
+    });
+
+    // Clean the body of the main email
+    mainEmail.body = cleanEmailBody(mainEmail.body);
+
+    // Clean the body of each related email
+    relatedEmails.forEach((email) => {
+      email.body = cleanEmailBody(email.body);
     });
 
     // Combine the main email and related emails in the response
