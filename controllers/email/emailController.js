@@ -516,7 +516,7 @@ exports.fetchArchiveEmails = async (req, res) => {
 
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const { page = 1, pageSize = 10, folder, search, isRead } = req.query;
+  const { page = 1, pageSize = 20, folder, search, isRead } = req.query;
 
   try {
     // Build the query filters dynamically
