@@ -47,7 +47,7 @@ exports.createPrivileges = async (req, res) => {
     // Create new privileges
     const privilege = await MasterUserPrivileges.create({
       masterUserID,
-      permissions:JSON.parse(permissions), // Convert permissions to a JSON string // Store the array of permissions
+      permissions, // Convert permissions to a JSON string // Store the array of permissions
       createdById: req.adminId, // Admin ID from the authenticated request
       createdBy: req.role, // Role of the creator (e.g., "admin")
       mode: mode || "create", // Optional mode field
