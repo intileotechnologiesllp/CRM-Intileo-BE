@@ -47,7 +47,7 @@ exports.createPrivileges = async (req, res) => {
     // Create new privileges
     const privilege = await MasterUserPrivileges.create({
       masterUserID,
-      permissions, // Store the array of permissions
+      permissions:JSON.stringify(permissions), // Convert permissions to a JSON string // Store the array of permissions
       createdById: req.adminId, // Admin ID from the authenticated request
       createdBy: req.role, // Role of the creator (e.g., "admin")
       mode: mode || "create", // Optional mode field
@@ -181,13 +181,13 @@ exports.getUsersWithPrivileges = async (req, res) => {
         model: MasterUserPrivileges,
         as: "privileges", // Use the alias defined in the association
         required: false, // Include users even if they don't have privileges
-        // include: [
-        //   {
-        //     model: Program, // Join with the Program model
-        //     as: "program", // Use the alias defined in the association
-        //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
-        //   },
-        // ],
+        include: [
+          {
+            model: Program, // Join with the Program model
+            as: "program", // Use the alias defined in the association
+            attributes: ["programId", "program_desc"], // Fetch programId and program_desc
+          },
+        ],
           
       },
     ],
