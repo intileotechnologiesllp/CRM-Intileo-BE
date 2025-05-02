@@ -13,21 +13,9 @@ const PROGRAMS = require("../../utils/programConstants");
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
 
-  let user = null;
-  let loginType = null;
-
   try {
-    // Check if the user exists in the Admin table
-    user = await Admin.findOne({ where: { email } });
-    if (user) {
-      loginType = "admin";
-    } else {
-      // Check if the user exists in the MasterUser table
-      user = await MasterUser.findOne({ where: { email } });
-      if (user) {
-        loginType = "general";
-      }
-    }
+    // Check if the user exists in the unified table (Admin and MasterUser combined)
+    const user = await MasterUser.findOne({ where: { email } }); // Assuming MasterUser is the unified table
 
     if (!user) {
       // Log failed sign-in attempt
@@ -47,9 +35,9 @@ exports.signIn = async (req, res) => {
       await logAuditTrail(
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
-        loginType,
+        user.loginType,
         "Invalid password",
-        loginType === "admin" ? user.id : user.masterUserID // Use the correct ID field
+        user.masterUserID
       );
       return res.status(401).json({ message: "Invalid password" });
     }
@@ -57,9 +45,9 @@ exports.signIn = async (req, res) => {
     // Generate JWT token
     const token = jwt.sign(
       {
-        id: loginType === "admin" ? user.id : user.masterUserID, // Use the correct ID field
+        id: user.masterUserID, // Use the user's ID
         email: user.email,
-        loginType,
+        loginType: user.loginType, // Use the loginType from the database
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
@@ -72,34 +60,35 @@ exports.signIn = async (req, res) => {
     const loginTimeIST = moment(loginTimeUTC)
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
-console.log(user.name,"name...................//");
+
+    console.log(user.name, "name...................//");
 
     // Log the login history
     await LoginHistory.create({
-      userId: loginType === "admin" ? user.id : user.masterUserID, // Use the correct ID field
-      loginType,
+      userId: user.masterUserID, // Use the user's ID
+      loginType: user.loginType, // Use the loginType from the database
       ipAddress: ipAddress || null,
       longitude: longitude || null,
       latitude: latitude || null,
       loginTime: loginTimeIST,
-      username:loginType==="admin" ? user.name : user.name, // Use the correct field for username
+      username: user.name, // Use the user's name
     });
 
     res.status(200).json({
       message: `${
-        loginType === "admin" ? "Admin" : "General User"
+        user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
       token,
     });
   } catch (error) {
-    console.error("Error during admin sign-in:", error);
+    console.error("Error during sign-in:", error);
 
     await logAuditTrail(
       PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
-      loginType || "unknown",
+      "unknown",
       error.message || "Internal server error",
-      user ? (loginType === "admin" ? user.id : user.masterUserID) : null // Use the correct ID field
+      null
     );
 
     res.status(500).json({ message: "Internal server error" });
