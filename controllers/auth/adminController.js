@@ -87,7 +87,7 @@ console.log(user.name,"name...................//");
 
     res.status(200).json({
       message: `${
-        loginType === "admin" ? "Admin" : "Gneral User"
+        loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
       token,
     });
