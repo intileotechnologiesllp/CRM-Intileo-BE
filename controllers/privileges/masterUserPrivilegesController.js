@@ -195,6 +195,23 @@ exports.getUsersWithPrivileges = async (req, res) => {
     offset: parseInt(offset),
     order: [[sortBy, sortOrder.toUpperCase()]],
   });
+    // Parse the permissions field if it is a JSON string
+    const mappedUsers = users.rows.map((user) => {
+      const privileges = user.privileges
+        ? {
+            ...user.privileges.toJSON(),
+            permissions:
+              typeof user.privileges.permissions === "string"
+                ? JSON.parse(user.privileges.permissions) // Parse JSON string
+                : user.privileges.permissions, // Use as-is if already an object
+          }
+        : null; // If privileges is null, return null
+
+      return {
+        ...user.toJSON(),
+        privileges,
+      };
+    });
 
     // Return paginated response
     res.status(200).json({
@@ -202,7 +219,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
       totalRecords: users.count,
       totalPages: Math.ceil(users.count / limit),
       currentPage: parseInt(page),
-      users: users.rows,
+      users:mappedUsers,
     });
   } catch (error) {
     console.error("Error fetching users:", error);
