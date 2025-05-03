@@ -1,5 +1,6 @@
 const adminService = require("../../services/adminServices.js");
 const LoginHistory = require("../../models/reports/loginHistoryModel.js");
+const RecentLoginHistory = require("../../models/reports/recentLoginHistoryModel");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
@@ -14,11 +15,10 @@ exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
 
   try {
-    // Check if the user exists in the unified table (Admin and MasterUser combined)
-    const user = await MasterUser.findOne({ where: { email } }); // Assuming MasterUser is the unified table
+    // Check if the user exists
+    const user = await MasterUser.findOne({ where: { email } });
 
     if (!user) {
-      // Log failed sign-in attempt
       await logAuditTrail(
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
@@ -31,7 +31,6 @@ exports.signIn = async (req, res) => {
     // Verify the password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      // Log failed sign-in attempt
       await logAuditTrail(
         PROGRAMS.AUTHENTICATION,
         "SIGN_IN",
@@ -45,9 +44,9 @@ exports.signIn = async (req, res) => {
     // Generate JWT token
     const token = jwt.sign(
       {
-        id: user.masterUserID, // Use the user's ID
+        id: user.masterUserID,
         email: user.email,
-        loginType: user.loginType, // Use the loginType from the database
+        loginType: user.loginType,
       },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
@@ -61,24 +60,67 @@ exports.signIn = async (req, res) => {
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
 
-    console.log(user.name, "name...................//");
+    // Fetch all login history for the user
+    const loginHistory = await LoginHistory.findAll({
+      where: { userId: user.masterUserID },
+      attributes: ["loginTime", "logoutTime"],
+    });
 
-    // Log the login history
+    // Calculate total session duration
+    let totalSessionDurationInSeconds = 0;
+    loginHistory.forEach((session) => {
+      if (session.logoutTime) {
+        const duration = moment(session.logoutTime).diff(
+          moment(session.loginTime),
+          "seconds"
+        );
+        totalSessionDurationInSeconds += duration;
+      }
+    });
+
+    // Convert total session duration to hours and minutes
+    const hours = Math.floor(totalSessionDurationInSeconds / 3600);
+    const minutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
+    const formattedDuration = `${hours > 0 ? `${hours} hours ` : ""}${
+      minutes > 0 ? `${minutes} minutes` : ""
+    }`.trim();
+
+    // Log the login history with totalSessionDuration
     await LoginHistory.create({
-      userId: user.masterUserID, // Use the user's ID
-      loginType: user.loginType, // Use the loginType from the database
+      userId: user.masterUserID,
+      loginType: user.loginType,
       ipAddress: ipAddress || null,
       longitude: longitude || null,
       latitude: latitude || null,
       loginTime: loginTimeIST,
-      username: user.name, // Use the user's name
+      username: user.name,
+      totalSessionDuration: formattedDuration, // Save totalSessionDuration
     });
 
+    // Delete any existing records for the user in RecentLoginHistory
+    await RecentLoginHistory.destroy({
+      where: { userId: user.masterUserID },
+    });
+
+    // Add the most recent login data to RecentLoginHistory
+    await RecentLoginHistory.create({
+      userId: user.masterUserID,
+      loginType: user.loginType,
+      ipAddress: ipAddress || null,
+      longitude: longitude || null,
+      latitude: latitude || null,
+      loginTime: loginTimeIST,
+      username: user.name,
+      totalSessionDuration: formattedDuration, // Save totalSessionDuration
+    });
+
+    // Return the response with totalSessionDuration
     res.status(200).json({
       message: `${
         user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
       token,
+      totalSessionDuration: formattedDuration,
     });
   } catch (error) {
     console.error("Error during sign-in:", error);

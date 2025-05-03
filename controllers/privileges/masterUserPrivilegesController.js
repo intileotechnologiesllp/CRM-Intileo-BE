@@ -1,6 +1,8 @@
+const jwt = require("jsonwebtoken");
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const Program = require("../../models/admin/masters/programModel");
+
 exports.createPrivileges = async (req, res) => {
   const { masterUserID, permissions, mode } = req.body;
 
@@ -105,19 +107,21 @@ exports.updatePrivileges = async (req, res) => {
       existingPermissions = []; // Default to an empty array if not an array
     }
 
+    console.log("Existing Permissions Before Update:", existingPermissions);
 
     // Update specific privileges based on programId
     for (const updatedPermission of permissions) {
+      // Parse and validate programId
       updatedPermission.programId = parseInt(updatedPermission.programId, 10);
+      console.log("Program ID Before Validation:", updatedPermission.programId);
 
       if (
-        !updatedPermission.programId ||
-        typeof updatedPermission.programId !== "number" ||
-        isNaN(updatedPermission.programId)
+        !Number.isInteger(updatedPermission.programId) ||
+        updatedPermission.programId <= 0
       ) {
         return res.status(400).json({
           message:
-            "Each permission must include a valid programId as an integer.",
+            "Each permission must include a valid programId as a positive integer.",
         });
       }
 
@@ -134,6 +138,8 @@ exports.updatePrivileges = async (req, res) => {
         existingPermissions.push(updatedPermission);
       }
     }
+
+    console.log("Updated Permissions After Loop:", existingPermissions);
 
     // Assign the updated permissions array directly
     existingPrivilege.permissions = existingPermissions;
@@ -291,6 +297,59 @@ exports.deletePrivileges = async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting privileges:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getAllPrivileges = async (req, res) => {
+  try {
+    // Extract masterUserID from req.user (set by authMiddleware)
+    const masterUserID = req.adminId;
+    console.log(req.adminId,"............................masterverID");
+    console.log(masterUserID);
+    
+
+    // // Validate the input
+    // if (!masterUserID) {
+    //   return res.status(400).json({
+    //     message: "Invalid input. masterUserID is required in the token.",
+    //   });
+    // }
+
+    // Check if the master user exists
+    const masterUser = await MasterUser.findOne({ where: { masterUserID } });
+    if (!masterUser) {
+      return res.status(404).json({
+        message: "Master User not found.",
+      });
+    }
+
+    // Fetch privileges data for the master user
+    const privileges = await MasterUserPrivileges.findOne({
+      where: { masterUserID },
+    });
+
+    if (!privileges) {
+      return res.status(404).json({
+        message: "Privileges not found for this Master User.",
+      });
+    }
+
+    // Parse permissions if stored as a JSON string
+    const parsedPrivileges = {
+      ...privileges.toJSON(),
+      permissions:
+        typeof privileges.permissions === "string"
+          ? JSON.parse(privileges.permissions)
+          : privileges.permissions,
+    };
+
+    res.status(200).json({
+      message: "Privileges fetched successfully.",
+      privileges: parsedPrivileges,
+    });
+  } catch (error) {
+    console.error("Error fetching privileges:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
