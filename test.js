@@ -1,296 +1,380 @@
-const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel");
-const MasterUser = require("../../models/master/masterUserModel");
-const Program = require("../../models/admin/masters/programModel");
-exports.createPrivileges = async (req, res) => {
-  const { masterUserID, permissions, mode } = req.body;
+const adminService = require("../../services/adminServices.js");
+const LoginHistory = require("../../models/reports/loginHistoryModel.js");
+const RecentLoginHistory = require("../../models/reports/recentLoginHistoryModel");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+const bcrypt = require("bcrypt");
+const Admin = require("../../models/adminModel.js");
+const MasterUser = require("../../models/master/masterUserModel.js"); // Import MasterUser model
+const jwt = require("jsonwebtoken");
+const moment = require("moment-timezone");
+const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
+const PROGRAMS = require("../../utils/programConstants");
+
+exports.signIn = async (req, res) => {
+  const { email, password, longitude, latitude, ipAddress } = req.body;
 
   try {
-    // Validate the input
-    if (!masterUserID || !Array.isArray(permissions)) {
-      return res.status(400).json({
-        message:
-          "Invalid input. Please provide masterUserID and permissions as an array.",
-      });
-    }
+    // Check if the user exists
+    const user = await MasterUser.findOne({ where: { email } });
 
-    // Check if privileges already exist for the user
-    const existingPrivilege = await MasterUserPrivileges.findOne({
-      where: { masterUserID },
-    });
-    if (existingPrivilege) {
-      return res.status(400).json({
-        message:
-          "Privileges already exist for this Master User. Please update instead.",
-      });
-    }
-
-    // Validate and convert each permission in the array
-    for (const permission of permissions) {
-      // Ensure programId is an integer
-      permission.programId = parseInt(permission.programId, 10);
-
-      if (
-        !permission.programId ||
-        typeof permission.programId !== "number" ||
-        isNaN(permission.programId)
-      ) {
-        return res.status(400).json({
-          message:
-            "Each permission must include a valid programId as an integer.",
-        });
-      }
-
-      if (
-        typeof permission.view !== "boolean" ||
-        typeof permission.edit !== "boolean" ||
-        typeof permission.delete !== "boolean" ||
-        typeof permission.create !== "boolean"
-      ) {
-        return res.status(400).json({
-          message:
-            "Each permission must include valid boolean values for view, edit, delete, and create.",
-        });
-      }
-    }
-
-    // Create new privileges
-    const privilege = await MasterUserPrivileges.create({
-      masterUserID,
-      permissions, // Store the array of permissions
-      createdById: req.adminId, // Admin ID from the authenticated request
-      createdBy: req.role, // Role of the creator (e.g., "admin")
-      mode: mode || "create", // Optional mode field
-    });
-
-    res.status(201).json({
-      message: "Privileges created successfully.",
-      privilege,
-    });
-  } catch (error) {
-    console.error("Error creating privileges:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.updatePrivileges = async (req, res) => {
-  const { masterUserID, permissions } = req.body;
-
-  try {
-    // Validate the input
-    if (!masterUserID || !Array.isArray(permissions)) {
-      return res.status(400).json({
-        message:
-          "Invalid input. Please provide masterUserID and permissions as an array.",
-      });
-    }
-
-    // Check if privileges exist for the user
-    const existingPrivilege = await MasterUserPrivileges.findOne({
-      where: { masterUserID },
-    });
-    if (!existingPrivilege) {
-      return res.status(404).json({
-        message:
-          "Privileges do not exist for this Master User. Please use the create API instead.",
-      });
-    }
-
-    // Parse the existing permissions
-    let existingPermissions = existingPrivilege.permissions || [];
-
-    // Ensure existingPermissions is an array
-    if (typeof existingPermissions === "string") {
-      existingPermissions = JSON.parse(existingPermissions); // Parse JSON string
-    } else if (!Array.isArray(existingPermissions)) {
-      existingPermissions = []; // Default to an empty array if not an array
-    }
-
-
-    // Update specific privileges based on programId
-    for (const updatedPermission of permissions) {
-      updatedPermission.programId = parseInt(updatedPermission.programId, 10);
-
-      if (
-        !updatedPermission.programId ||
-        typeof updatedPermission.programId !== "number" ||
-        isNaN(updatedPermission.programId)
-      ) {
-        return res.status(400).json({
-          message:
-            "Each permission must include a valid programId as an integer.",
-        });
-      }
-
-      const index = existingPermissions.findIndex(
-        (perm) => perm.programId === updatedPermission.programId
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN",
+        "Invalid email",
+        null
       );
+      return res.status(404).json({ message: "User not found" });
+    }
 
-      if (index !== -1) {
-        existingPermissions[index] = {
-          ...existingPermissions[index],
-          ...updatedPermission,
-        };
-      } else {
-        existingPermissions.push(updatedPermission);
+    // Verify the password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN",
+        user.loginType,
+        "Invalid password",
+        user.masterUserID
+      );
+      return res.status(401).json({ message: "Invalid password" });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        id: user.masterUserID,
+        email: user.email,
+        loginType: user.loginType,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+
+    // Get the current UTC time
+    const loginTimeUTC = new Date();
+
+    // Convert login time to IST
+    const loginTimeIST = moment(loginTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Fetch all login history for the user
+    const loginHistory = await LoginHistory.findAll({
+      where: { userId: user.masterUserID },
+      attributes: ["loginTime", "logoutTime"],
+    });
+
+    // Calculate total session duration
+    let totalSessionDurationInSeconds = 0;
+    loginHistory.forEach((session) => {
+      if (session.logoutTime) {
+        const duration = moment(session.logoutTime).diff(
+          moment(session.loginTime),
+          "seconds"
+        );
+        totalSessionDurationInSeconds += duration;
       }
+    });
+
+    // Convert total session duration to hours and minutes
+    const hours = Math.floor(totalSessionDurationInSeconds / 3600);
+    const minutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
+    const formattedDuration = `${hours > 0 ? `${hours} hours ` : ""}${
+      minutes > 0 ? `${minutes} minutes` : ""
+    }`.trim();
+
+    // Log the login history with totalSessionDuration
+    await LoginHistory.create({
+      userId: user.masterUserID,
+      loginType: user.loginType,
+      ipAddress: ipAddress || null,
+      longitude: longitude || null,
+      latitude: latitude || null,
+      loginTime: loginTimeIST,
+      username: user.name,
+      totalSessionDuration: formattedDuration, // Save totalSessionDuration
+    });
+
+    // Delete any existing records for the user in RecentLoginHistory
+    await RecentLoginHistory.destroy({
+      where: { userId: user.masterUserID },
+    });
+
+    // Add the most recent login data to RecentLoginHistory
+    await RecentLoginHistory.create({
+      userId: user.masterUserID,
+      loginType: user.loginType,
+      ipAddress: ipAddress || null,
+      longitude: longitude || null,
+      latitude: latitude || null,
+      loginTime: loginTimeIST,
+      username: user.name,
+      totalSessionDuration: formattedDuration, // Save totalSessionDuration
+    });
+
+    // Return the response with totalSessionDuration
+    res.status(200).json({
+      message: `${
+        user.loginType === "admin" ? "Admin" : "General User"
+      } sign-in successful`,
+      token,
+      totalSessionDuration: formattedDuration,
+    });
+  } catch (error) {
+    console.error("Error during sign-in:", error);
+
+    await logAuditTrail(
+      PROGRAMS.AUTHENTICATION,
+      "SIGN_IN",
+      "unknown",
+      error.message || "Internal server error",
+      null
+    );
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.createAdmin = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const admin = await adminService.createAdmin(email, password);
+    res.status(201).json({ message: "Admin created successfully", admin });
+  } catch (error) {
+    console.error("Error creating admin:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "general";
     }
 
-    // Assign the updated permissions array directly
-    existingPrivilege.permissions = existingPermissions;
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.FORGOT_PASSWORD,
+        "forgot_password",
+        null,
+        "User not found"
+      );
+      return res.status(404).json({ message: "User not found" });
+    }
 
-    // Explicitly mark the `permissions` field as changed
-    existingPrivilege.changed("permissions", true);
+    // Generate OTP
+    const otp = crypto.randomInt(100000, 999999).toString();
 
-    // Save the updated privileges
-    try {
-      await existingPrivilege.save();
-      console.log("Updated Privilege in Database:", existingPrivilege);
-    } catch (error) {
-      console.error("Error saving updated privileges:", error);
+    // Save OTP and expiration
+    await user.update({
+      otp,
+      otpExpiration: Date.now() + 10 * 60 * 1000, // OTP valid for 10 minutes
+    });
+
+    // Send OTP via email
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Password Reset OTP",
+      text: `Your OTP for password reset is: ${otp}. It is valid for 10 minutes.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({ message: "OTP sent to your email address." });
+  } catch (error) {
+    console.error("Error during forgot password:", error);
+    await logAuditTrail(
+      PROGRAMS.FORGOT_PASSWORD,
+      "forgot_password",
+      null,
+      error.message || "Internal server error"
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.verifyOtp = async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "general";
+    }
+
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.VERIFY_OTP,
+        "VERIFY_OTP",
+        null,
+        "User not found"
+      );
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if OTP is valid
+    if (user.otp !== otp || new Date() > user.otpExpiration) {
+      await logAuditTrail(
+        PROGRAMS.VERIFY_OTP,
+        "VERIFY_OTP",
+        loginType,
+        "Invalid or expired OTP",
+        loginType === "admin" ? user.id : user.masterUserID
+      );
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    res.status(200).json({ message: "OTP verified successfully" });
+  } catch (error) {
+    console.error("Error during OTP verification:", error);
+    await logAuditTrail(
+      PROGRAMS.VERIFY_OTP,
+      "VERIFY_OTP",
+      "unknown",
+      error.message || "Internal server error"
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  try {
+    let user = await Admin.findOne({ where: { email } });
+    let loginType = "admin";
+
+    if (!user) {
+      user = await MasterUser.findOne({ where: { email } });
+      loginType = "general";
+    }
+
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.RESET_PASSWORD,
+        "RESET_PASSWORD",
+        null,
+        "User not found"
+      );
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update the password
+    await user.update({
+      password: hashedPassword,
+      otp: null,
+      otpExpiration: null,
+    });
+
+    res.status(200).json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error("Error during password reset:", error);
+    await logAuditTrail(
+      PROGRAMS.RESET_PASSWORD,
+      "RESET_PASSWORD",
+      loginType || "unknown",
+      error.message || "Internal server error"
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    // Extract userId (adminId) from the middleware
+    const userId = req.adminId;
+
+    // Find the latest login history entry for the user
+    const loginHistory = await LoginHistory.findOne({
+      where: { userId },
+      order: [["loginTime", "DESC"]],
+    });
+
+    if (!loginHistory) {
       return res
-        .status(500)
-        .json({ message: "Failed to save updated privileges." });
+        .status(404)
+        .json({ message: "Login history not found for the user" });
     }
 
+    // Update the logout time
+    const logoutTimeUTC = new Date(); // Current UTC time
+    const loginTime = new Date(loginHistory.loginTime);
+
+    // Convert logout time to IST
+    const logoutTimeIST = moment(logoutTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Calculate the duration
+    const durationMs = logoutTimeUTC - loginTime; // Duration in milliseconds
+    const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
+    const durationMinutes = Math.floor(
+      (durationMs % (1000 * 60 * 60)) / (1000 * 60)
+    );
+
+    const duration = `${durationHours} hours ${durationMinutes} minutes`;
+
+    // Update the login history record
+    await loginHistory.update({
+      logoutTime: logoutTimeIST, // Store logout time in IST
+      duration,
+    });
+
     res.status(200).json({
-      message: "Privileges updated successfully.",
-      privilege: {
-        ...existingPrivilege.toJSON(),
-        permissions: existingPrivilege.permissions,
-      },
+      message: "Logout successful",
+      logoutTime: logoutTimeIST, // Return logout time in IST
+      duration,
     });
   } catch (error) {
-    console.error("Error updating privileges:", error);
+    console.error("Error during logout:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.getUsersWithPrivileges = async (req, res) => {
-  const {
-    userType,
-    masterUserID,
-    page = 1,
-    limit = 10,
-    sortBy = "createdAt",
-    sortOrder = "DESC",
-  } = req.body || {};
+exports.getLoginHistory = async (req, res) => {
+  const { userId } = req.query; // Get userId from query parameters
 
   try {
-    // Validate the input
-    if (userType && !["admin", "general"].includes(userType)) {
-      return res.status(400).json({
-        message: "Invalid userType. Please provide 'admin' or 'general'.",
-      });
-    }
-
-    // Build the where clause for filtering
-    const whereClause = {};
-    if (userType) {
-      whereClause.userType = userType;
-    }
-    if (masterUserID) {
-      whereClause.masterUserID = masterUserID;
-    }
-
-    // Calculate offset for pagination
-    const offset = (page - 1) * limit;
-
-    // Fetch data with pagination, sorting, and filtering
-    const users = await MasterUser.findAndCountAll({
-      where: whereClause,
-      attributes: {
-        exclude: [
-          "resetToken",
-          "resetTokenExpiry",
-          "loginType",
-          "otp",
-          "otpExpiration",
-          "createdAt",
-          "updatedAt",
-        ], // Exclude specific fields
-      },
-
-      include: [
-        {
-          model: MasterUserPrivileges,
-          as: "privileges", // Use the alias defined in the association
-          required: false, // Include users even if they don't have privileges
-          // include: [
-          //   {
-          //     model: Program, // Join with the Program model
-          //     as: "program", // Use the alias defined in the association
-          //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
-          //   },
-          // ],
-        },
-      ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [[sortBy, sortOrder.toUpperCase()]],
-    });
-    // Parse the permissions field if it is a JSON string
-    const mappedUsers = users.rows.map((user) => {
-      const privileges = user.privileges
-        ? {
-            ...user.privileges.toJSON(),
-            permissions:
-              typeof user.privileges.permissions === "string"
-                ? JSON.parse(user.privileges.permissions) // Parse JSON string
-                : user.privileges.permissions, // Use as-is if already an object
-          }
-        : null; // If privileges is null, return null
-
-      return {
-        ...user.toJSON(),
-        privileges,
-      };
+    // Fetch login history for the specified user or all users
+    const loginHistory = await LoginHistory.findAll({
+      where: userId ? { userId } : {}, // Filter by userId if provided
+      order: [["loginTime", "DESC"]], // Sort by login time in descending order
     });
 
-    // Return paginated response
-    res.status(200).json({
-      message: "Users fetched successfully.",
-      totalRecords: users.count,
-      totalPages: Math.ceil(users.count / limit),
-      currentPage: parseInt(page),
-      users: mappedUsers,
-    });
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.deletePrivileges = async (req, res) => {
-  const { masterUserID } = req.params;
-
-  try {
-    // Validate the input
-    if (!masterUserID) {
-      return res.status(400).json({
-        message: "Invalid input. Please provide a valid masterUserID.",
-      });
+    if (!loginHistory || loginHistory.length === 0) {
+      return res.status(404).json({ message: "No login history found" });
     }
-
-    // Check if privileges exist for the user
-    const existingPrivilege = await MasterUserPrivileges.findOne({
-      where: { masterUserID },
-    });
-    if (!existingPrivilege) {
-      return res.status(404).json({
-        message: "Privileges do not exist for this Master User.",
-      });
-    }
-
-    // Delete the privileges
-    await MasterUserPrivileges.destroy({
-      where: { masterUserID },
-    });
 
     res.status(200).json({
-      message: "Privileges deleted successfully.",
+      message: "Login history fetched successfully",
+      loginHistory,
     });
   } catch (error) {
-    console.error("Error deleting privileges:", error);
+    console.error("Error fetching login history:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
