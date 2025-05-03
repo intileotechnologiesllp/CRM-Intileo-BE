@@ -24,13 +24,22 @@ exports.createPrivileges = async (req, res) => {
       });
     }
 
-    // Validate each permission in the array
+    // Validate and convert each permission in the array
     for (const permission of permissions) {
-      if (!permission.programId || typeof permission.programId !== "string") {
+      // Ensure programId is an integer
+      permission.programId = parseInt(permission.programId, 10);
+
+      if (
+        !permission.programId ||
+        typeof permission.programId !== "number" ||
+        isNaN(permission.programId)
+      ) {
         return res.status(400).json({
-          message: "Each permission must include a valid programId.",
+          message:
+            "Each permission must include a valid programId as an integer.",
         });
       }
+
       if (
         typeof permission.view !== "boolean" ||
         typeof permission.edit !== "boolean" ||
@@ -47,7 +56,7 @@ exports.createPrivileges = async (req, res) => {
     // Create new privileges
     const privilege = await MasterUserPrivileges.create({
       masterUserID,
-      permissions, // Convert permissions to a JSON string // Store the array of permissions
+      permissions, // Store the array of permissions
       createdById: req.adminId, // Admin ID from the authenticated request
       createdBy: req.role, // Role of the creator (e.g., "admin")
       mode: mode || "create", // Optional mode field
@@ -87,43 +96,68 @@ exports.updatePrivileges = async (req, res) => {
     }
 
     // Parse the existing permissions
-    const existingPermissions = existingPrivilege.permissions || [];
+    let existingPermissions = existingPrivilege.permissions || [];
+
+    // Ensure existingPermissions is an array
+    if (typeof existingPermissions === "string") {
+      existingPermissions = JSON.parse(existingPermissions); // Parse JSON string
+    } else if (!Array.isArray(existingPermissions)) {
+      existingPermissions = []; // Default to an empty array if not an array
+    }
+
 
     // Update specific privileges based on programId
     for (const updatedPermission of permissions) {
+      updatedPermission.programId = parseInt(updatedPermission.programId, 10);
+
       if (
         !updatedPermission.programId ||
-        typeof updatedPermission.programId !== "string"
+        typeof updatedPermission.programId !== "number" ||
+        isNaN(updatedPermission.programId)
       ) {
         return res.status(400).json({
-          message: "Each permission must include a valid programId.",
+          message:
+            "Each permission must include a valid programId as an integer.",
         });
       }
 
-      // Find the existing permission for the given programId
       const index = existingPermissions.findIndex(
         (perm) => perm.programId === updatedPermission.programId
       );
 
       if (index !== -1) {
-        // Update the existing permission
         existingPermissions[index] = {
           ...existingPermissions[index],
-          ...updatedPermission, // Merge the updated fields
+          ...updatedPermission,
         };
       } else {
-        // Add new permission if programId does not exist
         existingPermissions.push(updatedPermission);
       }
     }
 
-    // Save the updated permissions
-    existingPrivilege.permissions = existingPermissions; // Assign updated permissions
-    await existingPrivilege.save(); // Save the updated privilege
+    // Assign the updated permissions array directly
+    existingPrivilege.permissions = existingPermissions;
+
+    // Explicitly mark the `permissions` field as changed
+    existingPrivilege.changed("permissions", true);
+
+    // Save the updated privileges
+    try {
+      await existingPrivilege.save();
+      console.log("Updated Privilege in Database:", existingPrivilege);
+    } catch (error) {
+      console.error("Error saving updated privileges:", error);
+      return res
+        .status(500)
+        .json({ message: "Failed to save updated privileges." });
+    }
 
     res.status(200).json({
       message: "Privileges updated successfully.",
-      privilege: existingPrivilege,
+      privilege: {
+        ...existingPrivilege.toJSON(),
+        permissions: existingPrivilege.permissions,
+      },
     });
   } catch (error) {
     console.error("Error updating privileges:", error);

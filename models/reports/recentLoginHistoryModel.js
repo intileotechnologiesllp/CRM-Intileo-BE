@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const LoginHistory = sequelize.define("LoginHistory", {
+const RecentLoginHistory = sequelize.define("RecentLoginHistory", {
   userId: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -51,4 +51,4 @@ const LoginHistory = sequelize.define("LoginHistory", {
   }
 });
 
-module.exports = LoginHistory;
+module.exports = RecentLoginHistory;

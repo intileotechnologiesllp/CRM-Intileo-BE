@@ -10,6 +10,7 @@ router.post("/create", verifyToken, masterUserPrivilegesController.createPrivile
 router.post("/update", verifyToken, masterUserPrivilegesController.updatePrivileges);
 router.get("/get", verifyToken, masterUserPrivilegesController.getUsersWithPrivileges);
 router.post("/delete/:masterUserID", verifyToken, masterUserPrivilegesController.deletePrivileges);
+router.get("/privileges", verifyToken, masterUserPrivilegesController.getAllPrivileges);
 
 
 module.exports = router;
