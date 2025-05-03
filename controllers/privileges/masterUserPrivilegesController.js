@@ -1,6 +1,6 @@
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel");
 const MasterUser = require("../../models/master/masterUserModel");
-const Program = require("../../models/admin/masters/programModel")
+const Program = require("../../models/admin/masters/programModel");
 exports.createPrivileges = async (req, res) => {
   const { masterUserID, permissions, mode } = req.body;
 
@@ -118,8 +118,8 @@ exports.updatePrivileges = async (req, res) => {
     }
 
     // Save the updated permissions
-    existingPrivilege.permissions = existingPermissions;
-    await existingPrivilege.save();
+    existingPrivilege.permissions = existingPermissions; // Assign updated permissions
+    await existingPrivilege.save(); // Save the updated privilege
 
     res.status(200).json({
       message: "Privileges updated successfully.",
@@ -176,25 +176,24 @@ exports.getUsersWithPrivileges = async (req, res) => {
         ], // Exclude specific fields
       },
 
-    include: [
-      {
-        model: MasterUserPrivileges,
-        as: "privileges", // Use the alias defined in the association
-        required: false, // Include users even if they don't have privileges
-        // include: [
-        //   {
-        //     model: Program, // Join with the Program model
-        //     as: "program", // Use the alias defined in the association
-        //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
-        //   },
-        // ],
-          
-      },
-    ],
-    limit: parseInt(limit),
-    offset: parseInt(offset),
-    order: [[sortBy, sortOrder.toUpperCase()]],
-  });
+      include: [
+        {
+          model: MasterUserPrivileges,
+          as: "privileges", // Use the alias defined in the association
+          required: false, // Include users even if they don't have privileges
+          // include: [
+          //   {
+          //     model: Program, // Join with the Program model
+          //     as: "program", // Use the alias defined in the association
+          //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
+          //   },
+          // ],
+        },
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [[sortBy, sortOrder.toUpperCase()]],
+    });
     // Parse the permissions field if it is a JSON string
     const mappedUsers = users.rows.map((user) => {
       const privileges = user.privileges
@@ -219,7 +218,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
       totalRecords: users.count,
       totalPages: Math.ceil(users.count / limit),
       currentPage: parseInt(page),
-      users:mappedUsers,
+      users: mappedUsers,
     });
   } catch (error) {
     console.error("Error fetching users:", error);
