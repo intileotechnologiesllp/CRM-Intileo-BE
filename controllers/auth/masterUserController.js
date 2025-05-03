@@ -8,6 +8,8 @@ const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
 const { Op } = require("sequelize");
 const { log } = require("console");
+const Program = require("../../models/admin/masters/programModel");
+const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
 // const path = require("path");
 
 // Create a Master User
@@ -77,7 +79,33 @@ exports.createMasterUser = async (req, res) => {
       userType: userType === "admin" ? "admin" : "general", // Set userType based on the userType
       status, // Use status from req.body or default to "active"
     });
+    // Fetch all programs from the Program table
+    const programs = await Program.findAll({
+      attributes: ["programId", "program_desc"],
+    });
+    if (!programs || programs.length === 0) {
+      return res.status(404).json({
+        message: "No programs found in the system.",
+      });
+    }
+    // Generate default permissions for all programs
+    const defaultPermissions = programs.map((program) => ({
+      programId: program.programId,
+      program_desc: program.program_desc,
+      view: false,
+      edit: false,
+      delete: false,
+      create: false,
+    }));
 
+    // Create default privileges for the new master user
+    await MasterUserPrivileges.create({
+      masterUserID: masterUser.masterUserID,
+      permissions: defaultPermissions,
+      createdById: adminId,
+      createdBy: adminName,
+      mode: "create",
+    });
     // If the userType is "general", send a password reset email
     if (userType === "general") {
       const resetLink = `${process.env.FRONTEND_URL}/api/master-user/reset-password?token=${resetToken}`;
@@ -185,12 +213,37 @@ exports.getMasterUsers = async (req, res) => {
       whereClause.userType = userType;
     }
 
-    // Fetch master users with pagination, sorting, and searching
+    // Fetch master users with pagination, sorting, searching, and privileges
     const { count, rows } = await MasterUser.findAndCountAll({
       where: whereClause,
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[sortBy, sortOrder.toUpperCase()]],
+      include: [
+        {
+          model: MasterUserPrivileges,
+          as: "privileges", // Use the alias defined in the association
+          required: false, // Include users even if they don't have privileges
+        },
+      ],
+    });
+
+    // Parse the permissions field if it is a JSON string
+    const mappedUsers = rows.map((user) => {
+      const privileges = user.privileges
+        ? {
+            ...user.privileges.toJSON(),
+            permissions:
+              typeof user.privileges.permissions === "string"
+                ? JSON.parse(user.privileges.permissions) // Parse JSON string
+                : user.privileges.permissions, // Use as-is if already an object
+          }
+        : null; // If privileges is null, return null
+
+      return {
+        ...user.toJSON(),
+        privileges,
+      };
     });
 
     // Return paginated response
@@ -199,7 +252,7 @@ exports.getMasterUsers = async (req, res) => {
       totalRecords: count,
       totalPages: Math.ceil(count / limit),
       currentPage: parseInt(page),
-      masterUsers: rows,
+      masterUsers: mappedUsers,
     });
   } catch (error) {
     console.error("Error fetching master users:", error);
