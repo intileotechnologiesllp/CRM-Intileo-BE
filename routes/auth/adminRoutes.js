@@ -32,6 +32,7 @@ router.post("/reset-password", adminController.resetPassword);
 
 router.post("/logout", verifyToken,adminController.logout);
 router.get("/login-history", adminController.getLoginHistory);
+router.get("/getRecentLoginHistory", adminController.getRecentLoginHistory);
 
 
 module.exports = router;

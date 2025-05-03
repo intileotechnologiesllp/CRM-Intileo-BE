@@ -60,32 +60,38 @@ exports.signIn = async (req, res) => {
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
 
-    // Fetch all login history for the user
-    const loginHistory = await LoginHistory.findAll({
+    // Fetch the latest login history for the user
+    const latestLoginHistory = await LoginHistory.findOne({
       where: { userId: user.masterUserID },
-      attributes: ["loginTime", "logoutTime"],
+      order: [["loginTime", "DESC"]],
     });
 
-    // Calculate total session duration
-    let totalSessionDurationInSeconds = 0;
-    loginHistory.forEach((session) => {
-      if (session.logoutTime) {
-        const duration = moment(session.logoutTime).diff(
-          moment(session.loginTime),
-          "seconds"
-        );
-        totalSessionDurationInSeconds += duration;
-      }
-    });
+    // Fetch the previous totalSessionDuration
+    let previousTotalDurationInSeconds = 0;
+    if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
+      const [hours, minutes] = latestLoginHistory.totalSessionDuration
+        .replace(" hours", "")
+        .replace(" minutes", "")
+        .split(" ")
+        .map(Number);
+
+      previousTotalDurationInSeconds =
+        (hours || 0) * 3600 + (minutes || 0) * 60;
+    }
+
+    // Add the current session's duration (default to 0 for a new session)
+    const currentSessionDurationInSeconds = 0; // No logout yet for the new session
+    const totalSessionDurationInSeconds =
+      previousTotalDurationInSeconds + currentSessionDurationInSeconds;
 
     // Convert total session duration to hours and minutes
-    const hours = Math.floor(totalSessionDurationInSeconds / 3600);
-    const minutes = Math.floor((totalSessionDurationInSeconds % 3600) / 60);
-    const formattedDuration = `${hours > 0 ? `${hours} hours ` : ""}${
-      minutes > 0 ? `${minutes} minutes` : ""
-    }`.trim();
+    const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
+    const totalMinutes = Math.floor(
+      (totalSessionDurationInSeconds % 3600) / 60
+    );
+    const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
-    // Log the login history with totalSessionDuration
+    // Save the new login history
     await LoginHistory.create({
       userId: user.masterUserID,
       loginType: user.loginType,
@@ -94,7 +100,7 @@ exports.signIn = async (req, res) => {
       latitude: latitude || null,
       loginTime: loginTimeIST,
       username: user.name,
-      totalSessionDuration: formattedDuration, // Save totalSessionDuration
+      totalSessionDuration, // Save updated totalSessionDuration
     });
 
     // Delete any existing records for the user in RecentLoginHistory
@@ -111,7 +117,7 @@ exports.signIn = async (req, res) => {
       latitude: latitude || null,
       loginTime: loginTimeIST,
       username: user.name,
-      totalSessionDuration: formattedDuration, // Save totalSessionDuration
+      totalSessionDuration, // Save updated totalSessionDuration
     });
 
     // Return the response with totalSessionDuration
@@ -120,7 +126,7 @@ exports.signIn = async (req, res) => {
         user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
       token,
-      totalSessionDuration: formattedDuration,
+      totalSessionDuration,
     });
   } catch (error) {
     console.error("Error during sign-in:", error);
@@ -129,8 +135,7 @@ exports.signIn = async (req, res) => {
       PROGRAMS.AUTHENTICATION,
       "SIGN_IN",
       "unknown",
-      error.message || "Internal server error",
-      null
+      error.message || "Internal server error"
     );
 
     res.status(500).json({ message: "Internal server error" });
@@ -329,25 +334,66 @@ exports.logout = async (req, res) => {
       .tz("Asia/Kolkata")
       .format("YYYY-MM-DD HH:mm:ss");
 
-    // Calculate the duration
+    // Calculate the duration of the current session
     const durationMs = logoutTimeUTC - loginTime; // Duration in milliseconds
     const durationHours = Math.floor(durationMs / (1000 * 60 * 60));
     const durationMinutes = Math.floor(
       (durationMs % (1000 * 60 * 60)) / (1000 * 60)
     );
 
-    const duration = `${durationHours} hours ${durationMinutes} minutes`;
+    const currentSessionDuration = `${durationHours} hours ${durationMinutes} minutes`;
+
+    // Fetch the previous totalSessionDuration
+    let previousTotalDurationInSeconds = 0;
+    if (loginHistory.totalSessionDuration) {
+      const [hours, minutes] = loginHistory.totalSessionDuration
+        .replace(" hours", "")
+        .replace(" minutes", "")
+        .split(" ")
+        .map(Number);
+
+      previousTotalDurationInSeconds =
+        (hours || 0) * 3600 + (minutes || 0) * 60;
+    }
+
+    // Add the current session's duration to the previous total
+    const currentSessionDurationInSeconds =
+      durationHours * 3600 + durationMinutes * 60;
+    const totalSessionDurationInSeconds =
+      previousTotalDurationInSeconds + currentSessionDurationInSeconds;
+
+    // Convert total session duration to hours and minutes
+    const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
+    const totalMinutes = Math.floor(
+      (totalSessionDurationInSeconds % 3600) / 60
+    );
+    const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
     // Update the login history record
     await loginHistory.update({
       logoutTime: logoutTimeIST, // Store logout time in IST
-      duration,
+      duration: currentSessionDuration, // Save current session duration
+      totalSessionDuration, // Save updated total session duration
     });
+
+    // Update the RecentLoginHistory record
+    const recentLoginHistory = await RecentLoginHistory.findOne({
+      where: { userId },
+    });
+
+    if (recentLoginHistory) {
+      await recentLoginHistory.update({
+        logoutTime: logoutTimeIST, // Update logout time
+        duration: currentSessionDuration, // Update session duration
+        totalSessionDuration:totalSessionDuration
+      });
+    }
 
     res.status(200).json({
       message: "Logout successful",
       logoutTime: logoutTimeIST, // Return logout time in IST
-      duration,
+      currentSessionDuration,
+      totalSessionDuration,
     });
   } catch (error) {
     console.error("Error during logout:", error);
@@ -363,6 +409,30 @@ exports.getLoginHistory = async (req, res) => {
     const loginHistory = await LoginHistory.findAll({
       where: userId ? { userId } : {}, // Filter by userId if provided
       order: [["loginTime", "DESC"]], // Sort by login time in descending order
+    });
+
+    if (!loginHistory || loginHistory.length === 0) {
+      return res.status(404).json({ message: "No login history found" });
+    }
+
+    res.status(200).json({
+      message: "Login history fetched successfully",
+      loginHistory,
+    });
+  } catch (error) {
+    console.error("Error fetching login history:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getRecentLoginHistory = async (req, res) => {
+  const { userId } = req.query; // Get userId from query parameters
+
+  try {
+    // Fetch login history for the specified user or all users
+    const loginHistory = await RecentLoginHistory.findAll({
+      where: userId ? { userId } : {}, // Filter by userId if provided
+      // order: [["loginTime", "DESC"]], // Sort by login time in descending order
     });
 
     if (!loginHistory || loginHistory.length === 0) {
