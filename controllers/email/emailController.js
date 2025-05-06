@@ -206,7 +206,7 @@ exports.fetchInboxEmails = async (req, res) => {
         });
 
         if (!existingEmail) {
-          savedEmail = await Email.create(emailData);
+          await Email.create(emailData);
           console.log(`Email saved: ${emailData.messageId}`);
         } else {
           console.log(`Email already exists: ${emailData.messageId}`);
@@ -216,8 +216,8 @@ exports.fetchInboxEmails = async (req, res) => {
         if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
           const savedAttachments = await saveAttachments(
             parsedEmail.attachments,
-            // existingEmail ? existingEmail.emailID : emailData.emailID
-            savedEmail.emailID
+            existingEmail ? existingEmail.emailID : emailData.emailID
+            // savedEmail.emailID
           );
           console.log(
             `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
