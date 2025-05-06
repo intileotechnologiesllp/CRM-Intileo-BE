@@ -76,14 +76,41 @@ const formatDateForIMAP = (date) => {
 };
 
 // Fetch emails from the inbox in batches
-exports.fetchInboxEmails = async (req,res) => {
-  const { batchSize = 50, page = 1 } = req.query;
+exports.fetchInboxEmails = async (req, res) => {
+  const { batchSize = 50, page = 1,days=7 } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  // const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const email = req.email; // Get email from the request body
+  const appPassword = req.body.appPassword; 
 
   try {
+    
+    // Validate input
+    if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
 
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (existingCredential) {
+      // Update existing credentials
+      await existingCredential.update({ email, appPassword });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    } else {
+      // Create new credentials
+      await UserCredential.create({
+        masterUserID,
+        email,
+        appPassword,
+      });
+      console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    }
+
+    // Fetch emails after saving credentials
+    console.log("Fetching emails for masterUserID:", masterUserID);
+    // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
@@ -92,142 +119,134 @@ exports.fetchInboxEmails = async (req,res) => {
       console.error("User credentials not found for masterUserID:", masterUserID);
       return res.status(404).json({ message: "User credentials not found." });
     }
-
+   console.log(userCredential.email,"email");
+   console.log(userCredential.appPassword,"appPassword");
+   
+   
     const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
+    const userPassword =userCredential.appPassword;
 
     console.log("Connecting to IMAP server...");
     const imapConfig = {
       imap: {
-        user: userEmail, // Use the email from the database
-        password: userPassword, // Use the app password from the database
-        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-        port: 993, // IMAP port
-        tls: true, // Use TLS
+        user: userEmail,
+        password: userPassword,
+        host: "imap.gmail.com",
+        port: 993,
+        tls: true,
         authTimeout: 30000,
         tlsOptions: {
-          rejectUnauthorized: false, // Allow self-signed certificates
+          rejectUnauthorized: false,
         },
       },
     };
 
     const connection = await Imap.connect(imapConfig);
 
-    console.log("Opening INBOX...");
-    await connection.openBox("INBOX");
+    // Helper function to fetch emails from a specific folder
+    const fetchEmailsFromFolder = async (folderName, folderType) => {
+      console.log(`Opening ${folderType} folder...`);
+      await connection.openBox(folderName);
 
-    console.log("Fetching emails from the last 7 days...");
-    const sinceDate = formatDateForIMAP(
-      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    );
-    console.log(`Using SINCE date: ${sinceDate}`);
+      console.log(`Fetching emails from ${folderType} folder...`);
+      const sinceDate = formatDateForIMAP(
+        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      );
+      console.log(`Using SINCE date: ${sinceDate}`);
 
-    const searchCriteria = [["SINCE", sinceDate]];
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    console.log(`Total emails found: ${messages.length}`);
-
-    // Pagination logic
-    const startIndex = (page - 1) * batchSize;
-    const endIndex = startIndex + parseInt(batchSize);
-    const batchMessages = messages.slice(startIndex, endIndex);
-
-    if (batchMessages.length === 0) {
-      console.log("No more emails to fetch.");
-      return res.status(200).json({ message: "No more emails to fetch." });
-    }
-
-    const inboxEmails = [];
-
-    for (const message of batchMessages) {
-      const rawBodyPart = message.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      if (!rawBody) {
-        console.log("No body found for this email.");
-        continue;
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to
-          ? parsedEmail.to.value.map((to) => to.address).join(", ")
-          : null,
-        cc: parsedEmail.cc
-          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-          : null,
-        bcc: parsedEmail.bcc
-          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-          : null,
-          masterUserID: masterUserID,
-        subject: parsedEmail.subject || null,
-        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-        folder: "inbox",
-        createdAt: parsedEmail.date || new Date(),
+      const searchCriteria = [["SINCE", sinceDate]];
+      const fetchOptions = {
+        bodies: "",
+        struct: true,
       };
 
-      console.log(`Processing email: ${emailData.messageId}`);
-      inboxEmails.push(emailData);
+      const messages = await connection.search(searchCriteria, fetchOptions);
 
-      const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId },
-      });
+      console.log(`Total emails found in ${folderType}: ${messages.length}`);
 
-      let savedEmail;
-      if (!existingEmail) {
-        savedEmail = await Email.create(emailData);
-        console.log(`Email saved: ${emailData.messageId}`);
-      } else {
-        console.log(`Email already exists: ${emailData.messageId}`);
-        savedEmail = existingEmail;
+      // Pagination logic
+      const startIndex = (page - 1) * batchSize;
+      const endIndex = startIndex + parseInt(batchSize);
+      const batchMessages = messages.slice(startIndex, endIndex);
+
+      for (const message of batchMessages) {
+        const rawBodyPart = message.parts.find((part) => part.which === "");
+        const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+        if (!rawBody) {
+          console.log(`No body found for email in ${folderType}.`);
+          continue;
+        }
+
+        const parsedEmail = await simpleParser(rawBody);
+
+        const emailData = {
+          messageId: parsedEmail.messageId || null,
+          sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+          senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+          recipient: parsedEmail.to
+            ? parsedEmail.to.value.map((to) => to.address).join(", ")
+            : null,
+          cc: parsedEmail.cc
+            ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+            : null,
+          bcc: parsedEmail.bcc
+            ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+            : null,
+          masterUserID: masterUserID,
+          subject: parsedEmail.subject || null,
+          body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+          folder: folderType, // Dynamically set the folder type
+          createdAt: parsedEmail.date || new Date(),
+        };
+
+        // Save email to the database
+        const existingEmail = await Email.findOne({
+          where: { messageId: emailData.messageId },
+        });
+
+        if (!existingEmail) {
+          savedEmail = await Email.create(emailData);
+          console.log(`Email saved: ${emailData.messageId}`);
+        } else {
+          console.log(`Email already exists: ${emailData.messageId}`);
+        }
+
+        // Save attachments
+        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+          const savedAttachments = await saveAttachments(
+            parsedEmail.attachments,
+            // existingEmail ? existingEmail.emailID : emailData.emailID
+            savedEmail.emailID
+          );
+          console.log(
+            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          );
+        }
       }
+    };
 
-      // Save attachments using saveAttachments function
-      // if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      //   const savedAttachments = await saveAttachments(
-      //     parsedEmail.attachments,
-      //     savedEmail.emailID,
-      //     masterUserID
-      //   );
-      //   console.log(
-      //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-      //   );
-      // }
-              // Save attachments
-              const attachments = [];
-              if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-                const savedAttachments = await saveAttachments(
-                  parsedEmail.attachments,
-                  savedEmail.emailID
-                );
-                attachments.push(...savedAttachments);
-                console.log(
-                  `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-                );
-              }
-    }
+    // Fetch emails from Inbox, Drafts, Archive, and Sent folders
+    console.log("Fetching emails from Inbox...");
+    await fetchEmailsFromFolder("INBOX", "inbox");
+
+    console.log("Fetching emails from Drafts...");
+    await fetchEmailsFromFolder("[Gmail]/Drafts", "drafts");
+
+    console.log("Fetching emails from Archive...");
+    await fetchEmailsFromFolder("[Gmail]/All Mail", "archive");
+
+    console.log("Fetching emails from Sent...");
+    await fetchEmailsFromFolder("[Gmail]/Sent Mail", "sent");
 
     connection.end();
     console.log("IMAP connection closed.");
 
     res.status(200).json({
-      message: `Fetched and saved ${inboxEmails.length} emails.`,
-      currentPage: parseInt(page),
-      totalEmails: messages.length,
+      message: "Fetched and saved emails from Inbox, Drafts, Archive, and Sent folders.",
     });
-
   } catch (error) {
-    console.error("Error fetching inbox emails:", error);
+    console.error("Error fetching emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
