@@ -16,7 +16,7 @@ router.get("/get-templates", emailController.getTemplates);
 router.get("/template/:templateID", emailController.getTemplateById)
 router.get("/unread-counts", emailController.getUnreadCounts);
 router.post("/add-credential", verifyToken,emailController.addUserCredential);
-router.get("/get-credential", emailController.getUserCredential);
+router.get("/get-credential", verifyToken,emailController.getUserCredential);
 
 
 
