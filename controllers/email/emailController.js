@@ -201,29 +201,31 @@ exports.fetchInboxEmails = async (req, res) => {
         };
 
         // Save email to the database
-        const existingEmail = await Email.findOne({
+        const existingEmail=await Email.findOne({
           where: { messageId: emailData.messageId },
-        });
-        
+        })
+
         let savedEmail;
         if (!existingEmail) {
           savedEmail = await Email.create(emailData);
-          console.log(`Email saved: ${emailData.messageId}`);
+          console.log(`Recent email saved: ${emailData.messageId}`);
         } else {
-          console.log(`Email already exists: ${emailData.messageId}`);
+          console.log(`Recent email already exists: ${emailData.messageId}`);
           savedEmail = existingEmail;
         }
-        
-        // Save attachments
-        if (savedEmail && parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-          const savedAttachments = await saveAttachments(
-            parsedEmail.attachments,
-            savedEmail.emailID // Pass the emailID of the saved email
-          );
-          console.log(
-            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-          );
-        }
+    
+            // Save attachments
+            const attachments = [];
+            if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+              const savedAttachments = await saveAttachments(
+                parsedEmail.attachments,
+                savedEmail.emailID
+              );
+              attachments.push(...savedAttachments);
+              console.log(
+                `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+              );
+            }
       }
     };
 
