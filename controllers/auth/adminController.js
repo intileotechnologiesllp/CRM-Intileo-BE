@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 const PROGRAMS = require("../../utils/programConstants");
+const { google } = require("googleapis");
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
@@ -402,7 +403,7 @@ exports.logout = async (req, res) => {
 };
 
 exports.getLoginHistory = async (req, res) => {
-  const { userId } = req.query; // Get userId from query parameters
+  const { userId } = req.params; // Get userId from query parameters
 
   try {
     // Fetch login history for the specified user or all users
@@ -448,3 +449,6 @@ exports.getRecentLoginHistory = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
+

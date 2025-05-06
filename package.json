@@ -18,6 +18,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
+    "googleapis": "^148.0.0",
     "html-to-text": "^9.0.5",
     "imap-simple": "^5.1.0",
     "joi": "^17.13.3",

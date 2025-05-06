@@ -70,6 +70,10 @@ const Email = sequelize.define("Email", {
     type: DataTypes.TEXT,
     allowNull: true, // Allow NULL values
   },
+  masterUserID:{
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  }
   
 });
 

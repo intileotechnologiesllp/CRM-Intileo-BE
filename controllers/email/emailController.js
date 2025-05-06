@@ -10,6 +10,8 @@ const { saveAttachments } = require("../../services/attachmentService");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const UserCredential = require("../../models/email/userCredentialModel");
+const { log } = require("console");
 
 // Ensure the upload directory exists
 const uploadDir = path.join(__dirname, "../../uploads/attachments");
@@ -74,11 +76,41 @@ const formatDateForIMAP = (date) => {
 };
 
 // Fetch emails from the inbox in batches
-exports.fetchInboxEmails = async (req, res) => {
+exports.fetchInboxEmails = async (req,res) => {
   const { batchSize = 50, page = 1 } = req.query;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  // const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
+
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      console.error("User credentials not found for masterUserID:", masterUserID);
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
+
     console.log("Connecting to IMAP server...");
+    const imapConfig = {
+      imap: {
+        user: userEmail, // Use the email from the database
+        password: userPassword, // Use the app password from the database
+        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+        port: 993, // IMAP port
+        tls: true, // Use TLS
+        authTimeout: 30000,
+        tlsOptions: {
+          rejectUnauthorized: false, // Allow self-signed certificates
+        },
+      },
+    };
+
     const connection = await Imap.connect(imapConfig);
 
     console.log("Opening INBOX...");
@@ -128,8 +160,16 @@ exports.fetchInboxEmails = async (req, res) => {
         messageId: parsedEmail.messageId || null,
         sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
         senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
-        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        recipient: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.address).join(", ")
+          : null,
+        cc: parsedEmail.cc
+          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+          : null,
+        bcc: parsedEmail.bcc
+          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+          : null,
+          masterUserID: masterUserID,
         subject: parsedEmail.subject || null,
         body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "inbox",
@@ -153,15 +193,28 @@ exports.fetchInboxEmails = async (req, res) => {
       }
 
       // Save attachments using saveAttachments function
-      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        const savedAttachments = await saveAttachments(
-          parsedEmail.attachments,
-          savedEmail.emailID
-        );
-        console.log(
-          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-        );
-      }
+      // if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+      //   const savedAttachments = await saveAttachments(
+      //     parsedEmail.attachments,
+      //     savedEmail.emailID,
+      //     masterUserID
+      //   );
+      //   console.log(
+      //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+      //   );
+      // }
+              // Save attachments
+              const attachments = [];
+              if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+                const savedAttachments = await saveAttachments(
+                  parsedEmail.attachments,
+                  savedEmail.emailID
+                );
+                attachments.push(...savedAttachments);
+                console.log(
+                  `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+                );
+              }
     }
 
     connection.end();
@@ -172,6 +225,7 @@ exports.fetchInboxEmails = async (req, res) => {
       currentPage: parseInt(page),
       totalEmails: messages.length,
     });
+
   } catch (error) {
     console.error("Error fetching inbox emails:", error);
     res.status(500).json({ message: "Internal server error." });
@@ -179,9 +233,38 @@ exports.fetchInboxEmails = async (req, res) => {
 };
 
 // Fetch and store the most recent email
-exports.fetchRecentEmail = async (req, res) => {
+exports.fetchRecentEmail = async (adminId) => {
   try {
+    // Fetch the user's email and app password from the UserCredential model
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID: adminId },
+    });
+
+    if (!userCredential) {
+      console.error("User credentials not found for adminId:", adminId);
+      return { message: "User credentials not found." };
+    }
+
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
+    console.log(userPassword);
+    console.log(userEmail);
+
     console.log("Connecting to IMAP server...");
+    const imapConfig = {
+      imap: {
+        user: userEmail, // Use the email from the database
+        password: userPassword, // Use the app password from the database
+        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+        port: 993, // IMAP port
+        tls: true, // Use TLS
+        authTimeout: 30000,
+        tlsOptions: {
+          rejectUnauthorized: false, // Allow self-signed certificates
+        },
+      },
+    };
+
     const connection = await Imap.connect(imapConfig);
 
     console.log("Opening INBOX...");
@@ -205,7 +288,7 @@ exports.fetchRecentEmail = async (req, res) => {
 
     if (messages.length === 0) {
       console.log("No emails found.");
-      return res.status(200).json({ message: "No emails found." });
+      return { message: "No emails found." };
     }
 
     // Get the most recent email
@@ -215,9 +298,7 @@ exports.fetchRecentEmail = async (req, res) => {
 
     if (!rawBody) {
       console.log("No body found for the most recent email.");
-      return res
-        .status(200)
-        .json({ message: "No body found for the most recent email." });
+      return { message: "No body found for the most recent email." };
     }
 
     // Parse the raw email body using simpleParser
@@ -238,6 +319,7 @@ exports.fetchRecentEmail = async (req, res) => {
       bcc: parsedEmail.bcc
         ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
         : null,
+      masterUserID: adminId,
       subject: parsedEmail.subject || null,
       body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
       folder: "inbox",
@@ -258,32 +340,31 @@ exports.fetchRecentEmail = async (req, res) => {
       savedEmail = existingEmail;
     }
 
-    // Save attachments
-    const attachments = [];
-    if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      const savedAttachments = await saveAttachments(
-        parsedEmail.attachments,
-        savedEmail.emailID
-      );
-      attachments.push(...savedAttachments);
-      console.log(
-        `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-      );
-    }
-
-    // Fetch related emails in the same thread
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: emailData.inReplyTo }, // Parent email
-          { inReplyTo: emailData.messageId }, // Replies to this email
-          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
-        ],
-      },
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
-
-    // Save related emails in the database
+        // Save attachments
+        const attachments = [];
+        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+          const savedAttachments = await saveAttachments(
+            parsedEmail.attachments,
+            savedEmail.emailID
+          );
+          attachments.push(...savedAttachments);
+          console.log(
+            `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+          );
+        }
+    
+        // Fetch related emails in the same thread
+        const relatedEmails = await Email.findAll({
+          where: {
+            [Sequelize.Op.or]: [
+              { messageId: emailData.inReplyTo }, // Parent email
+              { inReplyTo: emailData.messageId }, // Replies to this email
+              { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+            ],
+          },
+          order: [["createdAt", "ASC"]], // Sort by date
+        });
+            // Save related emails in the database
     for (const relatedEmail of relatedEmails) {
       const existingRelatedEmail = await Email.findOne({
         where: { messageId: relatedEmail.messageId },
@@ -300,15 +381,13 @@ exports.fetchRecentEmail = async (req, res) => {
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
-    res.status(200).json({
+    return {
       message: "Fetched and saved the most recent email.",
       email: emailData,
-      attachments, // Include attachments in the response
-      relatedEmails, // Include related emails in the response
-    });
+    };
   } catch (error) {
     console.error("Error fetching recent email:", error);
-    res.status(500).json({ message: "Internal server error." });
+    return { message: "Internal server error.", error: error.message };
   }
 };
 
@@ -517,10 +596,13 @@ exports.fetchArchiveEmails = async (req, res) => {
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
   const { page = 1, pageSize = 20, folder, search, isRead } = req.query;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
 
   try {
-    // Build the query filters dynamically
-    const filters = {};
+    const filters = {
+      masterUserID, // Filter emails by the specific user
+    };
 
     // Filter by folder (e.g., inbox, drafts, archive)
     if (folder) {
@@ -946,6 +1028,49 @@ exports.createTemplate = async (req, res) => {
   }
 };
 
+(exports.getTemplates = async (req, res) => {
+  try {
+    console.log("error..................///");
+
+    const templates = await Template.findAll();
+    res.status(200).json({
+      message: "Templates fetched successfully.",
+      templates,
+    });
+  } catch (error) {
+    console.error("Error fetching templates:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch templates.", error: error.message });
+  }
+}),
+  (exports.createTemplate = async (req, res) => {
+    const { name, subject, body, placeholders } = req.body;
+
+    try {
+      // Save the template in the database
+      const templateData = {
+        name,
+        subject,
+        body,
+        placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
+      };
+
+      const savedTemplate = await Template.create(templateData);
+      console.log("Template created successfully:", savedTemplate);
+
+      res.status(200).json({
+        message: "Template created successfully.",
+        template: savedTemplate,
+      });
+    } catch (error) {
+      console.error("Error creating template:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to create template.", error: error.message });
+    }
+  });
+
 exports.getTemplates = async (req, res) => {
   try {
     console.log("error..................///");
@@ -1021,6 +1146,76 @@ exports.getUnreadCounts = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching unread counts:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.addUserCredential = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const email = req.email; // Get email from req.user
+  const appPassword = req.body.appPassword; // Get appPassword from the request body
+
+  try {
+    // Validate input
+    if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (existingCredential) {
+      // Update existing credentials
+      await existingCredential.update({ email, appPassword });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+
+  
+      return res.status(200).json({
+        message: "User credentials updated successfully and emails fetched.",
+      });
+    }
+
+    // Create new credentials
+    const newCredential = await UserCredential.create({
+      masterUserID,
+      email,
+      appPassword,
+    });
+
+    res.status(201).json({
+      message: "User credentials added successfully.",
+      credential: newCredential,
+    });
+  } catch (error) {
+    console.error("Error adding user credentials:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.getUserCredential = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
+
+  try {
+    // Fetch the user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    res.status(200).json({
+      message: "User credentials fetched successfully.",
+      credential: {
+        email: userCredential.email,
+        appPassword: userCredential.appPassword, // You may want to exclude this in production for security reasons
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching user credentials:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
