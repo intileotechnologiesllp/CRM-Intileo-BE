@@ -32,6 +32,10 @@ const Attachment = sequelize.define("Attachment", {
     type: DataTypes.STRING, // Path to the file in the storage system
     allowNull: true,
   },
+  masterUserID:{
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  }
 });
 
 module.exports = Attachment;

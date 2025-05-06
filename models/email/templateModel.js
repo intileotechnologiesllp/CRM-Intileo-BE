@@ -23,6 +23,10 @@ const Template = sequelize.define("Template", {
     type: DataTypes.JSON, // Store placeholders as a JSON array
     allowNull: true,
   },
+  masterUserID:{
+    type: DataTypes.INTEGER,
+    allowNull: false, // Assuming this is required for user association
+  }
 });
 
 module.exports = Template;
