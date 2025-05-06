@@ -3,7 +3,7 @@ const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
 // Fetch inbox emails
-router.get("/fetch-inbox", verifyToken,emailController.fetchInboxEmails);
+router.post("/fetch-inbox", verifyToken,emailController.fetchInboxEmails);
 router.get("/fetch-recent-email",verifyToken,emailController.fetchRecentEmail);
 router.get("/fetch-drafts", emailController.fetchDraftEmails);
 router.get("/fetch-archive", emailController.fetchArchiveEmails);
