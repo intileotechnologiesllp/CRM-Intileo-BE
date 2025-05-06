@@ -10,7 +10,6 @@ const jwt = require("jsonwebtoken");
 const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 const PROGRAMS = require("../../utils/programConstants");
-const { google } = require("googleapis");
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
