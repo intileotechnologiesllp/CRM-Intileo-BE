@@ -415,7 +415,7 @@ exports.fetchRecentEmail = async (adminId) => {
         console.log(`Related email already exists: ${relatedEmail.messageId}`);
       }
     }
-     // Sae related emails in the database
+    // Sae related emails in the database
     for (const relatedEmail of relatedEmails) {
       const existingRelatedEmail = await Email.findOne({
         where: { messageId: relatedEmail.messageId },
@@ -646,7 +646,15 @@ exports.fetchArchiveEmails = async (req, res) => {
 
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const { page = 1, pageSize = 80, folder, search, isRead } = req.query;
+  const {
+    page = 1,
+    pageSize = 100,
+    folder,
+    search,
+    isRead,
+    toMe,
+    hasAttachments,
+  } = req.query; // Add `hasAttachments` to query parameters
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
@@ -662,6 +670,38 @@ exports.getEmails = async (req, res) => {
     // Filter by read/unread status
     if (isRead !== undefined) {
       filters.isRead = isRead === "true"; // Convert string to boolean
+    }
+
+    // Add `to:me` filter
+    if (toMe === "true") {
+      // Fetch the user's email address from the UserCredential model
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+
+      if (!userCredential) {
+        return res.status(404).json({ message: "User credentials not found." });
+      }
+
+      const userEmail = userCredential.email;
+      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` }; // Filter emails where the recipient contains the user's email
+    }
+
+    // Add `hasAttachments` filter
+    let includeAttachments = [
+      {
+        model: Attachment,
+        as: "attachments", // Alias defined in the relationship
+      },
+    ];
+    if (hasAttachments === "true") {
+      includeAttachments = [
+        {
+          model: Attachment,
+          as: "attachments",
+          required: true, // Only include emails that have attachments
+        },
+      ];
     }
 
     // Search by subject, sender, or recipient
@@ -680,12 +720,7 @@ exports.getEmails = async (req, res) => {
     // Fetch emails from the database
     const { count, rows: emails } = await Email.findAndCountAll({
       where: filters,
-      include: [
-        {
-          model: Attachment,
-          as: "attachments", // Alias defined in the relationship
-        },
-      ],
+      include: includeAttachments,
       offset,
       limit,
       order: [["createdAt", "DESC"]], // Sort by most recent emails
@@ -703,6 +738,7 @@ exports.getEmails = async (req, res) => {
         attachments,
       };
     });
+
     // Calculate unviewCount for the specified folder or all folders
     const unviewCount = await Email.count({
       where: {
@@ -729,7 +765,6 @@ exports.getEmails = async (req, res) => {
       totalEmails: count,
       unviewCount, // Include the unviewCount field
       threads: Object.values(threads), // Return grouped threads
-      // threads: emailsWithAttachments,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
@@ -1208,7 +1243,7 @@ exports.getTemplateById = async (req, res) => {
   }
 };
 exports.getUnreadCounts = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
     // Define all possible folders
@@ -1315,6 +1350,29 @@ exports.getUserCredential = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching user credentials:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+exports.deleteEmail = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+    const { emailId } = req.params; // Get the email ID from the request parameters
+
+    const email = await Email.findOne({
+      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
+    });
+    if (!email) {
+      return res.status(404).json({ message: "Email not found." });
+    } else {
+      // Delete the email from the database
+      await email.destroy();
+      console.log(`Email deleted: ${email.messageId}`);
+      res.status(200).json({
+        message: "Email deleted successfully.",
+      });
+    }
+  } catch (error) {
+    console.error("Error deleting email:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
