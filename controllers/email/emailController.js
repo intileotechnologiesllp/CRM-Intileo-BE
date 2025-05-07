@@ -619,7 +619,7 @@ exports.fetchArchiveEmails = async (req, res) => {
 
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const { page = 1, pageSize = 20, folder, search, isRead } = req.query;
+  const { page = 1, pageSize = 80, folder, search, isRead } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
