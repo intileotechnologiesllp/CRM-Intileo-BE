@@ -10,7 +10,6 @@ const Email = sequelize.define("Email", {
   },
   messageId: {
     type: DataTypes.STRING,
-    unique: true, // Ensure no duplicate emails
     allowNull: false,
   },
   inReplyTo: {
@@ -75,8 +74,16 @@ const Email = sequelize.define("Email", {
     allowNull: false,
   }
   
-});
+},
+{
+  indexes: [
+    {
 
+      fields: ["messageId", "folder"], // Composite unique index
+    },
+  ],
+
+});
 
 Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
 Attachment.belongsTo(Email, { foreignKey: "emailID" });

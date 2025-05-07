@@ -271,8 +271,6 @@ exports.fetchRecentEmail = async (adminId) => {
 
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
-    console.log(userPassword);
-    console.log(userEmail);
 
     console.log("Connecting to IMAP server...");
     const imapConfig = {
@@ -346,13 +344,13 @@ exports.fetchRecentEmail = async (adminId) => {
       masterUserID: adminId,
       subject: parsedEmail.subject || null,
       body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-      folder: "inbox",
+      folder: "inbox", // Add folder field
       createdAt: parsedEmail.date || new Date(),
     };
 
     console.log(`Processing recent email: ${emailData.messageId}`);
     const existingEmail = await Email.findOne({
-      where: { messageId: emailData.messageId },
+      where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
     });
 
     let savedEmail;
@@ -360,7 +358,9 @@ exports.fetchRecentEmail = async (adminId) => {
       savedEmail = await Email.create(emailData);
       console.log(`Recent email saved: ${emailData.messageId}`);
     } else {
-      console.log(`Recent email already exists: ${emailData.messageId}`);
+      console.log(
+        `Recent email already exists in folder ${emailData.folder}: ${emailData.messageId}`
+      );
       savedEmail = existingEmail;
     }
 
@@ -402,12 +402,39 @@ exports.fetchRecentEmail = async (adminId) => {
       }
     }
 
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
+
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
+     // Sae related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
+
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
     return {
       message: "Fetched and saved the most recent email.",
       email: emailData,
+      relatedEmails,
     };
   } catch (error) {
     console.error("Error fetching recent email:", error);
@@ -711,9 +738,7 @@ exports.getEmails = async (req, res) => {
 };
 
 // Fetch and store emails from the Sent folder using batching
-exports.fetchSentEmails = async (adminId,batchSize=50,page=1) => {
-
-
+exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
   try {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID: adminId },
@@ -819,7 +844,7 @@ exports.fetchSentEmails = async (adminId,batchSize=50,page=1) => {
       sentEmails.push(emailData);
 
       const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId },
+        where: { messageId: emailData.messageId, folder: emailData.folder },
       });
 
       let savedEmail;
@@ -994,13 +1019,14 @@ exports.composeEmail = [
       //   filename: file.originalname,
       //   path: file.path, // Use the file path from Multer
       // }));
-            // Prepare attachments for nodemailer
-            const formattedAttachments = req.files && req.files.length > 0
-            ? req.files.map((file) => ({
-                filename: file.originalname,
-                path: file.path, // Use the file path from Multer
-              }))
-            : [];
+      // Prepare attachments for nodemailer
+      const formattedAttachments =
+        req.files && req.files.length > 0
+          ? req.files.map((file) => ({
+              filename: file.originalname,
+              path: file.path, // Use the file path from Multer
+            }))
+          : [];
 
       // Create a transporter using the user's email credentials
       const transporter = nodemailer.createTransport({
@@ -1021,7 +1047,8 @@ exports.composeEmail = [
         text: finalBody, // Final body after placeholder replacement
         html: finalBody, // HTML body (optional)
         // attachments: formattedAttachments, // Attachments with file paths
-        attachments: formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
+        attachments:
+          formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
       };
 
       // Send the email
@@ -1065,26 +1092,27 @@ exports.composeEmail = [
       //   filename: attachment.filename,
       //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
       // }));
-      const savedAttachments = req.files && req.files.length > 0
-  ? req.files.map((file) => ({
-      emailID: savedEmail.emailID,
-      filename: file.originalname,
-      path: file.path,
-    }))
-  : [];
+      const savedAttachments =
+        req.files && req.files.length > 0
+          ? req.files.map((file) => ({
+              emailID: savedEmail.emailID,
+              filename: file.originalname,
+              path: file.path,
+            }))
+          : [];
 
-if (savedAttachments.length > 0) {
-  await Attachment.bulkCreate(savedAttachments);
-  console.log(
-    `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-  );
-}
+      if (savedAttachments.length > 0) {
+        await Attachment.bulkCreate(savedAttachments);
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
+      }
 
-// Generate public URLs for attachments
-const attachmentLinks = savedAttachments.map((attachment) => ({
-  filename: attachment.filename,
-  link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
-}));
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      }));
 
       res.status(200).json({
         message: "Email sent and saved successfully.",
