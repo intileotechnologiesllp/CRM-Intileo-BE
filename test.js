@@ -76,22 +76,53 @@ const formatDateForIMAP = (date) => {
 };
 
 // Fetch emails from the inbox in batches
-exports.fetchInboxEmails = async (req,res) => {
-  const { batchSize = 50, page = 1 } = req.query;
+exports.fetchInboxEmails = async (req, res) => {
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  // const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const email = req.email; // Get email from the request body
+  const appPassword = req.body.appPassword;
 
   try {
+    // Validate input
+    if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
 
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (existingCredential) {
+      // Update existing credentials
+      await existingCredential.update({ email, appPassword });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    } else {
+      // Create new credentials
+      await UserCredential.create({
+        masterUserID,
+        email,
+        appPassword,
+      });
+      console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    }
+
+    // Fetch emails after saving credentials
+    console.log("Fetching emails for masterUserID:", masterUserID);
+    // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
 
     if (!userCredential) {
-      console.error("User credentials not found for masterUserID:", masterUserID);
+      console.error(
+        "User credentials not found for masterUserID:",
+        masterUserID
+      );
       return res.status(404).json({ message: "User credentials not found." });
     }
+    console.log(userCredential.email, "email");
+    console.log(userCredential.appPassword, "appPassword");
 
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
@@ -99,135 +130,128 @@ exports.fetchInboxEmails = async (req,res) => {
     console.log("Connecting to IMAP server...");
     const imapConfig = {
       imap: {
-        user: userEmail, // Use the email from the database
-        password: userPassword, // Use the app password from the database
-        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-        port: 993, // IMAP port
-        tls: true, // Use TLS
+        user: userEmail,
+        password: userPassword,
+        host: "imap.gmail.com",
+        port: 993,
+        tls: true,
         authTimeout: 30000,
         tlsOptions: {
-          rejectUnauthorized: false, // Allow self-signed certificates
+          rejectUnauthorized: false,
         },
       },
     };
 
     const connection = await Imap.connect(imapConfig);
 
-    console.log("Opening INBOX...");
-    await connection.openBox("INBOX");
+    // Helper function to fetch emails from a specific folder
+    const fetchEmailsFromFolder = async (folderName, folderType) => {
+      console.log(`Opening ${folderType} folder...`);
+      await connection.openBox(folderName);
 
-    console.log("Fetching emails from the last 7 days...");
-    const sinceDate = formatDateForIMAP(
-      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    );
-    console.log(`Using SINCE date: ${sinceDate}`);
+      console.log(`Fetching emails from ${folderType} folder...`);
+      const sinceDate = formatDateForIMAP(
+        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      );
+      console.log(`Using SINCE date: ${sinceDate}`);
 
-    const searchCriteria = [["SINCE", sinceDate]];
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    console.log(`Total emails found: ${messages.length}`);
-
-    // Pagination logic
-    const startIndex = (page - 1) * batchSize;
-    const endIndex = startIndex + parseInt(batchSize);
-    const batchMessages = messages.slice(startIndex, endIndex);
-
-    if (batchMessages.length === 0) {
-      console.log("No more emails to fetch.");
-      return res.status(200).json({ message: "No more emails to fetch." });
-    }
-
-    const inboxEmails = [];
-
-    for (const message of batchMessages) {
-      const rawBodyPart = message.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      if (!rawBody) {
-        console.log("No body found for this email.");
-        continue;
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to
-          ? parsedEmail.to.value.map((to) => to.address).join(", ")
-          : null,
-        cc: parsedEmail.cc
-          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-          : null,
-        bcc: parsedEmail.bcc
-          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-          : null,
-          masterUserID: masterUserID,
-        subject: parsedEmail.subject || null,
-        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-        folder: "inbox",
-        createdAt: parsedEmail.date || new Date(),
+      const searchCriteria = [["SINCE", sinceDate]];
+      const fetchOptions = {
+        bodies: "",
+        struct: true,
       };
 
-      console.log(`Processing email: ${emailData.messageId}`);
-      inboxEmails.push(emailData);
+      const messages = await connection.search(searchCriteria, fetchOptions);
 
-      const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId },
-      });
+      console.log(`Total emails found in ${folderType}: ${messages.length}`);
 
-      let savedEmail;
-      if (!existingEmail) {
-        savedEmail = await Email.create(emailData);
-        console.log(`Email saved: ${emailData.messageId}`);
-      } else {
-        console.log(`Email already exists: ${emailData.messageId}`);
-        savedEmail = existingEmail;
+      // Pagination logic
+      const startIndex = (page - 1) * batchSize;
+      const endIndex = startIndex + parseInt(batchSize);
+      const batchMessages = messages.slice(startIndex, endIndex);
+
+      for (const message of batchMessages) {
+        const rawBodyPart = message.parts.find((part) => part.which === "");
+        const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+        if (!rawBody) {
+          console.log(`No body found for email in ${folderType}.`);
+          continue;
+        }
+
+        const parsedEmail = await simpleParser(rawBody);
+
+        const emailData = {
+          messageId: parsedEmail.messageId || null,
+          sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+          senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+          recipient: parsedEmail.to
+            ? parsedEmail.to.value.map((to) => to.address).join(", ")
+            : null,
+          cc: parsedEmail.cc
+            ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+            : null,
+          bcc: parsedEmail.bcc
+            ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+            : null,
+          masterUserID: masterUserID,
+          subject: parsedEmail.subject || null,
+          body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+          folder: folderType, // Dynamically set the folder type
+          createdAt: parsedEmail.date || new Date(),
+        };
+
+        // Save email to the database
+        const existingEmail = await Email.findOne({
+          where: { messageId: emailData.messageId },
+        });
+
+        let savedEmail;
+        if (!existingEmail) {
+          savedEmail = await Email.create(emailData);
+          console.log(`Recent email saved: ${emailData.messageId}`);
+        } else {
+          console.log(`Recent email already exists: ${emailData.messageId}`);
+          savedEmail = existingEmail;
+        }
+
+        // Save attachments
+        const attachments = [];
+        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+          const savedAttachments = await saveAttachments(
+            parsedEmail.attachments,
+            savedEmail.emailID
+          );
+          attachments.push(...savedAttachments);
+          console.log(
+            `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+          );
+        }
       }
+    };
 
-      // Save attachments using saveAttachments function
-      // if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      //   const savedAttachments = await saveAttachments(
-      //     parsedEmail.attachments,
-      //     savedEmail.emailID,
-      //     masterUserID
-      //   );
-      //   console.log(
-      //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-      //   );
-      // }
-              // Save attachments
-              const attachments = [];
-              if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-                const savedAttachments = await saveAttachments(
-                  parsedEmail.attachments,
-                  savedEmail.emailID
-                );
-                attachments.push(...savedAttachments);
-                console.log(
-                  `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-                );
-              }
-    }
+    // Fetch emails from Inbox, Drafts, Archive, and Sent folders
+    console.log("Fetching emails from Inbox...");
+    await fetchEmailsFromFolder("INBOX", "inbox");
+
+    console.log("Fetching emails from Drafts...");
+    await fetchEmailsFromFolder("[Gmail]/Drafts", "drafts");
+
+    console.log("Fetching emails from Archive...");
+    await fetchEmailsFromFolder("[Gmail]/All Mail", "archive");
+
+    console.log("Fetching emails from Sent...");
+    await fetchEmailsFromFolder("[Gmail]/Sent Mail", "sent");
 
     connection.end();
     console.log("IMAP connection closed.");
 
     res.status(200).json({
-      message: `Fetched and saved ${inboxEmails.length} emails.`,
-      currentPage: parseInt(page),
-      totalEmails: messages.length,
+      message:
+        "Fetched and saved emails from Inbox, Drafts, Archive, and Sent folders.",
     });
-
   } catch (error) {
-    console.error("Error fetching inbox emails:", error);
+    console.error("Error fetching emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -340,31 +364,31 @@ exports.fetchRecentEmail = async (adminId) => {
       savedEmail = existingEmail;
     }
 
-        // Save attachments
-        const attachments = [];
-        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-          const savedAttachments = await saveAttachments(
-            parsedEmail.attachments,
-            savedEmail.emailID
-          );
-          attachments.push(...savedAttachments);
-          console.log(
-            `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-          );
-        }
-    
-        // Fetch related emails in the same thread
-        const relatedEmails = await Email.findAll({
-          where: {
-            [Sequelize.Op.or]: [
-              { messageId: emailData.inReplyTo }, // Parent email
-              { inReplyTo: emailData.messageId }, // Replies to this email
-              { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
-            ],
-          },
-          order: [["createdAt", "ASC"]], // Sort by date
-        });
-            // Save related emails in the database
+    // Save attachments
+    const attachments = [];
+    if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+      const savedAttachments = await saveAttachments(
+        parsedEmail.attachments,
+        savedEmail.emailID
+      );
+      attachments.push(...savedAttachments);
+      console.log(
+        `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+      );
+    }
+
+    // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
+    // Save related emails in the database
     for (const relatedEmail of relatedEmails) {
       const existingRelatedEmail = await Email.findOne({
         where: { messageId: relatedEmail.messageId },
@@ -595,9 +619,8 @@ exports.fetchArchiveEmails = async (req, res) => {
 
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const { page = 1, pageSize = 20, folder, search, isRead } = req.query;
+  const { page = 1, pageSize = 80, folder, search, isRead } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
 
   try {
     const filters = {
@@ -688,10 +711,38 @@ exports.getEmails = async (req, res) => {
 };
 
 // Fetch and store emails from the Sent folder using batching
-exports.fetchSentEmails = async (req, res) => {
-  const { batchSize = 50, page = 1 } = req.query;
+exports.fetchSentEmails = async (adminId,batchSize=50,page=1) => {
+
 
   try {
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID: adminId },
+    });
+
+    if (!userCredential) {
+      console.error("User credentials not found for adminId:", adminId);
+      return { message: "User credentials not found." };
+    }
+
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
+    console.log(userPassword);
+    console.log(userEmail);
+
+    console.log("Connecting to IMAP server...");
+    const imapConfig = {
+      imap: {
+        user: userEmail, // Use the email from the database
+        password: userPassword, // Use the app password from the database
+        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+        port: 993, // IMAP port
+        tls: true, // Use TLS
+        authTimeout: 30000,
+        tlsOptions: {
+          rejectUnauthorized: false, // Allow self-signed certificates
+        },
+      },
+    };
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
 
@@ -761,6 +812,7 @@ exports.fetchSentEmails = async (req, res) => {
         body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "sent",
         createdAt: parsedEmail.date || new Date(),
+        masterUserID: adminId,
       };
 
       console.log(`Processing sent email: ${emailData.messageId}`);
@@ -794,14 +846,17 @@ exports.fetchSentEmails = async (req, res) => {
     connection.end();
     console.log("IMAP connection closed.");
 
-    res.status(200).json({
+    // res.status(200).json({
+    //   message: `Fetched and saved ${sentEmails.length} sent emails.`,
+    //   currentPage: parseInt(page),
+    //   totalSent: messages.length,
+    // });
+    return {
       message: `Fetched and saved ${sentEmails.length} sent emails.`,
-      currentPage: parseInt(page),
-      totalSent: messages.length,
-    });
+    };
   } catch (error) {
     console.error("Error fetching sent emails:", error);
-    res.status(500).json({ message: "Internal server error." });
+    // res.status(500).json({ message: "Internal server error." });
   }
 };
 
@@ -891,8 +946,23 @@ exports.composeEmail = [
   async (req, res) => {
     const { to, cc, bcc, subject, text, html, templateID, placeholders } =
       req.body;
+    const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
+      // Fetch the user's credentials from the UserCredential database
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+
+      if (!userCredential) {
+        return res
+          .status(404)
+          .json({ message: "User credentials not found for the given user." });
+      }
+
+      const SENDER_EMAIL = userCredential.email;
+      const SENDER_PASSWORD = userCredential.appPassword;
+
       let finalSubject = subject;
       let finalBody = text || html;
 
@@ -919,31 +989,39 @@ exports.composeEmail = [
         }
       }
 
-      // Prepare attachments for nodemailer
-      const formattedAttachments = req.files.map((file) => ({
-        filename: file.originalname,
-        path: file.path, // Use the file path from Multer
-      }));
+      // // Prepare attachments for nodemailer
+      // const formattedAttachments = req.files.map((file) => ({
+      //   filename: file.originalname,
+      //   path: file.path, // Use the file path from Multer
+      // }));
+            // Prepare attachments for nodemailer
+            const formattedAttachments = req.files && req.files.length > 0
+            ? req.files.map((file) => ({
+                filename: file.originalname,
+                path: file.path, // Use the file path from Multer
+              }))
+            : [];
 
-      // Create a transporter using your email credentials
+      // Create a transporter using the user's email credentials
       const transporter = nodemailer.createTransport({
         service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
         auth: {
-          user: process.env.SENDER_EMAIL, // Your email address
-          pass: process.env.SENDER_PASSWORD, // Your email password or app password
+          user: SENDER_EMAIL, // Fetch from UserCredential
+          pass: SENDER_PASSWORD, // Fetch from UserCredential
         },
       });
 
       // Define the email options
       const mailOptions = {
-        from: process.env.SENDER_EMAIL, // Sender's email address
+        from: SENDER_EMAIL, // Sender's email address
         to, // Recipient's email address
         cc, // CC recipients
         bcc, // BCC recipients
         subject: finalSubject, // Final subject after placeholder replacement
         text: finalBody, // Final body after placeholder replacement
         html: finalBody, // HTML body (optional)
-        attachments: formattedAttachments, // Attachments with file paths
+        // attachments: formattedAttachments, // Attachments with file paths
+        attachments: formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
       };
 
       // Send the email
@@ -954,8 +1032,8 @@ exports.composeEmail = [
       // Save the email in the database
       const emailData = {
         messageId: info.messageId,
-        sender: process.env.SENDER_EMAIL,
-        senderName: process.env.SENDER_NAME, // Replace with the sender's name if available
+        sender: SENDER_EMAIL,
+        senderName: null, // Replace with the sender's name if available
         recipient: to,
         cc, // Save CC recipients
         bcc, // Save BCC recipients
@@ -964,28 +1042,49 @@ exports.composeEmail = [
         body: finalBody,
         folder: "sent", // Mark as sent
         createdAt: new Date(),
+        masterUserID, // Associate the email with the user
       };
 
       const savedEmail = await Email.create(emailData);
       console.log("Composed email saved in the database:", savedEmail);
 
-      // Save attachments in the database
-      const savedAttachments = req.files.map((file) => ({
-        emailID: savedEmail.emailID,
-        filename: file.originalname,
-        path: file.path,
-      }));
+      // // Save attachments in the database
+      // const savedAttachments = req.files.map((file) => ({
+      //   emailID: savedEmail.emailID,
+      //   filename: file.originalname,
+      //   path: file.path,
+      // }));
 
-      await Attachment.bulkCreate(savedAttachments);
-      console.log(
-        `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-      );
+      // await Attachment.bulkCreate(savedAttachments);
+      // console.log(
+      //   `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+      // );
 
-      // Generate public URLs for attachments
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
-      }));
+      // // Generate public URLs for attachments
+      // const attachmentLinks = savedAttachments.map((attachment) => ({
+      //   filename: attachment.filename,
+      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      // }));
+      const savedAttachments = req.files && req.files.length > 0
+  ? req.files.map((file) => ({
+      emailID: savedEmail.emailID,
+      filename: file.originalname,
+      path: file.path,
+    }))
+  : [];
+
+if (savedAttachments.length > 0) {
+  await Attachment.bulkCreate(savedAttachments);
+  console.log(
+    `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+  );
+}
+
+// Generate public URLs for attachments
+const attachmentLinks = savedAttachments.map((attachment) => ({
+  filename: attachment.filename,
+  link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+}));
 
       res.status(200).json({
         message: "Email sent and saved successfully.",
@@ -1002,7 +1101,8 @@ exports.composeEmail = [
 ];
 
 exports.createTemplate = async (req, res) => {
-  const { name, subject, body, placeholders } = req.body;
+  const { name, subject, body, placeholders, isShared } = req.body;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
   try {
     // Save the template in the database
@@ -1010,7 +1110,9 @@ exports.createTemplate = async (req, res) => {
       name,
       subject,
       body,
-      placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
+      placeholders,
+      isShared: isShared || false, // Default to false if not provided
+      masterUserID, // Associate the template with the user
     };
 
     const savedTemplate = await Template.create(templateData);
@@ -1028,54 +1130,15 @@ exports.createTemplate = async (req, res) => {
   }
 };
 
-(exports.getTemplates = async (req, res) => {
-  try {
-    console.log("error..................///");
-
-    const templates = await Template.findAll();
-    res.status(200).json({
-      message: "Templates fetched successfully.",
-      templates,
-    });
-  } catch (error) {
-    console.error("Error fetching templates:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch templates.", error: error.message });
-  }
-}),
-  (exports.createTemplate = async (req, res) => {
-    const { name, subject, body, placeholders } = req.body;
-
-    try {
-      // Save the template in the database
-      const templateData = {
-        name,
-        subject,
-        body,
-        placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
-      };
-
-      const savedTemplate = await Template.create(templateData);
-      console.log("Template created successfully:", savedTemplate);
-
-      res.status(200).json({
-        message: "Template created successfully.",
-        template: savedTemplate,
-      });
-    } catch (error) {
-      console.error("Error creating template:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to create template.", error: error.message });
-    }
-  });
-
 exports.getTemplates = async (req, res) => {
-  try {
-    console.log("error..................///");
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
-    const templates = await Template.findAll();
+  try {
+    // Fetch templates for the specific user
+    const templates = await Template.findAll({
+      where: { masterUserID }, // Filter by masterUserID
+    });
+
     res.status(200).json({
       message: "Templates fetched successfully.",
       templates,
@@ -1090,10 +1153,15 @@ exports.getTemplates = async (req, res) => {
 
 exports.getTemplateById = async (req, res) => {
   const { templateID } = req.params;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
   try {
+    // Fetch the template for the specific user and templateID
     const template = await Template.findOne({
-      where: { templateID },
+      where: {
+        templateID,
+        masterUserID, // Ensure the template belongs to the specific user
+      },
     });
 
     if (!template) {
@@ -1112,11 +1180,13 @@ exports.getTemplateById = async (req, res) => {
   }
 };
 exports.getUnreadCounts = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
   try {
     // Define all possible folders
     const allFolders = ["inbox", "drafts", "sent", "archive"];
 
-    // Fetch the count of unread emails grouped by folder
+    // Fetch the count of unread emails grouped by folder for the specific user
     const unreadCounts = await Email.findAll({
       attributes: [
         "folder", // Group by folder
@@ -1124,6 +1194,7 @@ exports.getUnreadCounts = async (req, res) => {
       ],
       where: {
         isRead: false, // Only fetch unread emails
+        masterUserID, // Filter by the specific user's masterUserID
       },
       group: ["folder"], // Group by folder
     });
@@ -1142,6 +1213,7 @@ exports.getUnreadCounts = async (req, res) => {
 
     res.status(200).json({
       message: "Unread counts fetched successfully.",
+      masterUserID, // Include the user's masterUserID in the response
       unreadCounts: response,
     });
   } catch (error) {
@@ -1171,7 +1243,6 @@ exports.addUserCredential = async (req, res) => {
       await existingCredential.update({ email, appPassword });
       console.log(`User credentials updated for masterUserID: ${masterUserID}`);
 
-  
       return res.status(200).json({
         message: "User credentials updated successfully and emails fetched.",
       });
