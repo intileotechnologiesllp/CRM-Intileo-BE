@@ -711,8 +711,8 @@ exports.getEmails = async (req, res) => {
 };
 
 // Fetch and store emails from the Sent folder using batching
-exports.fetchSentEmails = async (adminId) => {
-  const { batchSize = 50, page = 1 } = req.query;
+exports.fetchSentEmails = async (adminId,batchSize=50,page=1) => {
+
 
   try {
     const userCredential = await UserCredential.findOne({
@@ -812,6 +812,7 @@ exports.fetchSentEmails = async (adminId) => {
         body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         folder: "sent",
         createdAt: parsedEmail.date || new Date(),
+        masterUserID: adminId,
       };
 
       console.log(`Processing sent email: ${emailData.messageId}`);
@@ -855,7 +856,7 @@ exports.fetchSentEmails = async (adminId) => {
     };
   } catch (error) {
     console.error("Error fetching sent emails:", error);
-    res.status(500).json({ message: "Internal server error." });
+    // res.status(500).json({ message: "Internal server error." });
   }
 };
 
