@@ -10,11 +10,11 @@ router.get("/fetch-archive", emailController.fetchArchiveEmails);
 router.get("/get-emails", verifyToken,emailController.getEmails);
 router.get("/fetch-sent", emailController.fetchSentEmails);
 router.get("/getoneEmail/:emailId", emailController.getOneEmail);
-router.post("/compose", emailController.composeEmail);
+router.post("/compose", verifyToken,emailController.composeEmail);
 router.post("/create-template", emailController.createTemplate);
 router.get("/get-templates", emailController.getTemplates);
 router.get("/template/:templateID", emailController.getTemplateById)
-router.get("/unread-counts", emailController.getUnreadCounts);
+router.get("/unread-counts",verifyToken, emailController.getUnreadCounts);
 router.post("/add-credential", verifyToken,emailController.addUserCredential);
 router.get("/get-credential", verifyToken,emailController.getUserCredential);
 
