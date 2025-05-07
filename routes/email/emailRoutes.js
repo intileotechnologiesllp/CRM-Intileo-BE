@@ -11,9 +11,9 @@ router.get("/get-emails", verifyToken,emailController.getEmails);
 router.get("/fetch-sent", emailController.fetchSentEmails);
 router.get("/getoneEmail/:emailId", emailController.getOneEmail);
 router.post("/compose", verifyToken,emailController.composeEmail);
-router.post("/create-template", emailController.createTemplate);
-router.get("/get-templates", emailController.getTemplates);
-router.get("/template/:templateID", emailController.getTemplateById)
+router.post("/create-template", verifyToken,emailController.createTemplate);
+router.get("/get-templates", verifyToken,emailController.getTemplates);
+router.get("/template/:templateID", verifyToken,emailController.getTemplateById)
 router.get("/unread-counts",verifyToken, emailController.getUnreadCounts);
 router.post("/add-credential", verifyToken,emailController.addUserCredential);
 router.get("/get-credential", verifyToken,emailController.getUserCredential);

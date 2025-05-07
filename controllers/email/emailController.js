@@ -1072,7 +1072,8 @@ exports.composeEmail = [
 ];
 
 exports.createTemplate = async (req, res) => {
-  const { name, subject, body, placeholders } = req.body;
+  const { name, subject, body, placeholders, isShared } = req.body;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
   try {
     // Save the template in the database
@@ -1080,7 +1081,9 @@ exports.createTemplate = async (req, res) => {
       name,
       subject,
       body,
-      placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
+      placeholders,
+      isShared: isShared || false, // Default to false if not provided
+      masterUserID, // Associate the template with the user
     };
 
     const savedTemplate = await Template.create(templateData);
@@ -1098,54 +1101,15 @@ exports.createTemplate = async (req, res) => {
   }
 };
 
-(exports.getTemplates = async (req, res) => {
-  try {
-    console.log("error..................///");
-
-    const templates = await Template.findAll();
-    res.status(200).json({
-      message: "Templates fetched successfully.",
-      templates,
-    });
-  } catch (error) {
-    console.error("Error fetching templates:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch templates.", error: error.message });
-  }
-}),
-  (exports.createTemplate = async (req, res) => {
-    const { name, subject, body, placeholders } = req.body;
-
-    try {
-      // Save the template in the database
-      const templateData = {
-        name,
-        subject,
-        body,
-        placeholders, // Optional: Array of placeholder names (e.g., ["{{name}}", "{{date}}"])
-      };
-
-      const savedTemplate = await Template.create(templateData);
-      console.log("Template created successfully:", savedTemplate);
-
-      res.status(200).json({
-        message: "Template created successfully.",
-        template: savedTemplate,
-      });
-    } catch (error) {
-      console.error("Error creating template:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to create template.", error: error.message });
-    }
-  });
-
 exports.getTemplates = async (req, res) => {
-  try {
-    console.log("error..................///");
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
-    const templates = await Template.findAll();
+  try {
+    // Fetch templates for the specific user
+    const templates = await Template.findAll({
+      where: { masterUserID }, // Filter by masterUserID
+    });
+
     res.status(200).json({
       message: "Templates fetched successfully.",
       templates,
@@ -1160,10 +1124,15 @@ exports.getTemplates = async (req, res) => {
 
 exports.getTemplateById = async (req, res) => {
   const { templateID } = req.params;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
   try {
+    // Fetch the template for the specific user and templateID
     const template = await Template.findOne({
-      where: { templateID },
+      where: {
+        templateID,
+        masterUserID, // Ensure the template belongs to the specific user
+      },
     });
 
     if (!template) {
