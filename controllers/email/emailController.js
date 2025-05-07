@@ -988,11 +988,18 @@ exports.composeEmail = [
         }
       }
 
-      // Prepare attachments for nodemailer
-      const formattedAttachments = req.files.map((file) => ({
-        filename: file.originalname,
-        path: file.path, // Use the file path from Multer
-      }));
+      // // Prepare attachments for nodemailer
+      // const formattedAttachments = req.files.map((file) => ({
+      //   filename: file.originalname,
+      //   path: file.path, // Use the file path from Multer
+      // }));
+            // Prepare attachments for nodemailer
+            const formattedAttachments = req.files && req.files.length > 0
+            ? req.files.map((file) => ({
+                filename: file.originalname,
+                path: file.path, // Use the file path from Multer
+              }))
+            : [];
 
       // Create a transporter using the user's email credentials
       const transporter = nodemailer.createTransport({
@@ -1012,7 +1019,8 @@ exports.composeEmail = [
         subject: finalSubject, // Final subject after placeholder replacement
         text: finalBody, // Final body after placeholder replacement
         html: finalBody, // HTML body (optional)
-        attachments: formattedAttachments, // Attachments with file paths
+        // attachments: formattedAttachments, // Attachments with file paths
+        attachments: formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
       };
 
       // Send the email
@@ -1039,23 +1047,43 @@ exports.composeEmail = [
       const savedEmail = await Email.create(emailData);
       console.log("Composed email saved in the database:", savedEmail);
 
-      // Save attachments in the database
-      const savedAttachments = req.files.map((file) => ({
-        emailID: savedEmail.emailID,
-        filename: file.originalname,
-        path: file.path,
-      }));
+      // // Save attachments in the database
+      // const savedAttachments = req.files.map((file) => ({
+      //   emailID: savedEmail.emailID,
+      //   filename: file.originalname,
+      //   path: file.path,
+      // }));
 
-      await Attachment.bulkCreate(savedAttachments);
-      console.log(
-        `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-      );
+      // await Attachment.bulkCreate(savedAttachments);
+      // console.log(
+      //   `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+      // );
 
-      // Generate public URLs for attachments
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
-      }));
+      // // Generate public URLs for attachments
+      // const attachmentLinks = savedAttachments.map((attachment) => ({
+      //   filename: attachment.filename,
+      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      // }));
+      const savedAttachments = req.files && req.files.length > 0
+  ? req.files.map((file) => ({
+      emailID: savedEmail.emailID,
+      filename: file.originalname,
+      path: file.path,
+    }))
+  : [];
+
+if (savedAttachments.length > 0) {
+  await Attachment.bulkCreate(savedAttachments);
+  console.log(
+    `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+  );
+}
+
+// Generate public URLs for attachments
+const attachmentLinks = savedAttachments.map((attachment) => ({
+  filename: attachment.filename,
+  link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+}));
 
       res.status(200).json({
         message: "Email sent and saved successfully.",
