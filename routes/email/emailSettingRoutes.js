@@ -6,7 +6,7 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 
 router.post("/create-default-email", verifyToken,emailSettingsController.createOrUpdateDefaultEmail);
 router.get("/get-default-email",verifyToken,emailSettingsController.getDefaultEmail);
-router.get("/update-default-email",verifyToken,emailSettingsController.updateDefaultEmail);
+router.post("/update-default-email",verifyToken,emailSettingsController.updateDefaultEmail);
 
 
 
