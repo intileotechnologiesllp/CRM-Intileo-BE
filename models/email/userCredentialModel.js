@@ -15,15 +15,7 @@ const UserCredential = sequelize.define("UserCredential", {
   appPassword: {
     type: DataTypes.STRING,
     allowNull: false,
-  },
-  senderName: {
-    type: DataTypes.STRING, // Optional sender name
-    allowNull: true,
-  },
-  defaultEmail: {
-    type: DataTypes.BOOLEAN, // New field for default email
-    defaultValue: false, // Default to false
-  },
+  }
 });
 
 module.exports = UserCredential;

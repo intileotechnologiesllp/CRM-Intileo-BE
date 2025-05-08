@@ -25,6 +25,7 @@ const historyRoutes=require("./routes/reports/historyRoutes"); // Import history
 const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes");
 const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js") // Import privileges routes
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
+const emailSettingController=require("./routes/email/emailSettingRoutes.js")
 const app = express();
 require("./utils/cronJob.js")
 app.use(express.static(path.join(__dirname, "public")));
@@ -60,6 +61,7 @@ app.use("/api/get-history", historyRoutes); // Register history routes
 app.use("/api/privileges", privilegesRoutes); // Register privileges routes
 app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
 app.use("/api/email", emailRoutes); // Register email routes
+app.use("/api/email-settings", emailSettingController); // Register email settings routes
 
 
 
