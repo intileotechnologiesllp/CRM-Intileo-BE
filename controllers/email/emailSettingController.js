@@ -53,9 +53,10 @@ exports.getDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
+
     // Fetch the default email for the user
     const defaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID, isDefault: true },
+      where: { masterUserID },
     });
 
     if (!defaultEmail) {
@@ -66,7 +67,8 @@ exports.getDefaultEmail = async (req, res) => {
       message: "Default email fetched successfully.",
       email: defaultEmail.email,
       senderName: defaultEmail.senderName, // Include senderName in the response
-      appPassword: defaultEmail.appPassword, // You may want to exclude this in production
+      appPassword: defaultEmail.appPassword,
+      isDefault:defaultEmail.isDefault // You may want to exclude this in production
     });
   } catch (error) {
     console.error("Error fetching default email:", error);
