@@ -15,14 +15,14 @@ const Template = sequelize.define("Template", {
     type: DataTypes.STRING,
     allowNull: false, // Subject is required
   },
-  body: {
+  content: {
     type: DataTypes.TEXT,
     allowNull: false, // Body is required
   },
-  placeholders: {
-    type: DataTypes.JSON, // Store placeholders as a JSON array
-    allowNull: true,
-  },
+  // placeholders: {
+  //   type: DataTypes.JSON, // Store placeholders as a JSON array
+  //   allowNull: true,
+  // },
   isShared: {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to private
