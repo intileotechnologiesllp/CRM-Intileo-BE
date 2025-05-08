@@ -1004,8 +1004,7 @@ exports.getOneEmail = async (req, res) => {
 exports.composeEmail = [
   upload.array("attachments"), // Use Multer to handle multiple file uploads
   async (req, res) => {
-    const { to, cc, bcc, subject, text, html, templateID, placeholders } =
-      req.body;
+    const { to, cc, bcc, subject, text, html, templateID } = req.body; // Removed `placeholders`
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
@@ -1026,7 +1025,7 @@ exports.composeEmail = [
       let finalSubject = subject;
       let finalBody = text || html;
 
-      // If a templateID is provided, fetch the template and replace placeholders
+      // If a templateID is provided, fetch the template
       if (templateID) {
         const template = await Template.findOne({
           where: { templateID },
@@ -1036,24 +1035,11 @@ exports.composeEmail = [
           return res.status(404).json({ message: "Template not found." });
         }
 
-        // Replace placeholders in the template subject and body
+        // Use the template's subject and body
         finalSubject = template.subject;
         finalBody = template.body;
-
-        if (placeholders) {
-          for (const key in placeholders) {
-            const placeholder = `{{${key}}}`;
-            finalSubject = finalSubject.replace(placeholder, placeholders[key]);
-            finalBody = finalBody.replace(placeholder, placeholders[key]);
-          }
-        }
       }
 
-      // // Prepare attachments for nodemailer
-      // const formattedAttachments = req.files.map((file) => ({
-      //   filename: file.originalname,
-      //   path: file.path, // Use the file path from Multer
-      // }));
       // Prepare attachments for nodemailer
       const formattedAttachments =
         req.files && req.files.length > 0
@@ -1078,10 +1064,9 @@ exports.composeEmail = [
         to, // Recipient's email address
         cc, // CC recipients
         bcc, // BCC recipients
-        subject: finalSubject, // Final subject after placeholder replacement
-        text: finalBody, // Final body after placeholder replacement
+        subject: finalSubject, // Final subject
+        text: finalBody, // Final body
         html: finalBody, // HTML body (optional)
-        // attachments: formattedAttachments, // Attachments with file paths
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
       };
@@ -1110,23 +1095,7 @@ exports.composeEmail = [
       const savedEmail = await Email.create(emailData);
       console.log("Composed email saved in the database:", savedEmail);
 
-      // // Save attachments in the database
-      // const savedAttachments = req.files.map((file) => ({
-      //   emailID: savedEmail.emailID,
-      //   filename: file.originalname,
-      //   path: file.path,
-      // }));
-
-      // await Attachment.bulkCreate(savedAttachments);
-      // console.log(
-      //   `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-      // );
-
-      // // Generate public URLs for attachments
-      // const attachmentLinks = savedAttachments.map((attachment) => ({
-      //   filename: attachment.filename,
-      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
-      // }));
+      // Save attachments in the database
       const savedAttachments =
         req.files && req.files.length > 0
           ? req.files.map((file) => ({
@@ -1164,7 +1133,7 @@ exports.composeEmail = [
 ];
 
 exports.createTemplate = async (req, res) => {
-  const { name, subject, body, placeholders, isShared } = req.body;
+  const { name, subject, content, isShared } = req.body; // Changed `body` to `content`
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
   try {
@@ -1172,8 +1141,7 @@ exports.createTemplate = async (req, res) => {
     const templateData = {
       name,
       subject,
-      body,
-      placeholders,
+      content, // Use `content` instead of `body`
       isShared: isShared || false, // Default to false if not provided
       masterUserID, // Associate the template with the user
     };

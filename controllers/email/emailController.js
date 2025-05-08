@@ -11,6 +11,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
+const DefaultEmail = require("../../models/email/defaultEmailModel");
 const { log } = require("console");
 
 // Ensure the upload directory exists
@@ -1004,26 +1005,69 @@ exports.getOneEmail = async (req, res) => {
 exports.composeEmail = [
   upload.array("attachments"), // Use Multer to handle multiple file uploads
   async (req, res) => {
-    const { to, cc, bcc, subject, text, html, templateID } = req.body; // Removed `placeholders`
+    const { to, cc, bcc, subject, text, html, templateID,actionType, replyToMessageId } = req.body; // Removed `placeholders`
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
-      // Fetch the user's credentials from the UserCredential database
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
+      // Check if a default email is set in the DefaultEmail table
+      const defaultEmail = await DefaultEmail.findOne({
+        where: { masterUserID, isDefault: true },
       });
 
-      if (!userCredential) {
-        return res
-          .status(404)
-          .json({ message: "User credentials not found for the given user." });
+      let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+
+      if (defaultEmail) {
+        // Use the default email account
+        SENDER_EMAIL = defaultEmail.email;
+        SENDER_PASSWORD = defaultEmail.appPassword;
+        SENDER_NAME = defaultEmail.senderName || "No Name"; // Use senderName or fallback to "No Name"
+      } else {
+        // Fallback to UserCredential if no default email is set
+        const userCredential = await UserCredential.findOne({
+          where: { masterUserID },
+        });
+
+        if (!userCredential) {
+          return res.status(404).json({
+            message: "User credentials not found for the given user.",
+          });
+        }
+
+        SENDER_EMAIL = userCredential.email;
+        SENDER_PASSWORD = userCredential.appPassword;
+        SENDER_NAME = userCredential.senderName || "No Name"; // Use senderName or fallback to "No Name"
       }
-
-      const SENDER_EMAIL = userCredential.email;
-      const SENDER_PASSWORD = userCredential.appPassword;
-
       let finalSubject = subject;
       let finalBody = text || html;
+      let inReplyToHeader = null;
+      let referencesHeader = null;
+
+      // Handle reply action
+      if (actionType === "reply") {
+        // Fetch the original email from the database
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId, masterUserID },
+        });
+
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
+
+        // Set headers for reply
+        inReplyToHeader = originalEmail.messageId; // Use the original email's messageId
+        referencesHeader = originalEmail.references
+          ? `${originalEmail.references} ${originalEmail.messageId}`
+          : originalEmail.messageId; // Append the original email's messageId to references
+
+        // Modify subject and body for reply
+        finalSubject = `Re: ${originalEmail.subject}`;
+        finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
+      }
+
+      // let finalSubject = subject;
+      // let finalBody = text || html;
 
       // If a templateID is provided, fetch the template
       if (templateID) {
@@ -1037,7 +1081,7 @@ exports.composeEmail = [
 
         // Use the template's subject and body
         finalSubject = template.subject;
-        finalBody = template.body;
+        finalBody = template.content; // Changed from `body` to `content`
       }
 
       // Prepare attachments for nodemailer
@@ -1049,18 +1093,18 @@ exports.composeEmail = [
             }))
           : [];
 
-      // Create a transporter using the user's email credentials
+      // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
         service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
         auth: {
-          user: SENDER_EMAIL, // Fetch from UserCredential
-          pass: SENDER_PASSWORD, // Fetch from UserCredential
+          user: SENDER_EMAIL, // Fetch from DefaultEmail or UserCredential
+          pass: SENDER_PASSWORD, // Fetch from DefaultEmail or UserCredential
         },
       });
 
       // Define the email options
       const mailOptions = {
-        from: SENDER_EMAIL, // Sender's email address
+        from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`, // Include senderName and email
         to, // Recipient's email address
         cc, // CC recipients
         bcc, // BCC recipients
@@ -1069,6 +1113,8 @@ exports.composeEmail = [
         html: finalBody, // HTML body (optional)
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
+          inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
+          references: referencesHeader || undefined, // Add references header
       };
 
       // Send the email
@@ -1079,12 +1125,13 @@ exports.composeEmail = [
       // Save the email in the database
       const emailData = {
         messageId: info.messageId,
+        inReplyTo: inReplyToHeader || null,
+        references: referencesHeader || null,
         sender: SENDER_EMAIL,
-        senderName: null, // Replace with the sender's name if available
+        senderName: SENDER_NAME, // Save the sender's name
         recipient: to,
         cc, // Save CC recipients
         bcc, // Save BCC recipients
-        recipientName: null, // You can extract the recipient's name if needed
         subject: finalSubject,
         body: finalBody,
         folder: "sent", // Mark as sent
@@ -1255,48 +1302,44 @@ exports.getUnreadCounts = async (req, res) => {
 
 exports.addUserCredential = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, senderName, defaultEmail } = req.body; // Include defaultEmail in the request body
+  const { email, appPassword, syncStartDate, syncStartType } = req.body;
 
   try {
-    // Validate input
-    if (!masterUserID || !email || !appPassword) {
-      return res.status(400).json({ message: "All fields are required." });
+    // Validate syncStartDate (optional validation to ensure it's a number)
+    if (syncStartDate && isNaN(syncStartDate)) {
+      return res.status(400).json({
+        message: "Invalid syncStartDate. It must be a number.",
+      });
     }
 
-    // If defaultEmail is true, unset defaultEmail for other accounts
-    if (defaultEmail) {
-      await UserCredential.update(
-        { defaultEmail: false },
-        { where: { masterUserID } }
-      );
-    }
-
-    // Check if the user already has credentials saved for this email
+    // Check if the user already has credentials saved
     const existingCredential = await UserCredential.findOne({
-      where: { masterUserID, email },
+      where: { masterUserID },
     });
+
+    // Prepare the fields to update
+    const updateData = {};
+    if (email) updateData.email = email;
+    if (appPassword) updateData.appPassword = appPassword;
+    if (syncStartDate) updateData.syncStartDate = parseInt(syncStartDate, 10); // Ensure it's stored as an integer
+    if (syncStartType) updateData.syncStartType = syncStartType;
 
     if (existingCredential) {
       // Update existing credentials
-      await existingCredential.update({
-        appPassword,
-        senderName,
-        defaultEmail,
-      });
-      console.log(`User credentials updated for email: ${email}`);
-
+      await existingCredential.update(updateData);
       return res.status(200).json({
         message: "User credentials updated successfully.",
+        updatedFields: updateData,
       });
     }
 
     // Create new credentials
     const newCredential = await UserCredential.create({
       masterUserID,
-      email,
-      appPassword,
-      senderName,
-      defaultEmail,
+      email: email || null,
+      appPassword: appPassword || null,
+      syncStartDate: syncStartDate || 3, // Default to 3
+      syncStartType: syncStartType || "days",
     });
 
     res.status(201).json({
@@ -1304,7 +1347,7 @@ exports.addUserCredential = async (req, res) => {
       credential: newCredential,
     });
   } catch (error) {
-    console.error("Error adding user credentials:", error);
+    console.error("Error adding or updating user credentials:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
