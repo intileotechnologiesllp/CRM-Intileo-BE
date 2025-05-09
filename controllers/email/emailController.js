@@ -1084,7 +1084,7 @@ exports.composeEmail = [
         // Modify subject and body for reply
         finalSubject = `Re: ${originalEmail.subject}`;
         // finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
-        finalBody=`${text || html}`
+        finalBody = `${text || html}`;
       }
 
       // let finalSubject = subject;
@@ -1421,3 +1421,65 @@ exports.deleteEmail = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.saveDraft = [
+  upload.array("attachments"), // Use Multer to handle multiple file uploads
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html } = req.body; // Extract email fields from the request body
+    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+    try {
+      // Prepare the draft email data
+      const draftData = {
+        messageId: null, // No messageId since it's not sent yet
+        sender: null, // Sender is not set for drafts
+        senderName: null,
+        recipient: to || null,
+        cc: cc || null,
+        bcc: bcc || null,
+        subject: subject || null,
+        body: text || html || null,
+        folder: "drafts", // Mark as a draft
+        masterUserID,
+      };
+
+      // Save the draft email in the database
+      const savedDraft = await Email.create(draftData);
+      console.log("Draft email saved:", savedDraft);
+
+      // Save attachments in the database
+      const savedAttachments =
+        req.files && req.files.length > 0
+          ? req.files.map((file) => ({
+              emailID: savedDraft.emailID, // Associate the attachment with the draft email
+              filename: file.originalname,
+              path: file.path, // Use the file path from Multer
+            }))
+          : [];
+
+      if (savedAttachments.length > 0) {
+        await Attachment.bulkCreate(savedAttachments);
+        console.log(
+          `Saved ${savedAttachments.length} attachments for draft: ${savedDraft.emailID}`
+        );
+      }
+
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      }));
+
+      res.status(200).json({
+        message: "Draft saved successfully.",
+        draft: savedDraft,
+        attachments: attachmentLinks, // Include attachment links in the response
+      });
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to save draft.", error: error.message });
+    }
+  },
+];
