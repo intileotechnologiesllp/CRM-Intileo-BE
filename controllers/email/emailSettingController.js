@@ -1,4 +1,5 @@
 const DefaultEmail = require("../../models/email/defaultEmailModel");
+const Email = require("../../models/email/emailModel");
 
 exports.createOrUpdateDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
@@ -110,6 +111,30 @@ exports.updateDefaultEmail = async (req, res) => {
     res.status(200).json({ message: "Default email updated successfully." });
   } catch (error) {
     console.error("Error updating default email:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.archiveEmail = async (req, res) => {
+  const { emailId } = req.params; // Get the email ID from the request parameters
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  try {
+    // Find the email by emailId and masterUserID
+    const email = await Email.findOne({
+      where: { emailID: emailId, masterUserID },
+    });
+
+    if (!email) {
+      return res.status(404).json({ message: "Email not found." });
+    }
+
+    // Update the folder to "archive"
+    await email.update({ folder: "archive" });
+
+    res.status(200).json({ message: "Email archived successfully." });
+  } catch (error) {
+    console.error("Error archiving email:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
