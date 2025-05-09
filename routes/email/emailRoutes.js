@@ -9,7 +9,7 @@ router.get("/fetch-drafts", emailController.fetchDraftEmails);
 router.get("/fetch-archive", emailController.fetchArchiveEmails);
 router.get("/get-emails", verifyToken,emailController.getEmails);
 router.get("/fetch-sent", emailController.fetchSentEmails);
-router.get("/getoneEmail/:emailId", emailController.getOneEmail);
+router.get("/getoneEmail/:emailId", verifyToken, emailController.getOneEmail);
 router.post("/compose", verifyToken,emailController.composeEmail);
 router.post("/create-template", verifyToken,emailController.createTemplate);
 router.get("/get-templates", verifyToken,emailController.getTemplates);

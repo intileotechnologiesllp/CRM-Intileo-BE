@@ -923,11 +923,12 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
     // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
-      where: { emailID: emailId },
+      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
       include: [
         {
           model: Attachment,
@@ -948,14 +949,18 @@ exports.getOneEmail = async (req, res) => {
       console.log(`Email marked as read: ${mainEmail.messageId}`);
     }
 
-    // Fetch related emails in the same thread, including their attachments
+    // Fetch related emails from both inbox and sent folders
     const relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
-          { messageId: mainEmail.inReplyTo }, // Parent email
-          { inReplyTo: mainEmail.messageId }, // Replies to this email
-          { references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` } }, // Emails in the same thread
+          { messageId: mainEmail.inReplyTo, masterUserID }, // Parent email
+          { inReplyTo: mainEmail.messageId, masterUserID }, // Replies to this email
+          {
+            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
+            masterUserID,
+          }, // Emails in the same thread
         ],
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] }, // Include only inbox and sent folders
       },
       include: [
         {
@@ -1005,7 +1010,17 @@ exports.getOneEmail = async (req, res) => {
 exports.composeEmail = [
   upload.array("attachments"), // Use Multer to handle multiple file uploads
   async (req, res) => {
-    const { to, cc, bcc, subject, text, html, templateID,actionType, replyToMessageId } = req.body; // Removed `placeholders`
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      text,
+      html,
+      templateID,
+      actionType,
+      replyToMessageId,
+    } = req.body; // Removed `placeholders`
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
@@ -1113,8 +1128,8 @@ exports.composeEmail = [
         html: finalBody, // HTML body (optional)
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
-          inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
-          references: referencesHeader || undefined, // Add references header
+        inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
+        references: referencesHeader || undefined, // Add references header
       };
 
       // Send the email
