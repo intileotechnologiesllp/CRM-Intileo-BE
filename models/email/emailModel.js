@@ -10,7 +10,7 @@ const Email = sequelize.define("Email", {
   },
   messageId: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   inReplyTo: {
     type: DataTypes.STRING, // Stores the messageId of the email being replied to
@@ -18,7 +18,7 @@ const Email = sequelize.define("Email", {
   },
   sender: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   senderName: {
     type: DataTypes.STRING, // New field for sender's name
