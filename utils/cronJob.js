@@ -130,7 +130,7 @@ cron.schedule("*/2 * * * *", async () => {
         // Fetch sent emails
         console.log(`Fetching sent emails for adminId: ${adminId}`);
         // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
-        console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
+        // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
       } catch (error) {
         console.error(`Error processing emails for adminId ${adminId}:`, error);
       }
