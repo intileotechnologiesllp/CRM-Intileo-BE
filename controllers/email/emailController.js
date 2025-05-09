@@ -1083,7 +1083,8 @@ exports.composeEmail = [
 
         // Modify subject and body for reply
         finalSubject = `Re: ${originalEmail.subject}`;
-        finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
+        // finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
+        finalBody=`${text}`
       }
 
       // let finalSubject = subject;
