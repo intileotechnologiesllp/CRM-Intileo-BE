@@ -72,7 +72,15 @@ const Email = sequelize.define("Email", {
   masterUserID:{
     type: DataTypes.INTEGER,
     allowNull: false,
-  }
+  },
+  draftId:{
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  isDraft:{
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+  },
   
 },
 {

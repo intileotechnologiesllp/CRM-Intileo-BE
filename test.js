@@ -326,11 +326,16 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
 
     const emailData = {
       messageId: parsedEmail.messageId || null,
       inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-      references: parsedEmail.headers.get("references") || null,
+      // references: parsedEmail.headers.get("references") || null,
+      references,
       sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
       senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
       recipient: parsedEmail.to
@@ -392,7 +397,7 @@ exports.fetchRecentEmail = async (adminId) => {
     // Save related emails in the database
     for (const relatedEmail of relatedEmails) {
       const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId,folder: relatedEmail.folder, },
+        where: { messageId: relatedEmail.messageId },
       });
 
       if (!existingRelatedEmail) {
@@ -923,11 +928,12 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
     // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
-      where: { emailID: emailId },
+      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
       include: [
         {
           model: Attachment,
@@ -948,14 +954,18 @@ exports.getOneEmail = async (req, res) => {
       console.log(`Email marked as read: ${mainEmail.messageId}`);
     }
 
-    // Fetch related emails in the same thread, including their attachments
+    // Fetch related emails from both inbox and sent folders
     const relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
-          { messageId: mainEmail.inReplyTo }, // Parent email
-          { inReplyTo: mainEmail.messageId }, // Replies to this email
-          { references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` } }, // Emails in the same thread
+          { messageId: mainEmail.inReplyTo, masterUserID }, // Parent email
+          { inReplyTo: mainEmail.messageId, masterUserID }, // Replies to this email
+          {
+            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
+            masterUserID,
+          }, // Emails in the same thread
         ],
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] }, // Include only inbox and sent folders
       },
       include: [
         {
@@ -1005,7 +1015,17 @@ exports.getOneEmail = async (req, res) => {
 exports.composeEmail = [
   upload.array("attachments"), // Use Multer to handle multiple file uploads
   async (req, res) => {
-    const { to, cc, bcc, subject, text, html, templateID,actionType, replyToMessageId } = req.body; // Removed `placeholders`
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      text,
+      html,
+      templateID,
+      actionType,
+      replyToMessageId,
+    } = req.body; // Removed `placeholders`
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
@@ -1041,12 +1061,9 @@ exports.composeEmail = [
       let finalBody = text || html;
       let inReplyToHeader = null;
       let referencesHeader = null;
-      let finalTo = to;
-      let finalCc = cc;
-      let finalBcc = bcc;
 
       // Handle reply action
-      if (actionType === "reply" || actionType === "replyAll") {
+      if (actionType === "reply") {
         // Fetch the original email from the database
         const originalEmail = await Email.findOne({
           where: { messageId: replyToMessageId, masterUserID },
@@ -1066,13 +1083,8 @@ exports.composeEmail = [
 
         // Modify subject and body for reply
         finalSubject = `Re: ${originalEmail.subject}`;
-        finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
-        if (actionType === "replyAll") {
-          // Include all recipients in the reply
-          finalTo = originalEmail.recipient || "";
-          finalCc = originalEmail.cc || "";
-          finalBcc = originalEmail.bcc || "";
-        }
+        // finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
+        finalBody = `${text || html}`;
       }
 
       // let finalSubject = subject;
@@ -1122,8 +1134,8 @@ exports.composeEmail = [
         html: finalBody, // HTML body (optional)
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
-          inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
-          references: referencesHeader || undefined, // Add references header
+        inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
+        references: referencesHeader || undefined, // Add references header
       };
 
       // Send the email
@@ -1409,3 +1421,66 @@ exports.deleteEmail = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+exports.saveDraft = [
+  upload.array("attachments"), // Use Multer to handle multiple file uploads
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html } = req.body; // Extract email fields from the request body
+    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+    try {
+      // Prepare the draft email data
+      const draftData = {
+        messageId: null, // No messageId since it's not sent yet
+        sender: null, // Sender is not set for drafts
+        senderName: null,
+        recipient: to || null,
+        cc: cc || null,
+        bcc: bcc || null,
+        subject: subject || null,
+        body: text || html || null,
+        folder: "drafts", // Mark as a draft
+        masterUserID,
+      };
+
+      // Save the draft email in the database
+      const savedDraft = await Email.create(draftData);
+      console.log("Draft email saved:", savedDraft);
+
+      // Save attachments in the database
+      const savedAttachments =
+        req.files && req.files.length > 0
+          ? req.files.map((file) => ({
+              emailID: savedDraft.emailID, // Associate the attachment with the draft email
+              filename: file.originalname,
+              path: file.path, // Use the file path from Multer
+            }))
+          : [];
+
+      if (savedAttachments.length > 0) {
+        await Attachment.bulkCreate(savedAttachments);
+        console.log(
+          `Saved ${savedAttachments.length} attachments for draft: ${savedDraft.emailID}`
+        );
+      }
+
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+      }));
+
+      res.status(200).json({
+        message: "Draft saved successfully.",
+        draft: savedDraft,
+        attachments: attachmentLinks, // Include attachment links in the response
+      });
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to save draft.", error: error.message });
+    }
+  },
+];
+

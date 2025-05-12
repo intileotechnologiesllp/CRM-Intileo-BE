@@ -1323,13 +1323,27 @@ exports.getUnreadCounts = async (req, res) => {
 
 exports.addUserCredential = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, syncStartDate, syncStartType } = req.body;
+  const {
+    email,
+    appPassword,
+    syncStartDate,
+    syncStartType,
+    syncFolders,
+    syncAllFolders,
+  } = req.body;
 
   try {
     // Validate syncStartDate (optional validation to ensure it's a number)
     if (syncStartDate && isNaN(syncStartDate)) {
       return res.status(400).json({
         message: "Invalid syncStartDate. It must be a number.",
+      });
+    }
+
+    // Validate syncFolders (optional validation to ensure it's an array)
+    if (syncFolders && !Array.isArray(syncFolders)) {
+      return res.status(400).json({
+        message: "Invalid syncFolders. It must be an array of folder names.",
       });
     }
 
@@ -1344,6 +1358,9 @@ exports.addUserCredential = async (req, res) => {
     if (appPassword) updateData.appPassword = appPassword;
     if (syncStartDate) updateData.syncStartDate = parseInt(syncStartDate, 10); // Ensure it's stored as an integer
     if (syncStartType) updateData.syncStartType = syncStartType;
+    if (syncFolders) updateData.syncFolders = syncFolders;
+    if (syncAllFolders !== undefined)
+      updateData.syncAllFolders = syncAllFolders; // Allow boolean values
 
     if (existingCredential) {
       // Update existing credentials
@@ -1361,6 +1378,12 @@ exports.addUserCredential = async (req, res) => {
       appPassword: appPassword || null,
       syncStartDate: syncStartDate || 3, // Default to 3
       syncStartType: syncStartType || "days",
+      syncFolders: syncFolders || [
+        "INBOX",
+        "[Gmail]/Sent Mail",
+        "[Gmail]/Drafts",
+      ], // Default folders
+      syncAllFolders: syncAllFolders || false, // Default to false
     });
 
     res.status(201).json({
@@ -1483,5 +1506,3 @@ exports.saveDraft = [
     }
   },
 ];
-
-
