@@ -34,7 +34,7 @@ const UserCredential = sequelize.define("UserCredential", {
   syncAllFolders: {
     type: DataTypes.BOOLEAN, // Boolean flag for syncing all folders
     allowNull: false,
-    defaultValue: false, // Default to false (sync specific folders)
+    defaultValue: true, // Default to false (sync specific folders)
   },
 });
 
