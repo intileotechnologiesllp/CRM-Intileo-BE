@@ -19,6 +19,7 @@ router.post("/add-credential", verifyToken,emailController.addUserCredential);
 router.get("/get-credential", verifyToken,emailController.getUserCredential);
 router.get("/delete-email/:emailId", verifyToken,emailController.deleteEmail);
 router.post("/save-draft", verifyToken,emailController.saveDraft);
+// router.post("/update-draft", verifyToken,emailController.updateDraft);
 
 
 

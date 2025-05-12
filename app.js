@@ -67,7 +67,7 @@ app.use("/api/email-settings", emailSettingController); // Register email settin
 
 // Sync database
 sequelize
-  .sync({ alter: true }) // Use `alter: true` to update the schema without dropping tables
+  .sync({ alter: false }) // Use `alter: true` to update the schema without dropping tables
   .then(() => console.log("Database synced successfully"))
   .catch((err) => console.error("Error syncing database:", err));
 

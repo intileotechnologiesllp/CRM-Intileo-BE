@@ -16,16 +16,26 @@ const UserCredential = sequelize.define("UserCredential", {
     type: DataTypes.STRING,
     allowNull: false,
   },
-  // syncStartDate: {
-  //   type: DataTypes.INTEGER, // Allow any number as a string
-  //   allowNull: true, // Optional field
-  //   defaultValue: "3", // Default to "3"
-  // },
-  // syncStartType: {
-  //   type: DataTypes.ENUM("days", "months", "years"), // Restrict values to 'days', 'months', or 'years'
-  //   allowNull: true, // Optional field
-  //   defaultValue: "days", // Default to 'days'
-  // },
+  syncStartDate: {
+    type: DataTypes.INTEGER, // Allow any number as a string
+    allowNull: true, // Optional field
+    defaultValue: "3", // Default to "3"
+  },
+  syncStartType: {
+    type: DataTypes.ENUM("days", "months", "years"), // Restrict values to 'days', 'months', or 'years'
+    allowNull: true, // Optional field
+    defaultValue: "days", // Default to 'days'
+  },
+    syncFolders: {
+    type: DataTypes.JSON, // Store folder names as a JSON array
+    allowNull: true, // Optional field
+    defaultValue: ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Drafts"], // Default folders to sync
+  },
+  syncAllFolders: {
+    type: DataTypes.BOOLEAN, // Boolean flag for syncing all folders
+    allowNull: false,
+    defaultValue: false, // Default to false (sync specific folders)
+  },
 });
 
 module.exports = UserCredential;
