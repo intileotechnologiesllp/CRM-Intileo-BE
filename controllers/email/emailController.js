@@ -1116,7 +1116,7 @@ exports.composeEmail = [
       // Add tracking links for click tracking
       const generateRedirectLink = (originalUrl, messageId) => {
         const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
-        return `${baseURL}/track/click?messageId=${messageId}&url=${encodeURIComponent(
+        return `${baseURL}/track/click?tempMessageId=${messageId}&url=${encodeURIComponent(
           originalUrl
         )}`;
       };
