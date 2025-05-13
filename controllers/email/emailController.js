@@ -12,6 +12,7 @@ const path = require("path");
 const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
 const DefaultEmail = require("../../models/email/defaultEmailModel");
+const MasterUser=require("../../models/master/masterUserModel");
 const { log } = require("console");
 
 // Ensure the upload directory exists
