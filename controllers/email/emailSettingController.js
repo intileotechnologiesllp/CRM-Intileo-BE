@@ -7,7 +7,7 @@ const Imap = require("imap-simple");
 const { htmlToText } = require("html-to-text");
 const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
-const { format, subDays } = require("date-fns"); // Use date-fns for date manipulation
+const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
 
 const cleanEmailBody = (body) => {
   // Remove quoted replies (e.g., lines starting with ">")
@@ -216,16 +216,40 @@ exports.fetchSyncEmails = async (req, res) => {
 
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
-    const syncStartDate = parseInt(userCredential.syncStartDate, 10) || 3; // Default to 3 days if invalid
+    const syncStartDate = userCredential.syncStartDate || "3 days ago"; // Default to "3 days ago" if invalid
     const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to "INBOX"
     const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
 
-    // Validate syncStartDate
-    if (isNaN(syncStartDate) || syncStartDate <= 0) {
-      return res.status(400).json({ message: "Invalid syncStartDate value." });
+    // Parse and calculate the `sinceDate` based on syncStartDate
+    let sinceDate;
+
+    if (typeof syncStartDate === "string" && syncStartDate.includes("T")) {
+      // If syncStartDate is an ISO date string
+      sinceDate = new Date(syncStartDate);
+    } else if (syncStartDate.includes("days ago")) {
+      const days = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subDays(new Date(), days);
+    } else if (syncStartDate.includes("month")) {
+      const months = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subMonths(new Date(), months);
+    } else if (syncStartDate.includes("year")) {
+      const years = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subYears(new Date(), years);
+    } else {
+      return res.status(400).json({ message: "Invalid syncStartDate format." });
     }
 
-    console.log("Connecting to IMAP server...");
+    // Validate sinceDate
+    if (isNaN(sinceDate.getTime())) {
+      throw new Error("Invalid sinceDate calculated from syncStartDate.");
+    }
+
+    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
+    const humanReadableSinceDate = `${format(sinceDate, "MMMM dd, yyyy")}`;
+
+    console.log(`Fetching emails since ${humanReadableSinceDate}`);
+
+    // Connect to IMAP server
     const imapConfig = {
       imap: {
         user: userEmail,
@@ -241,23 +265,6 @@ exports.fetchSyncEmails = async (req, res) => {
     };
 
     const connection = await Imap.connect(imapConfig);
-
-    // Calculate the `sinceDate` based on syncStartDate
-    const now = new Date();
-    const sinceDate = subDays(now, syncStartDate); // Subtract days from the current date
-
-    // Validate sinceDate
-    if (isNaN(sinceDate.getTime())) {
-      throw new Error("Invalid sinceDate calculated from syncStartDate.");
-    }
-
-    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
-    const humanReadableSinceDate = `${syncStartDate} days ago (${format(
-      sinceDate,
-      "MMMM dd, yyyy"
-    )})`; // Format as "3 days ago (May 10, 2025)"
-
-    console.log(`Fetching emails since ${humanReadableSinceDate}`);
 
     // Fetch all folders from the IMAP server
     const mailboxes = await connection.getBoxes();

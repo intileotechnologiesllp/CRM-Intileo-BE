@@ -1323,13 +1323,27 @@ exports.getUnreadCounts = async (req, res) => {
 
 exports.addUserCredential = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, syncStartDate, syncStartType } = req.body;
+  const { email, appPassword, syncStartDate, syncFolders, syncAllFolders } =
+    req.body;
 
   try {
-    // Validate syncStartDate (optional validation to ensure it's a number)
-    if (syncStartDate && isNaN(syncStartDate)) {
+    // Validate syncStartDate (optional validation to ensure it's in the correct format)
+    if (syncStartDate) {
+      const daysAgoMatch = syncStartDate.match(
+        /^(\d+)\s+days\s+ago\s+\((.+)\)$/
+      );
+      if (!daysAgoMatch) {
+        return res.status(400).json({
+          message:
+            "Invalid syncStartDate format. Expected format: '3 days ago (May 10, 2025)'.",
+        });
+      }
+    }
+
+    // Validate syncFolders (optional validation to ensure it's an array)
+    if (syncFolders && !Array.isArray(syncFolders)) {
       return res.status(400).json({
-        message: "Invalid syncStartDate. It must be a number.",
+        message: "Invalid syncFolders. It must be an array of folder names.",
       });
     }
 
@@ -1342,8 +1356,10 @@ exports.addUserCredential = async (req, res) => {
     const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = parseInt(syncStartDate, 10); // Ensure it's stored as an integer
-    if (syncStartType) updateData.syncStartType = syncStartType;
+    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the formatted syncStartDate
+    if (syncFolders) updateData.syncFolders = syncFolders;
+    if (syncAllFolders !== undefined)
+      updateData.syncAllFolders = syncAllFolders; // Allow boolean values
 
     if (existingCredential) {
       // Update existing credentials
@@ -1359,8 +1375,13 @@ exports.addUserCredential = async (req, res) => {
       masterUserID,
       email: email || null,
       appPassword: appPassword || null,
-      syncStartDate: syncStartDate || 3, // Default to 3
-      syncStartType: syncStartType || "days",
+      syncStartDate: syncStartDate || "3 days ago (May 10, 2025)", // Default value
+      syncFolders: syncFolders || [
+        "INBOX",
+        "[Gmail]/Sent Mail",
+        "[Gmail]/Drafts",
+      ], // Default folders
+      syncAllFolders: syncAllFolders || false, // Default to false
     });
 
     res.status(201).json({
@@ -1483,4 +1504,3 @@ exports.saveDraft = [
     }
   },
 ];
-
