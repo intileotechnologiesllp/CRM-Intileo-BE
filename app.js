@@ -26,6 +26,7 @@ const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes
 const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js") // Import privileges routes
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
 const emailSettingController=require("./routes/email/emailSettingRoutes.js")
+const Email = require("./models/email/emailModel"); // Import Email model
 const app = express();
 require("./utils/cronJob.js")
 app.use(express.static(path.join(__dirname, "public")));
@@ -63,7 +64,48 @@ app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
 app.use("/api/email", emailRoutes); // Register email routes
 app.use("/api/email-settings", emailSettingController); // Register email settings routes
 
+app.get("/track/open/:tempMessageId", async (req, res) => {
+  const { tempMessageId } = req.params;
 
+  try {
+    // Update the `isOpened` field for the email with the given `tempMessageId`
+    await Email.update(
+      { isOpened: true },
+      { where: { tempMessageId } }
+    );
+
+    // Return a 1x1 transparent pixel
+    const pixel = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAgMBAp6KfAAAAABJRU5ErkJggg==",
+      "base64"
+    );
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Content-Length": pixel.length,
+    });
+    res.end(pixel);
+  } catch (error) {
+    console.error("Error tracking email open:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+app.get("/track/click", async (req, res) => {
+  const { tempMessageId, url } = req.query;
+
+  try {
+    // Update the `isClicked` field for the email with the given `tempMessageId`
+    await Email.update(
+      { isClicked: true },
+      { where: { tempMessageId } }
+    );
+
+    // Redirect to the original URL
+    res.redirect(url);
+  } catch (error) {
+    console.error("Error tracking link click:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
 
 // Sync database
 sequelize

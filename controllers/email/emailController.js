@@ -1025,7 +1025,7 @@ exports.composeEmail = [
       templateID,
       actionType,
       replyToMessageId,
-    } = req.body; // Removed `placeholders`
+    } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
     try {
@@ -1040,7 +1040,7 @@ exports.composeEmail = [
         // Use the default email account
         SENDER_EMAIL = defaultEmail.email;
         SENDER_PASSWORD = defaultEmail.appPassword;
-        SENDER_NAME = defaultEmail.senderName || "No Name"; // Use senderName or fallback to "No Name"
+        SENDER_NAME = defaultEmail.senderName || "No Name";
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1055,8 +1055,9 @@ exports.composeEmail = [
 
         SENDER_EMAIL = userCredential.email;
         SENDER_PASSWORD = userCredential.appPassword;
-        SENDER_NAME = userCredential.senderName || "No Name"; // Use senderName or fallback to "No Name"
+        SENDER_NAME = userCredential.senderName || "No Name";
       }
+
       let finalSubject = subject;
       let finalBody = text || html;
       let inReplyToHeader = null;
@@ -1064,7 +1065,6 @@ exports.composeEmail = [
 
       // Handle reply action
       if (actionType === "reply") {
-        // Fetch the original email from the database
         const originalEmail = await Email.findOne({
           where: { messageId: replyToMessageId, masterUserID },
         });
@@ -1075,20 +1075,14 @@ exports.composeEmail = [
           });
         }
 
-        // Set headers for reply
-        inReplyToHeader = originalEmail.messageId; // Use the original email's messageId
+        inReplyToHeader = originalEmail.messageId;
         referencesHeader = originalEmail.references
           ? `${originalEmail.references} ${originalEmail.messageId}`
-          : originalEmail.messageId; // Append the original email's messageId to references
+          : originalEmail.messageId;
 
-        // Modify subject and body for reply
         finalSubject = `Re: ${originalEmail.subject}`;
-        // finalBody = `\n\nOn ${originalEmail.createdAt}, ${originalEmail.sender} wrote:\n${originalEmail.body}\n\n${text}`;
         finalBody = `${text || html}`;
       }
-
-      // let finalSubject = subject;
-      // let finalBody = text || html;
 
       // If a templateID is provided, fetch the template
       if (templateID) {
@@ -1100,9 +1094,8 @@ exports.composeEmail = [
           return res.status(404).json({ message: "Template not found." });
         }
 
-        // Use the template's subject and body
         finalSubject = template.subject;
-        finalBody = template.content; // Changed from `body` to `content`
+        finalBody = template.content;
       }
 
       // Prepare attachments for nodemailer
@@ -1110,32 +1103,62 @@ exports.composeEmail = [
         req.files && req.files.length > 0
           ? req.files.map((file) => ({
               filename: file.originalname,
-              path: file.path, // Use the file path from Multer
+              path: file.path,
             }))
           : [];
 
+      // Add tracking pixel for email open tracking
+      const generateTrackingPixel = (messageId) => {
+        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
+        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;" />`;
+      };
+
+      // Add tracking links for click tracking
+      const generateRedirectLink = (originalUrl, messageId) => {
+        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
+        return `${baseURL}/track/click?messageId=${messageId}&url=${encodeURIComponent(
+          originalUrl
+        )}`;
+      };
+
+      const replaceLinksWithTracking = (body, messageId) => {
+        return body.replace(
+          /href="([^"]*)"/g,
+          (match, url) => `href="${generateRedirectLink(url, messageId)}"`
+        );
+      };
+
+      // Generate a temporary messageId for tracking
+      const tempMessageId = `temp-${Date.now()}`;
+
+      // Add tracking pixel and replace links in the email body
+      finalBody = `${replaceLinksWithTracking(
+        finalBody,
+        tempMessageId
+      )}<br>${generateTrackingPixel(tempMessageId)}`;
+
       // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
-        service: "gmail", // Use your email provider (e.g., Gmail, Outlook)
+        service: "gmail",
         auth: {
-          user: SENDER_EMAIL, // Fetch from DefaultEmail or UserCredential
-          pass: SENDER_PASSWORD, // Fetch from DefaultEmail or UserCredential
+          user: SENDER_EMAIL,
+          pass: SENDER_PASSWORD,
         },
       });
 
       // Define the email options
       const mailOptions = {
-        from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`, // Include senderName and email
-        to, // Recipient's email address
-        cc, // CC recipients
-        bcc, // BCC recipients
-        subject: finalSubject, // Final subject
-        text: finalBody, // Final body
-        html: finalBody, // HTML body (optional)
+        from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+        to,
+        cc,
+        bcc,
+        subject: finalSubject,
+        text: finalBody,
+        html: finalBody,
         attachments:
-          formattedAttachments.length > 0 ? formattedAttachments : undefined, // Include attachments only if they exist
-        inReplyTo: inReplyToHeader || undefined, // Add inReplyTo header
-        references: referencesHeader || undefined, // Add references header
+          formattedAttachments.length > 0 ? formattedAttachments : undefined,
+        inReplyTo: inReplyToHeader || undefined,
+        references: referencesHeader || undefined,
       };
 
       // Send the email
@@ -1149,15 +1172,16 @@ exports.composeEmail = [
         inReplyTo: inReplyToHeader || null,
         references: referencesHeader || null,
         sender: SENDER_EMAIL,
-        senderName: SENDER_NAME, // Save the sender's name
+        senderName: SENDER_NAME,
         recipient: to,
-        cc, // Save CC recipients
-        bcc, // Save BCC recipients
+        cc,
+        bcc,
         subject: finalSubject,
         body: finalBody,
-        folder: "sent", // Mark as sent
+        folder: "sent",
         createdAt: new Date(),
-        masterUserID, // Associate the email with the user
+        masterUserID,
+        tempMessageId
       };
 
       const savedEmail = await Email.create(emailData);
@@ -1183,13 +1207,13 @@ exports.composeEmail = [
       // Generate public URLs for attachments
       const attachmentLinks = savedAttachments.map((attachment) => ({
         filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       }));
 
       res.status(200).json({
         message: "Email sent and saved successfully.",
         messageId: info.messageId,
-        attachments: attachmentLinks, // Include attachment links in the response
+        attachments: attachmentLinks,
       });
     } catch (error) {
       console.error("Error sending email:", error);
