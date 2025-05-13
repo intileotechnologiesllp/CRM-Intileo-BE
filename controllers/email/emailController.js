@@ -1040,7 +1040,23 @@ exports.composeEmail = [
         // Use the default email account
         SENDER_EMAIL = defaultEmail.email;
         SENDER_PASSWORD = defaultEmail.appPassword;
-        SENDER_NAME = defaultEmail.senderName || SENDER_EMAIL.split("@")[0]; // Use the email prefix if senderName is not provided
+
+        // If senderName is not provided in DefaultEmail, fetch it from MasterUser
+        if (defaultEmail.senderName) {
+          SENDER_NAME = defaultEmail.senderName;
+        } else {
+          const masterUser = await MasterUser.findOne({
+            where: { masterUserID },
+          });
+
+          if (!masterUser) {
+            return res.status(404).json({
+              message: "Master user not found for the given user.",
+            });
+          }
+
+          SENDER_NAME = masterUser.name; // Use the name from MasterUser
+        }
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1055,7 +1071,19 @@ exports.composeEmail = [
 
         SENDER_EMAIL = userCredential.email;
         SENDER_PASSWORD = userCredential.appPassword;
-        SENDER_NAME = userCredential.senderName || SENDER_EMAIL.split("@")[0]; // Use the email prefix if senderName is not provided
+
+        // Fetch senderName from MasterUser
+        const masterUser = await MasterUser.findOne({
+          where: { masterUserID },
+        });
+
+        if (!masterUser) {
+          return res.status(404).json({
+            message: "Master user not found for the given user.",
+          });
+        }
+
+        SENDER_NAME = masterUser.name; // Use the name from MasterUser
       }
 
       let finalSubject = subject;
