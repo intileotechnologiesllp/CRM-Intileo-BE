@@ -81,6 +81,14 @@ const Email = sequelize.define("Email", {
   //   type: DataTypes.BOOLEAN,
   //   defaultValue: true,
   // },
+//   isOpened: {
+//   type: DataTypes.BOOLEAN,
+//   defaultValue: false,
+// },
+// isClicked: {
+//   type: DataTypes.BOOLEAN,
+//   defaultValue: false,
+// },
   
 },
 {

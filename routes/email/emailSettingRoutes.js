@@ -10,7 +10,7 @@ router.get("/get-default-email",verifyToken,emailSettingsController.getDefaultEm
 router.post("/update-default-email",verifyToken,emailSettingsController.updateDefaultEmail);
 router.get("/archive-email/:emailId",verifyToken,emailSettingsController.archiveEmail);
 router.get("/fetch-sync-email",verifyToken,emailSettingsController.fetchSyncEmails);
-
+router.get("/fetc-sync-email",verifyToken,emailSettingsController.fetchsyncdata)
 
 
 
