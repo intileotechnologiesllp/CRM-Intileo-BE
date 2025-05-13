@@ -1177,7 +1177,7 @@ exports.composeEmail = [
         cc,
         bcc,
         subject: finalSubject,
-        body: finalBody,
+        body: `${text || html}`,
         folder: "sent",
         createdAt: new Date(),
         masterUserID,
