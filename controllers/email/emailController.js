@@ -1181,7 +1181,7 @@ exports.composeEmail = [
         folder: "sent",
         createdAt: new Date(),
         masterUserID,
-        tempMessageId
+        tempMessageId,
       };
 
       const savedEmail = await Email.create(emailData);
@@ -1351,15 +1351,12 @@ exports.addUserCredential = async (req, res) => {
     req.body;
 
   try {
-    // Validate syncStartDate (optional validation to ensure it's in the correct format)
+    // Validate syncStartDate (ensure it's a valid ISO date string)
     if (syncStartDate) {
-      const daysAgoMatch = syncStartDate.match(
-        /^(\d+)\s+days\s+ago\s+\((.+)\)$/
-      );
-      if (!daysAgoMatch) {
+      const parsedDate = new Date(syncStartDate);
+      if (isNaN(parsedDate.getTime())) {
         return res.status(400).json({
-          message:
-            "Invalid syncStartDate format. Expected format: '3 days ago (May 10, 2025)'.",
+          message: "Invalid syncStartDate format. Expected an ISO date string.",
         });
       }
     }
@@ -1380,7 +1377,7 @@ exports.addUserCredential = async (req, res) => {
     const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the formatted syncStartDate
+    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the ISO date string
     if (syncFolders) updateData.syncFolders = syncFolders;
     if (syncAllFolders !== undefined)
       updateData.syncAllFolders = syncAllFolders; // Allow boolean values
@@ -1399,7 +1396,7 @@ exports.addUserCredential = async (req, res) => {
       masterUserID,
       email: email || null,
       appPassword: appPassword || null,
-      syncStartDate: syncStartDate || "3 days ago (May 10, 2025)", // Default value
+      syncStartDate: syncStartDate || new Date().toISOString(), // Default to the current date if not provided
       syncFolders: syncFolders || [
         "INBOX",
         "[Gmail]/Sent Mail",
