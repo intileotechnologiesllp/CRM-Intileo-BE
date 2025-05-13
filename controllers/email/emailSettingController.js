@@ -201,7 +201,7 @@ const folderMapping = {
 };
 
 exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 50, page = 1 } = req.query;
+  const { batchSize = 50, page = 1 } = req.query; // Default batchSize to 50 and page to 1
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
@@ -312,7 +312,12 @@ exports.fetchSyncEmails = async (req, res) => {
 
       console.log(`Total emails found in ${folderName}: ${messages.length}`);
 
-      for (const message of messages) {
+      // Paginate emails based on batchSize and page
+      const startIndex = (page - 1) * batchSize;
+      const endIndex = startIndex + parseInt(batchSize, 10);
+      const paginatedMessages = messages.slice(startIndex, endIndex);
+
+      for (const message of paginatedMessages) {
         const rawBodyPart = message.parts.find((part) => part.which === "");
         const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
@@ -373,6 +378,8 @@ exports.fetchSyncEmails = async (req, res) => {
     res.status(200).json({
       message: "Fetched and saved emails from specified folders.",
       sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
+      batchSize: parseInt(batchSize, 10),
+      page: parseInt(page, 10),
     });
   } catch (error) {
     console.error("Error fetching emails:", error);

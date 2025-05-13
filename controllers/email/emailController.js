@@ -1040,7 +1040,7 @@ exports.composeEmail = [
         // Use the default email account
         SENDER_EMAIL = defaultEmail.email;
         SENDER_PASSWORD = defaultEmail.appPassword;
-        SENDER_NAME = defaultEmail.senderName || "No Name";
+        SENDER_NAME = defaultEmail.senderName || SENDER_EMAIL.split("@")[0]; // Use the email prefix if senderName is not provided
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1055,7 +1055,7 @@ exports.composeEmail = [
 
         SENDER_EMAIL = userCredential.email;
         SENDER_PASSWORD = userCredential.appPassword;
-        SENDER_NAME = userCredential.senderName || "No Name";
+        SENDER_NAME = userCredential.senderName || SENDER_EMAIL.split("@")[0]; // Use the email prefix if senderName is not provided
       }
 
       let finalSubject = subject;
