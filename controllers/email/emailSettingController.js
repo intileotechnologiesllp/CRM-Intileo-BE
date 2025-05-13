@@ -7,6 +7,7 @@ const Imap = require("imap-simple");
 const { htmlToText } = require("html-to-text");
 const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
+const { format, subDays } = require("date-fns"); // Use date-fns for date manipulation
 
 const cleanEmailBody = (body) => {
   // Remove quoted replies (e.g., lines starting with ">")
@@ -215,10 +216,14 @@ exports.fetchSyncEmails = async (req, res) => {
 
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
-    const syncStartDate = userCredential.syncStartDate || 3; // Default to 3 days
-    const syncStartType = userCredential.syncStartType || "days"; // Default to "days"
+    const syncStartDate = parseInt(userCredential.syncStartDate, 10) || 3; // Default to 3 days if invalid
     const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to "INBOX"
     const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
+
+    // Validate syncStartDate
+    if (isNaN(syncStartDate) || syncStartDate <= 0) {
+      return res.status(400).json({ message: "Invalid syncStartDate value." });
+    }
 
     console.log("Connecting to IMAP server...");
     const imapConfig = {
@@ -236,6 +241,23 @@ exports.fetchSyncEmails = async (req, res) => {
     };
 
     const connection = await Imap.connect(imapConfig);
+
+    // Calculate the `sinceDate` based on syncStartDate
+    const now = new Date();
+    const sinceDate = subDays(now, syncStartDate); // Subtract days from the current date
+
+    // Validate sinceDate
+    if (isNaN(sinceDate.getTime())) {
+      throw new Error("Invalid sinceDate calculated from syncStartDate.");
+    }
+
+    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
+    const humanReadableSinceDate = `${syncStartDate} days ago (${format(
+      sinceDate,
+      "MMMM dd, yyyy"
+    )})`; // Format as "3 days ago (May 10, 2025)"
+
+    console.log(`Fetching emails since ${humanReadableSinceDate}`);
 
     // Fetch all folders from the IMAP server
     const mailboxes = await connection.getBoxes();
@@ -266,23 +288,6 @@ exports.fetchSyncEmails = async (req, res) => {
     }
 
     console.log("Valid folders to sync:", foldersToSync);
-
-    // Calculate the `sinceDate` based on syncStartDate and syncStartType
-    const now = new Date();
-    let sinceDate;
-
-    if (syncStartType === "days") {
-      sinceDate = new Date(now.getTime() - syncStartDate * 24 * 60 * 60 * 1000);
-    } else if (syncStartType === "months") {
-      sinceDate = new Date(now.setMonth(now.getMonth() - syncStartDate));
-    } else if (syncStartType === "years") {
-      sinceDate = new Date(now.setFullYear(now.getFullYear() - syncStartDate));
-    } else {
-      return res.status(400).json({ message: "Invalid syncStartType." });
-    }
-
-    const formattedSinceDate = formatDateForIMAP(sinceDate);
-    console.log(`Using SINCE date: ${formattedSinceDate}`);
 
     // Helper function to fetch emails from a specific folder
     const fetchEmailsFromFolder = async (folderName) => {
@@ -360,9 +365,32 @@ exports.fetchSyncEmails = async (req, res) => {
 
     res.status(200).json({
       message: "Fetched and saved emails from specified folders.",
+      sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+exports.fetchsyncdata = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
+
+  try {
+    // Fetch the user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    res.status(200).json({
+      message: "User credentials fetched successfully.",
+      credential: userCredential, // Return all fields from the UserCredential model
+    });
+  } catch (error) {
+    console.error("Error fetching user credentials:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };

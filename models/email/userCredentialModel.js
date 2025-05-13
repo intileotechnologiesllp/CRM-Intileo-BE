@@ -17,15 +17,14 @@ const UserCredential = sequelize.define("UserCredential", {
     allowNull: false,
   },
   syncStartDate: {
-    type: DataTypes.INTEGER, // Allow any number as a string
+    type: DataTypes.STRING,
     allowNull: true, // Optional field
-    defaultValue: "3", // Default to "3"
   },
-  syncStartType: {
-    type: DataTypes.ENUM("days", "months", "years"), // Restrict values to 'days', 'months', or 'years'
-    allowNull: true, // Optional field
-    defaultValue: "days", // Default to 'days'
-  },
+  // syncStartType: {
+  //   type: DataTypes.ENUM("days", "months", "years"), // Restrict values to 'days', 'months', or 'years'
+  //   allowNull: true, // Optional field
+  //   defaultValue: "days", // Default to 'days'
+  // },
     syncFolders: {
     type: DataTypes.JSON, // Store folder names as a JSON array
     allowNull: true, // Optional field
