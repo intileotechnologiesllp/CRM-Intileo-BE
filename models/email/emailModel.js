@@ -74,7 +74,7 @@ const Email = sequelize.define("Email", {
     allowNull: false,
   },
   draftId:{
-    type: DataTypes.INTEGER,
+    type: DataTypes.TEXT,
     allowNull: true,
   },
   isDraft:{

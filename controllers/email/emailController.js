@@ -718,6 +718,9 @@ exports.getEmails = async (req, res) => {
         { subject: { [Sequelize.Op.like]: `%${search}%` } },
         { sender: { [Sequelize.Op.like]: `%${search}%` } },
         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
+        { folder: { [Sequelize.Op.like]: `%${search}%` } }
       ];
     }
 
