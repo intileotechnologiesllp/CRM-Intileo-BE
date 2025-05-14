@@ -975,7 +975,7 @@ exports.getOneEmail = async (req, res) => {
             masterUserID,
           }, // Emails in the same thread
         ],
-        folder: { [Sequelize.Op.in]: ["inbox", "sent"] }, // Include only inbox and sent folders
+        folder: { [Sequelize.Op.in]: ["inbox", "sent","drafts","archive"] }, // Include only inbox and sent folders
       },
       include: [
         {
