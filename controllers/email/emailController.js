@@ -796,7 +796,8 @@ if (folder === "drafts") {
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
       unviewCount, // Include the unviewCount field
-      threads: Object.values(threads), // Return grouped threads
+      // threads: Object.values(threads), // Return grouped threads
+      threads: responseThreads, // Return grouped threads
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
