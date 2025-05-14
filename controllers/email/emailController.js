@@ -662,7 +662,9 @@ exports.getEmails = async (req, res) => {
     isRead,
     toMe,
     hasAttachments,
-   trackedEmails
+    isOpened, // <-- Add this
+    isClicked, // <-- Add this
+    trackedEmails
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
