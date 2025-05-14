@@ -46,6 +46,11 @@ const UserCredential = sequelize.define("UserCredential", {
     allowNull: false,
     defaultValue: true//Default to false (do not track)
   },
+  blockedEmail:{
+    type: DataTypes.JSON, // Store blocked email addresses as a JSON array
+    allowNull: true, // Optional field
+    defaultValue: [], // Default to an empty array
+  },
 });
 
 module.exports = UserCredential;

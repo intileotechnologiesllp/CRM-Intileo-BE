@@ -943,11 +943,11 @@ exports.getOneEmail = async (req, res) => {
   try {
     // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
-      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
+      where: { emailID: emailId, masterUserID },
       include: [
         {
           model: Attachment,
-          as: "attachments", // Alias defined in the relationship
+          as: "attachments",
         },
       ],
     });
@@ -956,59 +956,63 @@ exports.getOneEmail = async (req, res) => {
       return res.status(404).json({ message: "Email not found." });
     }
 
-    console.log(`Fetching related emails for thread: ${mainEmail.messageId}`);
-
-    // Update the isRead column to true
+    // Mark as read if not already
     if (!mainEmail.isRead) {
       await mainEmail.update({ isRead: true });
-      console.log(`Email marked as read: ${mainEmail.messageId}`);
     }
-
-    // Fetch related emails from both inbox and sent folders
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: mainEmail.inReplyTo, masterUserID }, // Parent email
-          { inReplyTo: mainEmail.messageId, masterUserID }, // Replies to this email
-          {
-            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
-            masterUserID,
-          }, // Emails in the same thread
-        ],
-        folder: { [Sequelize.Op.in]: ["inbox", "sent"] }, // Include only inbox and sent folders
-      },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments", // Alias defined in the relationship
-        },
-      ],
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
 
     // Clean the body of the main email
     mainEmail.body = cleanEmailBody(mainEmail.body);
-
-    // Clean the body of each related email
-    relatedEmails.forEach((email) => {
-      email.body = cleanEmailBody(email.body);
-    });
 
     // Add baseURL to attachment paths
     const baseURL = process.env.LOCALHOST_URL;
     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
       ...attachment,
-      path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
+    // If this is a draft, do NOT fetch related emails
+    if (mainEmail.folder === "drafts") {
+      return res.status(200).json({
+        message: "Draft email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+        },
+      });
+    }
+
+    // Otherwise, fetch related emails from inbox and sent folders
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: mainEmail.inReplyTo, masterUserID },
+          { inReplyTo: mainEmail.messageId, masterUserID },
+          {
+            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
+            masterUserID,
+          },
+        ],
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+      },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
+      order: [["createdAt", "ASC"]],
+    });
+
+    // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
+      email.body = cleanEmailBody(email.body);
       email.attachments = email.attachments.map((attachment) => ({
         ...attachment,
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
       }));
     });
 
-    // Combine the main email and related emails in the response
     res.status(200).json({
       message: "Email fetched successfully.",
       data: {

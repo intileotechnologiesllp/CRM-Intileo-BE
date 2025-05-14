@@ -272,6 +272,18 @@ exports.fetchRecentEmail = async (adminId) => {
       return { message: "User credentials not found." };
     }
 
+    // Get blocked emails as an array (adjust if your schema is different)
+    let blockedEmails = [];
+    if (userCredential.blockedEmail) {
+      if (Array.isArray(userCredential.blockedEmail)) {
+        blockedEmails = userCredential.blockedEmail;
+      } else if (typeof userCredential.blockedEmail === "string") {
+        blockedEmails = userCredential.blockedEmail
+          .split(",")
+          .map((e) => e.trim().toLowerCase());
+      }
+    }
+
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
 
@@ -328,6 +340,18 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
+
+    // Check if sender is blocked
+    const senderEmail = parsedEmail.from
+      ? parsedEmail.from.value[0].address.toLowerCase()
+      : null;
+    if (blockedEmails.includes(senderEmail)) {
+      console.log(`Email from blocked sender (${senderEmail}) skipped.`);
+      return {
+        message: `Email from blocked sender (${senderEmail}) not saved.`,
+      };
+    }
+
     const referencesHeader = parsedEmail.headers.get("references");
     const references = Array.isArray(referencesHeader)
       ? referencesHeader.join(" ") // Convert array to string
@@ -977,7 +1001,7 @@ exports.getOneEmail = async (req, res) => {
         message: "Draft email fetched successfully.",
         data: {
           email: mainEmail,
-          relatedEmails: [],
+          relatedEmails,
         },
       });
     }
@@ -1466,6 +1490,7 @@ exports.addUserCredential = async (req, res) => {
     syncAllFolders,
     isTrackOpenEmail,
     isTrackClickEmail,
+    blockedEmail, // <-- Add this line
   } = req.body;
 
   try {
@@ -1495,14 +1520,15 @@ exports.addUserCredential = async (req, res) => {
     const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the ISO date string
+    if (syncStartDate) updateData.syncStartDate = syncStartDate;
     if (syncFolders) updateData.syncFolders = syncFolders;
     if (syncAllFolders !== undefined)
-      updateData.syncAllFolders = syncAllFolders; // Allow boolean values
+      updateData.syncAllFolders = syncAllFolders;
     if (isTrackOpenEmail !== undefined)
-      updateData.isTrackOpenEmail = isTrackOpenEmail; // Update tracking open emails
+      updateData.isTrackOpenEmail = isTrackOpenEmail;
     if (isTrackClickEmail !== undefined)
-      updateData.isTrackClickEmail = isTrackClickEmail; // Update tracking click emails
+      updateData.isTrackClickEmail = isTrackClickEmail;
+    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail; // <-- Add this line
 
     if (existingCredential) {
       // Update existing credentials
@@ -1518,15 +1544,16 @@ exports.addUserCredential = async (req, res) => {
       masterUserID,
       email: email || null,
       appPassword: appPassword || null,
-      syncStartDate: syncStartDate || new Date().toISOString(), // Default to the current date if not provided
+      syncStartDate: syncStartDate || new Date().toISOString(),
       syncFolders: syncFolders || [
         "INBOX",
         "[Gmail]/Sent Mail",
         "[Gmail]/Drafts",
-      ], // Default folders
-      syncAllFolders: syncAllFolders || false, // Default to false
-      isTrackOpenEmail: isTrackOpenEmail || true, //efault to false
-      isTrackClickEmail: isTrackClickEmail || true, //Default to false
+      ],
+      syncAllFolders: syncAllFolders || false,
+      isTrackOpenEmail: isTrackOpenEmail || true,
+      isTrackClickEmail: isTrackClickEmail || true,
+      blockedEmail: blockedEmail || null, // <-- Add this line
     });
 
     res.status(201).json({
