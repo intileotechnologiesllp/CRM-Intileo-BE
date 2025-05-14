@@ -662,49 +662,44 @@ exports.getEmails = async (req, res) => {
     isRead,
     toMe,
     hasAttachments,
-    isOpened, // <-- Add this
-    isClicked, // <-- Add this
-  } = req.query;
+  } = req.query; // Add `hasAttachments` to query parameters
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
     const filters = {
-      masterUserID,
+      masterUserID, // Filter emails by the specific user
     };
 
+    // Filter by folder (e.g., inbox, drafts, archive)
     if (folder) {
       filters.folder = folder;
     }
 
+    // Filter by read/unread status
     if (isRead !== undefined) {
-      filters.isRead = isRead === "true";
+      filters.isRead = isRead === "true"; // Convert string to boolean
     }
 
+    // Add `to:me` filter
     if (toMe === "true") {
+      // Fetch the user's email address from the UserCredential model
       const userCredential = await UserCredential.findOne({
         where: { masterUserID },
       });
+
       if (!userCredential) {
         return res.status(404).json({ message: "User credentials not found." });
       }
+
       const userEmail = userCredential.email;
-      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
+      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` }; // Filter emails where the recipient contains the user's email
     }
 
-    // Add tracked emails filter
-    if (isOpened === "true" && isClicked === "true") {
-      filters.isOpened = true;
-      filters.isClicked = true;
-    } else {
-      if (isOpened !== undefined) filters.isOpened = isOpened === "true";
-      if (isClicked !== undefined) filters.isClicked = isClicked === "true";
-    }
-
-    // Add hasAttachments filter
+    // Add `hasAttachments` filter
     let includeAttachments = [
       {
         model: Attachment,
-        as: "attachments",
+        as: "attachments", // Alias defined in the relationship
       },
     ];
     if (hasAttachments === "true") {
@@ -712,7 +707,7 @@ exports.getEmails = async (req, res) => {
         {
           model: Attachment,
           as: "attachments",
-          required: true,
+          required: true, // Only include emails that have attachments
         },
       ];
     }
@@ -723,9 +718,6 @@ exports.getEmails = async (req, res) => {
         { subject: { [Sequelize.Op.like]: `%${search}%` } },
         { sender: { [Sequelize.Op.like]: `%${search}%` } },
         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-        { folder: { [Sequelize.Op.like]: `%${search}%` } },
       ];
     }
 
@@ -977,7 +969,7 @@ exports.getOneEmail = async (req, res) => {
         message: "Draft email fetched successfully.",
         data: {
           email: mainEmail,
-          relatedEmails,
+          relatedEmails:[],
         },
       });
     }
