@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db"); // Adjust the path to your database configuration
+// const { op}= require("sequelize/types/lib/operators");
 
 const UserCredential = sequelize.define("UserCredential", {
   masterUserID: {
@@ -34,6 +35,16 @@ const UserCredential = sequelize.define("UserCredential", {
     type: DataTypes.BOOLEAN, // Boolean flag for syncing all folders
     allowNull: false,
     defaultValue: true, // Default to false (sync specific folders)
+  },
+  isTrackOpenEmail:{
+    type: DataTypes.BOOLEAN, // Boolean flag for tracking email opens
+    allowNull: false,
+    defaultValue: true,//fault to false (do not track)
+  },
+  isTrackClickEmail:{
+    type: DataTypes.BOOLEAN, // Boolean flag for tracking email clicks
+    allowNull: false,
+    defaultValue: true//Default to false (do not track)
   },
 });
 

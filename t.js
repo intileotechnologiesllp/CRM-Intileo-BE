@@ -1094,19 +1094,7 @@ exports.composeEmail = [
       let finalBody = text || html;
       let inReplyToHeader = null;
       let referencesHeader = null;
-      let draftEmail
-      // If draftId is present, fetch the draft and use its data as defaults
-      if (draftId) {
-        draftEmail = await Email.findOne({
-          where: { draftId, masterUserID, folder: "drafts" },
-        });
-        if (!draftEmail) {
-          return res.status(404).json({ message: "Draft not found." });
-        }
-        // Use draft's data as defaults, allow override by request
-        finalSubject = subject || draftEmail.subject;
-        finalBody = (text || html) || draftEmail.body;
-      }
+
       // Handle reply action
       if (actionType === "reply") {
         const originalEmail = await Email.findOne({
@@ -1207,13 +1195,21 @@ exports.composeEmail = [
         },
       });
          // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
-
+    if (isDraft === false && draftId) {
+      const draftEmail = await Email.findOne({
+        where: { draftId, masterUserID, folder: "drafts" },
+      });
+      if (draftEmail) {
+        await draftEmail.update({ folder: "sent" });
+        console.log(`Draft with draftId ${draftId} moved to sent folder.`);
+      }
+    }
       // Define the email options
       const mailOptions = {
         from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-           to: to || (draftEmail && draftEmail.recipient),
-        cc: cc || (draftEmail && draftEmail.cc),
-        bcc: bcc || (draftEmail && draftEmail.bcc),
+        to,
+        cc,
+        bcc,
         subject: finalSubject,
         text: finalBody,
         html: finalBody,
@@ -1226,62 +1222,25 @@ exports.composeEmail = [
       // Send the email
       const info = await transporter.sendMail(mailOptions);
 
-      let savedEmail;
-      let savedAttachments = [];
-      console.log(draftId,".............");
-      
-      if (draftId) {
-        // Update the existing draft record to be a sent email
-        savedEmail = await draftEmail.update({
-          messageId: info.messageId,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to || draftEmail.recipient,
-          cc: cc || draftEmail.cc,
-          bcc: bcc || draftEmail.bcc,
-          subject: finalSubject,
-          body: `${text || html}`,
-          folder: "sent",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-        });
+      console.log("Email sent: ", info.messageId);
 
-        // Update attachments if new ones are uploaded
-        if (req.files && req.files.length > 0) {
-          await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-          savedAttachments = req.files.map((file) => ({
-            emailID: draftEmail.emailID,
-            filename: file.originalname,
-            path: file.path,
-          }));
-          await Attachment.bulkCreate(savedAttachments);
-        } else {
-          // If no new attachments, fetch existing ones for response
-          savedAttachments = await Attachment.findAll({ where: { emailID: draftEmail.emailID } });
-        }
-      } else {
-        // ... (your existing logic for new sent emails) ...
-        const emailData = {
-          messageId: info.messageId,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to,
-          cc,
-          bcc,
-          subject: finalSubject,
-          body: finalBody,
-          folder: "sent",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-          isDraft: false
-        };
-        savedEmail = await Email.create(emailData);
+      // Save the email in the database
+      const emailData = {
+        messageId: info.messageId,
+        inReplyTo: inReplyToHeader || null,
+        references: referencesHeader || null,
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        recipient: to,
+        cc,
+        bcc,
+        subject: finalSubject,
+        body: `${text || html}`,
+        folder: "sent",
+        createdAt: new Date(),
+        masterUserID,
+        tempMessageId,
+      };
 
 
       // Save attachments in the database
@@ -1300,7 +1259,6 @@ exports.composeEmail = [
           `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
         );
       }
-    }
 
       // Generate public URLs for attachments
       const attachmentLinks = savedAttachments.map((attachment) => ({

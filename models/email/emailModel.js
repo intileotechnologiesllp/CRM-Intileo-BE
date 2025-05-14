@@ -73,14 +73,14 @@ const Email = sequelize.define("Email", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
-  // draftId:{
-  //   type: DataTypes.INTEGER,
-  //   allowNull: true,
-  // },
-  // isDraft:{
-  //   type: DataTypes.BOOLEAN,
-  //   defaultValue: true,
-  // },
+  draftId:{
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  isDraft:{
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+  },
   isOpened: {
   type: DataTypes.BOOLEAN,
   defaultValue: false,
