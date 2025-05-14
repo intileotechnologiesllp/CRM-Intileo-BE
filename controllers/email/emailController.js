@@ -272,18 +272,6 @@ exports.fetchRecentEmail = async (adminId) => {
       return { message: "User credentials not found." };
     }
 
-    // Get blocked emails as an array (adjust if your schema is different)
-    let blockedEmails = [];
-    if (userCredential.blockedEmail) {
-      if (Array.isArray(userCredential.blockedEmail)) {
-        blockedEmails = userCredential.blockedEmail;
-      } else if (typeof userCredential.blockedEmail === "string") {
-        blockedEmails = userCredential.blockedEmail
-          .split(",")
-          .map((e) => e.trim().toLowerCase());
-      }
-    }
-
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
 
@@ -340,18 +328,6 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
-
-    // Check if sender is blocked
-    const senderEmail = parsedEmail.from
-      ? parsedEmail.from.value[0].address.toLowerCase()
-      : null;
-    if (blockedEmails.includes(senderEmail)) {
-      console.log(`Email from blocked sender (${senderEmail}) skipped.`);
-      return {
-        message: `Email from blocked sender (${senderEmail}) not saved.`,
-      };
-    }
-
     const referencesHeader = parsedEmail.headers.get("references");
     const references = Array.isArray(referencesHeader)
       ? referencesHeader.join(" ") // Convert array to string
