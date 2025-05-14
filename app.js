@@ -27,6 +27,7 @@ const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js"
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
 const emailSettingController=require("./routes/email/emailSettingRoutes.js")
 const Email = require("./models/email/emailModel"); // Import Email model
+// const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
 app.use(express.static(path.join(__dirname, "public")));
@@ -106,6 +107,16 @@ app.get("/track/click", async (req, res) => {
     res.status(500).send("Internal Server Error");
   }
 });
+
+// (async () => {
+//   try {
+//     await initRabbitMQ(); // Initialize RabbitMQ
+//     console.log("RabbitMQ initialized successfully.");
+//   } catch (error) {
+//     console.error("Failed to initialize RabbitMQ:", error);
+//     process.exit(1); // Exit the application if RabbitMQ fails to initialize
+//   }
+// })();
 
 // Sync database
 sequelize
