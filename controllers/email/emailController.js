@@ -662,8 +662,7 @@ exports.getEmails = async (req, res) => {
     isRead,
     toMe,
     hasAttachments,
-    isOpened, // <-- Add this
-    isClicked, // <-- Add this
+   trackedEmails
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -692,7 +691,8 @@ exports.getEmails = async (req, res) => {
     }
 
     // Add tracked emails filter
-    if (isOpened === "true" && isClicked === "true") {
+    // --- Tracked emails filter ---
+    if (trackedEmails === "true") {
       filters.isOpened = true;
       filters.isClicked = true;
     } else {
