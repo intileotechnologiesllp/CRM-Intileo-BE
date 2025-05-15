@@ -1589,7 +1589,7 @@ exports.getUserCredential = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
-exports.deleteEmails = async (req, res) => {
+exports.deleteEmail = async (req, res) => {
   try {
     const masterUserID = req.adminId; // Assuming adminId is set in middleware
     const { emailId } = req.params; // Get the email ID from the request parameters
