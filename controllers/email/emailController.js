@@ -1293,7 +1293,7 @@ exports.composeEmail = [
         cc: cc || (draftEmail && draftEmail.cc),
         bcc: bcc || (draftEmail && draftEmail.bcc),
         subject: finalSubject,
-        text: finalBody,
+        text: htmlToText(finalBody),
         html: finalBody,
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined,
