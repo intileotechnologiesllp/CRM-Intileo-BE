@@ -408,3 +408,51 @@ exports.fetchsyncdata = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+// Example restore API
+exports.restoreEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailIds } = req.body; // Array of email IDs
+
+  if (!Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+  }
+
+  // Restore all emails in trash to inbox (or originalFolder if you store it)
+  const [updatedCount] = await Email.update(
+    { folder: "inbox" }, // Or use originalFolder if you store it
+    { where: { emailID: emailIds, masterUserID, folder: "trash" } }
+  );
+
+  res.status(200).json({ message: `${updatedCount} email(s) restored from trash.` });
+};
+
+exports.permanentlyDeleteEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailIds } = req.body;
+
+  if (!Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+  }
+
+  const deletedCount = await Email.destroy({
+    where: { emailID: emailIds, masterUserID, folder: "trash" }
+  });
+
+  res.status(200).json({ message: `${deletedCount} email(s) permanently deleted.` });
+};
+
+exports.markAsUnread = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailIds } = req.body;
+
+  if (!Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+  }
+
+  const [updatedCount] = await Email.update(
+    { isRead: false },
+    { where: { emailID: emailIds, masterUserID } }
+  );
+
+  res.status(200).json({ message: `${updatedCount} email(s) marked as unread.` });
+};
