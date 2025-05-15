@@ -32,7 +32,10 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+});
 
 const imapConfig = {
   imap: {
@@ -662,44 +665,51 @@ exports.getEmails = async (req, res) => {
     isRead,
     toMe,
     hasAttachments,
-  } = req.query; // Add `hasAttachments` to query parameters
+    isOpened, // <-- Add this
+    isClicked, // <-- Add this
+    trackedEmails,
+  } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
     const filters = {
-      masterUserID, // Filter emails by the specific user
+      masterUserID,
     };
 
-    // Filter by folder (e.g., inbox, drafts, archive)
     if (folder) {
       filters.folder = folder;
     }
 
-    // Filter by read/unread status
     if (isRead !== undefined) {
-      filters.isRead = isRead === "true"; // Convert string to boolean
+      filters.isRead = isRead === "true";
     }
 
-    // Add `to:me` filter
     if (toMe === "true") {
-      // Fetch the user's email address from the UserCredential model
       const userCredential = await UserCredential.findOne({
         where: { masterUserID },
       });
-
       if (!userCredential) {
         return res.status(404).json({ message: "User credentials not found." });
       }
-
       const userEmail = userCredential.email;
-      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` }; // Filter emails where the recipient contains the user's email
+      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
     }
 
-    // Add `hasAttachments` filter
+    // Add tracked emails filter
+    // --- Tracked emails filter ---
+    if (trackedEmails === "true") {
+      filters.isOpened = true;
+      filters.isClicked = true;
+    } else {
+      if (isOpened !== undefined) filters.isOpened = isOpened === "true";
+      if (isClicked !== undefined) filters.isClicked = isClicked === "true";
+    }
+
+    // Add hasAttachments filter
     let includeAttachments = [
       {
         model: Attachment,
-        as: "attachments", // Alias defined in the relationship
+        as: "attachments",
       },
     ];
     if (hasAttachments === "true") {
@@ -707,7 +717,7 @@ exports.getEmails = async (req, res) => {
         {
           model: Attachment,
           as: "attachments",
-          required: true, // Only include emails that have attachments
+          required: true,
         },
       ];
     }
@@ -718,6 +728,9 @@ exports.getEmails = async (req, res) => {
         { subject: { [Sequelize.Op.like]: `%${search}%` } },
         { sender: { [Sequelize.Op.like]: `%${search}%` } },
         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
+        { folder: { [Sequelize.Op.like]: `%${search}%` } },
       ];
     }
 
@@ -756,14 +769,30 @@ exports.getEmails = async (req, res) => {
     });
 
     // Group emails by conversation (thread)
-    const threads = {};
-    emails.forEach((email) => {
-      const threadId = email.inReplyTo || email.messageId; // Use inReplyTo or messageId as thread identifier
-      if (!threads[threadId]) {
-        threads[threadId] = [];
-      }
-      threads[threadId].push(email);
-    });
+    let responseThreads;
+    if (folder === "drafts") {
+      // For drafts, group by draftId if available, else by messageId
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.draftId || email.messageId;
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+    } else {
+      // For other folders, group by inReplyTo or messageId
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.inReplyTo || email.messageId;
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+    }
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
@@ -772,7 +801,8 @@ exports.getEmails = async (req, res) => {
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
       unviewCount, // Include the unviewCount field
-      threads: Object.values(threads), // Return grouped threads
+      // threads: Object.values(threads), // Return grouped threads
+      threads: responseThreads, // Return grouped threads
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
@@ -935,11 +965,11 @@ exports.getOneEmail = async (req, res) => {
   try {
     // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
-      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
+      where: { emailID: emailId, masterUserID },
       include: [
         {
           model: Attachment,
-          as: "attachments", // Alias defined in the relationship
+          as: "attachments",
         },
       ],
     });
@@ -948,59 +978,63 @@ exports.getOneEmail = async (req, res) => {
       return res.status(404).json({ message: "Email not found." });
     }
 
-    console.log(`Fetching related emails for thread: ${mainEmail.messageId}`);
-
-    // Update the isRead column to true
+    // Mark as read if not already
     if (!mainEmail.isRead) {
       await mainEmail.update({ isRead: true });
-      console.log(`Email marked as read: ${mainEmail.messageId}`);
     }
-
-    // Fetch related emails from both inbox and sent folders
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: mainEmail.inReplyTo, masterUserID }, // Parent email
-          { inReplyTo: mainEmail.messageId, masterUserID }, // Replies to this email
-          {
-            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
-            masterUserID,
-          }, // Emails in the same thread
-        ],
-        folder: { [Sequelize.Op.in]: ["inbox", "sent"] }, // Include only inbox and sent folders
-      },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments", // Alias defined in the relationship
-        },
-      ],
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
 
     // Clean the body of the main email
     mainEmail.body = cleanEmailBody(mainEmail.body);
-
-    // Clean the body of each related email
-    relatedEmails.forEach((email) => {
-      email.body = cleanEmailBody(email.body);
-    });
 
     // Add baseURL to attachment paths
     const baseURL = process.env.LOCALHOST_URL;
     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
       ...attachment,
-      path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
+    // If this is a draft, do NOT fetch related emails
+    if (mainEmail.folder === "drafts") {
+      return res.status(200).json({
+        message: "Draft email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+        },
+      });
+    }
+
+    // Otherwise, fetch related emails from inbox and sent folders
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: mainEmail.inReplyTo, masterUserID },
+          { inReplyTo: mainEmail.messageId, masterUserID },
+          {
+            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
+            masterUserID,
+          },
+        ],
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+      },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
+      order: [["createdAt", "ASC"]],
+    });
+
+    // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
+      email.body = cleanEmailBody(email.body);
       email.attachments = email.attachments.map((attachment) => ({
         ...attachment,
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
       }));
     });
 
-    // Combine the main email and related emails in the response
     res.status(200).json({
       message: "Email fetched successfully.",
       data: {
@@ -1028,7 +1062,8 @@ exports.composeEmail = [
       actionType,
       replyToMessageId,
       isDraft,
-      draftId
+      draftId,
+      isSchedule, scheduledAt
     } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
@@ -1094,7 +1129,19 @@ exports.composeEmail = [
       let finalBody = text || html;
       let inReplyToHeader = null;
       let referencesHeader = null;
-
+      let draftEmail;
+      // If draftId is present, fetch the draft and use its data as defaults
+      if (draftId) {
+        draftEmail = await Email.findOne({
+          where: { draftId, masterUserID, folder: "drafts" },
+        });
+        if (!draftEmail) {
+          return res.status(404).json({ message: "Draft not found." });
+        }
+        // Use draft's data as defaults, allow override by request
+        finalSubject = subject || draftEmail.subject;
+        finalBody = text || html || draftEmail.body;
+      }
       // Handle reply action
       if (actionType === "reply") {
         const originalEmail = await Email.findOne({
@@ -1194,22 +1241,14 @@ exports.composeEmail = [
           pass: SENDER_PASSWORD,
         },
       });
-         // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
-    if (isDraft === false && draftId) {
-      const draftEmail = await Email.findOne({
-        where: { draftId, masterUserID, folder: "drafts" },
-      });
-      if (draftEmail) {
-        await draftEmail.update({ folder: "sent" });
-        console.log(`Draft with draftId ${draftId} moved to sent folder.`);
-      }
-    }
+      // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
+
       // Define the email options
       const mailOptions = {
         from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-        to,
-        cc,
-        bcc,
+        to: to || (draftEmail && draftEmail.recipient),
+        cc: cc || (draftEmail && draftEmail.cc),
+        bcc: bcc || (draftEmail && draftEmail.bcc),
         subject: finalSubject,
         text: finalBody,
         html: finalBody,
@@ -1222,42 +1261,86 @@ exports.composeEmail = [
       // Send the email
       const info = await transporter.sendMail(mailOptions);
 
-      console.log("Email sent: ", info.messageId);
+      let savedEmail;
+      let savedAttachments = [];
+      console.log(draftId, ".............");
 
-      // Save the email in the database
-      const emailData = {
-        messageId: info.messageId,
-        inReplyTo: inReplyToHeader || null,
-        references: referencesHeader || null,
-        sender: SENDER_EMAIL,
-        senderName: SENDER_NAME,
-        recipient: to,
-        cc,
-        bcc,
-        subject: finalSubject,
-        body: `${text || html}`,
-        folder: "sent",
-        createdAt: new Date(),
-        masterUserID,
-        tempMessageId,
-      };
+      if (draftId) {
+        // Update the existing draft record to be a sent email
+        savedEmail = await draftEmail.update({
+          messageId: info.messageId,
+          inReplyTo: inReplyToHeader || null,
+          references: referencesHeader || null,
+          sender: SENDER_EMAIL,
+          senderName: SENDER_NAME,
+          recipient: to || draftEmail.recipient,
+          cc: cc || draftEmail.cc,
+          bcc: bcc || draftEmail.bcc,
+          subject: finalSubject,
+          body: `${text || html}`,
+          folder: "sent",
+          createdAt: new Date(),
+          masterUserID,
+          tempMessageId,
+        });
 
+        // Update attachments if new ones are uploaded
+        if (req.files && req.files.length > 0) {
+          await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
+          savedAttachments = req.files.map((file) => ({
+            emailID: draftEmail.emailID,
+            filename: file.originalname,
+            path: file.path,
+          }));
+          await Attachment.bulkCreate(savedAttachments);
+        } else {
+          // If no new attachments, fetch existing ones for response
+          savedAttachments = await Attachment.findAll({
+            where: { emailID: draftEmail.emailID },
+          });
+        }
+      } else {
+        // ... (your existing logic for new sent emails) ...
+        const emailData = {
+          messageId: info.messageId,
+          inReplyTo: inReplyToHeader || null,
+          references: referencesHeader || null,
+          sender: SENDER_EMAIL,
+          senderName: SENDER_NAME,
+          recipient: to,
+          cc,
+          bcc,
+          subject: finalSubject,
+          body: finalBody,
+          folder: "sent",
+          createdAt: new Date(),
+          masterUserID,
+          tempMessageId,
+          isDraft: false,
+        };
+        // savedEmail = await Email.create(emailData);
+      // If scheduling, save to outbox and return
+      if (isSchedule === "true" || isSchedule === true) {
+        emailData.folder = "outbox";
+        emailData.scheduledAt = scheduledAt ? new Date(scheduledAt) : null;
+        // const scheduledEmail = await Email.create(emailData);
+        savedEmail = await Email.create(emailData);
+        // Save attachments in the database
+        const savedAttachments =
+          req.files && req.files.length > 0
+            ? req.files.map((file) => ({
+                emailID: savedEmail.emailID,
+                filename: file.originalname,
+                path: file.path,
+              }))
+            : [];
 
-      // Save attachments in the database
-      const savedAttachments =
-        req.files && req.files.length > 0
-          ? req.files.map((file) => ({
-              emailID: savedEmail.emailID,
-              filename: file.originalname,
-              path: file.path,
-            }))
-          : [];
-
-      if (savedAttachments.length > 0) {
-        await Attachment.bulkCreate(savedAttachments);
-        console.log(
-          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-        );
+        if (savedAttachments.length > 0) {
+          await Attachment.bulkCreate(savedAttachments);
+          console.log(
+            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          );
+        }
       }
 
       // Generate public URLs for attachments
@@ -1271,7 +1354,7 @@ exports.composeEmail = [
         messageId: info.messageId,
         attachments: attachmentLinks,
       });
-
+    }
     } catch (error) {
       console.error("Error sending email:", error);
       res
@@ -1412,6 +1495,7 @@ exports.addUserCredential = async (req, res) => {
     syncAllFolders,
     isTrackOpenEmail,
     isTrackClickEmail,
+    blockedEmail, // <-- Add this line
   } = req.body;
 
   try {
@@ -1441,14 +1525,15 @@ exports.addUserCredential = async (req, res) => {
     const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the ISO date string
+    if (syncStartDate) updateData.syncStartDate = syncStartDate;
     if (syncFolders) updateData.syncFolders = syncFolders;
     if (syncAllFolders !== undefined)
-      updateData.syncAllFolders = syncAllFolders; // Allow boolean values
+      updateData.syncAllFolders = syncAllFolders;
     if (isTrackOpenEmail !== undefined)
-      updateData.isTrackOpenEmail = isTrackOpenEmail; // Update tracking open emails
+      updateData.isTrackOpenEmail = isTrackOpenEmail;
     if (isTrackClickEmail !== undefined)
-      updateData.isTrackClickEmail = isTrackClickEmail; // Update tracking click emails
+      updateData.isTrackClickEmail = isTrackClickEmail;
+    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail; // <-- Add this line
 
     if (existingCredential) {
       // Update existing credentials
@@ -1464,15 +1549,16 @@ exports.addUserCredential = async (req, res) => {
       masterUserID,
       email: email || null,
       appPassword: appPassword || null,
-      syncStartDate: syncStartDate || new Date().toISOString(), // Default to the current date if not provided
+      syncStartDate: syncStartDate || new Date().toISOString(),
       syncFolders: syncFolders || [
         "INBOX",
         "[Gmail]/Sent Mail",
         "[Gmail]/Drafts",
-      ], // Default folders
-      syncAllFolders: syncAllFolders || false, // Default to false
-      isTrackOpenEmail: isTrackOpenEmail || true,//efault to false
-      isTrackClickEmail: isTrackClickEmail || true//Default to false
+      ],
+      syncAllFolders: syncAllFolders || false,
+      isTrackOpenEmail: isTrackOpenEmail || true,
+      isTrackClickEmail: isTrackClickEmail || true,
+      blockedEmail: blockedEmail || null, // <-- Add this line
     });
 
     res.status(201).json({
@@ -1537,62 +1623,171 @@ exports.deleteEmail = async (req, res) => {
 exports.saveDraft = [
   upload.array("attachments"), // Use Multer to handle multiple file uploads
   async (req, res) => {
-    const { to, cc, bcc, subject, text, html,draftId } = req.body; // Extract email fields from the request body
+    const { to, cc, bcc, subject, text, html, draftId } = req.body;
     const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
     try {
-      // Prepare the draft email data
-      const draftData = {
-        messageId: null, // No messageId since it's not sent yet
-        sender: null, // Sender is not set for drafts
-        senderName: null,
-        recipient: to || null,
-        cc: cc || null,
-        bcc: bcc || null,
-        subject: subject || null,
-        body: text || html || null,
-        folder: "drafts", // Mark as a draft
-        masterUserID,
-        draftId:draftId || null
-      };
+      let savedDraft;
+      let isUpdate = false;
 
-      // Save the draft email in the database
-      const savedDraft = await Email.create(draftData);
-      console.log("Draft email saved:", savedDraft);
+      if (draftId) {
+        // Try to find the existing draft
+        savedDraft = await Email.findOne({
+          where: { draftId, masterUserID, folder: "drafts" },
+        });
 
-      // Save attachments in the database
-      const savedAttachments =
-        req.files && req.files.length > 0
-          ? req.files.map((file) => ({
-              emailID: savedDraft.emailID, // Associate the attachment with the draft email
-              filename: file.originalname,
-              path: file.path, // Use the file path from Multer
-            }))
-          : [];
+        if (savedDraft) {
+          // Update the existing draft
+          await savedDraft.update({
+            recipient: to || null,
+            cc: cc || null,
+            bcc: bcc || null,
+            subject: subject || null,
+            body: text || html || null,
+          });
+          isUpdate = true;
+        }
+      }
 
-      if (savedAttachments.length > 0) {
+      if (!savedDraft) {
+        // Create a new draft if not updating
+        savedDraft = await Email.create({
+          messageId: null,
+          sender: null,
+          senderName: null,
+          recipient: to || null,
+          cc: cc || null,
+          bcc: bcc || null,
+          subject: subject || null,
+          body: text || html || null,
+          folder: "drafts",
+          masterUserID,
+          draftId: draftId || null,
+        });
+      }
+
+      // Handle attachments
+      let savedAttachments = [];
+      if (req.files && req.files.length > 0) {
+        if (isUpdate) {
+          // Remove old attachments if updating
+          await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
+        }
+        savedAttachments = req.files.map((file) => ({
+          emailID: savedDraft.emailID,
+          filename: file.originalname,
+          path: file.path,
+        }));
         await Attachment.bulkCreate(savedAttachments);
-        console.log(
-          `Saved ${savedAttachments.length} attachments for draft: ${savedDraft.emailID}`
-        );
+      } else if (isUpdate) {
+        // If no new attachments, fetch existing ones for response
+        savedAttachments = await Attachment.findAll({
+          where: { emailID: savedDraft.emailID },
+        });
       }
 
       // Generate public URLs for attachments
       const attachmentLinks = savedAttachments.map((attachment) => ({
         filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`, // Public URL for the attachment
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       }));
 
       res.status(200).json({
-        message: "Draft saved successfully.",
+        message: isUpdate
+          ? "Draft updated successfully."
+          : "Draft saved successfully.",
         draft: savedDraft,
-        attachments: attachmentLinks, // Include attachment links in the response
+        attachments: attachmentLinks,
       });
     } catch (error) {
       console.error("Error saving draft:", error);
       res
         .status(500)
         .json({ message: "Failed to save draft.", error: error.message });
+    }
+  },
+];
+
+exports.scheduleEmail = [
+  upload.array("attachments"),
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html, scheduledAt } = req.body;
+    const masterUserID = req.adminId;
+
+    try {
+      // Fetch sender email and name (prefer DefaultEmail, fallback to UserCredential)
+      let SENDER_EMAIL, SENDER_NAME;
+
+      const defaultEmail = await DefaultEmail.findOne({
+        where: { masterUserID, isDefault: true },
+      });
+
+      if (defaultEmail) {
+        SENDER_EMAIL = defaultEmail.email;
+        SENDER_NAME = defaultEmail.senderName;
+        if (!SENDER_NAME) {
+          const masterUser = await MasterUser.findOne({
+            where: { masterUserID },
+          });
+          SENDER_NAME = masterUser ? masterUser.name : null;
+        }
+      } else {
+        const userCredential = await UserCredential.findOne({
+          where: { masterUserID },
+        });
+        SENDER_EMAIL = userCredential ? userCredential.email : null;
+        const masterUser = await MasterUser.findOne({
+          where: { masterUserID },
+        });
+        SENDER_NAME = masterUser ? masterUser.name : null;
+      }
+
+      // Prepare email data for scheduling
+      const emailData = {
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        recipient: to,
+        cc,
+        bcc,
+        subject,
+        body: text || html,
+        folder: "outbox",
+        masterUserID,
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+        isDraft: false,
+      };
+      const scheduledEmail = await Email.create(emailData);
+
+      // Save attachments if any
+      if (req.files && req.files.length > 0) {
+        const savedAttachments = req.files.map((file) => ({
+          emailID: scheduledEmail.emailID,
+          filename: file.originalname,
+          path: file.path,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+      }
+
+      // // Fetch the full email data with attachments for response
+      // const fullEmail = await Email.findOne({
+      //   where: { emailID: scheduledEmail.emailID },
+      //   include: [
+      //     {
+      //       model: Attachment,
+      //       as: "attachments",
+      //     },
+      //   ],
+      // });
+
+      res.status(200).json({
+        message: "Email scheduled successfully.",
+        // email: fullEmail,
+      });
+    } catch (error) {
+      console.error("Error scheduling email:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to schedule email.", error: error.message });
     }
   },
 ];

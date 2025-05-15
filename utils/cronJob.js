@@ -2,7 +2,10 @@ const cron = require("node-cron");
  const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSentEmails } = require("../controllers/email/emailController"); // Adjust the path to your controller
 const UserCredential = require("../models/email/userCredentialModel"); // Adjust the path to your model
-
+const Email = require("../models/email/emailModel");
+const Attachment = require("../models/email/attachmentModel");
+const nodemailer = require("nodemailer");
+const { Sequelize } = require("sequelize");
 // // Schedule the cron job to run every 5 minutes
 // cron.schedule("*/2 * * * *", async () => {
 //   console.log("Running scheduled task to fetch the most recent email...");
@@ -137,5 +140,64 @@ cron.schedule("*/2 * * * *", async () => {
     }
   } catch (error) {
     console.error("Error running combined cron job:", error);
+  }
+});
+
+cron.schedule("* * * * *", async () => { // Runs every minute
+  console.log("Running cron job to send scheduled emails...");
+  
+  const now = new Date();
+  console.log("Current time:", now);
+  const emails = await Email.findAll({
+    where: {
+      folder: "outbox",
+      scheduledAt: { [Sequelize.Op.lte]: now },
+    },
+    include: [{ model: Attachment, as: "attachments" }],
+  });
+  console.log(emails);
+  console.log("Fetched emails:", emails.length);
+if (emails.length > 0) {
+  emails.forEach(e => console.log(e.emailID, e.folder, e.scheduledAt));
+}
+  
+
+  for (const email of emails) {
+    try {
+      // Fetch sender credentials
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID: email.masterUserID },
+      });
+      if (!userCredential) continue;
+
+      // Send email
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: userCredential.email,
+          pass: userCredential.appPassword,
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: userCredential.email,
+        to: email.recipient,
+        cc: email.cc,
+        bcc: email.bcc,
+        subject: email.subject,
+        text: email.body,
+        html: email.body,
+        attachments: email.attachments.map(att => ({
+          filename: att.filename,
+          path: att.path,
+        })),
+      });
+
+      // Move email to sent
+      await email.update({ folder: "sent", createdAt: new Date(), messageId: info.messageId });
+      console.log(`Scheduled email sent: ${email.subject}`);
+    } catch (err) {
+      console.error("Failed to send scheduled email:", err);
+    }
   }
 });

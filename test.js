@@ -32,7 +32,9 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+ });
 
 const imapConfig = {
   imap: {
@@ -664,6 +666,7 @@ exports.getEmails = async (req, res) => {
     hasAttachments,
     isOpened, // <-- Add this
     isClicked, // <-- Add this
+    trackedEmails
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -692,7 +695,8 @@ exports.getEmails = async (req, res) => {
     }
 
     // Add tracked emails filter
-    if (isOpened === "true" && isClicked === "true") {
+    // --- Tracked emails filter ---
+    if (trackedEmails === "true") {
       filters.isOpened = true;
       filters.isClicked = true;
     } else {
@@ -764,14 +768,30 @@ exports.getEmails = async (req, res) => {
     });
 
     // Group emails by conversation (thread)
-    const threads = {};
-    emails.forEach((email) => {
-      const threadId = email.inReplyTo || email.messageId; // Use inReplyTo or messageId as thread identifier
-      if (!threads[threadId]) {
-        threads[threadId] = [];
-      }
-      threads[threadId].push(email);
-    });
+let responseThreads;
+if (folder === "drafts") {
+  // For drafts, group by draftId if available, else by messageId
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.draftId || email.messageId;
+    if (!threads[threadId]) {
+      threads[threadId] = [];
+    }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+} else {
+  // For other folders, group by inReplyTo or messageId
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.inReplyTo || email.messageId;
+    if (!threads[threadId]) {
+      threads[threadId] = [];
+    }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+}
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
@@ -780,7 +800,8 @@ exports.getEmails = async (req, res) => {
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
       unviewCount, // Include the unviewCount field
-      threads: Object.values(threads), // Return grouped threads
+      // threads: Object.values(threads), // Return grouped threads
+      threads: responseThreads, // Return grouped threads
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
@@ -977,7 +998,7 @@ exports.getOneEmail = async (req, res) => {
         message: "Draft email fetched successfully.",
         data: {
           email: mainEmail,
-          relatedEmails: [],
+          relatedEmails:[],
         },
       });
     }
@@ -1466,6 +1487,7 @@ exports.addUserCredential = async (req, res) => {
     syncAllFolders,
     isTrackOpenEmail,
     isTrackClickEmail,
+    blockedEmail, // <-- Add this line
   } = req.body;
 
   try {
@@ -1495,14 +1517,15 @@ exports.addUserCredential = async (req, res) => {
     const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = syncStartDate; // Store the ISO date string
+    if (syncStartDate) updateData.syncStartDate = syncStartDate;
     if (syncFolders) updateData.syncFolders = syncFolders;
     if (syncAllFolders !== undefined)
-      updateData.syncAllFolders = syncAllFolders; // Allow boolean values
+      updateData.syncAllFolders = syncAllFolders;
     if (isTrackOpenEmail !== undefined)
-      updateData.isTrackOpenEmail = isTrackOpenEmail; // Update tracking open emails
+      updateData.isTrackOpenEmail = isTrackOpenEmail;
     if (isTrackClickEmail !== undefined)
-      updateData.isTrackClickEmail = isTrackClickEmail; // Update tracking click emails
+      updateData.isTrackClickEmail = isTrackClickEmail;
+    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail; // <-- Add this line
 
     if (existingCredential) {
       // Update existing credentials
@@ -1518,15 +1541,16 @@ exports.addUserCredential = async (req, res) => {
       masterUserID,
       email: email || null,
       appPassword: appPassword || null,
-      syncStartDate: syncStartDate || new Date().toISOString(), // Default to the current date if not provided
+      syncStartDate: syncStartDate || new Date().toISOString(),
       syncFolders: syncFolders || [
         "INBOX",
         "[Gmail]/Sent Mail",
         "[Gmail]/Drafts",
-      ], // Default folders
-      syncAllFolders: syncAllFolders || false, // Default to false
-      isTrackOpenEmail: isTrackOpenEmail || true, //efault to false
-      isTrackClickEmail: isTrackClickEmail || true, //Default to false
+      ],
+      syncAllFolders: syncAllFolders || false,
+      isTrackOpenEmail: isTrackOpenEmail || true,
+      isTrackClickEmail: isTrackClickEmail || true,
+      blockedEmail: blockedEmail || null, // <-- Add this line
     });
 
     res.status(201).json({

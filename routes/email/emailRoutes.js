@@ -17,8 +17,9 @@ router.get("/template/:templateID", verifyToken,emailController.getTemplateById)
 router.get("/unread-counts",verifyToken, emailController.getUnreadCounts);
 router.post("/add-credential", verifyToken,emailController.addUserCredential);
 router.get("/get-credential", verifyToken,emailController.getUserCredential);
-router.get("/delete-email/:emailId", verifyToken,emailController.deleteEmail);
+router.post("/delete-emails", verifyToken,emailController.deleteEmails);
 router.post("/save-draft", verifyToken,emailController.saveDraft);
+router.post("/schedule-email", verifyToken,emailController.scheduleEmail);
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 
 

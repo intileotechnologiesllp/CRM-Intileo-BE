@@ -41,7 +41,7 @@ const Email = sequelize.define("Email", {
     allowNull: true,
   },
   folder: {
-    type: DataTypes.ENUM("inbox", "drafts", "outbox", "sent", "archive"),
+    type: DataTypes.ENUM("inbox", "drafts", "outbox", "sent", "archive", "trash"),
     allowNull: false,
     defaultValue: "inbox",
   },
@@ -91,6 +91,10 @@ isClicked: {
 },
 tempMessageId:{
   type: DataTypes.STRING,
+  allowNull: true,
+},
+scheduledAt: {
+  type: DataTypes.DATE,
   allowNull: true,
 }
   
