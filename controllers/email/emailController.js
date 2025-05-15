@@ -1063,8 +1063,6 @@ exports.composeEmail = [
       replyToMessageId,
       isDraft,
       draftId,
-      isSchedule,
-      scheduledAt,
     } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
@@ -1233,48 +1231,6 @@ exports.composeEmail = [
               path: file.path,
             }))
           : [];
-      // const formattedAttachments =
-      //   req.files && req.files.length > 0
-      //     ? req.files.map((file) => ({
-      //         filename: file.originalname,
-      //         path: file.path,
-      //       }))
-      //     : [];
-
-      // If scheduling, save to outbox and return (DO THIS BEFORE SENDING)
-      if (isSchedule === "true" || isSchedule === true) {
-        const emailData = {
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to,
-          cc,
-          bcc,
-          subject: finalSubject,
-          body: finalBody,
-          folder: "outbox",
-          masterUserID,
-          tempMessageId,
-          isDraft: false,
-          createdAt: new Date(),
-          scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
-        };
-        const scheduledEmail = await Email.create(emailData);
-
-        // Save attachments if any
-        if (formattedAttachments.length > 0) {
-          const savedAttachments = formattedAttachments.map((file) => ({
-            emailID: scheduledEmail.emailID,
-            filename: file.filename,
-            path: file.path,
-          }));
-          await Attachment.bulkCreate(savedAttachments);
-        }
-
-        return res.status(200).json({
-          message: "Email scheduled successfully.",
-          email: scheduledEmail,
-        });
-      }
 
       // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
@@ -1293,7 +1249,7 @@ exports.composeEmail = [
         cc: cc || (draftEmail && draftEmail.cc),
         bcc: bcc || (draftEmail && draftEmail.bcc),
         subject: finalSubject,
-        text: htmlToText(finalBody),
+        text: finalBody,
         html: finalBody,
         attachments:
           formattedAttachments.length > 0 ? formattedAttachments : undefined,
@@ -1361,43 +1317,37 @@ exports.composeEmail = [
           tempMessageId,
           isDraft: false,
         };
-        // savedEmail = await Email.create(emailData);
-        // If scheduling, save to outbox and return
-        if (isSchedule === "true" || isSchedule === true) {
-          emailData.folder = "outbox";
-          emailData.scheduledAt = scheduledAt ? new Date(scheduledAt) : null;
-          // const scheduledEmail = await Email.create(emailData);
-          savedEmail = await Email.create(emailData);
-          // Save attachments in the database
-          const savedAttachments =
-            req.files && req.files.length > 0
-              ? req.files.map((file) => ({
-                  emailID: savedEmail.emailID,
-                  filename: file.originalname,
-                  path: file.path,
-                }))
-              : [];
+        savedEmail = await Email.create(emailData);
 
-          if (savedAttachments.length > 0) {
-            await Attachment.bulkCreate(savedAttachments);
-            console.log(
-              `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-            );
-          }
+        // Save attachments in the database
+        const savedAttachments =
+          req.files && req.files.length > 0
+            ? req.files.map((file) => ({
+                emailID: savedEmail.emailID,
+                filename: file.originalname,
+                path: file.path,
+              }))
+            : [];
+
+        if (savedAttachments.length > 0) {
+          await Attachment.bulkCreate(savedAttachments);
+          console.log(
+            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          );
         }
-
-        // Generate public URLs for attachments
-        const attachmentLinks = savedAttachments.map((attachment) => ({
-          filename: attachment.filename,
-          link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
-        }));
-
-        res.status(200).json({
-          message: "Email sent and saved successfully.",
-          messageId: info.messageId,
-          attachments: attachmentLinks,
-        });
       }
+
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+      }));
+
+      res.status(200).json({
+        message: "Email sent and saved successfully.",
+        messageId: info.messageId,
+        attachments: attachmentLinks,
+      });
     } catch (error) {
       console.error("Error sending email:", error);
       res
