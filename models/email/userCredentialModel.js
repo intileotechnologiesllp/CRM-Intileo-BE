@@ -46,6 +46,18 @@ const UserCredential = sequelize.define("UserCredential", {
     allowNull: false,
     defaultValue: true//Default to false (do not track)
   },
+  signature: {
+  type: DataTypes.TEXT,
+  allowNull: true,
+},
+signatureName: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
+signatureImage: {
+  type: DataTypes.TEXT, // Store as a base64 string or image URL
+  allowNull: true,
+},
   // blockedEmail:{
   //   type: DataTypes.JSON, // Store blocked email addresses as a JSON array
   //   allowNull: true, // Optional field

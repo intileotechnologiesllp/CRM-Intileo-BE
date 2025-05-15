@@ -32,7 +32,7 @@ const app = express();
 require("./utils/cronJob.js")
 app.use(express.static(path.join(__dirname, "public")));
 // Serve static files from the "uploads" directory
-app.use("/uploads", express.static(path.join(__dirname, "utils/uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 console.log("Serving static files from:", path.join(__dirname, "public"),"........//.....//")
 const cors = require("cors");
 app.use(cors());

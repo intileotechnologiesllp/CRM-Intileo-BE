@@ -143,61 +143,61 @@ cron.schedule("*/2 * * * *", async () => {
   }
 });
 
-cron.schedule("* * * * *", async () => { // Runs every minute
-  console.log("Running cron job to send scheduled emails...");
+// cron.schedule("* * * * *", async () => { // Runs every minute
+//   console.log("Running cron job to send scheduled emails...");
   
-  const now = new Date();
-  console.log("Current time:", now);
-  const emails = await Email.findAll({
-    where: {
-      folder: "outbox",
-      scheduledAt: { [Sequelize.Op.lte]: now },
-    },
-    include: [{ model: Attachment, as: "attachments" }],
-  });
-  console.log(emails);
-  console.log("Fetched emails:", emails.length);
-if (emails.length > 0) {
-  emails.forEach(e => console.log(e.emailID, e.folder, e.scheduledAt));
-}
+//   const now = new Date();
+//   console.log("Current time:", now);
+//   const emails = await Email.findAll({
+//     where: {
+//       folder: "outbox",
+//       scheduledAt: { [Sequelize.Op.lte]: now },
+//     },
+//     include: [{ model: Attachment, as: "attachments" }],
+//   });
+//   console.log(emails);
+//   console.log("Fetched emails:", emails.length);
+// if (emails.length > 0) {
+//   emails.forEach(e => console.log(e.emailID, e.folder, e.scheduledAt));
+// }
   
 
-  for (const email of emails) {
-    try {
-      // Fetch sender credentials
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID: email.masterUserID },
-      });
-      if (!userCredential) continue;
+//   for (const email of emails) {
+//     try {
+//       // Fetch sender credentials
+//       const userCredential = await UserCredential.findOne({
+//         where: { masterUserID: email.masterUserID },
+//       });
+//       if (!userCredential) continue;
 
-      // Send email
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: userCredential.email,
-          pass: userCredential.appPassword,
-        },
-      });
+//       // Send email
+//       const transporter = nodemailer.createTransport({
+//         service: "gmail",
+//         auth: {
+//           user: userCredential.email,
+//           pass: userCredential.appPassword,
+//         },
+//       });
 
-      const info = await transporter.sendMail({
-        from: userCredential.email,
-        to: email.recipient,
-        cc: email.cc,
-        bcc: email.bcc,
-        subject: email.subject,
-        text: email.body,
-        html: email.body,
-        attachments: email.attachments.map(att => ({
-          filename: att.filename,
-          path: att.path,
-        })),
-      });
+//       const info = await transporter.sendMail({
+//         from: userCredential.email,
+//         to: email.recipient,
+//         cc: email.cc,
+//         bcc: email.bcc,
+//         subject: email.subject,
+//         text: email.body,
+//         html: email.body,
+//         attachments: email.attachments.map(att => ({
+//           filename: att.filename,
+//           path: att.path,
+//         })),
+//       });
 
-      // Move email to sent
-      await email.update({ folder: "sent", createdAt: new Date(), messageId: info.messageId });
-      console.log(`Scheduled email sent: ${email.subject}`);
-    } catch (err) {
-      console.error("Failed to send scheduled email:", err);
-    }
-  }
-});
+//       // Move email to sent
+//       await email.update({ folder: "sent", createdAt: new Date(), messageId: info.messageId });
+//       console.log(`Scheduled email sent: ${email.subject}`);
+//     } catch (err) {
+//       console.error("Failed to send scheduled email:", err);
+//     }
+//   }
+// });
