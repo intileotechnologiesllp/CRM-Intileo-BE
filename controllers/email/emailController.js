@@ -1613,7 +1613,7 @@ exports.deleteEmail = async (req, res) => {
   }
 };
 
-exports.deleteEmails = async (req, res) => {
+exports.deletebulkEmails = async (req, res) => {
   try {
     const masterUserID = req.adminId;
     const { emailIds } = req.body; // Expecting an array of email IDs
