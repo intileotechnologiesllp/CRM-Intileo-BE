@@ -8,7 +8,20 @@ const { htmlToText } = require("html-to-text");
 const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
 const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
+const multer = require("multer");
+const path = require("path");
 
+// Configure storage for signature images
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/signatures/"); // Make sure this folder exists
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
 const cleanEmailBody = (body) => {
   // Remove quoted replies (e.g., lines starting with ">")
   return body
@@ -175,6 +188,24 @@ exports.archiveEmail = async (req, res) => {
     console.error("Error archiving email:", error);
     res.status(500).json({ message: "Internal server error." });
   }
+};
+exports.bulkArchiveEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailIds } = req.body; // Array of email IDs
+
+  if (!Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+  }
+
+  // Update all emails to move them to the archive folder
+  const [updatedCount] = await Email.update(
+    { folder: "archive" },
+    { where: { emailID: emailIds, masterUserID } }
+  );
+
+  res.status(200).json({
+    message: `${updatedCount} email(s) archived successfully.`,
+  });
 };
 
 const extractFolders = (mailboxes, parent = "") => {
@@ -456,3 +487,42 @@ exports.markAsUnread = async (req, res) => {
 
   res.status(200).json({ message: `${updatedCount} email(s) marked as unread.` });
 };
+
+exports.updateSignature = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { signature, signatureName } = req.body;
+  let signatureImage = req.body.signatureImage;
+
+  // If an image was uploaded, use its path as the image URL
+  if (req.file) {
+    signatureImage = `${process.env.LOCALHOST_URL || "http://localhost:3056"}/uploads/signatures/${req.file.filename}`;
+  }
+
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    await userCredential.update({ signature, signatureName, signatureImage });
+    res.status(200).json({ message: "Signature updated successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update signature.", error: error.message });
+  }
+};
+
+exports.markAsRead = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailIds } = req.body;
+
+  if (!Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+  }
+
+  const [updatedCount] = await Email.update(
+    { isRead: true },
+    { where: { emailID: emailIds, masterUserID } }
+  );
+
+  res.status(200).json({ message: `${updatedCount} email(s) marked as read.` });
+};
+
