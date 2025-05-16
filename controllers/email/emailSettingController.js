@@ -526,3 +526,32 @@ exports.markAsRead = async (req, res) => {
   res.status(200).json({ message: `${updatedCount} email(s) marked as read.` });
 };
 
+exports.updateEmailSharing = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const { emailId } = req.params;   // Email ID from URL
+  const { isShared } = req.body;    // Boolean value in request body
+
+  try {
+    const email = await Email.findOne({
+      where: { emailID: emailId, masterUserID },
+    });
+
+    if (!email) {
+      return res.status(404).json({ message: "Email not found." });
+    }
+
+    await email.update({ isShared: isShared === true || isShared === "true" });
+
+    res.status(200).json({
+      message: `Email sharing updated successfully.`,
+      email: {
+        emailID: email.emailID,
+        isShared: email.isShared,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating email sharing:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+

@@ -32,6 +32,7 @@
     "mysql2": "^3.14.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.0",
+    "p-limit": "^6.2.0",
     "sequelize": "^6.11.0",
     "uninstall": "^0.0.0"
   }

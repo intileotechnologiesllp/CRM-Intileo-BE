@@ -93,10 +93,15 @@ tempMessageId:{
   type: DataTypes.STRING,
   allowNull: true,
 },
-scheduledAt: {
-  type: DataTypes.DATE,
-  allowNull: true,
-}
+// scheduledAt: {
+//   type: DataTypes.DATE,
+//   allowNull: true,
+// },
+// isShared: {
+//   type: DataTypes.BOOLEAN,
+//   allowNull: false,
+//   defaultValue: false, // false = private, true = shared
+// },
   
 },
 {

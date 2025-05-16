@@ -668,14 +668,26 @@ exports.getEmails = async (req, res) => {
     isOpened, // <-- Add this
     isClicked, // <-- Add this
     trackedEmails,
+    isShared
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
-    const filters = {
+    let filters = {
       masterUserID,
     };
-
+if (isShared === "true") {
+  filters.isShared = true;
+  if (folder) filters.folder = folder;
+} else {
+  filters = {
+    [Sequelize.Op.or]: [
+      { masterUserID },
+      { isShared: true },
+    ]
+  };
+  if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
+}
     if (folder) {
       filters.folder = folder;
     }
@@ -694,6 +706,8 @@ exports.getEmails = async (req, res) => {
       const userEmail = userCredential.email;
       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
     }
+
+
 
     // Add tracked emails filter
     // --- Tracked emails filter ---
@@ -1063,6 +1077,7 @@ exports.composeEmail = [
       replyToMessageId,
       isDraft,
       draftId,
+      // isShared
     } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
@@ -1095,6 +1110,21 @@ exports.composeEmail = [
 
           SENDER_NAME = masterUser.name; // Use the name from MasterUser
         }
+  //         let toList = [];
+  // if (to) {
+  //   if (Array.isArray(to)) {
+  //     toList = to;
+  //   } else if (typeof to === "string") {
+  //     toList = to.split(",").map(e => e.trim());
+  //   }
+  // }
+  // // Add req.email if not already present
+  // if (req.email && !toList.includes(req.email)) {
+  //   toList.push(req.email);
+  // }
+  // // Set the updated "to" field
+  // req.body.to = toList.join(",");
+
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1122,8 +1152,9 @@ exports.composeEmail = [
         }
 
         SENDER_NAME = masterUser.name; // Use the name from MasterUser
-        
+
       }
+
       
 
       let finalSubject = subject;
@@ -1328,6 +1359,7 @@ finalBody += `<br><br>${signatureBlock}`;
           masterUserID,
           tempMessageId,
           isDraft: false,
+          // isShared: isShared === true || isShared === "true", // ensure boolean
         };
         savedEmail = await Email.create(emailData);
 

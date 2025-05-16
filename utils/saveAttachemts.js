@@ -31,7 +31,7 @@ const saveAttachmentToFile = async (attachment, emailID) => {
 
   // Return the public URL for the file
   const baseURL = process.env.LOCALHOST_URL;
-  const publicPath = `${baseURL}/uploads/attachments/${encodeURIComponent(attachment.filename)}`;
+  const publicPath = `${baseURL}/uploads/attachments/${attachment.filename}`;
 
   return publicPath;
 };

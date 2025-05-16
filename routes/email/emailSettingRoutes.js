@@ -38,6 +38,7 @@ router.post("/mark-as-unread",verifyToken,emailSettingsController.markAsUnread);
 router.post("/update-signature",verifyToken,upload.single("signatureImage"),emailSettingsController.updateSignature);
 router.post("/bulk-archive", verifyToken, emailSettingsController.bulkArchiveEmails);
 router.post("/mark-as-read", verifyToken, emailSettingsController.markAsRead);
+router.post("/update-email-shared", verifyToken, emailSettingsController.updateEmailSharing);
 
 
 
