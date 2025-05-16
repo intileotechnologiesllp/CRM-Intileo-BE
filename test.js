@@ -1122,7 +1122,9 @@ exports.composeEmail = [
         }
 
         SENDER_NAME = masterUser.name; // Use the name from MasterUser
+        
       }
+      
 
       let finalSubject = subject;
       let finalBody = text || html;
@@ -1210,7 +1212,17 @@ exports.composeEmail = [
           (match, url) => `href="${generateRedirectLink(url, messageId)}"`
         );
       };
-
+let signatureBlock = "";
+if (userCredential.signatureName) {
+  signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+}
+if (userCredential.signature) {
+  signatureBlock += `${userCredential.signature}<br>`;
+}
+if (userCredential.signatureImage) {
+  signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+}
+finalBody += `<br><br>${signatureBlock}`;
       // Generate a temporary messageId for tracking
       const tempMessageId = `temp-${Date.now()}`;
 
@@ -1320,14 +1332,22 @@ exports.composeEmail = [
         savedEmail = await Email.create(emailData);
 
         // Save attachments in the database
-        const savedAttachments =
-          req.files && req.files.length > 0
-            ? req.files.map((file) => ({
-                emailID: savedEmail.emailID,
-                filename: file.originalname,
-                path: file.path,
-              }))
-            : [];
+        // const savedAttachments =
+        //   req.files && req.files.length > 0
+        //     ? req.files.map((file) => ({
+        //         emailID: savedEmail.emailID,
+        //         filename: file.originalname,
+        //         filePath: file.path,
+        //       }))
+        //     : [];
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+      savedAttachments = req.files.map((file) => ({
+  emailID: savedEmail.emailID,
+  filename: file.originalname,
+  filePath:`${baseURL}/uploads/attachments/${encodeURIComponent(file.originalname)}`, // Save public URL in DB
+  size: file.size,
+  contentType: file.mimetype,
+}));
 
         if (savedAttachments.length > 0) {
           await Attachment.bulkCreate(savedAttachments);
@@ -1340,7 +1360,7 @@ exports.composeEmail = [
       // Generate public URLs for attachments
       const attachmentLinks = savedAttachments.map((attachment) => ({
         filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`
       }));
 
       res.status(200).json({

@@ -6,142 +6,95 @@ const Email = require("../models/email/emailModel");
 const Attachment = require("../models/email/attachmentModel");
 const nodemailer = require("nodemailer");
 const { Sequelize } = require("sequelize");
-// // Schedule the cron job to run every 5 minutes
+
+//
+// Combined cron job to fetch recent and sent emails for all users
+
+
+// const amqp = require("amqplib");
+
+
+
+// const QUEUE_NAME = "email-fetch-queue";
+
+// async function pushJobsToQueue() {
+//   const connection = await amqp.connect("amqp://localhost");
+//   const channel = await connection.createChannel();
+//   await channel.assertQueue(QUEUE_NAME, { durable: true });
+
+//   const userCredentials = await UserCredential.findAll();
+//   if (!userCredentials || userCredentials.length === 0) {
+//     console.log("No user credentials found.");
+//     await channel.close();
+//     await connection.close();
+//     return;
+//   }
+
+//   for (const credential of userCredentials) {
+//     const adminId = credential.masterUserID;
+//     channel.sendToQueue(
+//       QUEUE_NAME,
+//       Buffer.from(JSON.stringify({ adminId })),
+//       { persistent: true }
+//     );
+//   }
+//   console.log(`Queued ${userCredentials.length} email fetch jobs.`);
+
+//   await channel.close();
+//   await connection.close();
+// }
+
 // cron.schedule("*/2 * * * *", async () => {
-//   console.log("Running scheduled task to fetch the most recent email...");
+//   console.log("Running cron job to queue email fetch jobs...");
 //   try {
-//     await fetchRecentEmail(
-//       { query: {} },
-//       { status: () => ({ json: () => {} }) }
-//     ); // Mock req and res
+//     await pushJobsToQueue();
 //   } catch (error) {
-//     console.error("Error running scheduled task:", error);
+//     console.error("Error queueing email fetch jobs:", error);
 //   }
 // });
-// cron.schedule("*/1 * * * *", async () => {
-//     console.log("Running cron job to fetch recent emails for all users...");
-  
-//     try {
-//       // Fetch all user credentials
-//       const userCredentials = await UserCredential.findAll();
-  
-//       if (!userCredentials || userCredentials.length === 0) {
-//         console.log("No user credentials found.");
-//         return;
-//       }
-  
-//       // Iterate over each user credential
-//       for (const credential of userCredentials) {
-//         const adminId = credential.masterUserID;
-  
-//         try {
-//           console.log(`Fetching emails for adminId: ${adminId}`);
-//           const result = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
-//           console.log(`Result for adminId ${adminId}:`, result);
-//         } catch (error) {
-//           console.error(`Error fetching emails for adminId ${adminId}:`, error);
-//         }
-//       }
-//     } catch (error) {
-//       console.error("Error running cron job:", error);
+
+
+
+
+
+// cron.schedule("*/2 * * * *", async () => {
+//   console.log("Running combined cron job to fetch recent and sent emails for all users...");
+
+//   try {
+//     // Fetch all user credentials
+//     const userCredentials = await UserCredential.findAll();
+
+//     if (!userCredentials || userCredentials.length === 0) {
+//       console.log("No user credentials found.");
+//       return;
 //     }
-//   });
 
-//   cron.schedule("*/1 * * * *", async () => {
-//     console.log("Running cron job to fetch recent emails for all users...");
-  
-//     try {
-//       // Fetch all user credentials
-//       const userCredentials = await UserCredential.findAll();
-  
-//       if (!userCredentials || userCredentials.length === 0) {
-//         console.log("No user credentials found.");
-//         return;
+//     // Iterate over each user credential
+//     for (const credential of userCredentials) {
+//       const adminId = credential.masterUserID;
+
+//       try {
+//         // Fetch recent emails
+//         console.log(`Fetching recent emails for adminId: ${adminId}`);
+//         const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
+//         console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
+
+//         // Fetch sent emails
+//         console.log(`Fetching sent emails for adminId: ${adminId}`);
+//         // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
+//         // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
+//       } catch (error) {
+//         console.error(`Error processing emails for adminId ${adminId}:`, error);
 //       }
-  
-//       // Iterate over each user credential
-//       for (const credential of userCredentials) {
-//         const adminId = credential.masterUserID;
-  
-//         try {
-//           console.log(`Fetching recent emails for adminId: ${adminId}`);
-//           const result = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
-//           console.log(`Result for adminId ${adminId}:`, result);
-//         } catch (error) {
-//           console.error(`Error fetching recent emails for adminId ${adminId}:`, error);
-//         }
-//       }
-//     } catch (error) {
-//       console.error("Error running cron job:", error);
 //     }
-//   });
-  
-//   // Cron job to fetch sent emails for all users
-//   cron.schedule("*/3 * * * *", async () => {
-//     console.log("Running cron job to fetch sent emails for all users...");
-  
-//     try {
-//       // Fetch all user credentials
-//       const userCredentials = await UserCredential.findAll();
-  
-//       if (!userCredentials || userCredentials.length === 0) {
-//         console.log("No user credentials found.");
-//         return;
-//       }
-  
-//       // Iterate over each user credential
-//       for (const credential of userCredentials) {
-//         const adminId = credential.masterUserID;
-  
-//         try {
-//           console.log(`Fetching sent emails for adminId: ${adminId}`);
-//           const result = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
-//           console.log(`Result for adminId ${adminId}:`, result);
-//         } catch (error) {
-//           console.error(`Error fetching sent emails for adminId ${adminId}:`, error);
-//         }
-//       }
-//     } catch (error) {
-//       console.error("Error running cron job:", error);
-//     }
-//   });
-// Adjust the path to your model
+//   } catch (error) {
+//     console.error("Error running combined cron job:", error);
+//   }
+// });
 
-// Combined cron job to fetch recent and sent emails for all users
-cron.schedule("*/2 * * * *", async () => {
-  console.log("Running combined cron job to fetch recent and sent emails for all users...");
 
-  try {
-    // Fetch all user credentials
-    const userCredentials = await UserCredential.findAll();
 
-    if (!userCredentials || userCredentials.length === 0) {
-      console.log("No user credentials found.");
-      return;
-    }
-
-    // Iterate over each user credential
-    for (const credential of userCredentials) {
-      const adminId = credential.masterUserID;
-
-      try {
-        // Fetch recent emails
-        console.log(`Fetching recent emails for adminId: ${adminId}`);
-        const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
-        console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
-
-        // Fetch sent emails
-        console.log(`Fetching sent emails for adminId: ${adminId}`);
-        // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
-        // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
-      } catch (error) {
-        console.error(`Error processing emails for adminId ${adminId}:`, error);
-      }
-    }
-  } catch (error) {
-    console.error("Error running combined cron job:", error);
-  }
-});
+// Uncomment the following code to enable the cron job for sending scheduled emails
 
 // cron.schedule("* * * * *", async () => { // Runs every minute
 //   console.log("Running cron job to send scheduled emails...");
