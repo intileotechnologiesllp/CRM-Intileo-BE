@@ -676,18 +676,18 @@ exports.getEmails = async (req, res) => {
     let filters = {
       masterUserID,
     };
-if (isShared === "true") {
-  filters.isShared = true;
-  if (folder) filters.folder = folder;
-} else {
-  filters = {
-    [Sequelize.Op.or]: [
-      { masterUserID },
-      { isShared: true },
-    ]
-  };
-  if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
-}
+// if (isShared === "true") {
+//   filters.isShared = true;
+//   if (folder) filters.folder = folder;
+// } else {
+//   filters = {
+//     [Sequelize.Op.or]: [
+//       { masterUserID },
+//       { isShared: true },
+//     ]
+//   };
+//   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
+// }
     if (folder) {
       filters.folder = folder;
     }
