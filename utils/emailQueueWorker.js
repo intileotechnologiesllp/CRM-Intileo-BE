@@ -7,7 +7,7 @@ const QUEUE_NAME = "email-fetch-queue";
 // const limit = pLimit(5); // Limit concurrency to 5
 
 async function startWorker() {
-  const connection = await amqp.connect("amqp://127.0.0.1:5672");
+  const connection = await amqp.connect("amqp://164.52.223.86:5672");
   console.log("Connected to RabbitMQ");
   const channel = await connection.createChannel();
   await channel.assertQueue(QUEUE_NAME, { durable: true });
