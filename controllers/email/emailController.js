@@ -1017,6 +1017,15 @@ exports.getOneEmail = async (req, res) => {
         },
       });
     }
+        if (mainEmail.folder === "trash") {
+      return res.status(200).json({
+        message: "trash email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+        },
+      });
+    }
 
     // Otherwise, fetch related emails from inbox and sent folders
     const relatedEmails = await Email.findAll({
