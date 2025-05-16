@@ -57,40 +57,40 @@ const { Sequelize } = require("sequelize");
 
 
 
-// cron.schedule("*/2 * * * *", async () => {
-//   console.log("Running combined cron job to fetch recent and sent emails for all users...");
+cron.schedule("*/2 * * * *", async () => {
+  console.log("Running combined cron job to fetch recent and sent emails for all users...");
 
-//   try {
-//     // Fetch all user credentials
-//     const userCredentials = await UserCredential.findAll();
+  try {
+    // Fetch all user credentials
+    const userCredentials = await UserCredential.findAll();
 
-//     if (!userCredentials || userCredentials.length === 0) {
-//       console.log("No user credentials found.");
-//       return;
-//     }
+    if (!userCredentials || userCredentials.length === 0) {
+      console.log("No user credentials found.");
+      return;
+    }
 
-//     // Iterate over each user credential
-//     for (const credential of userCredentials) {
-//       const adminId = credential.masterUserID;
+    // Iterate over each user credential
+    for (const credential of userCredentials) {
+      const adminId = credential.masterUserID;
 
-//       try {
-//         // Fetch recent emails
-//         console.log(`Fetching recent emails for adminId: ${adminId}`);
-//         const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
-//         console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
+      try {
+        // Fetch recent emails
+        console.log(`Fetching recent emails for adminId: ${adminId}`);
+        const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
+        console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
 
-//         // Fetch sent emails
-//         console.log(`Fetching sent emails for adminId: ${adminId}`);
-//         // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
-//         // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
-//       } catch (error) {
-//         console.error(`Error processing emails for adminId ${adminId}:`, error);
-//       }
-//     }
-//   } catch (error) {
-//     console.error("Error running combined cron job:", error);
-//   }
-// });
+        // Fetch sent emails
+        console.log(`Fetching sent emails for adminId: ${adminId}`);
+        // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
+        // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
+      } catch (error) {
+        console.error(`Error processing emails for adminId ${adminId}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error("Error running combined cron job:", error);
+  }
+});
 
 
 
@@ -154,3 +154,43 @@ const { Sequelize } = require("sequelize");
 //     }
 //   }
 // });
+
+cron.schedule("0 2 * * *", async () => {
+  const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const BATCH_SIZE = 500;
+  let totalDeleted = 0;
+  let deletedCount;
+
+  try {
+    do {
+      const emailsToDelete = await Email.findAll({
+        where: {
+          folder: "trash",
+          createdAt: { [Sequelize.Op.lt]: THIRTY_DAYS_AGO },
+        },
+        attributes: ['emailID'],
+        limit: BATCH_SIZE
+      });
+
+      if (emailsToDelete.length === 0) break;
+
+      const ids = emailsToDelete.map(e => e.emailID);
+
+      deletedCount = await Email.destroy({
+        where: { emailID: ids }
+      });
+
+      totalDeleted += deletedCount;
+
+      if (deletedCount > 0) {
+        console.log(`Batch deleted ${deletedCount} emails from trash (older than 30 days).`);
+      }
+    } while (deletedCount === BATCH_SIZE);
+
+    if (totalDeleted > 0) {
+      console.log(`Auto-deleted total ${totalDeleted} emails from trash (older than 30 days).`);
+    }
+  } catch (error) {
+    console.error("Error auto-deleting old trash emails:", error);
+  }
+});
