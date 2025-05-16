@@ -306,7 +306,7 @@ exports.fetchSyncEmails = async (req, res) => {
     console.log("Valid folders from IMAP server:", validFolders);
 
     // Fetch all folders if syncAllFolders is true
-    let foldersToSync = syncFolders;
+    let foldersToSync = Array.isArray(syncFolders) ? syncFolders : [syncFolders];
     if (syncAllFolders) {
       console.log("Fetching all folders...");
       foldersToSync = validFolders; // Use all valid folders
