@@ -18,7 +18,7 @@ const amqp = require("amqplib");
 const QUEUE_NAME = "email-fetch-queue";
 
 async function pushJobsToQueue() {
-  const connection = await amqp.connect("amqp://localhost");
+  const connection = await amqp.connect("amqp://164.52.223.86:5672");
   const channel = await connection.createChannel();
   await channel.assertQueue(QUEUE_NAME, { durable: true });
 
