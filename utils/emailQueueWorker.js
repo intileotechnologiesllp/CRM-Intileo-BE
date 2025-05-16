@@ -1,5 +1,5 @@
 const amqp = require("amqplib");
-const pLimit = require('p-limit').default;
+const pLimit = require('p-limit');
 const limit = pLimit(5);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 
