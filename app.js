@@ -30,7 +30,7 @@ const Email = require("./models/email/emailModel"); // Import Email model
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
-// require('./utils/emailQueueWorker');
+require('./utils/emailQueueWorker');
 app.use(express.static(path.join(__dirname, "public")));
 // Serve static files from the "uploads" directory
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));

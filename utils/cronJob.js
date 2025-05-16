@@ -11,86 +11,86 @@ const { Sequelize } = require("sequelize");
 // Combined cron job to fetch recent and sent emails for all users
 
 
-// const amqp = require("amqplib");
+const amqp = require("amqplib");
 
 
 
-// const QUEUE_NAME = "email-fetch-queue";
+const QUEUE_NAME = "email-fetch-queue";
 
-// async function pushJobsToQueue() {
-//   const connection = await amqp.connect("amqp://localhost");
-//   const channel = await connection.createChannel();
-//   await channel.assertQueue(QUEUE_NAME, { durable: true });
+async function pushJobsToQueue() {
+  const connection = await amqp.connect("amqp://localhost");
+  const channel = await connection.createChannel();
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
 
-//   const userCredentials = await UserCredential.findAll();
-//   if (!userCredentials || userCredentials.length === 0) {
-//     console.log("No user credentials found.");
-//     await channel.close();
-//     await connection.close();
-//     return;
-//   }
+  const userCredentials = await UserCredential.findAll();
+  if (!userCredentials || userCredentials.length === 0) {
+    console.log("No user credentials found.");
+    await channel.close();
+    await connection.close();
+    return;
+  }
 
-//   for (const credential of userCredentials) {
-//     const adminId = credential.masterUserID;
-//     channel.sendToQueue(
-//       QUEUE_NAME,
-//       Buffer.from(JSON.stringify({ adminId })),
-//       { persistent: true }
-//     );
-//   }
-//   console.log(`Queued ${userCredentials.length} email fetch jobs.`);
+  for (const credential of userCredentials) {
+    const adminId = credential.masterUserID;
+    channel.sendToQueue(
+      QUEUE_NAME,
+      Buffer.from(JSON.stringify({ adminId })),
+      { persistent: true }
+    );
+  }
+  console.log(`Queued ${userCredentials.length} email fetch jobs.`);
 
-//   await channel.close();
-//   await connection.close();
-// }
-
-// cron.schedule("*/2 * * * *", async () => {
-//   console.log("Running cron job to queue email fetch jobs...");
-//   try {
-//     await pushJobsToQueue();
-//   } catch (error) {
-//     console.error("Error queueing email fetch jobs:", error);
-//   }
-// });
-
-
-
-
+  await channel.close();
+  await connection.close();
+}
 
 cron.schedule("*/2 * * * *", async () => {
-  console.log("Running combined cron job to fetch recent and sent emails for all users...");
-
+  console.log("Running cron job to queue email fetch jobs...");
   try {
-    // Fetch all user credentials
-    const userCredentials = await UserCredential.findAll();
-
-    if (!userCredentials || userCredentials.length === 0) {
-      console.log("No user credentials found.");
-      return;
-    }
-
-    // Iterate over each user credential
-    for (const credential of userCredentials) {
-      const adminId = credential.masterUserID;
-
-      try {
-        // Fetch recent emails
-        console.log(`Fetching recent emails for adminId: ${adminId}`);
-        const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
-        console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
-
-        // Fetch sent emails
-        console.log(`Fetching sent emails for adminId: ${adminId}`);
-        // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
-        // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
-      } catch (error) {
-        console.error(`Error processing emails for adminId ${adminId}:`, error);
-      }
-    }
+    await pushJobsToQueue();
   } catch (error) {
-    console.error("Error running combined cron job:", error);
+    console.error("Error queueing email fetch jobs:", error);
   }
 });
+
+
+
+
+
+// cron.schedule("*/2 * * * *", async () => {
+//   console.log("Running combined cron job to fetch recent and sent emails for all users...");
+
+//   try {
+//     // Fetch all user credentials
+//     const userCredentials = await UserCredential.findAll();
+
+//     if (!userCredentials || userCredentials.length === 0) {
+//       console.log("No user credentials found.");
+//       return;
+//     }
+
+//     // Iterate over each user credential
+//     for (const credential of userCredentials) {
+//       const adminId = credential.masterUserID;
+
+//       try {
+//         // Fetch recent emails
+//         console.log(`Fetching recent emails for adminId: ${adminId}`);
+//         const recentEmailsResult = await fetchRecentEmail(adminId); // Pass adminId to fetchRecentEmail
+//         console.log(`Result for recent emails (adminId ${adminId}):`, recentEmailsResult);
+
+//         // Fetch sent emails
+//         console.log(`Fetching sent emails for adminId: ${adminId}`);
+//         // const sentEmailsResult = await fetchSentEmails(adminId); // Pass adminId to fetchSentEmails
+//         // console.log(`Result for sent emails (adminId ${adminId}):`, sentEmailsResult);
+//       } catch (error) {
+//         console.error(`Error processing emails for adminId ${adminId}:`, error);
+//       }
+//     }
+//   } catch (error) {
+//     console.error("Error running combined cron job:", error);
+//   }
+// });
 
 
 
@@ -155,42 +155,42 @@ cron.schedule("*/2 * * * *", async () => {
 //   }
 // });
 
-cron.schedule("0 2 * * *", async () => {
-  const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const BATCH_SIZE = 500;
-  let totalDeleted = 0;
-  let deletedCount;
+// cron.schedule("0 2 * * *", async () => {
+//   const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+//   const BATCH_SIZE = 500;
+//   let totalDeleted = 0;
+//   let deletedCount;
 
-  try {
-    do {
-      const emailsToDelete = await Email.findAll({
-        where: {
-          folder: "trash",
-          createdAt: { [Sequelize.Op.lt]: THIRTY_DAYS_AGO },
-        },
-        attributes: ['emailID'],
-        limit: BATCH_SIZE
-      });
+//   try {
+//     do {
+//       const emailsToDelete = await Email.findAll({
+//         where: {
+//           folder: "trash",
+//           createdAt: { [Sequelize.Op.lt]: THIRTY_DAYS_AGO },
+//         },
+//         attributes: ['emailID'],
+//         limit: BATCH_SIZE
+//       });
 
-      if (emailsToDelete.length === 0) break;
+//       if (emailsToDelete.length === 0) break;
 
-      const ids = emailsToDelete.map(e => e.emailID);
+//       const ids = emailsToDelete.map(e => e.emailID);
 
-      deletedCount = await Email.destroy({
-        where: { emailID: ids }
-      });
+//       deletedCount = await Email.destroy({
+//         where: { emailID: ids }
+//       });
 
-      totalDeleted += deletedCount;
+//       totalDeleted += deletedCount;
 
-      if (deletedCount > 0) {
-        console.log(`Batch deleted ${deletedCount} emails from trash (older than 30 days).`);
-      }
-    } while (deletedCount === BATCH_SIZE);
+//       if (deletedCount > 0) {
+//         console.log(`Batch deleted ${deletedCount} emails from trash (older than 30 days).`);
+//       }
+//     } while (deletedCount === BATCH_SIZE);
 
-    if (totalDeleted > 0) {
-      console.log(`Auto-deleted total ${totalDeleted} emails from trash (older than 30 days).`);
-    }
-  } catch (error) {
-    console.error("Error auto-deleting old trash emails:", error);
-  }
-});
+//     if (totalDeleted > 0) {
+//       console.log(`Auto-deleted total ${totalDeleted} emails from trash (older than 30 days).`);
+//     }
+//   } catch (error) {
+//     console.error("Error auto-deleting old trash emails:", error);
+//   }
+// });

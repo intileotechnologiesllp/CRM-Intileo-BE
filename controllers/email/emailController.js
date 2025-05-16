@@ -1283,6 +1283,48 @@ finalBody += `<br><br>${signatureBlock}`;
               path: file.path,
             }))
           : [];
+          // Check if scheduledAt is provided for scheduling
+// if (req.body.scheduledAt) {
+//   // Save to outbox for later sending
+//   const emailData = {
+//     messageId: null,
+//     inReplyTo: inReplyToHeader || null,
+//     references: referencesHeader || null,
+//     sender: SENDER_EMAIL,
+//     senderName: SENDER_NAME,
+//     recipient: to,
+//     cc,
+//     bcc,
+//     subject: finalSubject,
+//     body: finalBody,
+//     folder: "outbox",
+//     createdAt: new Date(),
+//     masterUserID,
+//     tempMessageId,
+//     isDraft: false,
+//     scheduledAt: new Date(req.body.scheduledAt),
+//   };
+//   const savedEmail = await Email.create(emailData);
+
+//   // Save attachments in the database
+//   const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+//   const savedAttachments = req.files.map((file) => ({
+//     emailID: savedEmail.emailID,
+//     filename: file.originalname,
+//     filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.originalname)}`,
+//     size: file.size,
+//     contentType: file.mimetype,
+//   }));
+//   if (savedAttachments.length > 0) {
+//     await Attachment.bulkCreate(savedAttachments);
+//   }
+
+//   return res.status(200).json({
+//     message: "Email scheduled and saved to outbox successfully.",
+//     scheduledAt: emailData.scheduledAt,
+//     emailID: savedEmail.emailID,
+//   });
+// }
 
       // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
