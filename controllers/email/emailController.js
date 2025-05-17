@@ -1066,7 +1066,7 @@ exports.getOneEmail = async (req, res) => {
       order: [["createdAt", "ASC"]],
     });
 // Remove the main email from relatedEmails
-relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
+//relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
