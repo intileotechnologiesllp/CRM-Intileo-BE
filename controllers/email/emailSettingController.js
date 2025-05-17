@@ -569,5 +569,57 @@ exports.setSmartBcc = async (req, res) => {
     res.status(500).json({ message: "Failed to update Smart BCC.", error: error.message });
   }
 };
+exports.updateBlockedAddress = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { blockedEmail } = req.body; // comma-separated string or array
+
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    // If blockedEmail is an array, join to string
+    let blockedEmailStr = blockedEmail;
+    if (Array.isArray(blockedEmail)) {
+      blockedEmailStr = blockedEmail.join(",");
+    }
+
+    await userCredential.update({ blockedEmail: blockedEmailStr });
+    res.status(200).json({ message: "Blocked address list updated successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update blocked address.", error: error.message });
+  }
+};
+exports.removeBlockedAddress = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailToRemove } = req.body; // The email address to remove
+
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    let blockedList = [];
+    if (userCredential.blockedEmail) {
+      blockedList = userCredential.blockedEmail
+        .split(",")
+        .map(e => e.trim().toLowerCase())
+        .filter(Boolean);
+    }
+
+    // Remove the email (case-insensitive)
+    const updatedList = blockedList.filter(
+      email => email !== emailToRemove.trim().toLowerCase()
+    );
+
+    await userCredential.update({ blockedEmail: updatedList.join(",") });
+
+    res.status(200).json({ message: "Blocked address removed successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to remove blocked address.", error: error.message });
+  }
+};
 
 

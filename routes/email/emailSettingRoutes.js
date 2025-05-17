@@ -40,6 +40,8 @@ router.post("/bulk-archive", verifyToken, emailSettingsController.bulkArchiveEma
 router.post("/mark-as-read", verifyToken, emailSettingsController.markAsRead);
 router.post("/update-email-shared", verifyToken, emailSettingsController.updateEmailSharing);
 router.post("/update-smart-bcc", verifyToken, emailSettingsController.setSmartBcc);
+router.post("/update-blocked-email", verifyToken, emailSettingsController.updateBlockedAddress);
+router.post("/remove-blocked-email", verifyToken, emailSettingsController.removeBlockedAddress);
 
 
 
