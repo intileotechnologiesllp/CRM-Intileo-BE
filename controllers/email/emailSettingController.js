@@ -554,4 +554,20 @@ exports.updateEmailSharing = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+exports.setSmartBcc = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { smartBcc } = req.body;
+
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    await userCredential.update({ smartBcc });
+    res.status(200).json({ message: "Smart BCC updated successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update Smart BCC.", error: error.message });
+  }
+};
+
 

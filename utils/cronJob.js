@@ -1,5 +1,5 @@
 const cron = require("node-cron");
- const { fetchRecentEmail } = require("../controllers/email/emailController");
+const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSentEmails } = require("../controllers/email/emailController"); // Adjust the path to your controller
 const UserCredential = require("../models/email/userCredentialModel"); // Adjust the path to your model
 const Email = require("../models/email/emailModel");
@@ -10,15 +10,14 @@ const { Sequelize } = require("sequelize");
 //
 // Combined cron job to fetch recent and sent emails for all users
 
-
 const amqp = require("amqplib");
 
-
-
 const QUEUE_NAME = "email-fetch-queue";
+const SCHEDULED_QUEUE = "scheduled-email-queue";
 
 async function pushJobsToQueue() {
-  const connection = await amqp.connect("amqp://164.52.223.86:5672");
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+  const connection = await amqp.connect(amqpUrl);
   const channel = await connection.createChannel();
   await channel.assertQueue(QUEUE_NAME, { durable: true });
 
@@ -32,11 +31,9 @@ async function pushJobsToQueue() {
 
   for (const credential of userCredentials) {
     const adminId = credential.masterUserID;
-    channel.sendToQueue(
-      QUEUE_NAME,
-      Buffer.from(JSON.stringify({ adminId })),
-      { persistent: true }
-    );
+    channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify({ adminId })), {
+      persistent: true,
+    });
   }
   console.log(`Queued ${userCredentials.length} email fetch jobs.`);
 
@@ -53,9 +50,60 @@ cron.schedule("*/2 * * * *", async () => {
   }
 });
 
+cron.schedule("* * * * *", async () => {
+  // Every minute
+  console.log("Running cron job to queue scheduled outbox emails...");
+  const now = new Date();
+  console.log("Current server time:", now.toISOString());
 
+  try {
+    // Find all outbox emails that should be sent now or earlier
+    const emails = await Email.findAll({
+      where: {
+        folder: "outbox",
+        scheduledAt: { [Sequelize.Op.lte]: now },
+      },
+      attributes: ["emailID", "scheduledAt", "folder"],
+    });
 
+    console.log(
+      "Found scheduled outbox emails:",
+      emails.map((e) => ({
+        emailID: e.emailID,
+        scheduledAt: e.scheduledAt,
+        folder: e.folder,
+      }))
+    );
 
+    if (!emails.length) {
+      console.log("No scheduled outbox emails to queue at this time.");
+      return;
+    }
+
+    // Connect to RabbitMQ and queue each email for sending
+    const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+    const connection = await amqp.connect(amqpUrl);
+    const channel = await connection.createChannel();
+    await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
+
+    for (const email of emails) {
+      console.log(
+        `Queueing emailID ${email.emailID} (scheduledAt: ${email.scheduledAt}) to RabbitMQ...`
+      );
+      channel.sendToQueue(
+        SCHEDULED_QUEUE,
+        Buffer.from(JSON.stringify({ emailID: email.emailID })),
+        { persistent: true }
+      );
+    }
+    console.log(`Queued ${emails.length} scheduled outbox emails for sending.`);
+
+    await channel.close();
+    await connection.close();
+  } catch (error) {
+    console.error("Error queueing scheduled outbox emails:", error);
+  }
+});
 
 // cron.schedule("*/2 * * * *", async () => {
 //   console.log("Running combined cron job to fetch recent and sent emails for all users...");
@@ -92,13 +140,11 @@ cron.schedule("*/2 * * * *", async () => {
 //   }
 // });
 
-
-
 // Uncomment the following code to enable the cron job for sending scheduled emails
 
 // cron.schedule("* * * * *", async () => { // Runs every minute
 //   console.log("Running cron job to send scheduled emails...");
-  
+
 //   const now = new Date();
 //   console.log("Current time:", now);
 //   const emails = await Email.findAll({
@@ -113,7 +159,6 @@ cron.schedule("*/2 * * * *", async () => {
 // if (emails.length > 0) {
 //   emails.forEach(e => console.log(e.emailID, e.folder, e.scheduledAt));
 // }
-  
 
 //   for (const email of emails) {
 //     try {
@@ -155,42 +200,46 @@ cron.schedule("*/2 * * * *", async () => {
 //   }
 // });
 
-// cron.schedule("0 2 * * *", async () => {
-//   const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-//   const BATCH_SIZE = 500;
-//   let totalDeleted = 0;
-//   let deletedCount;
+cron.schedule("0 2 * * *", async () => {
+  const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const BATCH_SIZE = 500;
+  let totalDeleted = 0;
+  let deletedCount;
 
-//   try {
-//     do {
-//       const emailsToDelete = await Email.findAll({
-//         where: {
-//           folder: "trash",
-//           createdAt: { [Sequelize.Op.lt]: THIRTY_DAYS_AGO },
-//         },
-//         attributes: ['emailID'],
-//         limit: BATCH_SIZE
-//       });
+  try {
+    do {
+      const emailsToDelete = await Email.findAll({
+        where: {
+          folder: "trash",
+          createdAt: { [Sequelize.Op.lt]: THIRTY_DAYS_AGO },
+        },
+        attributes: ["emailID"],
+        limit: BATCH_SIZE,
+      });
 
-//       if (emailsToDelete.length === 0) break;
+      if (emailsToDelete.length === 0) break;
 
-//       const ids = emailsToDelete.map(e => e.emailID);
+      const ids = emailsToDelete.map((e) => e.emailID);
 
-//       deletedCount = await Email.destroy({
-//         where: { emailID: ids }
-//       });
+      deletedCount = await Email.destroy({
+        where: { emailID: ids },
+      });
 
-//       totalDeleted += deletedCount;
+      totalDeleted += deletedCount;
 
-//       if (deletedCount > 0) {
-//         console.log(`Batch deleted ${deletedCount} emails from trash (older than 30 days).`);
-//       }
-//     } while (deletedCount === BATCH_SIZE);
+      if (deletedCount > 0) {
+        console.log(
+          `Batch deleted ${deletedCount} emails from trash (older than 30 days).`
+        );
+      }
+    } while (deletedCount === BATCH_SIZE);
 
-//     if (totalDeleted > 0) {
-//       console.log(`Auto-deleted total ${totalDeleted} emails from trash (older than 30 days).`);
-//     }
-//   } catch (error) {
-//     console.error("Error auto-deleting old trash emails:", error);
-//   }
-// });
+    if (totalDeleted > 0) {
+      console.log(
+        `Auto-deleted total ${totalDeleted} emails from trash (older than 30 days).`
+      );
+    }
+  } catch (error) {
+    console.error("Error auto-deleting old trash emails:", error);
+  }
+});

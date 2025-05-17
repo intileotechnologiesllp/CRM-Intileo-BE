@@ -34,7 +34,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+  // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
 });
 
 const imapConfig = {
@@ -354,7 +354,8 @@ exports.fetchRecentEmail = async (adminId) => {
         : null,
       masterUserID: adminId,
       subject: parsedEmail.subject || null,
-      body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+      // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+      body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
       folder: "inbox", // Add folder field
       createdAt: parsedEmail.date || new Date(),
     };
@@ -668,7 +669,7 @@ exports.getEmails = async (req, res) => {
     isOpened, // <-- Add this
     isClicked, // <-- Add this
     trackedEmails,
-    isShared
+    isShared,
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -676,18 +677,18 @@ exports.getEmails = async (req, res) => {
     let filters = {
       masterUserID,
     };
-// if (isShared === "true") {
-//   filters.isShared = true;
-//   if (folder) filters.folder = folder;
-// } else {
-//   filters = {
-//     [Sequelize.Op.or]: [
-//       { masterUserID },
-//       { isShared: true },
-//     ]
-//   };
-//   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
-// }
+    // if (isShared === "true") {
+    //   filters.isShared = true;
+    //   if (folder) filters.folder = folder;
+    // } else {
+    //   filters = {
+    //     [Sequelize.Op.or]: [
+    //       { masterUserID },
+    //       { isShared: true },
+    //     ]
+    //   };
+    //   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
+    // }
     if (folder) {
       filters.folder = folder;
     }
@@ -706,8 +707,6 @@ exports.getEmails = async (req, res) => {
       const userEmail = userCredential.email;
       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
     }
-
-
 
     // Add tracked emails filter
     // --- Tracked emails filter ---
@@ -979,7 +978,7 @@ exports.getOneEmail = async (req, res) => {
   try {
     // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
-      where: { emailID: emailId, masterUserID },
+      where: { emailID: emailId },
       include: [
         {
           model: Attachment,
@@ -1007,7 +1006,7 @@ exports.getOneEmail = async (req, res) => {
       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
-    // If this is a draft, do NOT fetch related emails
+    // If this is a draft or trash, do NOT fetch related emails
     if (mainEmail.folder === "drafts") {
       return res.status(200).json({
         message: "Draft email fetched successfully.",
@@ -1017,7 +1016,7 @@ exports.getOneEmail = async (req, res) => {
         },
       });
     }
-        if (mainEmail.folder === "trash") {
+    if (mainEmail.folder === "trash") {
       return res.status(200).json({
         message: "trash email fetched successfully.",
         data: {
@@ -1027,18 +1026,28 @@ exports.getOneEmail = async (req, res) => {
       });
     }
 
-    // Otherwise, fetch related emails from inbox and sent folders
-    const relatedEmails = await Email.findAll({
+    // Gather all thread IDs (messageId, inReplyTo, references)
+    const threadIds = [
+      mainEmail.messageId,
+      mainEmail.inReplyTo,
+      ...(mainEmail.references ? mainEmail.references.split(" ") : []),
+    ].filter(Boolean);
+
+    // Fetch all related emails in the thread (across all users)
+    let relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
-          { messageId: mainEmail.inReplyTo, masterUserID },
-          { inReplyTo: mainEmail.messageId, masterUserID },
+          { messageId: { [Sequelize.Op.in]: threadIds } },
+          { inReplyTo: { [Sequelize.Op.in]: threadIds } },
           {
-            references: { [Sequelize.Op.like]: `%${mainEmail.messageId}%` },
-            masterUserID,
+            references: {
+              [Sequelize.Op.or]: threadIds.map((id) => ({
+                [Sequelize.Op.like]: `%${id}%`,
+              })),
+            },
           },
         ],
-        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+        folder: { [Sequelize.Op.in]: ["inbox"] },
       },
       include: [
         {
@@ -1048,7 +1057,8 @@ exports.getOneEmail = async (req, res) => {
       ],
       order: [["createdAt", "ASC"]],
     });
-
+// Remove the main email from relatedEmails
+relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
@@ -1096,6 +1106,9 @@ exports.composeEmail = [
         where: { masterUserID, isDefault: true },
       });
 
+
+
+
       let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
 
       if (defaultEmail) {
@@ -1119,21 +1132,6 @@ exports.composeEmail = [
 
           SENDER_NAME = masterUser.name; // Use the name from MasterUser
         }
-  //         let toList = [];
-  // if (to) {
-  //   if (Array.isArray(to)) {
-  //     toList = to;
-  //   } else if (typeof to === "string") {
-  //     toList = to.split(",").map(e => e.trim());
-  //   }
-  // }
-  // // Add req.email if not already present
-  // if (req.email && !toList.includes(req.email)) {
-  //   toList.push(req.email);
-  // }
-  // // Set the updated "to" field
-  // req.body.to = toList.join(",");
-
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1145,6 +1143,18 @@ exports.composeEmail = [
             message: "User credentials not found for the given user.",
           });
         }
+        // Add Smart BCC if set and not already in bcc
+// let bccList = [];
+// if (bcc) {
+//   bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
+// }
+// if (userCredential.smartBcc) {
+//   const smartBccEmail = userCredential.smartBcc.trim();
+//   if (!bccList.includes(smartBccEmail)) {
+//     bccList.push(smartBccEmail);
+//   }
+// }
+// const finalBcc = bccList.join(", ");
 
         SENDER_EMAIL = userCredential.email;
         SENDER_PASSWORD = userCredential.appPassword;
@@ -1161,10 +1171,23 @@ exports.composeEmail = [
         }
 
         SENDER_NAME = masterUser.name; // Use the name from MasterUser
-
       }
+      // --- Smart BCC logic: always after sender is set ---
+const userCredentialForBcc = await UserCredential.findOne({
+  where: { masterUserID },
+});
 
-      
+let bccList = [];
+if (bcc) {
+  bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
+}
+if (userCredentialForBcc && userCredentialForBcc.smartBcc) {
+  const smartBccEmail = userCredentialForBcc.smartBcc.trim();
+  if (!bccList.includes(smartBccEmail)) {
+    bccList.push(smartBccEmail);
+  }
+}
+const finalBcc = bccList.join(", ");
 
       let finalSubject = subject;
       let finalBody = text || html;
@@ -1184,25 +1207,81 @@ exports.composeEmail = [
         finalBody = text || html || draftEmail.body;
       }
       // Handle reply action
-      if (actionType === "reply") {
-        const originalEmail = await Email.findOne({
-          where: { messageId: replyToMessageId, masterUserID },
-        });
+if (actionType === "reply") {
+  const originalEmail = await Email.findOne({
+    where: { messageId: replyToMessageId },
+  });
 
-        if (!originalEmail) {
-          return res.status(404).json({
-            message: "Original email not found for the given messageId.",
-          });
-        }
+  if (!originalEmail) {
+    return res.status(404).json({
+      message: "Original email not found for the given messageId.",
+    });
+  }
 
-        inReplyToHeader = originalEmail.messageId;
-        referencesHeader = originalEmail.references
-          ? `${originalEmail.references} ${originalEmail.messageId}`
-          : originalEmail.messageId;
+  inReplyToHeader = originalEmail.messageId;
+  referencesHeader = originalEmail.references
+    ? `${originalEmail.references} ${originalEmail.messageId}`
+    : originalEmail.messageId;
 
-        finalSubject = `Re: ${originalEmail.subject}`;
-        finalBody = `${text || html}`;
-      }
+  finalSubject = originalEmail.subject.startsWith("Re:") ? originalEmail.subject : `Re: ${originalEmail.subject}`;
+  finalBody = `${text || html}`;
+  req.body.to = originalEmail.sender;
+  req.body.cc = "";
+}
+if (actionType === "replyAll") {
+  const originalEmail = await Email.findOne({
+    where: { messageId: replyToMessageId },
+  });
+
+  if (!originalEmail) {
+    return res.status(404).json({
+      message: "Original email not found for the given messageId.",
+    });
+  }
+
+  inReplyToHeader = originalEmail.messageId;
+  referencesHeader = originalEmail.references
+    ? `${originalEmail.references} ${originalEmail.messageId}`
+    : originalEmail.messageId;
+
+  finalSubject = originalEmail.subject.startsWith("Re:") ? originalEmail.subject : `Re: ${originalEmail.subject}`;
+  finalBody = `${text || html}`;
+
+  // Build recipients: all original To and CC, plus sender, except yourself
+  const currentUserEmail = SENDER_EMAIL.toLowerCase();
+  const allTo = (originalEmail.recipient || "").split(",").map(e => e.trim().toLowerCase());
+  const allCc = (originalEmail.cc || "").split(",").map(e => e.trim().toLowerCase());
+  const replyAllList = [originalEmail.sender, ...allTo, ...allCc]
+    .filter(email => email && email !== currentUserEmail);
+  // Remove duplicates
+  const uniqueReplyAll = [...new Set(replyAllList)];
+  // Set recipients for reply all
+  req.body.to = uniqueReplyAll[0] || "";
+  req.body.cc = uniqueReplyAll.slice(1).join(", ");
+}
+if (actionType === "forward") {
+  const originalEmail = await Email.findOne({
+    where: { messageId: replyToMessageId },
+  });
+
+  if (!originalEmail) {
+    return res.status(404).json({
+      message: "Original email not found for the given messageId.",
+    });
+  }
+
+  inReplyToHeader = null;
+  referencesHeader = null;
+
+  finalSubject = originalEmail.subject.startsWith("Fwd:") ? originalEmail.subject : `Fwd: ${originalEmail.subject}`;
+  finalBody = `${text || html}<br><br>---------- Forwarded message ----------<br>
+    From: ${originalEmail.senderName || originalEmail.sender}<br>
+    Date: ${originalEmail.createdAt}<br>
+    Subject: ${originalEmail.subject}<br>
+    To: ${originalEmail.recipient}<br>
+    ${originalEmail.body}`;
+  // For forward, req.body.to and req.body.cc are set by the user
+}
 
       // If a templateID is provided, fetch the template
       if (templateID) {
@@ -1252,17 +1331,17 @@ exports.composeEmail = [
           (match, url) => `href="${generateRedirectLink(url, messageId)}"`
         );
       };
-let signatureBlock = "";
-if (userCredential.signatureName) {
-  signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-}
-if (userCredential.signature) {
-  signatureBlock += `${userCredential.signature}<br>`;
-}
-if (userCredential.signatureImage) {
-  signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-}
-finalBody += `<br><br>${signatureBlock}`;
+      let signatureBlock = "";
+      if (userCredential.signatureName) {
+        signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+      }
+      if (userCredential.signature) {
+        signatureBlock += `${userCredential.signature}<br>`;
+      }
+      if (userCredential.signatureImage) {
+        signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+      }
+      finalBody += `<br><br>${signatureBlock}`;
       // Generate a temporary messageId for tracking
       const tempMessageId = `temp-${Date.now()}`;
 
@@ -1283,48 +1362,56 @@ finalBody += `<br><br>${signatureBlock}`;
               path: file.path,
             }))
           : [];
-          // Check if scheduledAt is provided for scheduling
-// if (req.body.scheduledAt) {
-//   // Save to outbox for later sending
-//   const emailData = {
-//     messageId: null,
-//     inReplyTo: inReplyToHeader || null,
-//     references: referencesHeader || null,
-//     sender: SENDER_EMAIL,
-//     senderName: SENDER_NAME,
-//     recipient: to,
-//     cc,
-//     bcc,
-//     subject: finalSubject,
-//     body: finalBody,
-//     folder: "outbox",
-//     createdAt: new Date(),
-//     masterUserID,
-//     tempMessageId,
-//     isDraft: false,
-//     scheduledAt: new Date(req.body.scheduledAt),
-//   };
-//   const savedEmail = await Email.create(emailData);
+      //Check if scheduledAt is provided for scheduling
+      if (req.body.scheduledAt) {
+        const parsedDate = new Date(req.body.scheduledAt);
+        if (isNaN(parsedDate.getTime())) {
+          return res
+            .status(400)
+            .json({ message: "Invalid scheduledAt date format." });
+        }
+        // Save to outbox for later sending
+        const emailData = {
+          messageId: null,
+          inReplyTo: inReplyToHeader || null,
+          references: referencesHeader || null,
+          sender: SENDER_EMAIL,
+          senderName: SENDER_NAME,
+          recipient: to,
+          cc,
+          bcc,
+          subject: finalSubject,
+          body: finalBody,
+          folder: "outbox",
+          createdAt: new Date(),
+          masterUserID,
+          tempMessageId,
+          isDraft: false,
+          scheduledAt: parsedDate,
+        };
+        const savedEmail = await Email.create(emailData);
 
-//   // Save attachments in the database
-//   const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-//   const savedAttachments = req.files.map((file) => ({
-//     emailID: savedEmail.emailID,
-//     filename: file.originalname,
-//     filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.originalname)}`,
-//     size: file.size,
-//     contentType: file.mimetype,
-//   }));
-//   if (savedAttachments.length > 0) {
-//     await Attachment.bulkCreate(savedAttachments);
-//   }
+        // Save attachments in the database
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+        const savedAttachments = req.files.map((file) => ({
+          emailID: savedEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          size: file.size,
+          contentType: file.mimetype,
+        }));
+        if (savedAttachments.length > 0) {
+          await Attachment.bulkCreate(savedAttachments);
+        }
 
-//   return res.status(200).json({
-//     message: "Email scheduled and saved to outbox successfully.",
-//     scheduledAt: emailData.scheduledAt,
-//     emailID: savedEmail.emailID,
-//   });
-// }
+        return res.status(200).json({
+          message: "Email scheduled and saved to outbox successfully.",
+          scheduledAt: emailData.scheduledAt,
+          emailID: savedEmail.emailID,
+        });
+      }
 
       // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
@@ -1341,7 +1428,7 @@ finalBody += `<br><br>${signatureBlock}`;
         from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
         to: to || (draftEmail && draftEmail.recipient),
         cc: cc || (draftEmail && draftEmail.cc),
-        bcc: bcc || (draftEmail && draftEmail.bcc),
+        bcc: finalBcc || bcc || (draftEmail && draftEmail.bcc),
         subject: finalSubject,
         text: htmlToText(finalBody),
         html: finalBody,
@@ -1424,13 +1511,15 @@ finalBody += `<br><br>${signatureBlock}`;
         //       }))
         //     : [];
         const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-      savedAttachments = req.files.map((file) => ({
-  emailID: savedEmail.emailID,
-  filename: file.originalname,
-  filePath:`${baseURL}/uploads/attachments/${encodeURIComponent(file.originalname)}`, // Save public URL in DB
-  size: file.size,
-  contentType: file.mimetype,
-}));
+        savedAttachments = req.files.map((file) => ({
+          emailID: savedEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`, // Save public URL in DB
+          size: file.size,
+          contentType: file.mimetype,
+        }));
 
         if (savedAttachments.length > 0) {
           await Attachment.bulkCreate(savedAttachments);
@@ -1443,7 +1532,7 @@ finalBody += `<br><br>${signatureBlock}`;
       // Generate public URLs for attachments
       const attachmentLinks = savedAttachments.map((attachment) => ({
         filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       }));
 
       res.status(200).json({
@@ -1543,7 +1632,7 @@ exports.getUnreadCounts = async (req, res) => {
 
   try {
     // Define all possible folders
-    const allFolders = ["inbox", "drafts", "sent", "archive","trash"];
+    const allFolders = ["inbox", "drafts", "sent", "archive", "trash"];
 
     // Fetch the count of unread emails grouped by folder for the specific user
     const unreadCounts = await Email.findAll({
