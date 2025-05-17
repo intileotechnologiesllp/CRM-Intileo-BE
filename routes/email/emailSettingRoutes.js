@@ -42,6 +42,7 @@ router.post("/update-email-shared", verifyToken, emailSettingsController.updateE
 router.post("/update-smart-bcc", verifyToken, emailSettingsController.setSmartBcc);
 router.post("/update-blocked-email", verifyToken, emailSettingsController.updateBlockedAddress);
 router.post("/remove-blocked-email", verifyToken, emailSettingsController.removeBlockedAddress);
+router.get("/get-signature", verifyToken, emailSettingsController.getSignature);
 
 
 

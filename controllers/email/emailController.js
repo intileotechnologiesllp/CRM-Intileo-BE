@@ -338,6 +338,12 @@ if (userCredential && userCredential.blockedEmail) {
     .map(e => e.trim().toLowerCase())
     .filter(Boolean);
 }
+    const senderEmail = parsedEmail.from ? parsedEmail.from.value[0].address.toLowerCase() : null;
+    if (blockedList.includes(senderEmail)) {
+      console.log(`Blocked email from: ${senderEmail}`);
+      connection.end();
+      return { message: `Blocked email from: ${senderEmail}` };
+    }
     
     const referencesHeader = parsedEmail.headers.get("references");
     const references = Array.isArray(referencesHeader)
@@ -1558,7 +1564,7 @@ if (actionType === "forward") {
         filename: attachment.filename,
         link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       }));
-
+// await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
       res.status(200).json({
         message: "Email sent and saved successfully.",
         messageId: info.messageId,

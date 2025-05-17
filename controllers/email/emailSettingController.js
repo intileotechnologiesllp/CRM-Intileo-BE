@@ -601,24 +601,49 @@ exports.removeBlockedAddress = async (req, res) => {
       return res.status(404).json({ message: "User credentials not found." });
     }
 
+    // Ensure blockedEmail is always an array
     let blockedList = [];
-    if (userCredential.blockedEmail) {
-      blockedList = userCredential.blockedEmail
-        .split(",")
-        .map(e => e.trim().toLowerCase())
-        .filter(Boolean);
+    if (Array.isArray(userCredential.blockedEmail)) {
+      blockedList = userCredential.blockedEmail;
+    } else if (typeof userCredential.blockedEmail === "string" && userCredential.blockedEmail.length > 0) {
+      // Fallback for legacy comma-separated string
+      blockedList = userCredential.blockedEmail.split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
     }
 
-    // Remove the email (case-insensitive)
-    const updatedList = blockedList.filter(
-      email => email !== emailToRemove.trim().toLowerCase()
-    );
+    // Remove the email (case-insensitive, trimmed)
+    const updatedList = blockedList
+      .map(e => e.trim().toLowerCase())
+      .filter(email => email !== emailToRemove.trim().toLowerCase());
 
-    await userCredential.update({ blockedEmail: updatedList.join(",") });
+    await userCredential.update({ blockedEmail: updatedList });
 
-    res.status(200).json({ message: "Blocked address removed successfully." });
+    res.status(200).json({
+      message: updatedList.length < blockedList.length
+        ? "Blocked address removed successfully."
+        : "Email not found in blocked list.",
+      blockedEmail: updatedList
+    });
   } catch (error) {
     res.status(500).json({ message: "Failed to remove blocked address.", error: error.message });
+  }
+};
+exports.getSignature = async (req, res) => {
+  const masterUserID = req.adminId;
+
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    res.status(200).json({
+      message: "Signature data fetched successfully.",
+      signature: userCredential.signature,
+      signatureName: userCredential.signatureName,
+      signatureImage: userCredential.signatureImage,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch signature data.", error: error.message });
   }
 };
 
