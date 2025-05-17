@@ -1475,6 +1475,7 @@ if (actionType === "forward") {
         // Update attachments if new ones are uploaded
         if (req.files && req.files.length > 0) {
           await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
+           const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
           savedAttachments = req.files.map((file) => ({
                   emailID: savedEmail.emailID,
           filename: file.filename,
