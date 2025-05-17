@@ -128,6 +128,7 @@ async function sendEmailJob(emailID) {
 
   // Fetch sender credentials (prefer DefaultEmail)
   let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+  let signatureBlock = "";
   const defaultEmail = await DefaultEmail.findOne({
     where: { masterUserID: email.masterUserID, isDefault: true },
   });
