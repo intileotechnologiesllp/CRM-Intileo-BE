@@ -142,6 +142,10 @@ async function sendEmailJob(emailID) {
       });
       SENDER_NAME = masterUser ? masterUser.name : "";
     }
+        // Fetch userCredential for signature if needed
+    userCredential = await UserCredential.findOne({
+      where: { masterUserID: email.masterUserID },
+    });
   } else {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID: email.masterUserID },
@@ -152,6 +156,25 @@ async function sendEmailJob(emailID) {
       where: { masterUserID: email.masterUserID },
     });
     SENDER_NAME = masterUser ? masterUser.name : "";
+    
+  }
+    // Build signature block if not already present in email.body
+  if (userCredential) {
+    if (userCredential.signatureName) {
+      signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+    }
+    if (userCredential.signature) {
+      signatureBlock += `${userCredential.signature}<br>`;
+    }
+    if (userCredential.signatureImage) {
+      signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+    }
+  }
+
+  // Only add signature if not already present in body
+  let emailBody = email.body || "";
+  if (signatureBlock && !emailBody.includes(signatureBlock)) {
+    emailBody += `<br><br>${signatureBlock}`;
   }
 
   // Prepare mail options
