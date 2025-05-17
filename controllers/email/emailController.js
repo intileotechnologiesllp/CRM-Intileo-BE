@@ -1797,7 +1797,17 @@ exports.getUserCredential = async (req, res) => {
       message: "User credentials fetched successfully.",
       credential: {
         email: userCredential.email,
-        appPassword: userCredential.appPassword, // You may want to exclude this in production for security reasons
+        appPassword: userCredential.appPassword,
+        syncStartDate: userCredential.syncStartDate,
+        syncFolders: userCredential.syncFolders,
+        syncAllFolders: userCredential.syncAllFolders,
+        isTrackOpenEmail: userCredential.isTrackOpenEmail,
+        isTrackClickEmail: userCredential.isTrackClickEmail,
+        signature: userCredential.signature,
+        signatureName: userCredential.signatureName,
+        signatureImage: userCredential.signatureImage,
+        smartBcc: userCredential.smartBcc,
+        blockedEmail: userCredential.blockedEmail, // You may want to exclude this in production for security reasons
       },
     });
   } catch (error) {
