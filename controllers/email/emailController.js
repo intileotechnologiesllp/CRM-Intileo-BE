@@ -1068,7 +1068,16 @@ exports.getOneEmail = async (req, res) => {
 // Remove the main email from relatedEmails
 //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
 // Remove the main email from relatedEmails (by messageId)
+
 relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
+
+// Deduplicate relatedEmails by messageId (keep the first occurrence)
+const seen = new Set();
+relatedEmails = relatedEmails.filter(email => {
+  if (seen.has(email.messageId)) return false;
+  seen.add(email.messageId);
+  return true;
+});
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
