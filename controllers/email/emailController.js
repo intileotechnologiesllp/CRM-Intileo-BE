@@ -331,6 +331,14 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
+let blockedList = [];
+if (userCredential && userCredential.blockedEmail) {
+  blockedList = userCredential.blockedEmail
+    .split(",")
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+    
     const referencesHeader = parsedEmail.headers.get("references");
     const references = Array.isArray(referencesHeader)
       ? referencesHeader.join(" ") // Convert array to string
@@ -1468,9 +1476,13 @@ if (actionType === "forward") {
         if (req.files && req.files.length > 0) {
           await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
           savedAttachments = req.files.map((file) => ({
-            emailID: draftEmail.emailID,
-            filename: file.originalname,
-            path: file.path,
+                  emailID: savedEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`, // Save public URL in DB
+          size: file.size,
+          contentType: file.mimetype,
           }));
           await Attachment.bulkCreate(savedAttachments);
         } else {
