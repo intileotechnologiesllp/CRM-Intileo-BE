@@ -1464,7 +1464,9 @@ if (actionType === "forward") {
       };
 
       // Send the email
-      const info = await transporter.sendMail(mailOptions);
+      // const info = await transporter.sendMail(mailOptions);
+      // await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+
 
       let savedEmail;
       let savedAttachments = [];
@@ -1473,7 +1475,7 @@ if (actionType === "forward") {
       if (draftId) {
         // Update the existing draft record to be a sent email
         savedEmail = await draftEmail.update({
-          messageId: info.messageId,
+          // messageId: info.messageId,
           inReplyTo: inReplyToHeader || null,
           references: referencesHeader || null,
           sender: SENDER_EMAIL,
@@ -1512,7 +1514,7 @@ if (actionType === "forward") {
       } else {
         // ... (your existing logic for new sent emails) ...
         const emailData = {
-          messageId: info.messageId,
+          // messageId: info.messageId,
           inReplyTo: inReplyToHeader || null,
           references: referencesHeader || null,
           sender: SENDER_EMAIL,
@@ -1564,10 +1566,10 @@ if (actionType === "forward") {
         filename: attachment.filename,
         link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       }));
-// await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
       res.status(200).json({
         message: "Email sent and saved successfully.",
-        messageId: info.messageId,
+        // messageId: info.messageId,
         attachments: attachmentLinks,
       });
     } catch (error) {
