@@ -58,6 +58,10 @@ signatureImage: {
   type: DataTypes.TEXT, // Store as a base64 string or image URL
   allowNull: true,
 },
+smartBcc: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
   // blockedEmail:{
   //   type: DataTypes.JSON, // Store blocked email addresses as a JSON array
   //   allowNull: true, // Optional field

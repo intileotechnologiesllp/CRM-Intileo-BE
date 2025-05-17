@@ -39,6 +39,7 @@ router.post("/update-signature",verifyToken,upload.single("signatureImage"),emai
 router.post("/bulk-archive", verifyToken, emailSettingsController.bulkArchiveEmails);
 router.post("/mark-as-read", verifyToken, emailSettingsController.markAsRead);
 router.post("/update-email-shared", verifyToken, emailSettingsController.updateEmailSharing);
+router.post("/update-smart-bcc", verifyToken, emailSettingsController.setSmartBcc);
 
 
 

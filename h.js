@@ -1554,10 +1554,12 @@
 //     }
 //   },
 // ];
-const now = new Date();
-const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in milliseconds
-const future = new Date(now.getTime() + istOffset + 3 * 60 * 1000); // Add 7 minutes
-const iso = future.toISOString().replace('Z', '+05:30');
-console.log(iso);
+// const now = new Date();
+// const istOffset = 5.5 * 60 * 60 * 1000; // IST offset in milliseconds
+// const future = new Date(now.getTime() + istOffset + 3 * 60 * 1000); // Add 7 minutes
+// const iso = future.toISOString().replace('Z', '+05:30');
+// console.log(iso);
+ const now = new Date();
+  console.log("Current server time:", now.toISOString());
 
 

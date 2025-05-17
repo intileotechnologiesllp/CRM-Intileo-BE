@@ -668,14 +668,26 @@ exports.getEmails = async (req, res) => {
     isOpened, // <-- Add this
     isClicked, // <-- Add this
     trackedEmails,
+    isShared
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
-    const filters = {
+    let filters = {
       masterUserID,
     };
-
+// if (isShared === "true") {
+//   filters.isShared = true;
+//   if (folder) filters.folder = folder;
+// } else {
+//   filters = {
+//     [Sequelize.Op.or]: [
+//       { masterUserID },
+//       { isShared: true },
+//     ]
+//   };
+//   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
+// }
     if (folder) {
       filters.folder = folder;
     }
@@ -694,6 +706,8 @@ exports.getEmails = async (req, res) => {
       const userEmail = userCredential.email;
       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
     }
+
+
 
     // Add tracked emails filter
     // --- Tracked emails filter ---
@@ -1003,6 +1017,15 @@ exports.getOneEmail = async (req, res) => {
         },
       });
     }
+        if (mainEmail.folder === "trash") {
+      return res.status(200).json({
+        message: "trash email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+        },
+      });
+    }
 
     // Otherwise, fetch related emails from inbox and sent folders
     const relatedEmails = await Email.findAll({
@@ -1063,6 +1086,7 @@ exports.composeEmail = [
       replyToMessageId,
       isDraft,
       draftId,
+      // isShared
     } = req.body;
     const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
 
@@ -1095,6 +1119,21 @@ exports.composeEmail = [
 
           SENDER_NAME = masterUser.name; // Use the name from MasterUser
         }
+  //         let toList = [];
+  // if (to) {
+  //   if (Array.isArray(to)) {
+  //     toList = to;
+  //   } else if (typeof to === "string") {
+  //     toList = to.split(",").map(e => e.trim());
+  //   }
+  // }
+  // // Add req.email if not already present
+  // if (req.email && !toList.includes(req.email)) {
+  //   toList.push(req.email);
+  // }
+  // // Set the updated "to" field
+  // req.body.to = toList.join(",");
+
       } else {
         // Fallback to UserCredential if no default email is set
         const userCredential = await UserCredential.findOne({
@@ -1122,8 +1161,9 @@ exports.composeEmail = [
         }
 
         SENDER_NAME = masterUser.name; // Use the name from MasterUser
-        
+
       }
+
       
 
       let finalSubject = subject;
@@ -1243,6 +1283,48 @@ finalBody += `<br><br>${signatureBlock}`;
               path: file.path,
             }))
           : [];
+          // Check if scheduledAt is provided for scheduling
+// if (req.body.scheduledAt) {
+//   // Save to outbox for later sending
+//   const emailData = {
+//     messageId: null,
+//     inReplyTo: inReplyToHeader || null,
+//     references: referencesHeader || null,
+//     sender: SENDER_EMAIL,
+//     senderName: SENDER_NAME,
+//     recipient: to,
+//     cc,
+//     bcc,
+//     subject: finalSubject,
+//     body: finalBody,
+//     folder: "outbox",
+//     createdAt: new Date(),
+//     masterUserID,
+//     tempMessageId,
+//     isDraft: false,
+//     scheduledAt: new Date(req.body.scheduledAt),
+//   };
+//   const savedEmail = await Email.create(emailData);
+
+//   // Save attachments in the database
+//   const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+//   const savedAttachments = req.files.map((file) => ({
+//     emailID: savedEmail.emailID,
+//     filename: file.originalname,
+//     filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.originalname)}`,
+//     size: file.size,
+//     contentType: file.mimetype,
+//   }));
+//   if (savedAttachments.length > 0) {
+//     await Attachment.bulkCreate(savedAttachments);
+//   }
+
+//   return res.status(200).json({
+//     message: "Email scheduled and saved to outbox successfully.",
+//     scheduledAt: emailData.scheduledAt,
+//     emailID: savedEmail.emailID,
+//   });
+// }
 
       // Create a transporter using the selected email credentials
       const transporter = nodemailer.createTransport({
@@ -1328,6 +1410,7 @@ finalBody += `<br><br>${signatureBlock}`;
           masterUserID,
           tempMessageId,
           isDraft: false,
+          // isShared: isShared === true || isShared === "true", // ensure boolean
         };
         savedEmail = await Email.create(emailData);
 
