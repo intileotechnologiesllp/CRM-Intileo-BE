@@ -43,6 +43,8 @@ router.post("/update-smart-bcc", verifyToken, emailSettingsController.setSmartBc
 router.post("/update-blocked-email", verifyToken, emailSettingsController.updateBlockedAddress);
 router.post("/remove-blocked-email", verifyToken, emailSettingsController.removeBlockedAddress);
 router.get("/get-signature", verifyToken, emailSettingsController.getSignature);
+router.get("/get-blocked-addresses", verifyToken, emailSettingsController.getBlockedAddress);
+router.get("/get-smart-bcc", verifyToken, emailSettingsController.getSmartBcc);
 
 
 

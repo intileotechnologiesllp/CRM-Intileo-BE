@@ -646,5 +646,35 @@ exports.getSignature = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch signature data.", error: error.message });
   }
 };
+exports.getBlockedAddress = async (req, res) => {
+  const masterUserID = req.adminId;
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    res.status(200).json({
+      message: "Blocked addresses fetched successfully.",
+      blockedEmail: userCredential.blockedEmail,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch blocked addresses.", error: error.message });
+  }
+};
+exports.getSmartBcc = async (req, res) => {
+  const masterUserID = req.adminId;
+  try {
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    res.status(200).json({
+      message: "Smart BCC fetched successfully.",
+      smartBcc: userCredential.smartBcc,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch Smart BCC.", error: error.message });
+  }
+};
 
 
