@@ -9,6 +9,7 @@ const Attachment = require("../models/email/attachmentModel");
 const UserCredential = require("../models/email/userCredentialModel");
 const DefaultEmail = require("../models/email/defaultEmailModel");
 const MasterUser = require("../models/master/masterUserModel");
+const { fetchInboxEmails } = require("../controllers/email/emailController");
 const QUEUE_NAME = "email-fetch-queue";
 const SCHEDULED_QUEUE = "scheduled-email-queue";
 const QUEUE = "EMAIL_QUEUE";
