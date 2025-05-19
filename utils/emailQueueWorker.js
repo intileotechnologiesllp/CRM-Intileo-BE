@@ -294,8 +294,8 @@ async function startFetchInboxWorker() {
             await fetchInboxEmails(
               {
                 adminId: masterUserID,
-                email,
-                body: { appPassword },
+                body: { email, appPassword },
+                // body: { appPassword },
                 query: { batchSize, page, days }
               },
               { status: () => ({ json: () => {} }) }

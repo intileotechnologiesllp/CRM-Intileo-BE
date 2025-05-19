@@ -85,7 +85,9 @@ const formatDateForIMAP = (date) => {
 exports.queueFetchInboxEmails = async (req, res) => {
   const { batchSize = 50, page = 1, days = 7 } = req.query;
   const masterUserID = req.adminId;
-  const { email, appPassword } = req.body;
+  // const { email, appPassword } = req.body;
+  const email = req.body?.email || req.email;
+const appPassword = req.body?.appPassword || req.appPassword;
 
   try {
     await publishToQueue("FETCH_INBOX_QUEUE", {
@@ -106,8 +108,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
 exports.fetchInboxEmails = async (req, res) => {
   const { batchSize = 50, page = 1, days = 7 } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const email = req.email; // Get email from the request body
-  const appPassword = req.body.appPassword;
+  // const email = req.email; // Get email from the request body
+  // const appPassword = req.body.appPassword;
+  const email = req.body?.email || req.email;
+const appPassword = req.body?.appPassword || req.appPassword;
 
   try {
     // Validate input
