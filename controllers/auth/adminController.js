@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 const PROGRAMS = require("../../utils/programConstants");
+const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
@@ -450,4 +451,52 @@ exports.getRecentLoginHistory = async (req, res) => {
 };
 
 
+
+// Get current settings
+exports.getMiscSettings = async (req, res) => {
+  try {
+    const settings = await MiscSettings.findOne({ where: {}, order: [["id", "DESC"]] });
+    res.status(200).json({ settings });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch settings", error: error.message });
+  }
+};
+
+// Update settings (admin only)
+exports.updateMiscSettings = async (req, res) => {
+  const { maxImageSizeMB, allowedImageTypes } = req.body;
+
+  // Validation for maxImageSizeMB (required)
+  if (!maxImageSizeMB || isNaN(maxImageSizeMB) || maxImageSizeMB < 1 || maxImageSizeMB > 50) {
+    return res.status(400).json({ message: "maxImageSizeMB must be a number between 1 and 50." });
+  }
+
+  // Validation for allowedImageTypes (optional)
+  if (
+    allowedImageTypes !== undefined &&
+    (typeof allowedImageTypes !== "string" || !allowedImageTypes.match(/^[a-z,]+$/i))
+  ) {
+    return res.status(400).json({ message: "allowedImageTypes must be a comma-separated string of extensions." });
+  }
+
+  try {
+    let settings = await MiscSettings.findOne({ order: [["id", "DESC"]] });
+    if (settings) {
+      const updateData = { maxImageSizeMB };
+      if (allowedImageTypes !== undefined) {
+        updateData.allowedImageTypes = allowedImageTypes;
+      }
+      await settings.update(updateData);
+    } else {
+      // If creating new, use default if not provided
+      await MiscSettings.create({
+        maxImageSizeMB,
+        allowedImageTypes: allowedImageTypes !== undefined ? allowedImageTypes : "jpg,jpeg,png,gif",
+      });
+    }
+    res.status(200).json({ message: "Settings updated", settings });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update settings", error: error.message });
+  }
+};
 

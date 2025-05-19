@@ -356,12 +356,18 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
+// let blockedList = [];
+// if (userCredential && userCredential.blockedEmail) {
+//   blockedList = userCredential.blockedEmail
+//     .split(",")
+//     .map(e => e.trim().toLowerCase())
+//     .filter(Boolean);
+// }
 let blockedList = [];
 if (userCredential && userCredential.blockedEmail) {
-  blockedList = userCredential.blockedEmail
-    .split(",")
-    .map(e => e.trim().toLowerCase())
-    .filter(Boolean);
+  blockedList = Array.isArray(userCredential.blockedEmail)
+    ? userCredential.blockedEmail.map(e => String(e).trim().toLowerCase()).filter(Boolean)
+    : [];
 }
     const senderEmail = parsedEmail.from ? parsedEmail.from.value[0].address.toLowerCase() : null;
     if (blockedList.includes(senderEmail)) {
@@ -1130,9 +1136,10 @@ relatedEmails = relatedEmails.filter(email => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
-
+const dynamicUpload = require("../../middlewares/dynamicUpload");
 exports.composeEmail = [
-  upload.array("attachments"), // Use Multer to handle multiple file uploads
+  // upload.array("attachments"), // Use Multer to handle multiple file uploads
+  dynamicUpload,
   async (req, res) => {
     const {
       to,
@@ -1899,7 +1906,8 @@ exports.deletebulkEmails = async (req, res) => {
 };
 
 exports.saveDraft = [
-  upload.array("attachments"), // Use Multer to handle multiple file uploads
+  // upload.array("attachments"), // Use Multer to handle multiple file uploads
+  dynamicUpload,
   async (req, res) => {
     const { to, cc, bcc, subject, text, html, draftId } = req.body;
     const masterUserID = req.adminId; // Assuming adminId is set in middleware
@@ -1987,7 +1995,8 @@ exports.saveDraft = [
 ];
 
 exports.scheduleEmail = [
-  upload.array("attachments"),
+  // upload.array("attachments"),
+  dynamicUpload,
   async (req, res) => {
     const { to, cc, bcc, subject, text, html, scheduledAt } = req.body;
     const masterUserID = req.adminId;

@@ -33,6 +33,8 @@ router.post("/reset-password", adminController.resetPassword);
 router.post("/logout", verifyToken,adminController.logout);
 router.get("/login-history/:userId",adminController.getLoginHistory);
 router.get("/getRecentLoginHistory",adminController.getRecentLoginHistory);
+router.get("/get-miscsettings",adminController.getMiscSettings);
+router.post("/update-miscsettings",adminController.updateMiscSettings);
 
 
 
