@@ -188,8 +188,10 @@ async function sendEmailJob(emailID) {
     cc: email.cc,
     bcc: email.bcc,
     subject: email.subject,
-    html: email.body,
-    text: email.body, // fallback
+    // html: email.body,
+    // text: email.body, // fallback
+    html: emailBody,
+    text: emailBody,
     attachments: email.attachments.map(att => ({
       filename: att.filename,
       path: att.filePath || att.path,
