@@ -11,6 +11,7 @@ const { format, subDays, subMonths, subYears } = require("date-fns"); // Use dat
 const multer = require("multer");
 const path = require("path");
 const { publishToQueue } = require("../../services/rabbitmqService");
+const { Op } = require("sequelize");
 
 // Configure storage for signature images
 const storage = multer.diskStorage({
@@ -694,6 +695,42 @@ exports.getSmartBcc = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch Smart BCC.", error: error.message });
+  }
+};
+
+
+
+
+// GET /api/emails/autocomplete?search=abc&page=1&limit=10
+exports.getEmailAutocomplete = async (req, res) => {
+  const { search = "", page = 1, limit = 50 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    const where = search
+      ? { recipient: { [Op.like]: `%${search}%` } }
+      : {};
+
+    // Find distinct emails for auto-complete
+    const { rows, count } = await Email.findAndCountAll({
+      attributes: [[Email.sequelize.fn("DISTINCT", Email.sequelize.col("recipient")), "email"]],
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [["recipient", "ASC"]],
+    });
+
+    // Map to just email strings
+    const emails = rows.map(row => row.get("email"));
+
+    res.status(200).json({
+      emails,
+      total: count,
+      page: parseInt(page),
+      limit: parseInt(limit),
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch emails.", error: error.message });
   }
 };
 

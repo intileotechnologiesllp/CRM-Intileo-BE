@@ -45,6 +45,7 @@ router.post("/remove-blocked-email", verifyToken, emailSettingsController.remove
 router.get("/get-signature", verifyToken, emailSettingsController.getSignature);
 router.get("/get-blocked-addresses", verifyToken, emailSettingsController.getBlockedAddress);
 router.get("/get-smart-bcc", verifyToken, emailSettingsController.getSmartBcc);
+router.get("/get-email-autopopulate",verifyToken,emailSettingsController.getEmailAutocomplete);
 
 
 
