@@ -29,5 +29,6 @@ router.get("/reset-password", masterUserController.handleResetLink);
 router.post("/reset-password", masterUserController.resetPassword);
 router.get("/resend-reset-link",masterUserController.resendResetLink);
 router.post("/update/:masterUserID", verifyToken, masterUserController.updateMasterUser);
+router.get("/profile", verifyToken,masterUserController.getProfile);
 
 module.exports = router;

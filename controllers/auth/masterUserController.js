@@ -564,3 +564,21 @@ exports.updateMasterUser = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+// Get Profile of Current Master User
+exports.getProfile = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  try {
+    const masterUser = await MasterUser.findOne({ where: { masterUserID } });
+    if (!masterUser) {
+      return res.status(404).json({ message: "Profile not found." });
+    }
+    res.status(200).json({
+      message: "Profile fetched successfully.",
+      profile: masterUser,
+    });
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({ message: "Failed to fetch profile.", error: error.message });
+  }
+};
