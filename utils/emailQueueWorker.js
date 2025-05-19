@@ -2,6 +2,7 @@ const amqp = require("amqplib");
 const pLimit = require("p-limit");
 const limit = pLimit(5);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
+const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
 const Email = require("../models/email/emailModel");
 const Attachment = require("../models/email/attachmentModel");
@@ -243,9 +244,77 @@ async function startEmailWorker() {
   console.log("Email worker started and waiting for jobs...");
 }
 
+async function startSyncEmailWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  const connection = await amqp.connect(amqpUrl);
+  const channel = await connection.createChannel();
+  await channel.assertQueue("SYNC_EMAIL_QUEUE", { durable: true });
 
+  channel.consume(
+    "SYNC_EMAIL_QUEUE",
+    async (msg) => {
+      if (msg !== null) {
+        const { masterUserID, syncStartDate } = JSON.parse(msg.content.toString());
+        limit(async () => {
+          try {
+            // Call fetchSyncEmails logic directly, but mock req/res
+            await fetchSyncEmails(
+              { adminId: masterUserID, body: { syncStartDate }, query: {} },
+              { status: () => ({ json: () => {} }) }
+            );
+            channel.ack(msg);
+          } catch (err) {
+            console.error("Failed to sync emails:", err);
+            channel.nack(msg, false, false);
+          }
+        });
+              }
+    },
+    { noAck: false }
+  );
 
+  console.log("Sync email worker started and waiting for jobs...");
+}
 
+async function startFetchInboxWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  const connection = await amqp.connect(amqpUrl);
+  const channel = await connection.createChannel();
+  await channel.assertQueue("FETCH_INBOX_QUEUE", { durable: true });
+
+  channel.consume(
+    "FETCH_INBOX_QUEUE",
+    async (msg) => {
+      if (msg !== null) {
+        const { masterUserID, email, appPassword, batchSize, page, days } = JSON.parse(msg.content.toString());
+        limit(async () => {
+          try {
+            // Call fetchInboxEmails logic directly, but mock req/res
+            await fetchInboxEmails(
+              {
+                adminId: masterUserID,
+                email,
+                body: { appPassword },
+                query: { batchSize, page, days }
+              },
+              { status: () => ({ json: () => {} }) }
+            );
+            channel.ack(msg);
+          } catch (err) {
+            console.error("Failed to fetch inbox emails:", err);
+            channel.nack(msg, false, false);
+          }
+        });
+      }
+   },
+    { noAck: false }
+  );
+
+    console.log("Inbox fetch worker started and waiting for jobs...");
+}
+
+startFetchInboxWorker().catch(console.error);
+startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 startWorker().catch(console.error);
 startScheduledEmailWorker().catch(console.error);

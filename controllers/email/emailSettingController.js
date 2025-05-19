@@ -10,6 +10,7 @@ const Attachment = require("../../models/email/attachmentModel");
 const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
 const multer = require("multer");
 const path = require("path");
+const { publishToQueue } = require("../../services/rabbitmqService");
 
 // Configure storage for signature images
 const storage = multer.diskStorage({
@@ -231,11 +232,30 @@ const folderMapping = {
   "[Gmail]/All Mail": "inbox", // Map "All Mail" to "archive"
 };
 
-exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 50, page = 1 } = req.query; // Default batchSize to 50 and page to 1
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+exports.queueSyncEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { syncStartDate } = req.body;
 
   try {
+    await publishToQueue("SYNC_EMAIL_QUEUE", { masterUserID, syncStartDate });
+    res.status(200).json({ message: "Sync job queued successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to queue sync job.", error: error.message });
+  }
+};
+
+
+exports.fetchSyncEmails = async (req, res) => {
+  const { batchSize = 100, page = 1 } = req.query; // Default batchSize to 50 and page to 1
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+const { syncStartDate:inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
+  try {
+     if (inputSyncStartDate) {
+      await UserCredential.update(
+        { syncStartDate:inputSyncStartDate },
+        { where: { masterUserID } }
+      );
+    }
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },

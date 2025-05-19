@@ -81,6 +81,27 @@ const formatDateForIMAP = (date) => {
   return `${day}-${month}-${year}`;
 };
 
+
+exports.queueFetchInboxEmails = async (req, res) => {
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
+  const masterUserID = req.adminId;
+  const { email, appPassword } = req.body;
+
+  try {
+    await publishToQueue("FETCH_INBOX_QUEUE", {
+      masterUserID,
+      email,
+      appPassword,
+      batchSize,
+      page,
+      days,
+    });
+    res.status(200).json({ message: "Inbox fetch job queued successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to queue inbox fetch job.", error: error.message });
+  }
+};
+
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
   const { batchSize = 50, page = 1, days = 7 } = req.query;
