@@ -1086,25 +1086,54 @@ exports.getOneEmail = async (req, res) => {
       });
     }
 
-    // Fetch all emails in the same thread, sorted by createdAt
+    // --- Gmail-like conversation grouping ---
+    // Gather all thread IDs (messageId, inReplyTo, references)
+    const threadIds = [
+      mainEmail.messageId,
+      mainEmail.inReplyTo,
+      ...(mainEmail.references ? mainEmail.references.split(" ") : []),
+    ].filter(Boolean);
+
+    // Fetch all related emails in the thread (across all users)
     let relatedEmails = await Email.findAll({
       where: {
-        threadId: mainEmail.threadId || mainEmail.messageId,
+        [Sequelize.Op.or]: [
+          { messageId: { [Sequelize.Op.in]: threadIds } },
+          { inReplyTo: { [Sequelize.Op.in]: threadIds } },
+          {
+            references: {
+              [Sequelize.Op.or]: threadIds.map((id) => ({
+                [Sequelize.Op.like]: `%${id}%`,
+              })),
+            },
+          },
+        ],
+        masterUserID,
         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
       },
       include: [{ model: Attachment, as: "attachments" }],
       order: [["createdAt", "ASC"]],
     });
 
-    // Clean body and attachment paths for related emails
-    relatedEmails = relatedEmails.map((email) => ({
-      ...email.toJSON(),
-      body: cleanEmailBody(email.body),
-      attachments: email.attachments.map((attachment) => ({
+    // Remove the main email from relatedEmails (by messageId)
+    relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
+
+    // Deduplicate relatedEmails by messageId (keep the first occurrence)
+    const seen = new Set();
+    relatedEmails = relatedEmails.filter(email => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+
+    // Clean the body and attachment paths for related emails
+    relatedEmails.forEach((email) => {
+      email.body = cleanEmailBody(email.body);
+      email.attachments = email.attachments.map((attachment) => ({
         ...attachment,
         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-      })),
-    }));
+      }));
+    });
 
     res.status(200).json({
       message: "Email fetched successfully.",
