@@ -1256,6 +1256,27 @@ allEmails = allEmails.filter(email => {
   seen.add(email.messageId);
   return true;
 });
+const emailMap = {};
+allEmails.forEach(email => {
+  emailMap[email.messageId] = email;
+});
+const conversation = [];
+let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
+while (current) {
+  conversation.push(current);
+  // Find the next email that replies to the current one
+  current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
+}
+
+// If some emails are not in the chain (e.g., forwards), add them by date
+const remaining = allEmails.filter(email => !conversation.includes(email));
+remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+conversation.push(...remaining);
+
+// The first is the main email, the rest are related
+const sortedMainEmail = conversation[0];
+const sortedRelatedEmails = conversation.slice(1);
+
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
@@ -1276,8 +1297,8 @@ allEmails = allEmails.filter(email => {
     allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 // The oldest email is the main email, the rest are relatedEmails
-const sortedMainEmail = allEmails[0];
-const sortedRelatedEmails = allEmails.slice(1);
+// const sortedMainEmail = allEmails[0];
+// const sortedRelatedEmails = allEmails.slice(1);
 
 res.status(200).json({
   message: "Email fetched successfully.",
