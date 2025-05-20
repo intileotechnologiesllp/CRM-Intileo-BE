@@ -1263,28 +1263,21 @@ relatedEmails = relatedEmails.filter(email => {
     //     relatedEmails,
     //   },
     // });
-    let allEmails = [mainEmail, ...relatedEmails];
+    // Sort relatedEmails by createdAt ascending (oldest to newest)
+relatedEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
-// Remove duplicates by messageId (in case mainEmail is also in relatedEmails)
-// const seen = new Set();
-allEmails = allEmails.filter(email => {
-  if (seen.has(email.messageId)) return false;
-  seen.add(email.messageId);
-  return true;
-});
+// If you want mainEmail and relatedEmails together, sorted:
+const allEmails = [mainEmail, ...relatedEmails].sort(
+  (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+);
 
-// Sort all emails by createdAt ascending
-allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-// The main email (by emailID) stays as mainEmail, others go to relatedEmails
-const mainEmailSorted = allEmails.find(e => e.emailID === mainEmail.emailID);
-const relatedEmailsSorted = allEmails.filter(e => e.emailID !== mainEmail.emailID);
-
+// If you want to keep the response format:
 res.status(200).json({
   message: "Email fetched successfully.",
   data: {
-    email: mainEmailSorted,
-    relatedEmails: relatedEmailsSorted,
+    email: mainEmail, // or allEmails[0] if you want the oldest as main
+    relatedEmails: relatedEmails, // already sorted
+    // or: relatedEmails: allEmails.filter(e => e.emailID !== mainEmail.emailID)
   },
 });
   } catch (error) {
