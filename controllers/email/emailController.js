@@ -381,17 +381,21 @@ if (userCredential && userCredential.blockedEmail) {
     //   ? referencesHeader.join(" ") // Convert array to string
     //   : referencesHeader || null;
     //................................
-    let threadId = null;
+let threadId = null;
 const referencesHeader = parsedEmail.headers.get("references");
+const references = Array.isArray(referencesHeader)
+  ? referencesHeader.join(" ")
+  : referencesHeader || null;
+
 if (referencesHeader) {
   if (Array.isArray(referencesHeader)) {
-    threadId = referencesHeader[0]; // First messageId in the references array
+    threadId = referencesHeader[0];
   } else if (typeof referencesHeader === "string") {
-    threadId = referencesHeader.split(" ")[0]; // First messageId in the string
+    threadId = referencesHeader.split(" ")[0];
   }
 }
 if (!threadId) {
-  threadId = parsedEmail.messageId; // Fallback: use own messageId
+  threadId = parsedEmail.messageId;
 }
       
 
