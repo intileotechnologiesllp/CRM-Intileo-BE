@@ -1247,6 +1247,7 @@ relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.mess
 //   seen.add(email.messageId);
 //   return true;
 // });
+let allEmails = [mainEmail, ...relatedEmails];
 
 //......changes
 const seen = new Set();
