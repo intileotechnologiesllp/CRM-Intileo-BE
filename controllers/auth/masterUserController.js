@@ -569,7 +569,20 @@ exports.getProfile = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
-    const masterUser = await MasterUser.findOne({ where: { masterUserID } });
+    const masterUser = await MasterUser.findOne({
+      where: { masterUserID },
+      attributes: [
+        "name",
+        "lastName",
+        "bio",
+        "location",
+        "mobileNumber",
+        "designation",
+        "department",
+        "profileImage",
+        "email",
+      ],
+    });
     if (!masterUser) {
       return res.status(404).json({ message: "Profile not found." });
     }
@@ -579,6 +592,57 @@ exports.getProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching profile:", error);
-    res.status(500).json({ message: "Failed to fetch profile.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch profile.", error: error.message });
+  }
+};
+exports.updateProfile = async (req, res) => {
+  const masterUserID = req.adminId;
+  const {
+    name,
+    lastName,
+    bio,
+    location,
+    mobileNumber,
+    designation,
+    department,
+  } = req.body;
+  let profileImage;
+
+  if (req.file) {
+    // Save the relative or absolute path/URL as needed
+    const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+    profileImage = `${baseURL}/uploads/profile-images/${req.file.filename}`;
+  }
+
+  try {
+    const masterUser = await MasterUser.findOne({ where: { masterUserID } });
+    if (!masterUser) {
+      return res.status(404).json({ message: "Profile not found." });
+    }
+
+    const updatedFields = {
+      ...(name && { name }),
+      ...(lastName && { lastName }),
+      ...(bio && { bio }),
+      ...(location && { location }),
+      ...(mobileNumber && { mobileNumber }),
+      ...(designation && { designation }),
+      ...(department && { department }),
+      ...(profileImage && { profileImage }), // Now saves the full path/URL
+    };
+
+    await masterUser.update(updatedFields);
+
+    res.status(200).json({
+      message: "Profile updated successfully.",
+      profile: masterUser,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to update profile.", error: error.message });
   }
 };
