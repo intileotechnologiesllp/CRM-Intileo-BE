@@ -376,27 +376,27 @@ if (userCredential && userCredential.blockedEmail) {
       return { message: `Blocked email from: ${senderEmail}` };
     }
     
-    // const referencesHeader = parsedEmail.headers.get("references");
-    // const references = Array.isArray(referencesHeader)
-    //   ? referencesHeader.join(" ") // Convert array to string
-    //   : referencesHeader || null;
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
     //................................
-let threadId = null;
-const referencesHeader = parsedEmail.headers.get("references");
-const references = Array.isArray(referencesHeader)
-  ? referencesHeader.join(" ")
-  : referencesHeader || null;
+// let threadId = null;
+// const referencesHeader = parsedEmail.headers.get("references");
+// const references = Array.isArray(referencesHeader)
+//   ? referencesHeader.join(" ")
+//   : referencesHeader || null;
 
-if (referencesHeader) {
-  if (Array.isArray(referencesHeader)) {
-    threadId = referencesHeader[0];
-  } else if (typeof referencesHeader === "string") {
-    threadId = referencesHeader.split(" ")[0];
-  }
-}
-if (!threadId) {
-  threadId = parsedEmail.messageId;
-}
+// if (referencesHeader) {
+//   if (Array.isArray(referencesHeader)) {
+//     threadId = referencesHeader[0];
+//   } else if (typeof referencesHeader === "string") {
+//     threadId = referencesHeader.split(" ")[0];
+//   }
+// }
+// if (!threadId) {
+//   threadId = parsedEmail.messageId;
+// }
       
 
     const emailData = {
@@ -420,7 +420,7 @@ if (!threadId) {
       // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
       body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
       folder: "inbox", // Add folder field
-      threadId,
+      // threadId,
       createdAt: parsedEmail.date || new Date(),
     };
 
@@ -860,24 +860,24 @@ exports.getEmails = async (req, res) => {
       responseThreads = Object.values(threads);
     } else {
       // For other folders, group by inReplyTo or messageId
-      // const threads = {};
-      // emails.forEach((email) => {
-      //   const threadId = email.inReplyTo || email.messageId;
-      //   if (!threads[threadId]) {
-      //     threads[threadId] = [];
-      //   }
-      //   threads[threadId].push(email);
-      // });
-      // responseThreads = Object.values(threads);
       const threads = {};
-emails.forEach((email) => {
-  const threadKey = email.threadId || email.messageId;
-  if (!threads[threadKey]) {
-    threads[threadKey] = [];
-  }
-  threads[threadKey].push(email);
-});
- responseThreads = Object.values(threads);
+      emails.forEach((email) => {
+        const threadId = email.inReplyTo || email.messageId;
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+//       const threads = {};
+// emails.forEach((email) => {
+//   const threadKey = email.threadId || email.messageId;
+//   if (!threads[threadKey]) {
+//     threads[threadKey] = [];
+//   }
+//   threads[threadKey].push(email);
+// });
+//  responseThreads = Object.values(threads);
     }
 
     // Return the paginated response with threads and unviewCount
@@ -1232,7 +1232,7 @@ exports.getOneEmail = async (req, res) => {
           as: "attachments",
         },
       ],
-      order: [["createdAt", "DESC"]],
+      order: [["createdAt", "ASC"]],
     });
 // Remove the main email from relatedEmails
 //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
@@ -1578,7 +1578,6 @@ if (actionType === "forward") {
           tempMessageId,
           isDraft: false,
           scheduledAt: parsedDate,
-          threadId:replyToMessageId
         };
         const savedEmail = await Email.create(emailData);
 
