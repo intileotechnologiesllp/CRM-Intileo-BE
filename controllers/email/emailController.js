@@ -841,15 +841,24 @@ exports.getEmails = async (req, res) => {
       responseThreads = Object.values(threads);
     } else {
       // For other folders, group by inReplyTo or messageId
+      // const threads = {};
+      // emails.forEach((email) => {
+      //   const threadId = email.inReplyTo || email.messageId;
+      //   if (!threads[threadId]) {
+      //     threads[threadId] = [];
+      //   }
+      //   threads[threadId].push(email);
+      // });
+      // responseThreads = Object.values(threads);
       const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.inReplyTo || email.messageId;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
+emails.forEach((email) => {
+  const threadKey = email.threadId || email.messageId;
+  if (!threads[threadKey]) {
+    threads[threadKey] = [];
+  }
+  threads[threadKey].push(email);
+});
+ responseThreads = Object.values(threads);
     }
 
     // Return the paginated response with threads and unviewCount

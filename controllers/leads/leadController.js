@@ -456,3 +456,42 @@ exports.updateAllLabels = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+//......................................................
+exports.updateLeadCustomFields = async (req, res) => {
+  const { leadId } = req.params;
+  const { customFields } = req.body;
+
+  if (!customFields || typeof customFields !== "object") {
+    return res.status(400).json({ message: "customFields must be a valid object." });
+  }
+
+  try {
+    const lead = await Lead.findByPk(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Save original customFields for history
+    const originalCustomFields = lead.customFields || {};
+
+    // Update only customFields
+    await lead.update({ customFields });
+
+    // Log the change (optional)
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_UPDATE_CUSTOM_FIELDS",
+      lead.userId,
+      leadId,
+      req.adminId,
+      `Custom fields updated for lead ${leadId} by user ${req.role}`,
+      { from: originalCustomFields, to: customFields }
+    );
+
+    res.status(200).json({ message: "Custom fields updated successfully", customFields: lead.customFields });
+  } catch (error) {
+    console.error("Error updating custom fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
