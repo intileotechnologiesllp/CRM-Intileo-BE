@@ -734,5 +734,73 @@ exports.getEmailAutocomplete = async (req, res) => {
   }
 };
 
+exports.downloadAttachment = async (req, res) => {
+  const { emailID, filename } = req.params;
+  const masterUserID = req.adminId;
+  console.log(emailID, filename, masterUserID);
+  
+
+  try {
+    // Find the email and attachment metadata
+    const email = await Email.findOne({ where: { emailID, masterUserID } });
+    if (!email) return res.status(404).json({ message: "Email not found." });
+
+    const attachmentMeta = await Attachment.findOne({
+      where: { emailID, filename }
+    });
+    if (!attachmentMeta) return res.status(404).json({ message: "Attachment not found." });
+
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) return res.status(404).json({ message: "User credentials not found." });
+
+    // Connect to IMAP and fetch the email
+    const imapConfig = {
+      imap: {
+        user: userCredential.email,
+        password: userCredential.appPassword,
+        host: "imap.gmail.com",
+        port: 993,
+        tls: true,
+        authTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+    const connection = await Imap.connect(imapConfig);
+    await connection.openBox(email.folder);
+
+    // Search for the email by messageId
+    const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
+    const fetchOptions = { bodies: "", struct: true };
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    if (!messages.length) {
+      connection.end();
+      return res.status(404).json({ message: "Email not found on server." });
+    }
+
+    // Parse the email and find the attachment
+    const rawBodyPart = messages[0].parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+    const parsedEmail = await simpleParser(rawBody);
+
+    const attachment = parsedEmail.attachments.find(att => att.filename === filename);
+    if (!attachment) {
+      connection.end();
+      return res.status(404).json({ message: "Attachment not found in email." });
+    }
+
+    // Send the attachment as a download
+    res.setHeader("Content-Disposition", `attachment; filename="${attachment.filename}"`);
+    res.setHeader("Content-Type", attachment.contentType);
+    res.send(attachment.content);
+
+    connection.end();
+  } catch (error) {
+    console.error("Error downloading attachment:", error);
+    res.status(500).json({ message: "Failed to download attachment.", error: error.message });
+  }
+};
+
 
 

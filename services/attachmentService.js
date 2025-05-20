@@ -33,6 +33,17 @@ const saveAttachments = async (attachments, emailID) => {
           filePath,
         };
 
+        //   const meta = await saveAttachmentToFile(attachment, emailID);
+
+        // // Prepare attachment data
+        // const attachmentData = {
+        //   emailID:meta.emailID,
+        //   filename: meta.filename,
+        //   contentType: meta.contentType,
+        //   size: meta.size,
+        //   // filePath,
+        // };
+
         // Save the attachment in the database
         const savedAttachment = await Attachment.create(attachmentData);
         savedAttachments.push(savedAttachment);

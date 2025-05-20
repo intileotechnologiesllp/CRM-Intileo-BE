@@ -73,6 +73,22 @@ const MasterUser = sequelize.define("MasterUser", {
     allowNull: false,
     unique: true,
   },
+  profileImage: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  bio:{
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  location:{
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  lastName:{
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 });
 
 const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");

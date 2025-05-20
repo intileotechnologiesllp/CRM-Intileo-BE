@@ -37,3 +37,19 @@ const saveAttachmentToFile = async (attachment, emailID) => {
 };
 
 module.exports = { saveAttachmentToFile };
+
+
+
+// const saveAttachmentToFile = async (attachment, emailID) => {
+//   // Do NOT save the file to disk
+//   // Just return metadata for database storage
+//   return {
+//     filename: attachment.filename,
+//     size: attachment.size,
+//     contentType: attachment.contentType,
+//     emailID,
+//     // Optionally add: checksum, partID, etc.
+//   };
+// };
+
+// module.exports = { saveAttachmentToFile };
