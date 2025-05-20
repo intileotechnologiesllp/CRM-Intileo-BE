@@ -1043,21 +1043,17 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
     // res.status(500).json({ message: "Internal server error." });
   }
 };
+//...........................changes............................
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const masterUserID = req.adminId;
 
   try {
-    // Fetch the main email by emailId, including attachments
+    // Fetch the main email
     const mainEmail = await Email.findOne({
       where: { emailID: emailId },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-        },
-      ],
+      include: [{ model: Attachment, as: "attachments" }],
     });
 
     if (!mainEmail) {
@@ -1075,23 +1071,14 @@ exports.getOneEmail = async (req, res) => {
     // Add baseURL to attachment paths
     const baseURL = process.env.LOCALHOST_URL;
     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
-      ...attachment,
+      ...attachment.toJSON(),
       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
     // If this is a draft or trash, do NOT fetch related emails
-    if (mainEmail.folder === "drafts") {
+    if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
       return res.status(200).json({
-        message: "Draft email fetched successfully.",
-        data: {
-          email: mainEmail,
-          relatedEmails: [],
-        },
-      });
-    }
-    if (mainEmail.folder === "trash") {
-      return res.status(200).json({
-        message: "trash email fetched successfully.",
+        message: `${mainEmail.folder} email fetched successfully.`,
         data: {
           email: mainEmail,
           relatedEmails: [],
@@ -1099,58 +1086,25 @@ exports.getOneEmail = async (req, res) => {
       });
     }
 
-    // Gather all thread IDs (messageId, inReplyTo, references)
-    const threadIds = [
-      mainEmail.messageId,
-      mainEmail.inReplyTo,
-      ...(mainEmail.references ? mainEmail.references.split(" ") : []),
-    ].filter(Boolean);
-
-    // Fetch all related emails in the thread (across all users)
+    // Fetch all emails in the same thread, sorted by createdAt
     let relatedEmails = await Email.findAll({
       where: {
-        [Sequelize.Op.or]: [
-          { messageId: { [Sequelize.Op.in]: threadIds } },
-          { inReplyTo: { [Sequelize.Op.in]: threadIds } },
-          {
-            references: {
-              [Sequelize.Op.or]: threadIds.map((id) => ({
-                [Sequelize.Op.like]: `%${id}%`,
-              })),
-            },
-          },
-        ],
-        folder: { [Sequelize.Op.in]: ["inbox","sent"] },
+        threadId: mainEmail.threadId || mainEmail.messageId,
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
       },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-        },
-      ],
+      include: [{ model: Attachment, as: "attachments" }],
       order: [["createdAt", "ASC"]],
     });
-// Remove the main email from relatedEmails
-//relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
-// Remove the main email from relatedEmails (by messageId)
 
-relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
-
-// Deduplicate relatedEmails by messageId (keep the first occurrence)
-const seen = new Set();
-relatedEmails = relatedEmails.filter(email => {
-  if (seen.has(email.messageId)) return false;
-  seen.add(email.messageId);
-  return true;
-});
-    // Clean the body and attachment paths for related emails
-    relatedEmails.forEach((email) => {
-      email.body = cleanEmailBody(email.body);
-      email.attachments = email.attachments.map((attachment) => ({
+    // Clean body and attachment paths for related emails
+    relatedEmails = relatedEmails.map((email) => ({
+      ...email.toJSON(),
+      body: cleanEmailBody(email.body),
+      attachments: email.attachments.map((attachment) => ({
         ...attachment,
         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-      }));
-    });
+      })),
+    }));
 
     res.status(200).json({
       message: "Email fetched successfully.",
@@ -1164,6 +1118,127 @@ relatedEmails = relatedEmails.filter(email => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+// exports.getOneEmail = async (req, res) => {
+//   const { emailId } = req.params;
+//   const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+//   try {
+//     // Fetch the main email by emailId, including attachments
+//     const mainEmail = await Email.findOne({
+//       where: { emailID: emailId },
+//       include: [
+//         {
+//           model: Attachment,
+//           as: "attachments",
+//         },
+//       ],
+//     });
+
+//     if (!mainEmail) {
+//       return res.status(404).json({ message: "Email not found." });
+//     }
+
+//     // Mark as read if not already
+//     if (!mainEmail.isRead) {
+//       await mainEmail.update({ isRead: true });
+//     }
+
+//     // Clean the body of the main email
+//     mainEmail.body = cleanEmailBody(mainEmail.body);
+
+//     // Add baseURL to attachment paths
+//     const baseURL = process.env.LOCALHOST_URL;
+//     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
+//       ...attachment,
+//       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+//     }));
+
+//     // If this is a draft or trash, do NOT fetch related emails
+//     if (mainEmail.folder === "drafts") {
+//       return res.status(200).json({
+//         message: "Draft email fetched successfully.",
+//         data: {
+//           email: mainEmail,
+//           relatedEmails: [],
+//         },
+//       });
+//     }
+//     if (mainEmail.folder === "trash") {
+//       return res.status(200).json({
+//         message: "trash email fetched successfully.",
+//         data: {
+//           email: mainEmail,
+//           relatedEmails: [],
+//         },
+//       });
+//     }
+
+//     // Gather all thread IDs (messageId, inReplyTo, references)
+//     const threadIds = [
+//       mainEmail.messageId,
+//       mainEmail.inReplyTo,
+//       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
+//     ].filter(Boolean);
+
+//     // Fetch all related emails in the thread (across all users)
+//     let relatedEmails = await Email.findAll({
+//       where: {
+//         [Sequelize.Op.or]: [
+//           { messageId: { [Sequelize.Op.in]: threadIds } },
+//           { inReplyTo: { [Sequelize.Op.in]: threadIds } },
+//           {
+//             references: {
+//               [Sequelize.Op.or]: threadIds.map((id) => ({
+//                 [Sequelize.Op.like]: `%${id}%`,
+//               })),
+//             },
+//           },
+//         ],
+//         folder: { [Sequelize.Op.in]: ["inbox","sent"] },
+//       },
+//       include: [
+//         {
+//           model: Attachment,
+//           as: "attachments",
+//         },
+//       ],
+//       order: [["createdAt", "ASC"]],
+//     });
+// // Remove the main email from relatedEmails
+// //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
+// // Remove the main email from relatedEmails (by messageId)
+
+// relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
+
+// // Deduplicate relatedEmails by messageId (keep the first occurrence)
+// const seen = new Set();
+// relatedEmails = relatedEmails.filter(email => {
+//   if (seen.has(email.messageId)) return false;
+//   seen.add(email.messageId);
+//   return true;
+// });
+//     // Clean the body and attachment paths for related emails
+//     relatedEmails.forEach((email) => {
+//       email.body = cleanEmailBody(email.body);
+//       email.attachments = email.attachments.map((attachment) => ({
+//         ...attachment,
+//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+//       }));
+//     });
+
+//     res.status(200).json({
+//       message: "Email fetched successfully.",
+//       data: {
+//         email: mainEmail,
+//         relatedEmails,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching email:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 const dynamicUpload = require("../../middlewares/dynamicUpload");
 exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
