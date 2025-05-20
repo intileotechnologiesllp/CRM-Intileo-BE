@@ -1240,6 +1240,7 @@ exports.getOneEmail = async (req, res) => {
 //   }
 // };
 const dynamicUpload = require("../../middlewares/dynamicUpload");
+const { threadId } = require("worker_threads");
 exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
   dynamicUpload,
@@ -1548,6 +1549,7 @@ if (actionType === "forward") {
           tempMessageId,
           isDraft: false,
           scheduledAt: parsedDate,
+          threadId:replyToMessageId
         };
         const savedEmail = await Email.create(emailData);
 
