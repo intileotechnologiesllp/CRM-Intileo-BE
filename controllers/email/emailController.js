@@ -1232,7 +1232,7 @@ exports.getOneEmail = async (req, res) => {
           as: "attachments",
         },
       ],
-      order: [["createdAt", "ASC"]],
+      order: [["createdAt", "DESC"]],
     });
 // Remove the main email from relatedEmails
 //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
