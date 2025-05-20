@@ -376,10 +376,24 @@ if (userCredential && userCredential.blockedEmail) {
       return { message: `Blocked email from: ${senderEmail}` };
     }
     
-    const referencesHeader = parsedEmail.headers.get("references");
-    const references = Array.isArray(referencesHeader)
-      ? referencesHeader.join(" ") // Convert array to string
-      : referencesHeader || null;
+    // const referencesHeader = parsedEmail.headers.get("references");
+    // const references = Array.isArray(referencesHeader)
+    //   ? referencesHeader.join(" ") // Convert array to string
+    //   : referencesHeader || null;
+    //................................
+    let threadId = null;
+const referencesHeader = parsedEmail.headers.get("references");
+if (referencesHeader) {
+  if (Array.isArray(referencesHeader)) {
+    threadId = referencesHeader[0]; // First messageId in the references array
+  } else if (typeof referencesHeader === "string") {
+    threadId = referencesHeader.split(" ")[0]; // First messageId in the string
+  }
+}
+if (!threadId) {
+  threadId = parsedEmail.messageId; // Fallback: use own messageId
+}
+      
 
     const emailData = {
       messageId: parsedEmail.messageId || null,
@@ -402,6 +416,7 @@ if (userCredential && userCredential.blockedEmail) {
       // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
       body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
       folder: "inbox", // Add folder field
+      threadId,
       createdAt: parsedEmail.date || new Date(),
     };
 
