@@ -180,7 +180,8 @@ async function sendEmailJob(emailID) {
   if (signatureBlock && !emailBody.includes(signatureBlock)) {
     emailBody += `<br><br>${signatureBlock}`;
   }
-
+const inReplyToHeader = email.inReplyTo || undefined;
+const referencesHeader = email.references || undefined;
   // Prepare mail options
   const mailOptions = {
     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
@@ -196,6 +197,8 @@ async function sendEmailJob(emailID) {
       filename: att.filename,
       path: att.filePath || att.path,
     })),
+     inReplyTo: inReplyToHeader,
+  references: referencesHeader,
   };
 
   // Send email
