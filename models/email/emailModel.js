@@ -97,6 +97,10 @@ scheduledAt: {
   type: DataTypes.DATE,
   allowNull: true,
 },
+threadId: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
 // isShared: {
 //   type: DataTypes.BOOLEAN,
 //   allowNull: false,
