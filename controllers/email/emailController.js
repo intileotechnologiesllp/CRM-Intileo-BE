@@ -1256,13 +1256,37 @@ relatedEmails = relatedEmails.filter(email => {
       }));
     });
 
-    res.status(200).json({
-      message: "Email fetched successfully.",
-      data: {
-        email: mainEmail,
-        relatedEmails,
-      },
-    });
+    // res.status(200).json({
+    //   message: "Email fetched successfully.",
+    //   data: {
+    //     email: mainEmail,
+    //     relatedEmails,
+    //   },
+    // });
+    let allEmails = [mainEmail, ...relatedEmails];
+
+// Remove duplicates by messageId (in case mainEmail is also in relatedEmails)
+// const seen = new Set();
+allEmails = allEmails.filter(email => {
+  if (seen.has(email.messageId)) return false;
+  seen.add(email.messageId);
+  return true;
+});
+
+// Sort all emails by createdAt ascending
+allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+// The main email (by emailID) stays as mainEmail, others go to relatedEmails
+const mainEmailSorted = allEmails.find(e => e.emailID === mainEmail.emailID);
+const relatedEmailsSorted = allEmails.filter(e => e.emailID !== mainEmail.emailID);
+
+res.status(200).json({
+  message: "Email fetched successfully.",
+  data: {
+    email: mainEmailSorted,
+    relatedEmails: relatedEmailsSorted,
+  },
+});
   } catch (error) {
     console.error("Error fetching email:", error);
     res.status(500).json({ message: "Internal server error." });
