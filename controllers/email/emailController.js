@@ -1286,13 +1286,13 @@ relatedEmails = relatedEmails.filter(email => {
       }));
     });
 
-    // res.status(200).json({
-    //   message: "Email fetched successfully.",
-    //   data: {
-    //     email: mainEmail,
-    //     relatedEmails,
-    //   },
-    // });
+    res.status(200).json({
+      message: "Email fetched successfully.",
+      data: {
+        email: mainEmail,
+        relatedEmails,
+      },
+    });
     // Sort relatedEmails by createdAt ascending (oldest to newest)
     // allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
