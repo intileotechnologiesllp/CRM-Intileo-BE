@@ -581,6 +581,8 @@ exports.getProfile = async (req, res) => {
         "department",
         "profileImage",
         "email",
+        "createdAt",   // Add this line
+        "updatedAt",
       ],
     });
     if (!masterUser) {
