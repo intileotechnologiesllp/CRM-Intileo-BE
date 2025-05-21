@@ -1224,7 +1224,7 @@ exports.getOneEmail = async (req, res) => {
             },
           },
         ],
-        folder: { [Sequelize.Op.in]: ["inbox"] },
+        folder: { [Sequelize.Op.in]: ["inbox","sent"] },
       },
       include: [
         {
