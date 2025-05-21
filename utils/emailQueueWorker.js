@@ -216,7 +216,7 @@ const referencesHeader = email.references || undefined;
   await email.update({
     folder: "sent",
     messageId: info.messageId,
-    createdAt: new Date(),
+    // createdAt: new Date(),
     isDraft: false,
   });
 
