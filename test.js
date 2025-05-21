@@ -380,6 +380,24 @@ if (userCredential && userCredential.blockedEmail) {
     const references = Array.isArray(referencesHeader)
       ? referencesHeader.join(" ") // Convert array to string
       : referencesHeader || null;
+    //................................
+// let threadId = null;
+// const referencesHeader = parsedEmail.headers.get("references");
+// const references = Array.isArray(referencesHeader)
+//   ? referencesHeader.join(" ")
+//   : referencesHeader || null;
+
+// if (referencesHeader) {
+//   if (Array.isArray(referencesHeader)) {
+//     threadId = referencesHeader[0];
+//   } else if (typeof referencesHeader === "string") {
+//     threadId = referencesHeader.split(" ")[0];
+//   }
+// }
+// if (!threadId) {
+//   threadId = parsedEmail.messageId;
+// }
+      
 
     const emailData = {
       messageId: parsedEmail.messageId || null,
@@ -402,6 +420,7 @@ if (userCredential && userCredential.blockedEmail) {
       // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
       body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
       folder: "inbox", // Add folder field
+      // threadId,
       createdAt: parsedEmail.date || new Date(),
     };
 
@@ -850,6 +869,15 @@ exports.getEmails = async (req, res) => {
         threads[threadId].push(email);
       });
       responseThreads = Object.values(threads);
+//       const threads = {};
+// emails.forEach((email) => {
+//   const threadKey = email.threadId || email.messageId;
+//   if (!threads[threadKey]) {
+//     threads[threadKey] = [];
+//   }
+//   threads[threadKey].push(email);
+// });
+//  responseThreads = Object.values(threads);
     }
 
     // Return the paginated response with threads and unviewCount
@@ -1015,6 +1043,110 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
     // res.status(500).json({ message: "Internal server error." });
   }
 };
+//...........................changes............................
+
+// exports.getOneEmail = async (req, res) => {
+//   const { emailId } = req.params;
+//   const masterUserID = req.adminId;
+
+//   try {
+//     // Fetch the main email
+//     const mainEmail = await Email.findOne({
+//       where: { emailID: emailId },
+//       include: [{ model: Attachment, as: "attachments" }],
+//     });
+
+//     if (!mainEmail) {
+//       return res.status(404).json({ message: "Email not found." });
+//     }
+
+//     // Mark as read if not already
+//     if (!mainEmail.isRead) {
+//       await mainEmail.update({ isRead: true });
+//     }
+
+//     // Clean the body of the main email
+//     mainEmail.body = cleanEmailBody(mainEmail.body);
+
+//     // Add baseURL to attachment paths
+//     const baseURL = process.env.LOCALHOST_URL;
+//     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
+//       ...attachment.toJSON(),
+//       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+//     }));
+
+//     // If this is a draft or trash, do NOT fetch related emails
+//     if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
+//       return res.status(200).json({
+//         message: `${mainEmail.folder} email fetched successfully.`,
+//         data: {
+//           email: mainEmail,
+//           relatedEmails: [],
+//         },
+//       });
+//     }
+
+//     // --- Gmail-like conversation grouping ---
+//     // Gather all thread IDs (messageId, inReplyTo, references)
+//     const threadIds = [
+//       mainEmail.messageId,
+//       mainEmail.inReplyTo,
+//       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
+//     ].filter(Boolean);
+
+//     // Fetch all related emails in the thread (across all users)
+//     let relatedEmails = await Email.findAll({
+//       where: {
+//         [Sequelize.Op.or]: [
+//           { messageId: { [Sequelize.Op.in]: threadIds } },
+//           { inReplyTo: { [Sequelize.Op.in]: threadIds } },
+//           {
+//             references: {
+//               [Sequelize.Op.or]: threadIds.map((id) => ({
+//                 [Sequelize.Op.like]: `%${id}%`,
+//               })),
+//             },
+//           },
+//         ],
+//         masterUserID,
+//         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]],
+//     });
+
+//     // Remove the main email from relatedEmails (by messageId)
+//     relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
+
+//     // Deduplicate relatedEmails by messageId (keep the first occurrence)
+//     const seen = new Set();
+//     relatedEmails = relatedEmails.filter(email => {
+//       if (seen.has(email.messageId)) return false;
+//       seen.add(email.messageId);
+//       return true;
+//     });
+
+//     // Clean the body and attachment paths for related emails
+//     relatedEmails.forEach((email) => {
+//       email.body = cleanEmailBody(email.body);
+//       email.attachments = email.attachments.map((attachment) => ({
+//         ...attachment,
+//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+//       }));
+//     });
+
+//     res.status(200).json({
+//       message: "Email fetched successfully.",
+//       data: {
+//         email: mainEmail,
+//         relatedEmails,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching email:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
@@ -1109,12 +1241,42 @@ exports.getOneEmail = async (req, res) => {
 relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
 
 // Deduplicate relatedEmails by messageId (keep the first occurrence)
+// const seen = new Set();
+// relatedEmails = relatedEmails.filter(email => {
+//   if (seen.has(email.messageId)) return false;
+//   seen.add(email.messageId);
+//   return true;
+// });
+let allEmails = [mainEmail, ...relatedEmails];
+
+//......changes
 const seen = new Set();
-relatedEmails = relatedEmails.filter(email => {
+allEmails = allEmails.filter(email => {
   if (seen.has(email.messageId)) return false;
   seen.add(email.messageId);
   return true;
 });
+const emailMap = {};
+allEmails.forEach(email => {
+  emailMap[email.messageId] = email;
+});
+const conversation = [];
+let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
+while (current) {
+  conversation.push(current);
+  // Find the next email that replies to the current one
+  current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
+}
+
+// // If some emails are not in the chain (e.g., forwards), add them by date
+const remaining = allEmails.filter(email => !conversation.includes(email));
+remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+conversation.push(...remaining);
+
+// // The first is the main email, the rest are related
+// const sortedMainEmail = conversation[0];
+// const sortedRelatedEmails = conversation.slice(1);
+
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
@@ -1124,19 +1286,36 @@ relatedEmails = relatedEmails.filter(email => {
       }));
     });
 
-    res.status(200).json({
-      message: "Email fetched successfully.",
-      data: {
-        email: mainEmail,
-        relatedEmails,
-      },
-    });
+    // res.status(200).json({
+    //   message: "Email fetched successfully.",
+    //   data: {
+    //     email: mainEmail,
+    //     relatedEmails,
+    //   },
+    // });
+    // Sort relatedEmails by createdAt ascending (oldest to newest)
+    //  allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+// The oldest email is the main email, the rest are relatedEmails
+// const sortedMainEmail = allEmails[0];
+// const sortedRelatedEmails = allEmails.slice(1);
+const sortedMainEmail = conversation[0];
+const sortedRelatedEmails = conversation.slice(1);
+
+res.status(200).json({
+  message: "Email fetched successfully.",
+  data: {
+    email: sortedMainEmail,
+    relatedEmails: sortedRelatedEmails,
+  },
+});
   } catch (error) {
     console.error("Error fetching email:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
 const dynamicUpload = require("../../middlewares/dynamicUpload");
+const { threadId } = require("worker_threads");
 exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
   dynamicUpload,

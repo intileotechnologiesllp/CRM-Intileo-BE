@@ -1724,6 +1724,15 @@ if (actionType === "forward") {
         }
       } else {
         // ... (your existing logic for new sent emails) ...
+        const attachments = req.files && req.files.length > 0
+  ? req.files.map((file) => ({
+      filename: file.filename,
+      originalname: file.originalname,
+      path: file.path,
+      size: file.size,
+      contentType: file.mimetype,
+    }))
+  : [];
         const emailData = {
           // messageId: info.messageId,
           inReplyTo: inReplyToHeader || null,
@@ -1740,6 +1749,7 @@ if (actionType === "forward") {
           masterUserID,
           tempMessageId,
           isDraft: false,
+          attachments
           // isShared: isShared === true || isShared === "true", // ensure boolean
         };
         savedEmail = await Email.create(emailData);
@@ -1753,31 +1763,33 @@ if (actionType === "forward") {
         //         filePath: file.path,
         //       }))
         //     : [];
-        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL in DB
-          size: file.size,
-          contentType: file.mimetype,
-        }));
 
-        if (savedAttachments.length > 0) {
-          await Attachment.bulkCreate(savedAttachments);
-          console.log(
-            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-          );
-        }
+        // const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+        // savedAttachments = req.files.map((file) => ({
+        //   emailID: savedEmail.emailID,
+        //   filename: file.filename,
+        //   filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+        //     file.filename
+        //   )}`, // Save public URL in DB
+        //   size: file.size,
+        //   contentType: file.mimetype,
+        // }));
+
+        // if (savedAttachments.length > 0) {
+        //   await Attachment.bulkCreate(savedAttachments);
+        //   console.log(
+        //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        //   );
+        // }
       }
 
       // Generate public URLs for attachments
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
-      }));
-await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+      // const attachmentLinks = savedAttachments.map((attachment) => ({
+      //   filename: attachment.filename,
+      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+      // }));
+// await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+await publishToQueue("EMAIL_QUEUE", emailData);
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,
