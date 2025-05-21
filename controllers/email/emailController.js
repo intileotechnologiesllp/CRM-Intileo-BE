@@ -1794,7 +1794,7 @@ if (actionType === "forward") {
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,
-        attachments: attachmentLinks,
+        // attachments: attachmentLinks,
       });
     } catch (error) {
       console.error("Error sending email:", error);
