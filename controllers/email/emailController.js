@@ -1224,7 +1224,7 @@ exports.getOneEmail = async (req, res) => {
             },
           },
         ],
-        folder: { [Sequelize.Op.in]: ["inbox","sent"] },
+        folder: { [Sequelize.Op.in]: ["inbox"] },
       },
       include: [
         {
@@ -1241,21 +1241,21 @@ exports.getOneEmail = async (req, res) => {
 relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
 
 // Deduplicate relatedEmails by messageId (keep the first occurrence)
-const seen = new Set();
-relatedEmails = relatedEmails.filter(email => {
-  if (seen.has(email.messageId)) return false;
-  seen.add(email.messageId);
-  return true;
-});
-// let allEmails = [mainEmail, ...relatedEmails];
-
-//......changes
 // const seen = new Set();
-// allEmails = allEmails.filter(email => {
+// relatedEmails = relatedEmails.filter(email => {
 //   if (seen.has(email.messageId)) return false;
 //   seen.add(email.messageId);
 //   return true;
 // });
+let allEmails = [mainEmail, ...relatedEmails];
+
+//......changes
+const seen = new Set();
+allEmails = allEmails.filter(email => {
+  if (seen.has(email.messageId)) return false;
+  seen.add(email.messageId);
+  return true;
+});
 // const emailMap = {};
 // allEmails.forEach(email => {
 //   emailMap[email.messageId] = email;
@@ -1286,27 +1286,27 @@ relatedEmails = relatedEmails.filter(email => {
       }));
     });
 
-    res.status(200).json({
-      message: "Email fetched successfully.",
-      data: {
-        email: mainEmail,
-        relatedEmails,
-      },
-    });
+    // res.status(200).json({
+    //   message: "Email fetched successfully.",
+    //   data: {
+    //     email: mainEmail,
+    //     relatedEmails,
+    //   },
+    // });
     // Sort relatedEmails by createdAt ascending (oldest to newest)
-    // allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+     allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 // The oldest email is the main email, the rest are relatedEmails
-// const sortedMainEmail = allEmails[0];
-// const sortedRelatedEmails = allEmails.slice(1);
+const sortedMainEmail = allEmails[0];
+const sortedRelatedEmails = allEmails.slice(1);
 
-// res.status(200).json({
-//   message: "Email fetched successfully.",
-//   data: {
-//     email: sortedMainEmail,
-//     relatedEmails: sortedRelatedEmails,
-//   },
-// });
+res.status(200).json({
+  message: "Email fetched successfully.",
+  data: {
+    email: sortedMainEmail,
+    relatedEmails: sortedRelatedEmails,
+  },
+});
   } catch (error) {
     console.error("Error fetching email:", error);
     res.status(500).json({ message: "Internal server error." });
