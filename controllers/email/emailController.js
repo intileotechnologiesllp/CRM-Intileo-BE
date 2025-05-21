@@ -1297,8 +1297,10 @@ conversation.push(...remaining);
     //  allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 // The oldest email is the main email, the rest are relatedEmails
-const sortedMainEmail = allEmails[0];
-const sortedRelatedEmails = allEmails.slice(1);
+// const sortedMainEmail = allEmails[0];
+// const sortedRelatedEmails = allEmails.slice(1);
+const sortedMainEmail = conversation[0];
+const sortedRelatedEmails = conversation.slice(1);
 
 res.status(200).json({
   message: "Email fetched successfully.",
