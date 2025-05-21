@@ -119,116 +119,116 @@ async function startScheduledEmailWorker() {
 }
 
 //......................................................................
-async function sendQueuedEmail(emailData) {
-  // Fetch sender credentials (prefer DefaultEmail)
-  let SENDER_EMAIL = emailData.sender;
-  let SENDER_PASSWORD;
-  let SENDER_NAME = emailData.senderName;
-  let signatureBlock = "";
-  let userCredential;
+// async function sendQueuedEmail(emailData) {
+//   // Fetch sender credentials (prefer DefaultEmail)
+//   let SENDER_EMAIL = emailData.sender;
+//   let SENDER_PASSWORD;
+//   let SENDER_NAME = emailData.senderName;
+//   let signatureBlock = "";
+//   let userCredential;
 
-  // If you need to fetch password from DB:
-  if (!emailData.senderPassword) {
-    const defaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID: emailData.masterUserID, isDefault: true },
-    });
-    if (defaultEmail) {
-      SENDER_PASSWORD = defaultEmail.appPassword;
-    } else {
-      userCredential = await UserCredential.findOne({
-        where: { masterUserID: emailData.masterUserID },
-      });
-      SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
-    }
-  } else {
-    SENDER_PASSWORD = emailData.senderPassword;
-  }
+//   // If you need to fetch password from DB:
+//   if (!emailData.senderPassword) {
+//     const defaultEmail = await DefaultEmail.findOne({
+//       where: { masterUserID: emailData.masterUserID, isDefault: true },
+//     });
+//     if (defaultEmail) {
+//       SENDER_PASSWORD = defaultEmail.appPassword;
+//     } else {
+//       userCredential = await UserCredential.findOne({
+//         where: { masterUserID: emailData.masterUserID },
+//       });
+//       SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
+//     }
+//   } else {
+//     SENDER_PASSWORD = emailData.senderPassword;
+//   }
 
-  // Build signature block if needed (optional)
-  if (!userCredential) {
-    userCredential = await UserCredential.findOne({
-      where: { masterUserID: emailData.masterUserID },
-    });
-  }
-  if (userCredential) {
-    if (userCredential.signatureName) {
-      signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-    }
-    if (userCredential.signature) {
-      signatureBlock += `${userCredential.signature}<br>`;
-    }
-    if (userCredential.signatureImage) {
-      signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-    }
-  }
+//   // Build signature block if needed (optional)
+//   if (!userCredential) {
+//     userCredential = await UserCredential.findOne({
+//       where: { masterUserID: emailData.masterUserID },
+//     });
+//   }
+//   if (userCredential) {
+//     if (userCredential.signatureName) {
+//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+//     }
+//     if (userCredential.signature) {
+//       signatureBlock += `${userCredential.signature}<br>`;
+//     }
+//     if (userCredential.signatureImage) {
+//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+//     }
+//   }
 
-  let emailBody = emailData.body || "";
-  if (signatureBlock && !emailBody.includes(signatureBlock)) {
-    emailBody += `<br><br>${signatureBlock}`;
-  }
+//   let emailBody = emailData.body || "";
+//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
+//     emailBody += `<br><br>${signatureBlock}`;
+//   }
 
-  // Prepare mail options
-  const mailOptions = {
-    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-    to: emailData.recipient,
-    cc: emailData.cc,
-    bcc: emailData.bcc,
-    subject: emailData.subject,
-    html: emailBody,
-    text: emailBody,
-    attachments: (emailData.attachments || []).map(att => ({
-      filename: att.filename,
-      path: att.path,
-    })),
-    inReplyTo: emailData.inReplyTo || undefined,
-    references: emailData.references || undefined,
-  };
+//   // Prepare mail options
+//   const mailOptions = {
+//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+//     to: emailData.recipient,
+//     cc: emailData.cc,
+//     bcc: emailData.bcc,
+//     subject: emailData.subject,
+//     html: emailBody,
+//     text: emailBody,
+//     attachments: (emailData.attachments || []).map(att => ({
+//       filename: att.filename,
+//       path: att.path,
+//     })),
+//     inReplyTo: emailData.inReplyTo || undefined,
+//     references: emailData.references || undefined,
+//   };
 
-  // Send email
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: SENDER_EMAIL,
-      pass: SENDER_PASSWORD,
-    },
-  });
+//   // Send email
+//   const transporter = nodemailer.createTransport({
+//     service: "gmail",
+//     auth: {
+//       user: SENDER_EMAIL,
+//       pass: SENDER_PASSWORD,
+//     },
+//   });
 
-  const info = await transporter.sendMail(mailOptions);
+//   const info = await transporter.sendMail(mailOptions);
 
-  // Save email to DB with real messageId
-  const savedEmail = await Email.create({
-    messageId: info.messageId,
-    inReplyTo: emailData.inReplyTo || null,
-    references: emailData.references || null,
-    sender: SENDER_EMAIL,
-    senderName: SENDER_NAME,
-    recipient: emailData.recipient,
-    cc: emailData.cc,
-    bcc: emailData.bcc,
-    subject: emailData.subject,
-    body: emailBody,
-    folder: "sent",
-    createdAt: emailData.createdAt || new Date(),
-    masterUserID: emailData.masterUserID,
-    tempMessageId: emailData.tempMessageId,
-    isDraft: false,
-    // ...any other fields you need...
-  });
+//   // Save email to DB with real messageId
+//   const savedEmail = await Email.create({
+//     messageId: info.messageId,
+//     inReplyTo: emailData.inReplyTo || null,
+//     references: emailData.references || null,
+//     sender: SENDER_EMAIL,
+//     senderName: SENDER_NAME,
+//     recipient: emailData.recipient,
+//     cc: emailData.cc,
+//     bcc: emailData.bcc,
+//     subject: emailData.subject,
+//     body: emailBody,
+//     folder: "sent",
+//     createdAt: emailData.createdAt || new Date(),
+//     masterUserID: emailData.masterUserID,
+//     tempMessageId: emailData.tempMessageId,
+//     isDraft: false,
+//     // ...any other fields you need...
+//   });
 
-  // Save attachments if any
-  if (emailData.attachments && emailData.attachments.length > 0) {
-    const savedAttachments = emailData.attachments.map(file => ({
-      emailID: savedEmail.emailID,
-      filename: file.filename,
-      filePath: file.path,
-      size: file.size,
-      contentType: file.contentType,
-    }));
-    await Attachment.bulkCreate(savedAttachments);
-  }
+//   // Save attachments if any
+//   if (emailData.attachments && emailData.attachments.length > 0) {
+//     const savedAttachments = emailData.attachments.map(file => ({
+//       emailID: savedEmail.emailID,
+//       filename: file.filename,
+//       filePath: file.path,
+//       size: file.size,
+//       contentType: file.contentType,
+//     }));
+//     await Attachment.bulkCreate(savedAttachments);
+//   }
 
-  console.log(`Queued email sent and saved: ${info.messageId}`);
-}
+//   console.log(`Queued email sent and saved: ${info.messageId}`);
+// }
 
 // --- Update EMAIL_QUEUE consumer ---
 async function startEmailWorker() {
@@ -259,107 +259,107 @@ async function startEmailWorker() {
 }
 //.....................change
 
-// async function sendEmailJob(emailID) {
-//   // Fetch email and attachments
-//   const email = await Email.findByPk(emailID, {
-//     include: [{ model: Attachment, as: "attachments" }],
-//   });
-//   if (!email) return;
+async function sendEmailJob(emailID) {
+  // Fetch email and attachments
+  const email = await Email.findByPk(emailID, {
+    include: [{ model: Attachment, as: "attachments" }],
+  });
+  if (!email) return;
 
-//   // Fetch sender credentials (prefer DefaultEmail)
-//   let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
-//   let signatureBlock = "";
-//   let userCredential; 
-//   const defaultEmail = await DefaultEmail.findOne({
-//     where: { masterUserID: email.masterUserID, isDefault: true },
-//   });
+  // Fetch sender credentials (prefer DefaultEmail)
+  let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+  let signatureBlock = "";
+  let userCredential; 
+  const defaultEmail = await DefaultEmail.findOne({
+    where: { masterUserID: email.masterUserID, isDefault: true },
+  });
 
-//   if (defaultEmail) {
-//     SENDER_EMAIL = defaultEmail.email;
-//     SENDER_PASSWORD = defaultEmail.appPassword;
-//     SENDER_NAME = defaultEmail.senderName;
-//     if (!SENDER_NAME) {
-//       const masterUser = await MasterUser.findOne({
-//         where: { masterUserID: email.masterUserID },
-//       });
-//       SENDER_NAME = masterUser ? masterUser.name : "";
-//     }
-//         // Fetch userCredential for signature if needed
-//     userCredential = await UserCredential.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//   } else {
-//     const userCredential = await UserCredential.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//     SENDER_EMAIL = userCredential.email;
-//     SENDER_PASSWORD = userCredential.appPassword;
-//     const masterUser = await MasterUser.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//     SENDER_NAME = masterUser ? masterUser.name : "";
+  if (defaultEmail) {
+    SENDER_EMAIL = defaultEmail.email;
+    SENDER_PASSWORD = defaultEmail.appPassword;
+    SENDER_NAME = defaultEmail.senderName;
+    if (!SENDER_NAME) {
+      const masterUser = await MasterUser.findOne({
+        where: { masterUserID: email.masterUserID },
+      });
+      SENDER_NAME = masterUser ? masterUser.name : "";
+    }
+        // Fetch userCredential for signature if needed
+    userCredential = await UserCredential.findOne({
+      where: { masterUserID: email.masterUserID },
+    });
+  } else {
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID: email.masterUserID },
+    });
+    SENDER_EMAIL = userCredential.email;
+    SENDER_PASSWORD = userCredential.appPassword;
+    const masterUser = await MasterUser.findOne({
+      where: { masterUserID: email.masterUserID },
+    });
+    SENDER_NAME = masterUser ? masterUser.name : "";
     
-//   }
-//     // Build signature block if not already present in email.body
-//   if (userCredential) {
-//     if (userCredential.signatureName) {
-//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-//     }
-//     if (userCredential.signature) {
-//       signatureBlock += `${userCredential.signature}<br>`;
-//     }
-//     if (userCredential.signatureImage) {
-//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-//     }
-//   }
+  }
+    // Build signature block if not already present in email.body
+  if (userCredential) {
+    if (userCredential.signatureName) {
+      signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+    }
+    if (userCredential.signature) {
+      signatureBlock += `${userCredential.signature}<br>`;
+    }
+    if (userCredential.signatureImage) {
+      signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+    }
+  }
 
-//   // Only add signature if not already present in body
-//   let emailBody = email.body || "";
-//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
-//     emailBody += `<br><br>${signatureBlock}`;
-//   }
-// const inReplyToHeader = email.inReplyTo || undefined;
-// const referencesHeader = email.references || undefined;
-//   // Prepare mail options
-//   const mailOptions = {
-//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-//     to: email.recipient,
-//     cc: email.cc,
-//     bcc: email.bcc,
-//     subject: email.subject,
-//     // html: email.body,
-//     // text: email.body, // fallback
-//     html: emailBody,
-//     text: emailBody,
-//     attachments: email.attachments.map(att => ({
-//       filename: att.filename,
-//       path: att.filePath || att.path,
-//     })),
-//      inReplyTo: inReplyToHeader,
-//   references: referencesHeader,
-//   };
+  // Only add signature if not already present in body
+  let emailBody = email.body || "";
+  if (signatureBlock && !emailBody.includes(signatureBlock)) {
+    emailBody += `<br><br>${signatureBlock}`;
+  }
+const inReplyToHeader = email.inReplyTo || undefined;
+const referencesHeader = email.references || undefined;
+  // Prepare mail options
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+    to: email.recipient,
+    cc: email.cc,
+    bcc: email.bcc,
+    subject: email.subject,
+    // html: email.body,
+    // text: email.body, // fallback
+    html: emailBody,
+    text: emailBody,
+    attachments: email.attachments.map(att => ({
+      filename: att.filename,
+      path: att.filePath || att.path,
+    })),
+     inReplyTo: inReplyToHeader,
+  references: referencesHeader,
+  };
 
-//   // Send email
-//   const transporter = nodemailer.createTransport({
-//     service: "gmail",
-//     auth: {
-//       user: SENDER_EMAIL,
-//       pass: SENDER_PASSWORD,
-//     },
-//   });
+  // Send email
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: SENDER_EMAIL,
+      pass: SENDER_PASSWORD,
+    },
+  });
 
-//   const info = await transporter.sendMail(mailOptions);
+  const info = await transporter.sendMail(mailOptions);
 
-//   // Update email as sent
-//   await email.update({
-//     folder: "sent",
-//     messageId: info.messageId,
-//     // createdAt: new Date(),
-//     isDraft: false,
-//   });
+  // Update email as sent
+  await email.update({
+    folder: "sent",
+    messageId: info.messageId,
+    // createdAt: new Date(),
+    isDraft: false,
+  });
 
-//   console.log(`Email sent and updated: ${info.messageId}`);
-// }
+  console.log(`Email sent and updated: ${info.messageId}`);
+}
 
 async function startEmailWorker() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
