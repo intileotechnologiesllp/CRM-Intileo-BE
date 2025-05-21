@@ -1241,41 +1241,41 @@ exports.getOneEmail = async (req, res) => {
 relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
 
 // Deduplicate relatedEmails by messageId (keep the first occurrence)
-// const seen = new Set();
-// relatedEmails = relatedEmails.filter(email => {
-//   if (seen.has(email.messageId)) return false;
-//   seen.add(email.messageId);
-//   return true;
-// });
-let allEmails = [mainEmail, ...relatedEmails];
-
-//......changes
 const seen = new Set();
-allEmails = allEmails.filter(email => {
+relatedEmails = relatedEmails.filter(email => {
   if (seen.has(email.messageId)) return false;
   seen.add(email.messageId);
   return true;
 });
-const emailMap = {};
-allEmails.forEach(email => {
-  emailMap[email.messageId] = email;
-});
-const conversation = [];
-let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
-while (current) {
-  conversation.push(current);
-  // Find the next email that replies to the current one
-  current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
-}
+// let allEmails = [mainEmail, ...relatedEmails];
 
-// If some emails are not in the chain (e.g., forwards), add them by date
-const remaining = allEmails.filter(email => !conversation.includes(email));
-remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-conversation.push(...remaining);
+//......changes
+// const seen = new Set();
+// allEmails = allEmails.filter(email => {
+//   if (seen.has(email.messageId)) return false;
+//   seen.add(email.messageId);
+//   return true;
+// });
+// const emailMap = {};
+// allEmails.forEach(email => {
+//   emailMap[email.messageId] = email;
+// });
+// const conversation = [];
+// let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
+// while (current) {
+//   conversation.push(current);
+//   // Find the next email that replies to the current one
+//   current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
+// }
 
-// The first is the main email, the rest are related
-const sortedMainEmail = conversation[0];
-const sortedRelatedEmails = conversation.slice(1);
+// // If some emails are not in the chain (e.g., forwards), add them by date
+// const remaining = allEmails.filter(email => !conversation.includes(email));
+// remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+// conversation.push(...remaining);
+
+// // The first is the main email, the rest are related
+// const sortedMainEmail = conversation[0];
+// const sortedRelatedEmails = conversation.slice(1);
 
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
@@ -1294,19 +1294,19 @@ const sortedRelatedEmails = conversation.slice(1);
     //   },
     // });
     // Sort relatedEmails by createdAt ascending (oldest to newest)
-    allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    // allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 // The oldest email is the main email, the rest are relatedEmails
 // const sortedMainEmail = allEmails[0];
 // const sortedRelatedEmails = allEmails.slice(1);
 
-res.status(200).json({
-  message: "Email fetched successfully.",
-  data: {
-    email: sortedMainEmail,
-    relatedEmails: sortedRelatedEmails,
-  },
-});
+// res.status(200).json({
+//   message: "Email fetched successfully.",
+//   data: {
+//     email: sortedMainEmail,
+//     relatedEmails: sortedRelatedEmails,
+//   },
+// });
   } catch (error) {
     console.error("Error fetching email:", error);
     res.status(500).json({ message: "Internal server error." });
