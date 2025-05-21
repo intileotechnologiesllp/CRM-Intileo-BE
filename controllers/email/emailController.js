@@ -1256,22 +1256,22 @@ allEmails = allEmails.filter(email => {
   seen.add(email.messageId);
   return true;
 });
-// const emailMap = {};
-// allEmails.forEach(email => {
-//   emailMap[email.messageId] = email;
-// });
-// const conversation = [];
-// let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
-// while (current) {
-//   conversation.push(current);
-//   // Find the next email that replies to the current one
-//   current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
-// }
+const emailMap = {};
+allEmails.forEach(email => {
+  emailMap[email.messageId] = email;
+});
+const conversation = [];
+let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
+while (current) {
+  conversation.push(current);
+  // Find the next email that replies to the current one
+  current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
+}
 
 // // If some emails are not in the chain (e.g., forwards), add them by date
-// const remaining = allEmails.filter(email => !conversation.includes(email));
-// remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-// conversation.push(...remaining);
+const remaining = allEmails.filter(email => !conversation.includes(email));
+remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+conversation.push(...remaining);
 
 // // The first is the main email, the rest are related
 // const sortedMainEmail = conversation[0];
@@ -1294,7 +1294,7 @@ allEmails = allEmails.filter(email => {
     //   },
     // });
     // Sort relatedEmails by createdAt ascending (oldest to newest)
-     allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    //  allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
 // The oldest email is the main email, the rest are relatedEmails
 const sortedMainEmail = allEmails[0];
