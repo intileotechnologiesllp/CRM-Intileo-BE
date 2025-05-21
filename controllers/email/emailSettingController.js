@@ -801,6 +801,30 @@ exports.downloadAttachment = async (req, res) => {
     res.status(500).json({ message: "Failed to download attachment.", error: error.message });
   }
 };
+exports.markAsUnreadSingle = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailID } = req.params;
+
+  if (!emailID) {
+    return res.status(400).json({ message: "emailID is required." });
+  }
+
+  try {
+    const [updatedCount] = await Email.update(
+      { isRead: false },
+      { where: { emailID, masterUserID } }
+    );
+
+    if (updatedCount === 0) {
+      return res.status(404).json({ message: "Email not found or already unread." });
+    }
+
+    res.status(200).json({ message: "Email marked as unread." });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark as unread.", error: error.message });
+  }
+};
+
 
 
 
