@@ -1752,7 +1752,8 @@ if (actionType === "forward") {
           attachments
           // isShared: isShared === true || isShared === "true", // ensure boolean
         };
-        savedEmail = await Email.create(emailData);
+        // savedEmail = await Email.create(emailData);
+        await publishToQueue("EMAIL_QUEUE", emailData);
 
         // Save attachments in the database
         // const savedAttachments =
@@ -1789,7 +1790,7 @@ if (actionType === "forward") {
       //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
       // }));
 // await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
-await publishToQueue("EMAIL_QUEUE", emailData);
+// await publishToQueue("EMAIL_QUEUE", emailData);
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,
