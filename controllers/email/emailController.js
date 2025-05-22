@@ -1679,60 +1679,106 @@ if (actionType === "forward") {
       // await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
 
 
-      let savedEmail;
-      let savedAttachments = [];
-      console.log(draftId, ".............");
+      // let savedEmail;
+      // let savedAttachments = [];
+      // console.log(draftId, ".............");
 
-      if (draftId) {
-        // Update the existing draft record to be a sent email
-        savedEmail = await draftEmail.update({
-          // messageId: info.messageId,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to || draftEmail.recipient,
-          cc: cc || draftEmail.cc,
-          bcc: bcc || draftEmail.bcc,
-          subject: finalSubject,
-          body: `${text || html}`,
-          folder: "sent",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-        });
+      // // if (draftId) {
+      //   // Update the existing draft record to be a sent email
+      //   savedEmail = await draftEmail.update({
+      //     // messageId: info.messageId,
+      //     inReplyTo: inReplyToHeader || null,
+      //     references: referencesHeader || null,
+      //     sender: SENDER_EMAIL,
+      //     senderName: SENDER_NAME,
+      //     recipient: to || draftEmail.recipient,
+      //     cc: cc || draftEmail.cc,
+      //     bcc: bcc || draftEmail.bcc,
+      //     subject: finalSubject,
+      //     body: `${text || html}`,
+      //     folder: "sent",
+      //     createdAt: new Date(),
+      //     masterUserID,
+      //     tempMessageId,
+      //   });
 
-        // Update attachments if new ones are uploaded
-        if (req.files && req.files.length > 0) {
-          await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-           const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-          savedAttachments = req.files.map((file) => ({
-                  emailID: savedEmail.emailID,
+      //   // Update attachments if new ones are uploaded
+      //   if (req.files && req.files.length > 0) {
+      //     await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
+      //      const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+      //     savedAttachments = req.files.map((file) => ({
+      //             emailID: savedEmail.emailID,
+      //     filename: file.filename,
+      //     filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+      //       file.filename
+      //     )}`, // Save public URL in DB
+      //     size: file.size,
+      //     contentType: file.mimetype,
+      //     }));
+      //     await Attachment.bulkCreate(savedAttachments);
+      //   } else {
+      //     // If no new attachments, fetch existing ones for response
+      //     savedAttachments = await Attachment.findAll({
+      //       where: { emailID: draftEmail.emailID },
+      //     });
+      //   }
+      // } else {
+        // ... (your existing logic for new sent emails) ...
+const baseURL = process.env.LOCALHOST_URL;
+//         const attachments = req.files && req.files.length > 0
+//   ? req.files.map((file) => ({
+//       filename: file.filename,
+//       originalname: file.originalname,
+//       path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
+//       size: file.size,
+//       contentType: file.mimetype,
+//     }))
+//   : [];
+  
+      let attachments = [];
+      if (req.files && req.files.length > 0) {
+        attachments = req.files.map((file) => ({
           filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL in DB
+          originalname: file.originalname,
+          // path: file.path,
+          path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
           size: file.size,
           contentType: file.mimetype,
-          }));
-          await Attachment.bulkCreate(savedAttachments);
-        } else {
-          // If no new attachments, fetch existing ones for response
-          savedAttachments = await Attachment.findAll({
-            where: { emailID: draftEmail.emailID },
-          });
-        }
-      } else {
-        // ... (your existing logic for new sent emails) ...
+        }));
+      } else if (draftId && draftEmail) {
+        // If no new files uploaded, fetch existing attachments from the draft
+        const oldAttachments = await Attachment.findAll({
+          where: { emailID: draftEmail.emailID },
+        });
+        attachments = oldAttachments.map((att) => ({
+          filename: att.filename,
+          originalname:att.originalname || att.filename,
+          path: att.filePath || att.path, // use filePath or path
+          size: att.size,
+          contentType: att.contentType,
+        }));
+      }
+
+  const finalTo = to || (draftEmail && draftEmail.recipient);
+const finalCc = cc || (draftEmail && draftEmail.cc);
+const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
+
+if (!finalTo && !finalCc && !finalBccValue) {
+  return res.status(400).json({ message: "At least one recipient (to, cc, bcc) is required." });
+}
         const emailData = {
           // messageId: info.messageId,
+          draftId:draftId || null,
           inReplyTo: inReplyToHeader || null,
           references: referencesHeader || null,
           sender: SENDER_EMAIL,
           senderName: SENDER_NAME,
-          recipient: to,
-          cc,
-          bcc,
+          // recipient: to,
+          // cc,
+          // bcc,
+     recipient: finalTo,
+  cc: finalCc,
+  bcc: finalBccValue,
           subject: finalSubject,
           body: finalBody,
           folder: "sent",
@@ -1740,9 +1786,10 @@ if (actionType === "forward") {
           masterUserID,
           tempMessageId,
           isDraft: false,
+          attachments
           // isShared: isShared === true || isShared === "true", // ensure boolean
         };
-        savedEmail = await Email.create(emailData);
+        // savedEmail = await Email.create(emailData);
 
         // Save attachments in the database
         // const savedAttachments =
@@ -1753,35 +1800,37 @@ if (actionType === "forward") {
         //         filePath: file.path,
         //       }))
         //     : [];
-        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL in DB
-          size: file.size,
-          contentType: file.mimetype,
-        }));
+        // const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+        // savedAttachments = req.files.map((file) => ({
+        //   emailID: savedEmail.emailID,
+        //   filename: file.filename,
+        //   filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+        //     file.filename
+        //   )}`, // Save public URL in DB
+        //   size: file.size,
+        //   contentType: file.mimetype,
+        // }));
 
-        if (savedAttachments.length > 0) {
-          await Attachment.bulkCreate(savedAttachments);
-          console.log(
-            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-          );
-        }
-      }
+        // if (savedAttachments.length > 0) {
+        //   await Attachment.bulkCreate(savedAttachments);
+        //   console.log(
+        //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        //   );
+        // }
+         await publishToQueue("EMAIL_QUEUE", emailData);
+      // }
+    
 
       // Generate public URLs for attachments
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
-      }));
-await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+      // const attachmentLinks = savedAttachments.map((attachment) => ({
+      //   filename: attachment.filename,
+      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+      // }));
+// await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,
-        attachments: attachmentLinks,
+        // attachments: attachmentLinks,
       });
     } catch (error) {
       console.error("Error sending email:", error);
@@ -2138,11 +2187,19 @@ exports.saveDraft = [
           // Remove old attachments if updating
           await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
         }
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedDraft.emailID,
-          filename: file.originalname,
-          path: file.path,
-        }));
+        // savedAttachments = req.files.map((file) => ({
+        //   emailID: savedDraft.emailID,
+        //   filename: file.originalname,
+        //   path: file.path,
+        // }));
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+          const savedAttachments = req.files.map((file) => ({
+    emailID: savedDraft.emailID,
+    filename: file.filename,
+    filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+    size: file.size,
+    contentType: file.mimetype,
+  }));
         await Attachment.bulkCreate(savedAttachments);
       } else if (isUpdate) {
         // If no new attachments, fetch existing ones for response

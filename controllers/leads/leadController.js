@@ -4,6 +4,8 @@ const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
+
 exports.createLead = async (req, res) => {
   const {
     contactPerson,
@@ -23,7 +25,7 @@ exports.createLead = async (req, res) => {
     projectLocation,
     organizationCountry,
     proposalSentDate,
-    status,
+    status
   } = req.body;
 
   console.log(req.role, "role of the user............");
@@ -36,7 +38,7 @@ exports.createLead = async (req, res) => {
     //     .json({ message: "Access denied. Only admins can create leads." });
     // }
 
-    // Create the lead with the userId from the authenticated user
+    // Create the lead with the masterUserID from the authenticated user
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
@@ -68,12 +70,12 @@ exports.createLead = async (req, res) => {
       organizationCountry,
       proposalSentDate,
       status,
-      userId: req.adminId, // Associate the lead with the authenticated user
+      masterUserID: req.adminId, // Associate the lead with the authenticated user
     });
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_CREATION", // Mode
-      lead.userId, // Created by (Admin ID)
+      lead.masterUserID, // Created by (Admin ID)
       lead.leadId, // Record ID (Country ID)
       null,
       `Lead is created by  ${req.role}`, // Description
@@ -115,7 +117,7 @@ exports.archiveLead = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_ARCHIVE", // Mode
-      lead.userId, // Admin ID from the authenticated request
+      lead.masterUserID, // Admin ID from the authenticated request
       leadId, // Record ID (Currency ID)
       req.adminId,
       `Lead is archived by "${req.role}"`, // Description
@@ -156,7 +158,7 @@ exports.unarchiveLead = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_UNARCHIVE", // Mode
-      lead.userId, // Admin ID from the authenticated request
+      lead.masterUserID, // Admin ID from the authenticated request
       leadId, // Record ID (Currency ID)
       req.adminId,
       `Lead is unarchived by "${req.role}"`, // Description
@@ -355,7 +357,7 @@ exports.updateLead = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
       "LEAD_UPDATE", // Mode
-      lead.userId, // Created by (Admin ID)
+      lead.masterUserID, // Created by (Admin ID)
       leadId, // Record ID (Lead ID)
       req.adminId, // Modified by (Admin ID)
       `Lead with ID ${leadId} updated by user ${req.role}`, // Description
@@ -397,7 +399,7 @@ exports.deleteLead = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_DELETE", // Mode
-      lead.userId, // Admin ID from the authenticated request
+      lead.masterUserID, // Admin ID from the authenticated request
       leadId, // Record ID (Currency ID)
       req.adminId,
       `Lead "${lead}" deleted by "${req.role}"`, // Description
@@ -482,7 +484,7 @@ exports.updateLeadCustomFields = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_UPDATE_CUSTOM_FIELDS",
-      lead.userId,
+      lead.masterUserID,
       leadId,
       req.adminId,
       `Custom fields updated for lead ${leadId} by user ${req.role}`,
@@ -492,6 +494,19 @@ exports.updateLeadCustomFields = async (req, res) => {
     res.status(200).json({ message: "Custom fields updated successfully", customFields: lead.customFields });
   } catch (error) {
     console.error("Error updating custom fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getNonAdminMasterUserNames = async (req, res) => {
+  try {
+    const users = await MasterUser.findAll({
+      where: { userType: { [Op.ne]: "admin" } },
+      attributes: ["id", "name"], // Only return id and name
+    });
+    res.status(200).json({ users });
+  } catch (error) {
+    console.error("Error fetching master users:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
