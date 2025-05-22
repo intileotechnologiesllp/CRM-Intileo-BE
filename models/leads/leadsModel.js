@@ -87,7 +87,7 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  userId: {
+  masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: false, // User ID of the creator (e.g., admin)
   },
@@ -95,6 +95,7 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to false (not archived)
   },
+
   
 
   // Timestamps
