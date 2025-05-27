@@ -228,16 +228,16 @@ exports.getLeads = async (req, res) => {
       ];
     }
 
-    // Pagination
-    const offset = (page - 1) * limit;
+  //   // Pagination
+  //   const offset = (page - 1) * limit;
 
-        // --- Get user column preferences ---
-    const masterUserID = req.adminId;
-    const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
-    const columns = pref ? pref.columns : null;
-    const leadAttributes = columns && columns.length
-  ? columns.map(col => typeof col === "string" ? col : col.key)
-  : undefined;
+  //       // --- Get user column preferences ---
+  //   const masterUserID = req.adminId;
+  //   const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
+  //   const columns = pref ? pref.columns : null;
+  //   const leadAttributes = columns && columns.length
+  // ? columns.map(col => typeof col === "string" ? col : col.key)
+  // : undefined;
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -251,7 +251,7 @@ exports.getLeads = async (req, res) => {
       limit: parseInt(limit), // Number of records per page
       offset: parseInt(offset), // Skip records for pagination
       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
-      attributes:leadAttributes, // Only these columns
+      // attributes:leadAttributes, // Only these columns
     });
 
     res.status(200).json({
