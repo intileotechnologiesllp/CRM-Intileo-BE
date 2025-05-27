@@ -27,6 +27,8 @@ const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js"
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
 const emailSettingController=require("./routes/email/emailSettingRoutes.js")
 const Email = require("./models/email/emailModel"); // Import Email model
+const leadFilterRoutes = require("./routes/leads/leadFilterRoutes"); // Import lead filter routes
+const leadColumnController=require("./routes/leads/leadColumnRoutes.js"); // Import lead column controller
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
@@ -65,6 +67,8 @@ app.use("/api/privileges", privilegesRoutes); // Register privileges routes
 app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
 app.use("/api/email", emailRoutes); // Register email routes
 app.use("/api/email-settings", emailSettingController); // Register email settings routes
+app.use("/api/lead-filters", leadFilterRoutes); // Register lead filter routes
+app.use("/api/lead-column", leadColumnController); // Register lead column controller routes
 
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;

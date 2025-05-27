@@ -22,5 +22,6 @@ router.get("/get", verifyToken, leadController.getLeads);
 router.post("/updateLables", verifyToken, leadController.updateAllLabels);
 router.put("/update-custom-fields/:leadId", verifyToken, leadController.updateLeadCustomFields);
 router.get("/get-general-users", verifyToken, leadController.getNonAdminMasterUserNames);
+router.post("/by-master-user", leadController.getLeadsByMasterUser);
 
 module.exports = router;

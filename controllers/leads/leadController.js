@@ -5,6 +5,7 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
+const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
 
 exports.createLead = async (req, res) => {
   const {
@@ -113,6 +114,7 @@ exports.archiveLead = async (req, res) => {
     }
 
     lead.isArchived = true; // Set the lead as archived
+    lead.archiveTime = new Date(); // Set the archive time to now
     await lead.save();
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
@@ -229,6 +231,13 @@ exports.getLeads = async (req, res) => {
     // Pagination
     const offset = (page - 1) * limit;
 
+        // --- Get user column preferences ---
+    const masterUserID = req.adminId;
+    const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
+    const columns = pref ? pref.columns : null;
+    const leadAttributes = columns && columns.length
+  ? columns.map(col => typeof col === "string" ? col : col.key)
+  : undefined;
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -242,6 +251,7 @@ exports.getLeads = async (req, res) => {
       limit: parseInt(limit), // Number of records per page
       offset: parseInt(offset), // Skip records for pagination
       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
+      attributes:leadAttributes, // Only these columns
     });
 
     res.status(200).json({
@@ -502,11 +512,37 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
   try {
     const users = await MasterUser.findAll({
       where: { userType: { [Op.ne]: "admin" } },
-      attributes: ["id", "name"], // Only return id and name
+      attributes: ["masterUserID", "name"], // Only return id and name
     });
     res.status(200).json({ users });
   } catch (error) {
     console.error("Error fetching master users:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getLeadsByMasterUser = async (req, res) => {
+  const { masterUserID, name } = req.body;
+
+  try {
+    let whereClause = {};
+
+    if (masterUserID) {
+      whereClause.masterUserID = masterUserID;
+    } else if (name) {
+      // Find masterUserID by name
+      const user = await MasterUser.findOne({ where: { name } });
+      if (!user) {
+        return res.status(404).json({ message: "Master user not found." });
+      }
+      whereClause.masterUserID = user.masterUserID;
+    } else {
+      return res.status(400).json({ message: "Please provide masterUserID or name." });
+    }
+
+    const leads = await Lead.findAll({ where: whereClause });
+    res.status(200).json({ leads });
+  } catch (error) {
+    console.error("Error fetching leads by master user:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
