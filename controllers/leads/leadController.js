@@ -188,13 +188,14 @@ exports.getLeads = async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     order = "DESC",
+    masterUserID:queryMasterUserID
   } = req.query;
 
   const { valueLabels } = req.body || {}; // Get valueLabels from the request body
 
   try {
     const whereClause = {};
-
+let masterUserID = queryMasterUserID || req.adminId;
     // Update valueLabels for all records if provided
     if (valueLabels) {
       const [updatedCount] = await Lead.update(
@@ -216,6 +217,9 @@ exports.getLeads = async (req, res) => {
     if (isArchived !== undefined) {
       whereClause.isArchived = isArchived === "true"; // Convert string to boolean
     }
+        if (masterUserID) {
+      whereClause.masterUserID = masterUserID;
+    }
 
     // Add search functionality
     if (search) {
@@ -230,14 +234,18 @@ exports.getLeads = async (req, res) => {
 
   //   // Pagination
     const offset = (page - 1) * limit;
+    // --- Get user column preferences ---
+    // const masterUserID = req.adminId;
+    // const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
+    // const columns = pref ? pref.columns : null;
+    //     // Only use valid Lead fields
+    // const validLeadFields = Object.keys(Lead.rawAttributes);
+    // const leadAttributes = columns && columns.length
+    //   ? columns
+    //       .map(col => typeof col === "string" ? col : col.key)
+    //       .filter(key => validLeadFields.includes(key))
+    //   : undefined;
 
-  //       // --- Get user column preferences ---
-  //   const masterUserID = req.adminId;
-  //   const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
-  //   const columns = pref ? pref.columns : null;
-  //   const leadAttributes = columns && columns.length
-  // ? columns.map(col => typeof col === "string" ? col : col.key)
-  // : undefined;
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,

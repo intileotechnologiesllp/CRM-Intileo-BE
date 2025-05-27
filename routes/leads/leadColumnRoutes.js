@@ -6,5 +6,6 @@ const leadColumnController = require("../../controllers/leads/leadColumnControll
 
 router.post("/create-column", verifyToken, leadColumnController.saveLeadColumnPreference);
 router.get("/get-column", verifyToken, leadColumnController.getLeadColumnPreference);
+router.post("/delete-column", verifyToken, leadColumnController.deleteLeadColumn);
 
 module.exports = router;
