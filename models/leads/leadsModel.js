@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
+const { number } = require("joi");
 const Lead = sequelize.define("Lead", {
   // Primary Key
   leadId: {
@@ -95,6 +96,22 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to false (not archived)
   },
+  archiveTime: {
+  type: DataTypes.DATE,
+  allowNull: true, // The date/time when the lead was archived
+},
+  questionShared: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false, // Default to false (not shared)
+  },
+    ownerId:{
+    type: DataTypes.INTEGER,
+    allowNull: true, // Owner ID of the lead
+  },
+  ownerName:{
+    type: DataTypes.STRING,
+    allowNull: true, // Owner name of the lead
+  },
 
   
 
@@ -107,6 +124,26 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  SBUClass: {
+    type: DataTypes.STRING,
+    allowNull: true, // SBU Class of the lead
+  },
+  numberOfReportsPrepared: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // Number of reports prepared for the project
+  },
+  sectoralSector: {
+    type: DataTypes.STRING,
+    allowNull: true, // Sectoral sector of the lead
+  },
+  seen: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false, // Default to false (not seen)
+  },
+  visibleTo:{
+    type: DataTypes.STRING,
+    allowNull: true, // Visibility of the lead (e.g., "Public", "Private")
+  }
 });
 
 // Define the one-to-one relationship

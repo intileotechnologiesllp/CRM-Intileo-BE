@@ -391,6 +391,7 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
       masterUserID: emailData.masterUserID,
       tempMessageId: emailData.tempMessageId,
       isDraft: false,
+      
     });
 
     // Save attachments if any

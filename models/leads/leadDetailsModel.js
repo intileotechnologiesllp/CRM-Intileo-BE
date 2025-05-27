@@ -33,7 +33,7 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  organizationCountry: {
+  organizationName: {
     type: DataTypes.STRING,
     allowNull: true,
   },
@@ -69,6 +69,28 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  sourceOrigin:{
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  sourceOriginID: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  currency:{
+    type: DataTypes.STRING,
+    allowNull: true, // Currency for the lead
+  },
+  nextActivityDate: {
+    type: DataTypes.DATE,
+    allowNull: true, // Date for the next activity
+  },
+  nextActivityStatus: {
+    type: DataTypes.STRING,
+    allowNull: true, // Status of the next activity
+  },
+
+
 });
 
 module.exports = LeadDetails;

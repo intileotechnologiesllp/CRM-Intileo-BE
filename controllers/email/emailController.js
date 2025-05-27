@@ -90,6 +90,29 @@ exports.queueFetchInboxEmails = async (req, res) => {
 const appPassword = req.body?.appPassword || req.appPassword;
 
   try {
+        if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+
+    // --- Validate IMAP credentials before queueing ---
+    const imapConfig = {
+      imap: {
+        user: email,
+        password: appPassword,
+        host: "imap.gmail.com",
+        port: 993,
+        tls: true,
+        authTimeout: 10000,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+
+    try {
+      const testConnection = await Imap.connect(imapConfig);
+      await testConnection.end(); // Close test connection
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid email or app password. Please check your credentials." });
+    }
     await publishToQueue("FETCH_INBOX_QUEUE", {
       masterUserID,
       email,
