@@ -195,7 +195,9 @@ exports.getLeads = async (req, res) => {
 
   try {
     const whereClause = {};
-let masterUserID = queryMasterUserID || req.adminId;
+//let masterUserID = queryMasterUserID || req.adminId;
+    // Allow masterUserID=all to fetch all leads, otherwise filter
+    let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
     // Update valueLabels for all records if provided
     if (valueLabels) {
       const [updatedCount] = await Lead.update(
