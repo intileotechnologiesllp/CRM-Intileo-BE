@@ -229,7 +229,7 @@ exports.getLeads = async (req, res) => {
     }
 
   //   // Pagination
-  //   const offset = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
   //       // --- Get user column preferences ---
   //   const masterUserID = req.adminId;
