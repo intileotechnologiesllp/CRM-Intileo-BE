@@ -23,6 +23,10 @@
 //     type: DataTypes.STRING,
 //     allowNull: true, // Comma-separated user IDs or roles
 //   },
+//   masterUserID: {
+//   type: DataTypes.INTEGER,
+//   allowNull: false, // or true if you want to allow nulls
+// },
 //   // Add more fields as needed
 // });
 
