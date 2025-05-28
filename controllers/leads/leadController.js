@@ -6,7 +6,137 @@ const PROGRAMS = require("../../utils/programConstants"); // Import program cons
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
 const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
+// const Person = require("../../models/leads/leadPersonModel"); // Import Person model
+// const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
+// const { Lead, LeadDetails, Person, Organization } = require("../../models");
 
+// exports.createLead = async (req, res) => {
+//   const {
+//     contactPerson,
+//     organization,
+//     title,
+//     valueLabels,
+//     expectedCloseDate,
+//     sourceChannel,
+//     sourceChannelID,
+//     serviceType,
+//     scopeOfServiceType,
+//     phone,
+//     email,
+//     company,
+//     proposalValue,
+//     esplProposalNo,
+//     projectLocation,
+//     organizationCountry,
+//     proposalSentDate,
+//     status
+//   } = req.body;
+
+//   console.log(req.role, "role of the user............");
+
+//   try {
+//     // Ensure only admins can create leads
+//     // if (req.user.role !== "admin") {
+//     //   return res
+//     //     .status(403)
+//     //     .json({ message: "Access denied. Only admins can create leads." });
+//     // }
+
+//     // Create the lead with the masterUserID from the authenticated user
+//     if (!["admin", "general", "master"].includes(req.role)) {
+//       await logAuditTrail(
+//         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+//         "LEAD_CREATION", // Mode
+//         null, // No user ID for failed sign-in
+//         "Access denied. You do not have permission to create leads.", // Error description
+//         null
+//       );
+//       return res.status(403).json({
+//         message: "Access denied. You do not have permission to create leads.",
+//       });
+//     }
+//     // 1. Find or create Organization
+//     let orgRecord = await Organization.findOne({ where: { organization } });
+//     if (!orgRecord) {
+//       orgRecord = await Organization.create({ organization });
+//     }
+
+//     // 2. Find or create Person (linked to organization)
+//     let personRecord = await Person.findOne({ where: { email } });
+//     if (!personRecord) {
+//       personRecord = await Person.create({
+//         contactPerson,
+//         email,
+//         phone,
+//         organizationId: orgRecord.organizationId
+//       });
+//     }
+
+//     // const lead = await Lead.create({
+//     //   contactPerson,
+//     //   organization,
+//     //   title,
+//     //   valueLabels,
+//     //   expectedCloseDate,
+//     //   sourceChannel,
+//     //   sourceChannelID,
+//     //   serviceType,
+//     //   scopeOfServiceType,
+//     //   phone,
+//     //   email,
+//     //   company,
+//     //   proposalValue,
+//     //   esplProposalNo,
+//     //   projectLocation,
+//     //   organizationCountry,
+//     //   proposalSentDate,
+//     //   status,
+//     //   masterUserID: req.adminId, // Associate the lead with the authenticated user
+//     // });
+//         const lead = await Lead.create({
+//       personId: personRecord.personId,
+//       organizationId: orgRecord.organizationId,
+//       title,
+//       valueLabels,
+//       expectedCloseDate,
+//       sourceChannel,
+//       sourceChannelID,
+//       serviceType,
+//       scopeOfServiceType,
+//       company,
+//       proposalValue,
+//       esplProposalNo,
+//       projectLocation,
+//       organizationCountry,
+//       proposalSentDate,
+//       status,
+//       masterUserID: req.adminId
+//     });
+//     await historyLogger(
+//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+//       "LEAD_CREATION", // Mode
+//       lead.masterUserID, // Created by (Admin ID)
+//       lead.leadId, // Record ID (Country ID)
+//       null,
+//       `Lead is created by  ${req.role}`, // Description
+//       null // Changes logged as JSON
+//     );
+//     res.status(201).json({ message: "Lead created successfully", lead });
+//   } catch (error) {
+//     console.error("Error creating lead:", error);
+
+//     await logAuditTrail(
+//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+//       "LEAD_CREATION", // Mode
+//       null, // No user ID for failed sign-in
+//       "Error creating lead: " + error.message, // Error description
+//       null
+//     );
+//     res.status(500).json(error);
+//   }
+// };
+
+//.....................changes......original....................
 exports.createLead = async (req, res) => {
   const {
     contactPerson,
@@ -96,6 +226,7 @@ exports.createLead = async (req, res) => {
     res.status(500).json(error);
   }
 };
+
 
 exports.archiveLead = async (req, res) => {
   const { leadId } = req.params; // Use leadId instead of id
@@ -556,3 +687,5 @@ exports.getLeadsByMasterUser = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
