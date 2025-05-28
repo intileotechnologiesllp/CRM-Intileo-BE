@@ -152,10 +152,10 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  transferOwnerShip: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false,
-  },
+  // transferOwnerShip: {
+  //   type: DataTypes.STRING,
+  //   allowNull: true
+  // },
   sourceOrgin: {
     type: DataTypes.STRING,
     allowNull: true,

@@ -202,7 +202,8 @@ exports.createLead = async (req, res) => {
       organizationCountry,
       proposalSentDate,
       status,
-      masterUserID: req.adminId, // Associate the lead with the authenticated user
+      masterUserID: req.adminId,
+      ownerId:req.adminId // Associate the lead with the authenticated user
     });
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
@@ -451,11 +452,12 @@ exports.getLeads = async (req, res) => {
 
       // Build the where clause from filterConfig
       const { all = [], any = [] } = filter.filterConfig;
-      const leadDetailsFields = [
-        // Add all LeadDetails fields you want to support, e.g.:
-        "someLeadDetailsField", "anotherLeadDetailsField"
-        // e.g. "archiveReason", "archivedBy", etc.
-      ];
+      // const leadDetailsFields = [
+      //   // Add all LeadDetails fields you want to support, e.g.:
+      //   "someLeadDetailsField", "anotherLeadDetailsField"
+      //   // e.g. "archiveReason", "archivedBy", etc.
+      // ];
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
       let filterWhere = {};
       let leadDetailsWhere = {};
@@ -691,6 +693,7 @@ exports.updateLead = async (req, res) => {
       organizationCountry: lead.organizationCountry,
       proposalSentDate: lead.proposalSentDate,
       status: lead.status,
+      ownerId: lead.ownerId, // Include ownerId if needed
     };
 
     // Update the lead with the provided data
@@ -734,6 +737,7 @@ exports.updateLead = async (req, res) => {
       organizationCountry: lead.organizationCountry,
       proposalSentDate: lead.proposalSentDate,
       status: lead.status,
+      ownerId: lead.ownerId, // Include ownerId if needed
     };
 
     // Calculate the changes

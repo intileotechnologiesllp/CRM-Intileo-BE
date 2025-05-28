@@ -312,11 +312,11 @@ exports.getLeadFields = (req, res) => {
     { value: "organizationCountry", label: "Organization Country" },
     { value: "proposalSentDate", label: "Proposal Sent Date" },
     { value: "status", label: "Status" },
-    { value: "masterUserID", label: "Owner" },
+    { value: "ownerId", label: "Owner" },
     { value: "createdAt", label: "Lead created" },
     { value: "updatedAt", label: "Last updated" },
     // Add any custom/virtual fields below
-    { value: "creator", label: "Creator" },
+    { value: "masterUserID", label: "Creator" },
     { value: "currency", label: "Currency" },
     { value: "nextActivityDate", label: "Next activity date" },
     { value: "nextActivityStatus", label: "Next activity status" },
