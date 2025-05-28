@@ -1,4 +1,5 @@
 const Lead = require("../../models/leads/leadsModel");
+const LeadFilter = require("../../models/leads/leadFiltersModel");
 const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
 const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
@@ -8,8 +9,8 @@ const MasterUser = require("../../models/master/masterUserModel"); // Adjust pat
 const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
 // const Person = require("../../models/leads/leadPersonModel"); // Import Person model
 // const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
-// const { Lead, LeadDetails, Person, Organization } = require("../../models");
-
+//  const { Lead, LeadDetails, Person, Organization } = require("../../models");
+const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
 // exports.createLead = async (req, res) => {
 //   const {
 //     contactPerson,
@@ -311,6 +312,111 @@ exports.unarchiveLead = async (req, res) => {
   }
 };
 
+// exports.getLeads = async (req, res) => {
+//   const {
+//     isArchived,
+//     search,
+//     page = 1,
+//     limit = 10,
+//     sortBy = "createdAt",
+//     order = "DESC",
+//     masterUserID:queryMasterUserID
+//   } = req.query;
+
+//   const { valueLabels } = req.body || {}; // Get valueLabels from the request body
+
+//   try {
+//     const whereClause = {};
+// //let masterUserID = queryMasterUserID || req.adminId;
+//     // Allow masterUserID=all to fetch all leads, otherwise filter
+//     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
+//     // Update valueLabels for all records if provided
+//     if (valueLabels) {
+//       const [updatedCount] = await Lead.update(
+//         { valueLabels }, // Set the new value for valueLabels
+//         { where: {} } // Update all records
+//       );
+
+//       // Log the update in the audit trail
+//       await logAuditTrail(
+//         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+//         "LEAD_UPDATE_ALL_LABELS", // Mode
+//         req.adminId, // Admin ID of the user making the update
+//         `Updated valueLabels for ${updatedCount} records`, // Description
+//         null
+//       );
+//     }
+
+//     // Filter by archive status if `isArchived` is provided
+//     if (isArchived !== undefined) {
+//       whereClause.isArchived = isArchived === "true"; // Convert string to boolean
+//     }
+//         if (masterUserID) {
+//       whereClause.masterUserID = masterUserID;
+//     }
+
+//     // Add search functionality
+//     if (search) {
+//       whereClause[Op.or] = [
+//         { contactPerson: { [Op.like]: `%${search}%` } }, // Search by contact person
+//         { organization: { [Op.like]: `%${search}%` } }, // Search by organization
+//         { title: { [Op.like]: `%${search}%` } }, // Search by title
+//         { email: { [Op.like]: `%${search}%` } }, // Search by email
+//         { phone: { [Op.like]: `%${search}%` } }, // Search by phone
+//       ];
+//     }
+
+//   //   // Pagination
+//     const offset = (page - 1) * limit;
+//     // --- Get user column preferences ---
+//     // const masterUserID = req.adminId;
+//     // const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
+//     // const columns = pref ? pref.columns : null;
+//     //     // Only use valid Lead fields
+//     // const validLeadFields = Object.keys(Lead.rawAttributes);
+//     // const leadAttributes = columns && columns.length
+//     //   ? columns
+//     //       .map(col => typeof col === "string" ? col : col.key)
+//     //       .filter(key => validLeadFields.includes(key))
+//     //   : undefined;
+
+//     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
+//     const leads = await Lead.findAndCountAll({
+//       where: whereClause,
+//       include: [
+//         {
+//           model: LeadDetails,
+//           as: "details", // Use the alias defined in the association
+//           required: false, // Include leads even if they don't have leadDetails
+//         },
+//       ],
+//       limit: parseInt(limit), // Number of records per page
+//       offset: parseInt(offset), // Skip records for pagination
+//       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
+//       // attributes:leadAttributes, // Only these columns
+//     });
+
+//     res.status(200).json({
+//       message: "Leads fetched successfully",
+//       totalRecords: leads.count, // Total number of records
+//       totalPages: Math.ceil(leads.count / limit), // Total number of pages
+//       currentPage: parseInt(page), // Current page
+//       leads: leads.rows, // Leads data with leadDetails
+//     });
+//   } catch (error) {
+//     console.error("Error fetching leads:", error);
+//     await logAuditTrail(
+//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+//       "LEAD_FETCH", // Mode
+//       null, // No user ID for failed sign-in
+//       "Error fetching leads: " + error.message, // Error description
+//       null
+//     );
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+//...................new code..........................
 exports.getLeads = async (req, res) => {
   const {
     isArchived,
@@ -319,101 +425,234 @@ exports.getLeads = async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     order = "DESC",
-    masterUserID:queryMasterUserID
+    masterUserID: queryMasterUserID,
+    filterId // <-- Accept filterId as a query param
   } = req.query;
 
-  const { valueLabels } = req.body || {}; // Get valueLabels from the request body
-
   try {
-    const whereClause = {};
-//let masterUserID = queryMasterUserID || req.adminId;
-    // Allow masterUserID=all to fetch all leads, otherwise filter
+    let whereClause = {};
+    let include = [
+      {
+        model: LeadDetails,
+        as: "details",
+        required: false,
+      },
+    ];
+
     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
-    // Update valueLabels for all records if provided
-    if (valueLabels) {
-      const [updatedCount] = await Lead.update(
-        { valueLabels }, // Set the new value for valueLabels
-        { where: {} } // Update all records
-      );
 
-      // Log the update in the audit trail
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_UPDATE_ALL_LABELS", // Mode
-        req.adminId, // Admin ID of the user making the update
-        `Updated valueLabels for ${updatedCount} records`, // Description
-        null
-      );
-    }
+    // If filterId is provided, use filter logic
+    if (filterId) {
+      // Fetch the saved filter
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
 
-    // Filter by archive status if `isArchived` is provided
-    if (isArchived !== undefined) {
-      whereClause.isArchived = isArchived === "true"; // Convert string to boolean
-    }
-        if (masterUserID) {
-      whereClause.masterUserID = masterUserID;
-    }
-
-    // Add search functionality
-    if (search) {
-      whereClause[Op.or] = [
-        { contactPerson: { [Op.like]: `%${search}%` } }, // Search by contact person
-        { organization: { [Op.like]: `%${search}%` } }, // Search by organization
-        { title: { [Op.like]: `%${search}%` } }, // Search by title
-        { email: { [Op.like]: `%${search}%` } }, // Search by email
-        { phone: { [Op.like]: `%${search}%` } }, // Search by phone
+      // Build the where clause from filterConfig
+      const { all = [], any = [] } = filter.filterConfig;
+      const leadDetailsFields = [
+        // Add all LeadDetails fields you want to support, e.g.:
+        "someLeadDetailsField", "anotherLeadDetailsField"
+        // e.g. "archiveReason", "archivedBy", etc.
       ];
+
+      let filterWhere = {};
+      let leadDetailsWhere = {};
+
+      if (all.length > 0) {
+        filterWhere[Op.and] = [];
+        leadDetailsWhere[Op.and] = [];
+        all.forEach(cond => {
+          if (leadDetailsFields.includes(cond.field)) {
+            leadDetailsWhere[Op.and].push(buildCondition(cond));
+          } else {
+            filterWhere[Op.and].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+        if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
+      }
+      if (any.length > 0) {
+        filterWhere[Op.or] = [];
+        leadDetailsWhere[Op.or] = [];
+        any.forEach(cond => {
+          if (leadDetailsFields.includes(cond.field)) {
+            leadDetailsWhere[Op.or].push(buildCondition(cond));
+          } else {
+            filterWhere[Op.or].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+        if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
+      }
+
+      // Merge with archive/masterUserID filters
+      if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
+      if (masterUserID) filterWhere.masterUserID = masterUserID;
+
+      whereClause = filterWhere;
+
+      // Add LeadDetails filter if needed
+      if (Object.keys(leadDetailsWhere).length > 0) {
+        include = [
+          ...include,
+          {
+            model: LeadDetails,
+            as: "details",
+            where: leadDetailsWhere,
+            required: true
+          }
+        ];
+      }
+    } else {
+      // Standard search/filter logic
+      if (isArchived !== undefined) whereClause.isArchived = isArchived === "true";
+      if (masterUserID) whereClause.masterUserID = masterUserID;
+
+      if (search) {
+        whereClause[Op.or] = [
+          { contactPerson: { [Op.like]: `%${search}%` } },
+          { organization: { [Op.like]: `%${search}%` } },
+          { title: { [Op.like]: `%${search}%` } },
+          { email: { [Op.like]: `%${search}%` } },
+          { phone: { [Op.like]: `%${search}%` } },
+        ];
+      }
     }
 
-  //   // Pagination
+    // Pagination
     const offset = (page - 1) * limit;
-    // --- Get user column preferences ---
-    // const masterUserID = req.adminId;
-    // const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
-    // const columns = pref ? pref.columns : null;
-    //     // Only use valid Lead fields
-    // const validLeadFields = Object.keys(Lead.rawAttributes);
-    // const leadAttributes = columns && columns.length
-    //   ? columns
-    //       .map(col => typeof col === "string" ? col : col.key)
-    //       .filter(key => validLeadFields.includes(key))
-    //   : undefined;
 
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
-      include: [
-        {
-          model: LeadDetails,
-          as: "details", // Use the alias defined in the association
-          required: false, // Include leads even if they don't have leadDetails
-        },
-      ],
-      limit: parseInt(limit), // Number of records per page
-      offset: parseInt(offset), // Skip records for pagination
-      order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
-      // attributes:leadAttributes, // Only these columns
+      include,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [[sortBy, order.toUpperCase()]],
     });
 
     res.status(200).json({
       message: "Leads fetched successfully",
-      totalRecords: leads.count, // Total number of records
-      totalPages: Math.ceil(leads.count / limit), // Total number of pages
-      currentPage: parseInt(page), // Current page
-      leads: leads.rows, // Leads data with leadDetails
+      totalRecords: leads.count,
+      totalPages: Math.ceil(leads.count / limit),
+      currentPage: parseInt(page),
+      leads: leads.rows,
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_FETCH", // Mode
-      null, // No user ID for failed sign-in
-      "Error fetching leads: " + error.message, // Error description
-      null
-    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// --- Helper functions (reuse from your prompt) ---
+
+const operatorMap = {
+  "is": "eq",
+  "is not": "ne",
+  "is empty": "is empty",
+  "is not empty": "is not empty",
+  "is exactly or earlier than": "lte",
+  "is earlier than": "lt",
+  "is exactly or later than": "gte",
+  "is later than": "gt"
+  // Add more mappings if needed
+};
+
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle date fields
+  const leadDateFields = Object.entries(Lead.rawAttributes)
+  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+  .map(([key]) => key);
+
+const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
+  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+  .map(([key]) => key);
+
+const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
+  // if (
+  //   ["createdAt", "updatedAt", "expectedCloseDate", "proposalSentDate", "nextActivityDate", "archiveTime"].includes(cond.field)
+  // ) {
+  //   // If useExactDate is true, use the value directly
+  //   if (cond.useExactDate) {
+  //     // Validate the date
+  //     const date = new Date(cond.value);
+  //     if (isNaN(date.getTime())) return {};
+  //     return {
+  //       [cond.field]: {
+  //         [ops[operator] || Op.eq]: date,
+  //       },
+  //     };
+  //   }
+  if (allDateFields.includes(cond.field)) {
+    if (cond.useExactDate) {
+      const date = new Date(cond.value);
+      if (isNaN(date.getTime())) return {};
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: date,
+        },
+      };
+    }
+    // Otherwise, use relative date conversion
+    const dateRange = convertRelativeDate(cond.value);
+    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
+
+    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
+      return {
+        [cond.field]: {
+          [Op.between]: [dateRange.start, dateRange.end],
+        },
+      };
+    }
+    if (dateRange && isValidDate(dateRange.start)) {
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: dateRange.start,
+        },
+      };
+    }
+    return {};
+  }
+
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
 
 exports.updateLead = async (req, res) => {
   const { leadId } = req.params; // Use leadId from the request parameters

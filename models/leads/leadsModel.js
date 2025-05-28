@@ -184,7 +184,7 @@
 // module.exports = Lead;
 
 
-//.........................new changes.....................................
+//.........................new changes original.....................................
 
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
