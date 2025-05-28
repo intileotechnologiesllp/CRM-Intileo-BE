@@ -313,7 +313,6 @@ exports.getLeadFields = (req, res) => {
     { value: "proposalSentDate", label: "Proposal Sent Date" },
     { value: "status", label: "Status" },
     { value: "masterUserID", label: "Owner" },
-    { value: "isArchived", label: "Archive time" },
     { value: "createdAt", label: "Lead created" },
     { value: "updatedAt", label: "Last updated" },
     // Add any custom/virtual fields below
@@ -341,4 +340,40 @@ exports.getLeadFields = (req, res) => {
     // ...add more as needed
   ];
   res.status(200).json({ fields });
+};
+
+
+exports.getAllLeadContactPersons = async (req, res) => {
+  try {
+    const { page = 1, limit = 100, search = "" } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build search condition for contactPerson
+    const where = search
+      ? { contactPerson: { [Op.like]: `%${search}%` } }
+      : {};
+
+    const { rows, count } = await Lead.findAndCountAll({
+      where,
+      attributes: ["contactPerson"],
+      limit: parseInt(limit),
+      offset,
+      distinct: true,
+    });
+
+    // Extract contactPerson values
+    const contactPersons = rows
+      .map(lead => lead.contactPerson)
+      .filter(Boolean);
+
+    res.status(200).json({
+      contactPersons,
+      total: count,
+      page: parseInt(page),
+      totalPages: Math.ceil(count / limit),
+    });
+  } catch (error) {
+    console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 };
