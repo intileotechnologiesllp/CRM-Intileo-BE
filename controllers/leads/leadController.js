@@ -486,8 +486,11 @@ exports.getLeads = async (req, res) => {
         return res.status(404).json({ message: "Filter not found." });
       }
       console.log("→ Loaded filterConfig:", JSON.stringify(filter.filterConfig));
+const filterConfig = typeof filter.filterConfig === "string"
+  ? JSON.parse(filter.filterConfig)
+  : filter.filterConfig;
 
-      const { all = [], any = [] } = filter.filterConfig;
+      const { all = [], any = [] } =filterConfig;
       const leadFields = Object.keys(Lead.rawAttributes);
       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
