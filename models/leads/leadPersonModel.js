@@ -53,7 +53,11 @@
 //   organization:{
 //     type: DataTypes.STRING,
 //     allowNull: true, // Organization name associated with the person
-//   }
+//   },
+//   masterUserID: {
+//   type: DataTypes.INTEGER,
+//   allowNull: false, // or true if you want to allow nulls
+// },
 //   // Add more fields as needed
 // });
 // // Person.belongsTo(Organization, { foreignKey: "organizationId" });

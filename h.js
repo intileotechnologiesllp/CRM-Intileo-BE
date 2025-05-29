@@ -1,8 +1,3 @@
-const { Lead, LeadDetails, Person, Organization, LeadFilter } = require("../../models");
-const { Op } = require("sequelize");
-
-// ...existing code...
-
 exports.getLeads = async (req, res) => {
   const {
     isArchived,
@@ -12,7 +7,7 @@ exports.getLeads = async (req, res) => {
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
-    filterId // <-- Accept filterId as a query param
+    filterId
   } = req.query;
 
   try {
@@ -23,74 +18,100 @@ exports.getLeads = async (req, res) => {
         as: "details",
         required: false,
       },
+      {
+        model: Person,
+        required: false,
+      },
+      {
+        model: Organization,
+        required: false,
+      }
     ];
 
     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
 
     // If filterId is provided, use filter logic
     if (filterId) {
-      // Fetch the saved filter
       const filter = await LeadFilter.findByPk(filterId);
       if (!filter) {
         return res.status(404).json({ message: "Filter not found." });
       }
 
-      // Build the where clause from filterConfig
       const { all = [], any = [] } = filter.filterConfig;
-      const leadDetailsFields = [
-        // Add all LeadDetails fields you want to support, e.g.:
-        "someLeadDetailsField", "anotherLeadDetailsField"
-        // e.g. "archiveReason", "archivedBy", etc.
-      ];
 
-      let filterWhere = {};
+      // Dynamically get all fields for each model
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const personFields = Object.keys(Person.rawAttributes);
+      const organizationFields = Object.keys(Organization.rawAttributes);
+
+      // Prepare where objects for each model
+      let leadWhere = {};
       let leadDetailsWhere = {};
+      let personWhere = {};
+      let organizationWhere = {};
 
+      // Helper to add conditions
+      function addCondition(whereObj, op, cond) {
+        if (!whereObj[op]) whereObj[op] = [];
+        whereObj[op].push(buildCondition(cond));
+      }
+
+      // Process 'all' (AND) filters
       if (all.length > 0) {
-        filterWhere[Op.and] = [];
-        leadDetailsWhere[Op.and] = [];
         all.forEach(cond => {
           if (leadDetailsFields.includes(cond.field)) {
-            leadDetailsWhere[Op.and].push(buildCondition(cond));
-          } else {
-            filterWhere[Op.and].push(buildCondition(cond));
+            addCondition(leadDetailsWhere, Op.and, cond);
+          } else if (personFields.includes(cond.field)) {
+            addCondition(personWhere, Op.and, cond);
+          } else if (organizationFields.includes(cond.field)) {
+            addCondition(organizationWhere, Op.and, cond);
+          } else if (leadFields.includes(cond.field)) {
+            addCondition(leadWhere, Op.and, cond);
           }
         });
-        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-        if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
       }
+
+      // Process 'any' (OR) filters
       if (any.length > 0) {
-        filterWhere[Op.or] = [];
-        leadDetailsWhere[Op.or] = [];
         any.forEach(cond => {
           if (leadDetailsFields.includes(cond.field)) {
-            leadDetailsWhere[Op.or].push(buildCondition(cond));
-          } else {
-            filterWhere[Op.or].push(buildCondition(cond));
+            addCondition(leadDetailsWhere, Op.or, cond);
+          } else if (personFields.includes(cond.field)) {
+            addCondition(personWhere, Op.or, cond);
+          } else if (organizationFields.includes(cond.field)) {
+            addCondition(organizationWhere, Op.or, cond);
+          } else if (leadFields.includes(cond.field)) {
+            addCondition(leadWhere, Op.or, cond);
           }
         });
-        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-        if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
       }
 
       // Merge with archive/masterUserID filters
-      if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
-      if (masterUserID) filterWhere.masterUserID = masterUserID;
+      if (isArchived !== undefined) leadWhere.isArchived = isArchived === "true";
+      if (masterUserID) leadWhere.masterUserID = masterUserID;
 
-      whereClause = filterWhere;
+      whereClause = leadWhere;
 
-      // Add LeadDetails filter if needed
-      if (Object.keys(leadDetailsWhere).length > 0) {
-        include = [
-          ...include,
-          {
-            model: LeadDetails,
-            as: "details",
-            where: leadDetailsWhere,
-            required: true
-          }
-        ];
-      }
+      // Build include array with where clauses for each model
+      include = [
+        {
+          model: LeadDetails,
+          as: "details",
+          where: Object.keys(leadDetailsWhere).length > 0 ? leadDetailsWhere : undefined,
+          required: Object.keys(leadDetailsWhere).length > 0
+        },
+        {
+          model: Person,
+          where: Object.keys(personWhere).length > 0 ? personWhere : undefined,
+          required: Object.keys(personWhere).length > 0
+        },
+        {
+          model: Organization,
+          where: Object.keys(organizationWhere).length > 0 ? organizationWhere : undefined,
+          required: Object.keys(organizationWhere).length > 0
+        }
+      ];
     } else {
       // Standard search/filter logic
       if (isArchived !== undefined) whereClause.isArchived = isArchived === "true";
@@ -110,7 +131,7 @@ exports.getLeads = async (req, res) => {
     // Pagination
     const offset = (page - 1) * limit;
 
-    // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
+    // Fetch leads with all filters applied
     const leads = await Lead.findAndCountAll({
       where: whereClause,
       include,
@@ -131,59 +152,3 @@ exports.getLeads = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-// --- Helper functions (reuse from your prompt) ---
-
-const operatorMap = {
-  "is": "eq",
-  "is not": "ne",
-  "is empty": "is empty",
-  "is not empty": "is not empty",
-  "is exactly or earlier than": "lte",
-  "is earlier than": "lt",
-  "is exactly or later than": "gte",
-  "is later than": "gt"
-  // Add more mappings if needed
-};
-
-function buildCondition(cond) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
-
-  let operator = cond.operator;
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "is empty") {
-    return { [cond.field]: { [Op.is]: null } };
-  }
-  if (operator === "is not empty") {
-    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle date fields
-  // (You can add your date field logic here if needed)
-
-  // Default
-  return {
-    [cond.field]: {
-      [ops[operator] || Op.eq]: cond.value,
-    },
-  };
-}

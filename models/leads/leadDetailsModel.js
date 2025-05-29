@@ -18,14 +18,14 @@
 //     },
 //     onDelete: "CASCADE", // Delete LeadDetails if the associated Lead is deleted
 //   },
-//     personId: {
-//     type: DataTypes.INTEGER,
-//     references: {
-//       model: Person,
-//       key: "personId"
-//     },
-//     allowNull: true,
-//   },
+//   //   personId: {
+//   //   type: DataTypes.INTEGER,
+//   //   references: {
+//   //     model: Person,
+//   //     key: "personId"
+//   //   },
+//   //   allowNull: true,
+//   // },
 //   RFP_receivedDate: {
 //     type: DataTypes.DATE,
 //     allowNull: true,
@@ -50,10 +50,10 @@
 //     type: DataTypes.STRING,
 //     allowNull: true,
 //   },
-//   transferOwnerShip: {
-//     type: DataTypes.BOOLEAN,
-//     defaultValue: false,
-//   },
+//   // transferOwnerShip: {
+//   //   type: DataTypes.BOOLEAN,
+//   //   defaultValue: false,
+//   // },
 //   sourceOrgin: {
 //     type: DataTypes.STRING,
 //     allowNull: true,
