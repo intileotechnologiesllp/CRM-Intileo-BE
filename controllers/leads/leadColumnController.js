@@ -54,7 +54,7 @@ exports.deleteLeadColumn = async (req, res) => {
 
 exports.getAllLeadFields = async (req, res) => {
   const masterUserID = req.adminId;
-  const fields = [
+ const fields = [
     { value: "contactPerson", label: "Contact person" },
     { value: "organization", label: "Organization" },
     { value: "title", label: "Title" },
@@ -73,11 +73,11 @@ exports.getAllLeadFields = async (req, res) => {
     { value: "organizationCountry", label: "Organization Country" },
     { value: "proposalSentDate", label: "Proposal Sent Date" },
     { value: "status", label: "Status" },
-    { value: "masterUserID", label: "Owner" },
+    { value: "ownerId", label: "Owner" },
     { value: "createdAt", label: "Lead created" },
     { value: "updatedAt", label: "Last updated" },
     // Add any custom/virtual fields below
-    { value: "creator", label: "Creator" },
+    { value: "masterUserID", label: "Creator" },
     { value: "currency", label: "Currency" },
     { value: "nextActivityDate", label: "Next activity date" },
     { value: "nextActivityStatus", label: "Next activity status" },
@@ -93,9 +93,11 @@ exports.getAllLeadFields = async (req, res) => {
     { value: "sourceOrigin", label: "Source origin" },
     { value: "sourceOriginID", label: "Source origin ID" },
     { value: "statusSummery", label: "Status Summery" },
-    { value: "archiveTime", label: "Archive time" },
+    { value: "title", label: "Title" },
+    { value: "updatedAt", label: "Update time" },
     { value: "value", label: "Value" },
     { value: "visibleTo", label: "Visible to" },
+    {value:"archiveTime", label:"Archive time"},
     // ...add more as needed
   ];
     try {

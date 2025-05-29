@@ -56,22 +56,55 @@ const {convertRelativeDate} = require("../../utils/helper"); // Import the utili
 //         message: "Access denied. You do not have permission to create leads.",
 //       });
 //     }
-//     // 1. Find or create Organization
-//     let orgRecord = await Organization.findOne({ where: { organization } });
-//     if (!orgRecord) {
-//       orgRecord = await Organization.create({ organization });
-//     }
+//     // // 1. Find or create Organization
+//     // let orgRecord = await Organization.findOne({ where: { organization } });
+//     // if (!orgRecord) {
+//     //   orgRecord = await Organization.create({ organization,masterUserID: req.adminId });
+//     // }
 
-//     // 2. Find or create Person (linked to organization)
-//     let personRecord = await Person.findOne({ where: { email } });
-//     if (!personRecord) {
-//       personRecord = await Person.create({
-//         contactPerson,
-//         email,
-//         phone,
-//         organizationId: orgRecord.organizationId
-//       });
-//     }
+//     // // 2. Find or create Person (linked to organization)
+//     // let personRecord = await Person.findOne({ where: { email } });
+//     // if (!personRecord) {
+//     //   personRecord = await Person.create({
+//     //     contactPerson,
+//     //     email,
+//     //     phone,
+//     //     organizationId: orgRecord.organizationId,
+//     //     masterUserID: req.adminId
+//     //   });
+//     // }
+//     // 1. Find or create Organization
+// let orgRecord = await Organization.findOne({ where: { organization } });
+// if (!orgRecord) {
+//   orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
+// }
+
+// // 2. Find or create Person (linked to organization)
+// let personRecord = await Person.findOne({ where: { email } });
+// if (!personRecord) {
+//   personRecord = await Person.create({
+//     contactPerson,
+//     email,
+//     phone,
+//     organizationId: orgRecord.organizationId,
+//     masterUserID: req.adminId
+//   });
+// }
+
+// // 3. Check for duplicate lead (same person, organization, and title)
+// const existingLead = await Lead.findOne({
+//   where: {
+//     personId: personRecord.personId,
+//     organizationId: orgRecord.organizationId,
+//     title
+//   }
+// });
+
+// if (existingLead) {
+//   return res.status(409).json({
+//     message: "A lead with this person, organization, and title already exists."
+//   });
+// }
 
 //     // const lead = await Lead.create({
 //     //   contactPerson,
@@ -427,7 +460,7 @@ exports.getLeads = async (req, res) => {
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
-    filterId // <-- Accept filterId as a query param
+    filterId
   } = req.query;
 
   try {
@@ -442,58 +475,74 @@ exports.getLeads = async (req, res) => {
 
     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
 
-    // If filterId is provided, use filter logic
+    console.log("→ Query params:", req.query);
+    console.log("→ masterUserID resolved:", masterUserID);
+
     if (filterId) {
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(filterId);
       if (!filter) {
+        console.log("→ Filter not found for filterId:", filterId);
         return res.status(404).json({ message: "Filter not found." });
       }
+      console.log("→ Loaded filterConfig:", JSON.stringify(filter.filterConfig));
 
-      // Build the where clause from filterConfig
       const { all = [], any = [] } = filter.filterConfig;
-      // const leadDetailsFields = [
-      //   // Add all LeadDetails fields you want to support, e.g.:
-      //   "someLeadDetailsField", "anotherLeadDetailsField"
-      //   // e.g. "archiveReason", "archivedBy", etc.
-      // ];
+      const leadFields = Object.keys(Lead.rawAttributes);
       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
       let filterWhere = {};
       let leadDetailsWhere = {};
 
-      if (all.length > 0) {
-        filterWhere[Op.and] = [];
-        leadDetailsWhere[Op.and] = [];
-        all.forEach(cond => {
-          if (leadDetailsFields.includes(cond.field)) {
-            leadDetailsWhere[Op.and].push(buildCondition(cond));
-          } else {
-            filterWhere[Op.and].push(buildCondition(cond));
-          }
-        });
-        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-        if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
-      }
-      if (any.length > 0) {
-        filterWhere[Op.or] = [];
-        leadDetailsWhere[Op.or] = [];
-        any.forEach(cond => {
-          if (leadDetailsFields.includes(cond.field)) {
-            leadDetailsWhere[Op.or].push(buildCondition(cond));
-          } else {
-            filterWhere[Op.or].push(buildCondition(cond));
-          }
-        });
-        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-        if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
-      }
+if (all.length > 0) {
+  filterWhere[Op.and] = [];
+  leadDetailsWhere[Op.and] = [];
+  all.forEach(cond => {
+    console.log("→ Processing 'all' condition:", cond);
+    if (leadFields.includes(cond.field)) {
+      const condition = buildCondition(cond);
+      console.log("→ Lead condition:", condition);
+      filterWhere[Op.and].push(condition);
+    } else if (leadDetailsFields.includes(cond.field)) {
+      const condition = buildCondition(cond);
+      console.log("→ LeadDetails condition:", condition);
+      leadDetailsWhere[Op.and].push(condition);
+    } else {
+      console.log("→ Field not found in Lead or LeadDetails:", cond.field);
+    }
+  });
+  if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+  if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
+}
+if (any.length > 0) {
+  filterWhere[Op.or] = [];
+  leadDetailsWhere[Op.or] = [];
+  any.forEach(cond => {
+    console.log("→ Processing 'any' condition:", cond);
+    if (leadFields.includes(cond.field)) {
+      const condition = buildCondition(cond);
+      console.log("→ Lead condition (OR):", condition);
+      filterWhere[Op.or].push(condition);
+    } else if (leadDetailsFields.includes(cond.field)) {
+      const condition = buildCondition(cond);
+      console.log("→ LeadDetails condition (OR):", condition);
+      leadDetailsWhere[Op.or].push(condition);
+    } else {
+      console.log("→ Field not found in Lead or LeadDetails (OR):", cond.field);
+    }
+  });
+  if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+  if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
+}
 
       // Merge with archive/masterUserID filters
       if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
       if (masterUserID) filterWhere.masterUserID = masterUserID;
 
       whereClause = filterWhere;
+
+      console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
+      console.log("→ Built leadDetailsWhere:", JSON.stringify(leadDetailsWhere));
 
       // Add LeadDetails filter if needed
       if (Object.keys(leadDetailsWhere).length > 0) {
@@ -506,6 +555,7 @@ exports.getLeads = async (req, res) => {
             required: true
           }
         ];
+        console.log("→ Updated include with LeadDetails where:", JSON.stringify(leadDetailsWhere));
       }
     } else {
       // Standard search/filter logic
@@ -520,11 +570,16 @@ exports.getLeads = async (req, res) => {
           { email: { [Op.like]: `%${search}%` } },
           { phone: { [Op.like]: `%${search}%` } },
         ];
+        console.log("→ Search applied, whereClause[Op.or]:", whereClause[Op.or]);
       }
     }
 
     // Pagination
     const offset = (page - 1) * limit;
+    console.log("→ Final whereClause:", JSON.stringify(whereClause));
+    console.log("→ Final include:", JSON.stringify(include));
+    console.log("→ Pagination: limit =", limit, "offset =", offset);
+    console.log("→ Order:", sortBy, order);
 
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
@@ -534,6 +589,8 @@ exports.getLeads = async (req, res) => {
       offset: parseInt(offset),
       order: [[sortBy, order.toUpperCase()]],
     });
+
+    console.log("→ Query executed. Total records:", leads.count);
 
     res.status(200).json({
       message: "Leads fetched successfully",
