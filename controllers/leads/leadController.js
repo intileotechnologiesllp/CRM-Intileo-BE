@@ -528,15 +528,24 @@ if (pref && pref.columns) {
     
 
     let whereClause = {};
-    let include = [
-      {
-        model: LeadDetails,
-        as: "details",
-        required: false,
-        attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
+    // let include = [
+    //   {
+    //     model: LeadDetails,
+    //     as: "details",
+    //     required: false,
+    //     attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
       
-      },
-    ];
+    //   },
+    // ];
+    let include = [];
+if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
+  include.push({
+    model: LeadDetails,
+    as: "details",
+    required: false,
+    attributes: leadDetailsAttributes
+  });
+}
 
     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
 
