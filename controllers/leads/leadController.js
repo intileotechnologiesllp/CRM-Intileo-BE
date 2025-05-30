@@ -670,13 +670,22 @@ if (any.length > 0) {
     });
 
     console.log("→ Query executed. Total records:", leads.count);
+    const flatLeads = leads.rows.map(lead => {
+  const leadObj = lead.toJSON();
+  if (leadObj.details) {
+    Object.assign(leadObj, leadObj.details);
+    delete leadObj.details;
+  }
+  return leadObj;
+});
 
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,
       totalPages: Math.ceil(leads.count / limit),
       currentPage: parseInt(page),
-      leads: leads.rows,
+      // leads: leads.rows,
+      leads: flatLeads // Return flattened leads with leadDetails merged
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
