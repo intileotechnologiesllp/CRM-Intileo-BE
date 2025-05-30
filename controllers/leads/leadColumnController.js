@@ -23,21 +23,11 @@ exports.getLeadColumnPreference = async (req, res) => {
   // const masterUserID = req.adminId;
   try {
 
-      const pref = await LeadColumnPreference.findOne({ where: {} });
-
-    let columns = pref ? pref.columns : [];
-
-    // Parse filterConfig if present and is a string
-    columns = columns.map(col => {
-      if (col.filterConfig) {
-        col.filterConfig = typeof col.filterConfig === "string"
-          ? JSON.parse(col.filterConfig)
-          : col.filterConfig;
-      }
-      return col;
+    const pref = await LeadColumnPreference.findOne({
+      where: {},
     });
-
-    res.status(200).json({ columns });
+   
+    res.status(200).json({ columns: pref ? pref.columns : [] });
   } catch (error) {
     res.status(500).json({ message: "Error fetching preferences" });
   }
