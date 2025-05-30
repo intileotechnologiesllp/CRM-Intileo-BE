@@ -1078,89 +1078,99 @@ exports.getLeadsByMasterUser = async (req, res) => {
 
 
 
-// exports.getConversationWithClient = async (req, res) => {
-//   const masterUserID = req.adminId;
-//   const { clientEmail } = req.body;
+exports.getConversationWithClient = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { clientEmail } = req.body;
+  const { leadId } = req.params;
 
-//   if (!clientEmail) {
-//     return res.status(400).json({ message: "clientEmail is required." });
-//   }
+  if (!clientEmail) {
+    return res.status(400).json({ message: "clientEmail is required." });
+  }
 
-//   try {
-//     // Get the user's email address from credentials
-//     const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-//     if (!userCredential) {
-//       return res.status(404).json({ message: "User credentials not found." });
-//     }
-//     const userEmail = userCredential.email.toLowerCase();
+      if (!leadId) {
+    return res.status(400).json({ message: "leadId is required in params." });
+  }
 
-//     // Find all emails between user and client (both directions)
-//     const emails = await Email.findAll({
-//       where: {
-//         [Op.or]: [
-//           {
-//             sender: userEmail,
-//             recipient: { [Op.like]: `%${clientEmail}%` }
-//           },
-//           {
-//             sender: clientEmail,
-//             recipient: { [Op.like]: `%${userEmail}%` }
-//           }
-//         ]
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]]
-//     });
+  try {
+    // Get the user's email address from credentials
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    const userEmail = userCredential.email.toLowerCase();
 
-//     if (!emails.length) {
-//       return res.status(404).json({ message: "No emails found for this conversation." });
-//     }
+    // Find all emails between user and client (both directions)
+    const emails = await Email.findAll({
+      where: {
+        [Op.or]: [
+          {
+            sender: userEmail,
+            recipient: { [Op.like]: `%${clientEmail}%` }
+          },
+          {
+            sender: clientEmail,
+            recipient: { [Op.like]: `%${userEmail}%` }
+          }
+        ]
+      },
+      include: [{ model: Attachment, as: "attachments" }],
+      order: [["createdAt", "ASC"]]
+    });
 
-//     // Gather all thread IDs from these emails
-//     const threadIds = [];
-//     emails.forEach(email => {
-//       if (email.messageId) threadIds.push(email.messageId);
-//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
-//       if (email.references) threadIds.push(...email.references.split(" "));
-//     });
-//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+    if (!emails.length) {
+      return res.status(404).json({ message: "No emails found for this conversation." });
+    }
 
-//     // Fetch all related emails in the thread (across all users)
-//     let relatedEmails = await Email.findAll({
-//       where: {
-//         [Op.or]: [
-//           { messageId: { [Op.in]: uniqueThreadIds } },
-//           { inReplyTo: { [Op.in]: uniqueThreadIds } },
-//           {
-//             references: {
-//               [Op.or]: uniqueThreadIds.map(id => ({
-//                 [Op.like]: `%${id}%`
-//               }))
-//             }
-//           }
-//         ]
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]]
-//     });
+    // Gather all thread IDs from these emails
+    const threadIds = [];
+    emails.forEach(email => {
+      if (email.messageId) threadIds.push(email.messageId);
+      if (email.inReplyTo) threadIds.push(email.inReplyTo);
+      if (email.references) threadIds.push(...email.references.split(" "));
+    });
+    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
 
-//     // Remove duplicates by messageId
-//     const seen = new Set();
-//     relatedEmails = relatedEmails.filter(email => {
-//       if (seen.has(email.messageId)) return false;
-//       seen.add(email.messageId);
-//       return true;
-//     });
+    // Fetch all related emails in the thread (across all users)
+    let relatedEmails = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { messageId: { [Op.in]: uniqueThreadIds } },
+          { inReplyTo: { [Op.in]: uniqueThreadIds } },
+          {
+            references: {
+              [Op.or]: uniqueThreadIds.map(id => ({
+                [Op.like]: `%${id}%`
+              }))
+            }
+          }
+        ]
+      },
+      include: [{ model: Attachment, as: "attachments" }],
+      order: [["createdAt", "ASC"]]
+    });
 
-//     res.status(200).json({
-//       message: "Conversation fetched successfully.",
-//       emails: relatedEmails
-//     });
-//   } catch (error) {
-//     console.error("Error fetching conversation:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
+    // Remove duplicates by messageId
+    const seen = new Set();
+    relatedEmails = relatedEmails.filter(email => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+        const notes = await LeadNote.findAll({
+      where: { leadId },
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      message: "Conversation fetched successfully.",
+      emails: relatedEmails,
+      notes
+    });
+  } catch (error) {
+    console.error("Error fetching conversation:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
 
 // exports.getConversationWithClient = async (req, res) => {
 //   const { clientEmail } = req.body;
@@ -1248,70 +1258,70 @@ exports.getLeadsByMasterUser = async (req, res) => {
 // };
 
 //........................only reply thread for client conversation................./
-exports.getConversationWithClient = async (req, res) => {
-  const { clientEmail } = req.body;
+// exports.getConversationWithClient = async (req, res) => {
+//   const { clientEmail } = req.body;
 
-  if (!clientEmail) {
-    return res.status(400).json({ message: "clientEmail is required." });
-  }
+//   if (!clientEmail) {
+//     return res.status(400).json({ message: "clientEmail is required." });
+//   }
 
-  try {
-    // Step 1: Find all emails where clientEmail is sender or recipient
-    const baseEmails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          { sender: clientEmail },
-          { recipient: { [Op.like]: `%${clientEmail}%` } }
-        ]
-      },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "ASC"]]
-    });
+//   try {
+//     // Step 1: Find all emails where clientEmail is sender or recipient
+//     const baseEmails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { sender: clientEmail },
+//           { recipient: { [Op.like]: `%${clientEmail}%` } }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
 
-    if (!baseEmails.length) {
-      return res.status(404).json({ message: "No emails found for this client." });
-    }
+//     if (!baseEmails.length) {
+//       return res.status(404).json({ message: "No emails found for this client." });
+//     }
 
-    // Step 2: Collect all thread IDs (messageId, inReplyTo, references)
-    const threadIds = [];
-    baseEmails.forEach(email => {
-      if (email.messageId) threadIds.push(email.messageId);
-      if (email.inReplyTo) threadIds.push(email.inReplyTo);
-      if (email.references) threadIds.push(...email.references.split(" "));
-    });
-    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+//     // Step 2: Collect all thread IDs (messageId, inReplyTo, references)
+//     const threadIds = [];
+//     baseEmails.forEach(email => {
+//       if (email.messageId) threadIds.push(email.messageId);
+//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
+//       if (email.references) threadIds.push(...email.references.split(" "));
+//     });
+//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
 
-    // Step 3: Fetch only replied/conversation emails (those with inReplyTo or references in the thread)
-    const repliedEmails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          { inReplyTo: { [Op.in]: uniqueThreadIds } },
-          {
-            references: {
-              [Op.or]: uniqueThreadIds.map(id => ({
-                [Op.like]: `%${id}%`
-              }))
-            }
-          }
-        ]
-      },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "ASC"]]
-    });
+//     // Step 3: Fetch only replied/conversation emails (those with inReplyTo or references in the thread)
+//     const repliedEmails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { inReplyTo: { [Op.in]: uniqueThreadIds } },
+//           {
+//             references: {
+//               [Op.or]: uniqueThreadIds.map(id => ({
+//                 [Op.like]: `%${id}%`
+//               }))
+//             }
+//           }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
 
-    if (!repliedEmails.length) {
-      return res.status(404).json({ message: "No replied conversation emails found for this client." });
-    }
+//     if (!repliedEmails.length) {
+//       return res.status(404).json({ message: "No replied conversation emails found for this client." });
+//     }
 
-    res.status(200).json({
-      message: "Replied conversation emails fetched successfully.",
-      emails: repliedEmails
-    });
-  } catch (error) {
-    console.error("Error fetching replied conversation emails:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
+//     res.status(200).json({
+//       message: "Replied conversation emails fetched successfully.",
+//       emails: repliedEmails
+//     });
+//   } catch (error) {
+//     console.error("Error fetching replied conversation emails:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 
 exports.addLeadNote = async (req, res) => {
   const {content} = req.body;
