@@ -50,7 +50,7 @@ exports.signIn = async (req, res) => {
         loginType: user.loginType,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" }
+      { expiresIn: "30d" }
     );
 
     // Get the current UTC time

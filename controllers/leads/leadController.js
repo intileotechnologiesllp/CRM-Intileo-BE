@@ -11,6 +11,10 @@ const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // I
 // const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
 //  const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
+const Email = require("../../models/email/emailModel");
+const UserCredential = require("../../models/email/userCredentialModel");
+const Attachment = require("../../models/email/attachmentModel");
+const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 // exports.createLead = async (req, res) => {
 //   const {
 //     contactPerson,
@@ -190,7 +194,8 @@ exports.createLead = async (req, res) => {
     projectLocation,
     organizationCountry,
     proposalSentDate,
-    status
+    status,
+    sourceOrigin
   } = req.body;
 
   console.log(req.role, "role of the user............");
@@ -216,6 +221,21 @@ exports.createLead = async (req, res) => {
         message: "Access denied. You do not have permission to create leads.",
       });
     }
+        const duplicateLead = await Lead.findOne({
+      where: {
+        organization,
+        contactPerson,
+        email,
+        title
+      }
+    });
+    if (duplicateLead) {
+      return res.status(409).json({
+        message: "Lead Already Exist."
+      });
+    }
+     const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
+    const ownerName = owner ? owner.name : null;
     const lead = await Lead.create({
       contactPerson,
       organization,
@@ -236,8 +256,15 @@ exports.createLead = async (req, res) => {
       proposalSentDate,
       status,
       masterUserID: req.adminId,
-      ownerId:req.adminId // Associate the lead with the authenticated user
+      ownerId:req.adminId,// Associate the lead with the authenticated user
+      ownerName,// Store the role of the user as ownerName,
+      sourceOrigin // Indicate that the lead was created manually
     });
+    await LeadDetails.create({
+      leadId: lead.leadId,
+      responsiblePerson:req.adminId,
+    });
+
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
       "LEAD_CREATION", // Mode
@@ -464,12 +491,32 @@ exports.getLeads = async (req, res) => {
   } = req.query;
 
   try {
+        const pref = await LeadColumnPreference.findOne();
+    let leadAttributes, leadDetailsAttributes;
+    if (pref && Array.isArray(pref.columns)) {
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+
+      leadAttributes = pref.columns
+        .filter(col => col.check && leadFields.includes(col.key))
+        .map(col => col.key);
+
+      leadDetailsAttributes = pref.columns
+        .filter(col => col.check && leadDetailsFields.includes(col.key))
+        .map(col => col.key);
+    }
+
+    console.log(leadAttributes, "leadAttributes from preferences");
+    
+
     let whereClause = {};
     let include = [
       {
         model: LeadDetails,
         as: "details",
         required: false,
+        attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
+      
       },
     ];
 
@@ -556,6 +603,7 @@ if (any.length > 0) {
             as: "details",
             where: leadDetailsWhere,
             required: true
+            
           }
         ];
         console.log("→ Updated include with LeadDetails where:", JSON.stringify(leadDetailsWhere));
@@ -591,6 +639,7 @@ if (any.length > 0) {
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[sortBy, order.toUpperCase()]],
+      attributes: leadAttributes && leadAttributes.length > 0 ? leadAttributes : undefined
     });
 
     console.log("→ Query executed. Total records:", leads.count);
@@ -987,6 +1036,271 @@ exports.getLeadsByMasterUser = async (req, res) => {
     res.status(200).json({ leads });
   } catch (error) {
     console.error("Error fetching leads by master user:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
+// exports.getConversationWithClient = async (req, res) => {
+//   const masterUserID = req.adminId;
+//   const { clientEmail } = req.body;
+
+//   if (!clientEmail) {
+//     return res.status(400).json({ message: "clientEmail is required." });
+//   }
+
+//   try {
+//     // Get the user's email address from credentials
+//     const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+//     if (!userCredential) {
+//       return res.status(404).json({ message: "User credentials not found." });
+//     }
+//     const userEmail = userCredential.email.toLowerCase();
+
+//     // Find all emails between user and client (both directions)
+//     const emails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           {
+//             sender: userEmail,
+//             recipient: { [Op.like]: `%${clientEmail}%` }
+//           },
+//           {
+//             sender: clientEmail,
+//             recipient: { [Op.like]: `%${userEmail}%` }
+//           }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
+
+//     if (!emails.length) {
+//       return res.status(404).json({ message: "No emails found for this conversation." });
+//     }
+
+//     // Gather all thread IDs from these emails
+//     const threadIds = [];
+//     emails.forEach(email => {
+//       if (email.messageId) threadIds.push(email.messageId);
+//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
+//       if (email.references) threadIds.push(...email.references.split(" "));
+//     });
+//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+//     // Fetch all related emails in the thread (across all users)
+//     let relatedEmails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { messageId: { [Op.in]: uniqueThreadIds } },
+//           { inReplyTo: { [Op.in]: uniqueThreadIds } },
+//           {
+//             references: {
+//               [Op.or]: uniqueThreadIds.map(id => ({
+//                 [Op.like]: `%${id}%`
+//               }))
+//             }
+//           }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
+
+//     // Remove duplicates by messageId
+//     const seen = new Set();
+//     relatedEmails = relatedEmails.filter(email => {
+//       if (seen.has(email.messageId)) return false;
+//       seen.add(email.messageId);
+//       return true;
+//     });
+
+//     res.status(200).json({
+//       message: "Conversation fetched successfully.",
+//       emails: relatedEmails
+//     });
+//   } catch (error) {
+//     console.error("Error fetching conversation:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
+
+exports.getConversationWithClient = async (req, res) => {
+  const { clientEmail } = req.body;
+  const { leadId } = req.params;
+
+  if (!clientEmail) {
+    return res.status(400).json({ message: "clientEmail is required." });
+  }
+    if (!leadId) {
+    return res.status(400).json({ message: "leadId is required in params." });
+  }
+
+  try {
+    // 1. Find all emails where clientEmail is sender or recipient (sent/received)
+    const baseEmails = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { sender: clientEmail },
+          { recipient: { [Op.like]: `%${clientEmail}%` } }
+        ]
+      },
+      include: [{ model: Attachment, as: "attachments" }],
+      order: [["createdAt", "ASC"]]
+    });
+
+    if (!baseEmails.length) {
+      return res.status(404).json({ message: "No emails found for this client." });
+    }
+
+    // 2. Collect all thread IDs (messageId, inReplyTo, references)
+    const threadIds = [];
+    baseEmails.forEach(email => {
+      if (email.messageId) threadIds.push(email.messageId);
+      if (email.inReplyTo) threadIds.push(email.inReplyTo);
+      if (email.references) threadIds.push(...email.references.split(" "));
+    });
+    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+    // 3. Fetch all related emails in the thread (replied/conversation)
+    let repliedEmails = [];
+    if (uniqueThreadIds.length > 0) {
+      repliedEmails = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { messageId: { [Op.in]: uniqueThreadIds } },
+            { inReplyTo: { [Op.in]: uniqueThreadIds } },
+            {
+              references: {
+                [Op.or]: uniqueThreadIds.map(id => ({
+                  [Op.like]: `%${id}%`
+                }))
+              }
+            }
+          ]
+        },
+        include: [{ model: Attachment, as: "attachments" }],
+        order: [["createdAt", "ASC"]]
+      });
+    }
+
+    // 4. Combine and deduplicate by messageId
+    const allEmails = [...baseEmails, ...repliedEmails];
+    const seen = new Set();
+    const uniqueEmails = allEmails.filter(email => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+
+      //Fetch notes for this leadId
+    const notes = await LeadNote.findAll({
+      where: { leadId },
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      message: "Conversation and related emails fetched successfully.",
+      emails: uniqueEmails,
+      notes
+    });
+  } catch (error) {
+    console.error("Error fetching conversation:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+//........................only reply thread for client conversation................./
+// exports.getConversationWithClient = async (req, res) => {
+//   const { clientEmail } = req.body;
+
+//   if (!clientEmail) {
+//     return res.status(400).json({ message: "clientEmail is required." });
+//   }
+
+//   try {
+//     // Step 1: Find all emails where clientEmail is sender or recipient
+//     const baseEmails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { sender: clientEmail },
+//           { recipient: { [Op.like]: `%${clientEmail}%` } }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
+
+//     if (!baseEmails.length) {
+//       return res.status(404).json({ message: "No emails found for this client." });
+//     }
+
+//     // Step 2: Collect all thread IDs (messageId, inReplyTo, references)
+//     const threadIds = [];
+//     baseEmails.forEach(email => {
+//       if (email.messageId) threadIds.push(email.messageId);
+//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
+//       if (email.references) threadIds.push(...email.references.split(" "));
+//     });
+//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+//     // Step 3: Fetch only replied/conversation emails (those with inReplyTo or references in the thread)
+//     const repliedEmails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { inReplyTo: { [Op.in]: uniqueThreadIds } },
+//           {
+//             references: {
+//               [Op.or]: uniqueThreadIds.map(id => ({
+//                 [Op.like]: `%${id}%`
+//               }))
+//             }
+//           }
+//         ]
+//       },
+//       include: [{ model: Attachment, as: "attachments" }],
+//       order: [["createdAt", "ASC"]]
+//     });
+
+//     if (!repliedEmails.length) {
+//       return res.status(404).json({ message: "No replied conversation emails found for this client." });
+//     }
+
+//     res.status(200).json({
+//       message: "Replied conversation emails fetched successfully.",
+//       emails: repliedEmails
+//     });
+//   } catch (error) {
+//     console.error("Error fetching replied conversation emails:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
+
+exports.addLeadNote = async (req, res) => {
+  const {content} = req.body;
+  const { leadId } = req.params;
+  const masterUserID = req.adminId;
+  const createdBy = req.adminId;
+
+  // 100KB = 102400 bytes
+  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+    return res.status(400).json({ message: "Note is required and must be under 100KB." });
+  }
+  if (!leadId) {
+    return res.status(400).json({ message: "leadId is required." });
+  }
+
+  try {
+    const note = await LeadNote.create({
+      leadId,
+      masterUserID,
+      content,
+      createdBy,
+    });
+    res.status(201).json({ message: "Note added successfully", note });
+  } catch (error) {
+    console.error("Error adding note:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

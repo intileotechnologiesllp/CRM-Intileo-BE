@@ -23,5 +23,7 @@ router.post("/updateLables", verifyToken, leadController.updateAllLabels);
 router.put("/update-custom-fields/:leadId", verifyToken, leadController.updateLeadCustomFields);
 router.get("/get-general-users", verifyToken, leadController.getNonAdminMasterUserNames);
 router.post("/by-master-user", leadController.getLeadsByMasterUser);
+router.post("/get-conversation-with-client/:leadId", verifyToken, leadController.getConversationWithClient);
+router.post("/add-lead-note/:leadId", verifyToken, leadController.addLeadNote);
 
 module.exports = router;

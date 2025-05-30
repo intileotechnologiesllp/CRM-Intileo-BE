@@ -180,10 +180,10 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  sourceOrigin:{
-    type: DataTypes.STRING,
-    allowNull: true,
-  },
+  // sourceOrigin:{
+  //   type: DataTypes.STRING,
+  //   allowNull: true,
+  // },
   sourceOriginID: {
     type: DataTypes.STRING,
     allowNull: true,
@@ -200,6 +200,10 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.STRING,
     allowNull: true, // Status of the next activity
   },
+  address:{
+    type: DataTypes.STRING,
+    allowNull: true, // Address for the lead
+  }
 
 
 });
