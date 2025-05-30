@@ -206,8 +206,13 @@ exports.updateLeadColumnChecks = async (req, res) => {
       return res.status(404).json({ message: "Preferences not found." });
     }
 
+    // Parse columns if stored as string
+    let prefColumns = typeof pref.columns === "string"
+      ? JSON.parse(pref.columns)
+      : pref.columns;
+
     // Update check status for matching columns
-    pref.columns = pref.columns.map(col => {
+    prefColumns = prefColumns.map(col => {
       const found = columns.find(c => c.key === col.key);
       if (found) {
         return { ...col, check: !!found.check };
@@ -215,6 +220,7 @@ exports.updateLeadColumnChecks = async (req, res) => {
       return col;
     });
 
+    pref.columns = prefColumns;
     await pref.save();
     res.status(200).json({ message: "Columns updated", columns: pref.columns });
   } catch (error) {
