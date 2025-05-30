@@ -22,12 +22,27 @@ exports.saveLeadColumnPreference = async (req, res) => {
 exports.getLeadColumnPreference = async (req, res) => {
   // const masterUserID = req.adminId;
   try {
+    const pref = await LeadColumnPreference.findOne({ where: {} });
 
-    const pref = await LeadColumnPreference.findOne({
-      where: {},
+    let columns = [];
+    if (pref) {
+      // Parse columns if it's a string
+      columns = typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map(col => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string"
+          ? JSON.parse(col.filterConfig)
+          : col.filterConfig;
+      }
+      return col;
     });
-   
-    res.status(200).json({ columns: pref ? pref.columns : [] });
+
+    res.status(200).json({ columns });
   } catch (error) {
     res.status(500).json({ message: "Error fetching preferences" });
   }
