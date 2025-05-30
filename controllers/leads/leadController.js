@@ -492,19 +492,37 @@ exports.getLeads = async (req, res) => {
 
   try {
         const pref = await LeadColumnPreference.findOne();
+    // let leadAttributes, leadDetailsAttributes;
+    // if (pref && Array.isArray(pref.columns)) {
+    //   const leadFields = Object.keys(Lead.rawAttributes);
+    //   const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+
+    //   leadAttributes = pref.columns
+    //     .filter(col => col.check && leadFields.includes(col.key))
+    //     .map(col => col.key);
+
+    //   leadDetailsAttributes = pref.columns
+    //     .filter(col => col.check && leadDetailsFields.includes(col.key))
+    //     .map(col => col.key);
+    // }
     let leadAttributes, leadDetailsAttributes;
-    if (pref && Array.isArray(pref.columns)) {
-      const leadFields = Object.keys(Lead.rawAttributes);
-      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+if (pref && pref.columns) {
+  // Parse columns if it's a string
+  const columns = typeof pref.columns === "string"
+    ? JSON.parse(pref.columns)
+    : pref.columns;
 
-      leadAttributes = pref.columns
-        .filter(col => col.check && leadFields.includes(col.key))
-        .map(col => col.key);
+  const leadFields = Object.keys(Lead.rawAttributes);
+  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
-      leadDetailsAttributes = pref.columns
-        .filter(col => col.check && leadDetailsFields.includes(col.key))
-        .map(col => col.key);
-    }
+  leadAttributes = columns
+    .filter(col => col.check && leadFields.includes(col.key))
+    .map(col => col.key);
+
+  leadDetailsAttributes = columns
+    .filter(col => col.check && leadDetailsFields.includes(col.key))
+    .map(col => col.key);
+}
 
     console.log(leadAttributes, "leadAttributes from preferences");
     
