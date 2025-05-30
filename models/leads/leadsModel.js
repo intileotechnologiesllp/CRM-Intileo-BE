@@ -331,7 +331,11 @@ const Lead = sequelize.define("Lead", {
   visibleTo:{
     type: DataTypes.STRING,
     allowNull: true, // Visibility of the lead (e.g., "Public", "Private")
-  }
+  },
+  sourceOrigin: {
+    type: DataTypes.STRING,
+    allowNull: true, // Source origin of the lead
+  },
 });
 
 // Define the one-to-one relationship
