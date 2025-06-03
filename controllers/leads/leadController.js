@@ -1082,7 +1082,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
 
 
 
-exports.getConversationWithClient = async (req, res) => {
+exports.getAllLeadDetails = async (req, res) => {
   const masterUserID = req.adminId;
   const { clientEmail } = req.body;
   const { leadId } = req.params;
@@ -1165,10 +1165,15 @@ exports.getConversationWithClient = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
+        const lead = await Lead.findByPk(leadId);
+    const leadDetails = await LeadDetails.findOne({ where: { leadId } });
+
     res.status(200).json({
-      message: "Conversation fetched successfully.",
-      emails: relatedEmails,
-      notes
+      message: "leads data fetched successfully.",
+      lead,
+      leadDetails,
+      notes,
+      emails: relatedEmails
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
