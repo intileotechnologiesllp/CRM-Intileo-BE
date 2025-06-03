@@ -1146,29 +1146,39 @@ exports.getAllLeadDetails = async (req, res) => {
       return res.status(404).json({ message: "Lead or lead email not found." });
     }
     const clientEmail = lead.email;
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-    const userEmail = userCredential.email.toLowerCase();
+    // const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    // if (!userCredential) {
+    //   return res.status(404).json({ message: "User credentials not found." });
+    // }
+    // const userEmail = userCredential.email.toLowerCase();
 
     // Find all emails between user and client (both directions)
+    // let emails = await Email.findAll({
+    //   where: {
+    //     [Op.or]: [
+    //       {
+    //         sender: userEmail,
+    //         recipient: { [Op.like]: `%${clientEmail}%` }
+    //       },
+    //       {
+    //         sender: clientEmail,
+    //         recipient: { [Op.like]: `%${userEmail}%` }
+    //       }
+    //     ]
+    //   },
+    //   include: [{ model: Attachment, as: "attachments" }],
+    //   order: [["createdAt", "ASC"]]
+    // });
     let emails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          {
-            sender: userEmail,
-            recipient: { [Op.like]: `%${clientEmail}%` }
-          },
-          {
-            sender: clientEmail,
-            recipient: { [Op.like]: `%${userEmail}%` }
-          }
-        ]
-      },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "ASC"]]
-    });
+  where: {
+    [Op.or]: [
+      { sender: clientEmail },
+      { recipient: { [Op.like]: `%${clientEmail}%` } }
+    ]
+  },
+  include: [{ model: Attachment, as: "attachments" }],
+  order: [["createdAt", "ASC"]]
+});
     // Filter out emails with "RE:" in subject and no inReplyTo or references
     emails = emails.filter(email => {
       const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
