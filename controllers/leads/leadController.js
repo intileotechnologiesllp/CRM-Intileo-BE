@@ -1169,6 +1169,12 @@ exports.getAllLeadDetails = async (req, res) => {
       include: [{ model: Attachment, as: "attachments" }],
       order: [["createdAt", "ASC"]]
     });
+    // Filter out emails with "RE:" in subject and no inReplyTo or references
+    emails = emails.filter(email => {
+      const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
+      const noThread = (!email.inReplyTo || email.inReplyTo === "") && (!email.references || email.references === "");
+      return !(hasRE && noThread);
+    });
 
     if (!emails.length) {
       return res.status(404).json({ message: "No emails found for this conversation." });
