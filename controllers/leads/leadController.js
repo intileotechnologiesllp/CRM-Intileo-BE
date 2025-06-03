@@ -518,6 +518,10 @@ if (pref && pref.columns) {
   leadAttributes = columns
     .filter(col => col.check && leadFields.includes(col.key))
     .map(col => col.key);
+    // Always include leadId
+if (!leadAttributes.includes('leadId')) {
+  leadAttributes.unshift('leadId');
+}
 
   leadDetailsAttributes = columns
     .filter(col => col.check && leadDetailsFields.includes(col.key))
