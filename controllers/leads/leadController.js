@@ -1153,7 +1153,7 @@ exports.getAllLeadDetails = async (req, res) => {
     const userEmail = userCredential.email.toLowerCase();
 
     // Find all emails between user and client (both directions)
-    const emails = await Email.findAll({
+    let emails = await Email.findAll({
       where: {
         [Op.or]: [
           {
