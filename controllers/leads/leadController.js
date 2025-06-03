@@ -1087,9 +1087,9 @@ exports.getAllLeadDetails = async (req, res) => {
   const { clientEmail } = req.body;
   const { leadId } = req.params;
 
-  if (!clientEmail) {
-    return res.status(400).json({ message: "clientEmail is required." });
-  }
+  // if (!clientEmail) {
+  //   return res.status(400).json({ message: "clientEmail is required." });
+  // }
 
       if (!leadId) {
     return res.status(400).json({ message: "leadId is required in params." });
@@ -1097,6 +1097,13 @@ exports.getAllLeadDetails = async (req, res) => {
 
   try {
     // Get the user's email address from credentials
+        if (!clientEmail) {
+      const lead = await Lead.findByPk(leadId);
+      if (!lead || !lead.email) {
+        return res.status(404).json({ message: "Lead or lead email not found." });
+      }
+      clientEmail = lead.email;
+    }
     const userCredential = await UserCredential.findOne({ where: { masterUserID } });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
