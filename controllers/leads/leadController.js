@@ -1084,7 +1084,7 @@ exports.getLeadsByMasterUser = async (req, res) => {
 
 exports.getAllLeadDetails = async (req, res) => {
   const masterUserID = req.adminId;
-  const { clientEmail } = req.body;
+  // const { clientEmail } = req.body?.clientEmail;
   const { leadId } = req.params;
 
   // if (!clientEmail) {
@@ -1097,13 +1097,11 @@ exports.getAllLeadDetails = async (req, res) => {
 
   try {
     // Get the user's email address from credentials
-        if (!clientEmail) {
-      const lead = await Lead.findByPk(leadId);
-      if (!lead || !lead.email) {
-        return res.status(404).json({ message: "Lead or lead email not found." });
-      }
-      clientEmail = lead.email;
+    const lead = await Lead.findByPk(leadId);
+    if (!lead || !lead.email) {
+      return res.status(404).json({ message: "Lead or lead email not found." });
     }
+    const clientEmail = lead.email;
     const userCredential = await UserCredential.findOne({ where: { masterUserID } });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
@@ -1172,7 +1170,6 @@ exports.getAllLeadDetails = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
 
-        const lead = await Lead.findByPk(leadId);
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
 
     res.status(200).json({
