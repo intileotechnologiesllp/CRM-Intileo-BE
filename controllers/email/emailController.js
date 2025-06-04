@@ -347,25 +347,37 @@ exports.fetchRecentEmail = async (adminId) => {
     await connection.openBox("INBOX");
 
     console.log("Fetching the most recent email...");
-    const sinceDate = formatDateForIMAP(
-      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    );
-    console.log(`Using SINCE date: ${sinceDate}`);
 
-    const searchCriteria = [["SINCE", sinceDate]];
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
 
-    const messages = await connection.search(searchCriteria, fetchOptions);
+    // Fetch all emails, then get the most recent one
+    const fetchOptions = { bodies: "", struct: true };
+    const messages = await connection.search(["ALL"], fetchOptions);
 
-    console.log(`Total emails found: ${messages.length}`);
-
-    if (messages.length === 0) {
-      console.log("No emails found.");
+    if (!messages.length) {
+      connection.end();
       return { message: "No emails found." };
     }
+
+    //...................original code.................
+    // const sinceDate = formatDateForIMAP(
+    //   new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    // );
+    // console.log(`Using SINCE date: ${sinceDate}`);
+
+    // const searchCriteria = [["SINCE", sinceDate]];
+    // const fetchOptions = {
+    //   bodies: "",
+    //   struct: true,
+    // };
+
+    // const messages = await connection.search(searchCriteria, fetchOptions);
+
+    // console.log(`Total emails found: ${messages.length}`);
+
+    // if (messages.length === 0) {
+    //   console.log("No emails found.");
+    //   return { message: "No emails found." };
+    // }
 
     // Get the most recent email
     const recentMessage = messages[messages.length - 1];
