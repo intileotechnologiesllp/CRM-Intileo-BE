@@ -101,6 +101,10 @@ threadId: {
   type: DataTypes.STRING,
   allowNull: true,
 },
+leadId:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Allow NULL values for emails not linked to a lead
+}
 // isShared: {
 //   type: DataTypes.BOOLEAN,
 //   allowNull: false,
