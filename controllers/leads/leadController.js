@@ -195,7 +195,7 @@ exports.createLead = async (req, res) => {
     organizationCountry,
     proposalSentDate,
     status,
-    sourceOrigin
+    sourceOrgin
   } = req.body;
 
   console.log(req.role, "role of the user............");
@@ -284,25 +284,31 @@ if (!orgRecord || !orgRecord.leadOrganizationId) {
       masterUserID: req.adminId,
       ownerId:req.adminId,// Associate the lead with the authenticated user
       ownerName,// Store the role of the user as ownerName,
-      sourceOrigin // Indicate that the lead was created manually
+      sourceOrgin // Indicate that the lead was created manually
     });
-
+if (sourceOrgin === 0 && req.body.emailID) {
+  await Email.update(
+    { leadId: lead.leadId },
+    { where: { emailID: req.body.emailID } }
+  );
+}
     // --- Add this block to link existing emails to the new lead ---
-await Email.update(
-  { leadId: lead.leadId },
-  {
-    where: {
-      [Op.or]: [
-        { sender: lead.email },
-        { recipient: { [Op.like]: `%${lead.email}%` } }
-      ]
-    }
-  }
-);
+// await Email.update(
+//   { leadId: lead.leadId },
+//   {
+//     where: {
+//       [Op.or]: [
+//         { sender: lead.email },
+//         { recipient: { [Op.like]: `%${lead.email}%` } }
+//       ]
+//     }
+//   }
+// );
 // --- End block ---
     await LeadDetails.create({
       leadId: lead.leadId,
       responsiblePerson:req.adminId,
+      sourceOrgin:sourceOrgin
     });
 
     await historyLogger(
