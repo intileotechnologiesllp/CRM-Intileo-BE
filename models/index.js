@@ -12,6 +12,8 @@ Person.hasMany(Lead, { foreignKey: "personId" });
 
 Lead.belongsTo(Organization, { foreignKey: "leadOrganizationId" });
 Organization.hasMany(Lead, { foreignKey: "leadOrganizationId" });
+Person.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "LeadOrganization" });
+Organization.hasMany(Person, { foreignKey: "leadOrganizationId", as: "persons" });
 
 module.exports = {
   Lead,

@@ -197,6 +197,17 @@ exports.createLead = async (req, res) => {
     status,
     sourceOrgin
   } = req.body;
+    // --- Add validation here ---
+  if (!contactPerson || !organization || !title || !email) {
+    return res.status(400).json({ message: "contactPerson, organization, title, and email are required." });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Invalid email format." });
+  }
+  if (proposalValue && proposalValue < 0) {
+    return res.status(400).json({ message: "Proposal value must be positive." });
+  }
+  // --- End validation ---
 
   console.log(req.role, "role of the user............");
 
