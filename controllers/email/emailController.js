@@ -514,31 +514,31 @@ if (userCredential && userCredential.blockedEmail) {
     }
 
     // Save related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
+    // for (const relatedEmail of relatedEmails) {
+    //   const existingRelatedEmail = await Email.findOne({
+    //     where: { messageId: relatedEmail.messageId },
+    //   });
 
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
-    // Sae related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
+    //   if (!existingRelatedEmail) {
+    //     await Email.create(relatedEmail);
+    //     console.log(`Related email saved: ${relatedEmail.messageId}`);
+    //   } else {
+    //     console.log(`Related email already exists: ${relatedEmail.messageId}`);
+    //   }
+    // }
+    // // Sae related emails in the database
+    // for (const relatedEmail of relatedEmails) {
+    //   const existingRelatedEmail = await Email.findOne({
+    //     where: { messageId: relatedEmail.messageId },
+    //   });
 
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
+    //   if (!existingRelatedEmail) {
+    //     await Email.create(relatedEmail);
+    //     console.log(`Related email saved: ${relatedEmail.messageId}`);
+    //   } else {
+    //     console.log(`Related email already exists: ${relatedEmail.messageId}`);
+    //   }
+    // }
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
