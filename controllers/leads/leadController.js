@@ -286,6 +286,20 @@ if (!orgRecord || !orgRecord.leadOrganizationId) {
       ownerName,// Store the role of the user as ownerName,
       sourceOrigin // Indicate that the lead was created manually
     });
+
+    // --- Add this block to link existing emails to the new lead ---
+await Email.update(
+  { leadId: lead.leadId },
+  {
+    where: {
+      [Op.or]: [
+        { sender: lead.email },
+        { recipient: { [Op.like]: `%${lead.email}%` } }
+      ]
+    }
+  }
+);
+// --- End block ---
     await LeadDetails.create({
       leadId: lead.leadId,
       responsiblePerson:req.adminId,
