@@ -1425,14 +1425,32 @@ exports.getAllLeadDetails = async (req, res) => {
       where: { leadId },
       order: [["createdAt", "DESC"]],
     });
+    // Get all unique creator IDs from notes
+    const creatorIds = [...new Set(notes.map(note => note.createdBy))];
 
+    // Fetch all creators in one query
+    const creators = await MasterUser.findAll({
+      where: { masterUserID: creatorIds },
+      attributes: ["masterUserID", "name"]
+    });
+    const creatorMap = {};
+    creators.forEach(user => {
+      creatorMap[user.masterUserID] = user.name;
+    });
+
+    // Attach creatorName to each note
+    const notesWithCreator = notes.map(note => {
+      const noteObj = note.toJSON();
+      noteObj.creatorName = creatorMap[note.createdBy] || null;
+      return noteObj;
+    });
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
 
     res.status(200).json({
       message: "leads data fetched successfully.",
       lead,
       leadDetails,
-      notes,
+      notes:notesWithCreator,
       emails: relatedEmails
     });
   } catch (error) {
