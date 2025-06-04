@@ -1637,5 +1637,32 @@ exports.addLeadNote = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+exports.deleteLeadNote = async (req, res) => {
+const { noteId } = req.params;
+  const masterUserID = req.adminId;
+
+  if (!noteId) {
+    return res.status(400).json({ message: "noteId is required." });
+  }
+
+  try {
+    const note = await LeadNote.findByPk(noteId);
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if the note belongs to the current user
+    if (note.masterUserID !== masterUserID) {
+      return res.status(403).json({ message: "You do not have permission to delete this note." });
+    }
+
+    await note.destroy();
+    res.status(200).json({ message: "Note deleted successfully." });
+  } catch (error) {
+    console.error("Error deleting note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+
+};
 
 
