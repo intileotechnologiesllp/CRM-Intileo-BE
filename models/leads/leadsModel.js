@@ -2,8 +2,8 @@
 // const sequelize = require("../../config/db");
 // const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
 // const { number } = require("joi");
-// const Organization = require("../../models/leads/leadOrganizationModel");
-// const Person = require("../../models/leads/leadPersonModel"); // Import the Person model
+const leadOrganization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel"); // Import the Person model
 // const Lead = sequelize.define("Lead", {
 //   // Primary Key
 //   leadId: {
@@ -190,6 +190,7 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
 const { number } = require("joi");
+// const { Organization } = require("..");
 const Lead = sequelize.define("Lead", {
   // Primary Key
   leadId: {
@@ -197,7 +198,23 @@ const Lead = sequelize.define("Lead", {
     primaryKey: true,
     autoIncrement: true,
   },
-
+    personId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model: Person,
+      key: "personId"
+    },
+    allowNull: true,
+  },
+  leadOrganizationId: {
+    type: DataTypes.INTEGER,
+    references: {
+      model:"leadOrganizations", // Name of the Organization table
+      key: "leadOrganizationId",
+    },
+     allowNull: true,
+    },
+  
   // Contact Information
   contactPerson: {
     type: DataTypes.STRING,
@@ -339,15 +356,15 @@ const Lead = sequelize.define("Lead", {
 });
 
 // Define the one-to-one relationship
-Lead.hasOne(LeadDetails, {
-  foreignKey: "leadId",
-  as: "details",
-  onDelete: "CASCADE",
-});
+// Lead.hasOne(LeadDetails, {
+//   foreignKey: "leadId",
+//   as: "details",
+//   onDelete: "CASCADE",
+// });
 
-LeadDetails.belongsTo(Lead, {
-  foreignKey: "leadId",
-  as: "lead",
-});
+// LeadDetails.belongsTo(Lead, {
+//   foreignKey: "leadId",
+//   as: "lead",
+// });
 
 module.exports = Lead;

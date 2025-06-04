@@ -123,7 +123,7 @@ const LeadDetails = sequelize.define("LeadDetails", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: Lead,
+      model: "leads",
       key: "leadId",
     },
     onDelete: "CASCADE", // Delete LeadDetails if the associated Lead is deleted

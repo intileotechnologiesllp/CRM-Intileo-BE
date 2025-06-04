@@ -1,15 +1,15 @@
-const Lead = require("../../models/leads/leadsModel");
+// const Lead = require("../../models/leads/leadsModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
-const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
+//const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
 const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
 const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
-// const Person = require("../../models/leads/leadPersonModel"); // Import Person model
-// const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
-//  const { Lead, LeadDetails, Person, Organization } = require("../../models");
+ //const Person = require("../../models/leads/leadPersonModel"); // Import Person model
+ //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
+  const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
 const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
@@ -221,11 +221,35 @@ exports.createLead = async (req, res) => {
         message: "Access denied. You do not have permission to create leads.",
       });
     }
+
+        // 1. Find or create Organization
+let orgRecord = await Organization.findOne({ where: { organization } });
+if (!orgRecord) {
+  orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
+}
+console.log("orgRecord after create/find:", orgRecord?.organizationId, orgRecord?.organization);
+
+// Defensive: If orgRecord is still not found, stop!
+if (!orgRecord || !orgRecord.leadOrganizationId) {
+  return res.status(500).json({ message: "Failed to create/find organization." });
+}
+
+    // 2. Find or create Person (linked to organization)
+    let personRecord = await Person.findOne({ where: { email } });
+    if (!personRecord) {
+      personRecord = await Person.create({
+        contactPerson: contactPerson,
+        email,
+        phone,
+        leadOrganizationId: orgRecord.leadOrganizationId,
+        masterUserID: req.adminId
+      });
+    }
         const duplicateLead = await Lead.findOne({
       where: {
         organization,
         contactPerson,
-        email,
+        // email,
         title
       }
     });
@@ -237,6 +261,8 @@ exports.createLead = async (req, res) => {
      const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
     const ownerName = owner ? owner.name : null;
     const lead = await Lead.create({
+        personId: personRecord.personId,           // <-- Add this
+  leadOrganizationId: orgRecord.leadOrganizationId,
       contactPerson,
       organization,
       title,
@@ -555,88 +581,139 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
 
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
+//................................................................//filter
+if (filterId) {
+  // Fetch the saved filter
+  const filter = await LeadFilter.findByPk(filterId);
+  if (!filter) {
+    return res.status(404).json({ message: "Filter not found." });
+  }
+  const filterConfig = typeof filter.filterConfig === "string"
+    ? JSON.parse(filter.filterConfig)
+    : filter.filterConfig;
 
-    if (filterId) {
-      // Fetch the saved filter
-      const filter = await LeadFilter.findByPk(filterId);
-      if (!filter) {
-        console.log("→ Filter not found for filterId:", filterId);
-        return res.status(404).json({ message: "Filter not found." });
+  const { all = [], any = [] } = filterConfig;
+  const leadFields = Object.keys(Lead.rawAttributes);
+  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+  const personFields = Object.keys(Person.rawAttributes);
+  const organizationFields = Object.keys(Organization.rawAttributes);
+
+  let filterWhere = {};
+  let leadDetailsWhere = {};
+  let personWhere = {};
+  let organizationWhere = {};
+
+  // --- Your new filter logic for all ---
+  if (all.length > 0) {
+    filterWhere[Op.and] = [];
+    leadDetailsWhere[Op.and] = [];
+    personWhere[Op.and] = [];
+    organizationWhere[Op.and] = [];
+    all.forEach(cond => {
+      if (leadFields.includes(cond.field)) {
+        filterWhere[Op.and].push(buildCondition(cond));
+      } else if (leadDetailsFields.includes(cond.field)) {
+        leadDetailsWhere[Op.and].push(buildCondition(cond));
+      } else if (personFields.includes(cond.field)) {
+        personWhere[Op.and].push(buildCondition(cond));
+      } else if (organizationFields.includes(cond.field)) {
+        organizationWhere[Op.and].push(buildCondition(cond));
       }
-      console.log("→ Loaded filterConfig:", JSON.stringify(filter.filterConfig));
-const filterConfig = typeof filter.filterConfig === "string"
-  ? JSON.parse(filter.filterConfig)
-  : filter.filterConfig;
+    });
+    if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+    if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
+    if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
+    if (organizationWhere[Op.and].length === 0) delete organizationWhere[Op.and];
+  }
 
-      const { all = [], any = [] } =filterConfig;
-      const leadFields = Object.keys(Lead.rawAttributes);
-      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+  // --- Your new filter logic for any ---
+  if (any.length > 0) {
+    filterWhere[Op.or] = [];
+    leadDetailsWhere[Op.or] = [];
+    personWhere[Op.or] = [];
+    organizationWhere[Op.or] = [];
+    any.forEach(cond => {
+      if (leadFields.includes(cond.field)) {
+        filterWhere[Op.or].push(buildCondition(cond));
+      } else if (leadDetailsFields.includes(cond.field)) {
+        leadDetailsWhere[Op.or].push(buildCondition(cond));
+      } else if (personFields.includes(cond.field)) {
+        personWhere[Op.or].push(buildCondition(cond));
+      } else if (organizationFields.includes(cond.field)) {
+        organizationWhere[Op.or].push(buildCondition(cond));
+      }
+    });
+    if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+    if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
+    if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
+    if (organizationWhere[Op.or].length === 0) delete organizationWhere[Op.or];
+  }
 
-      let filterWhere = {};
-      let leadDetailsWhere = {};
+  // Merge with archive/masterUserID filters
+  if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
+  if (masterUserID) filterWhere.masterUserID = masterUserID;
 
-if (all.length > 0) {
-  filterWhere[Op.and] = [];
-  leadDetailsWhere[Op.and] = [];
-  all.forEach(cond => {
-    console.log("→ Processing 'all' condition:", cond);
-    if (leadFields.includes(cond.field)) {
-      const condition = buildCondition(cond);
-      console.log("→ Lead condition:", condition);
-      filterWhere[Op.and].push(condition);
-    } else if (leadDetailsFields.includes(cond.field)) {
-      const condition = buildCondition(cond);
-      console.log("→ LeadDetails condition:", condition);
-      leadDetailsWhere[Op.and].push(condition);
-    } else {
-      console.log("→ Field not found in Lead or LeadDetails:", cond.field);
-    }
-  });
-  if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-  if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
-}
-if (any.length > 0) {
-  filterWhere[Op.or] = [];
-  leadDetailsWhere[Op.or] = [];
-  any.forEach(cond => {
-    console.log("→ Processing 'any' condition:", cond);
-    if (leadFields.includes(cond.field)) {
-      const condition = buildCondition(cond);
-      console.log("→ Lead condition (OR):", condition);
-      filterWhere[Op.or].push(condition);
-    } else if (leadDetailsFields.includes(cond.field)) {
-      const condition = buildCondition(cond);
-      console.log("→ LeadDetails condition (OR):", condition);
-      leadDetailsWhere[Op.or].push(condition);
-    } else {
-      console.log("→ Field not found in Lead or LeadDetails (OR):", cond.field);
-    }
-  });
-  if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-  if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
-}
-
-      // Merge with archive/masterUserID filters
-      if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
-      if (masterUserID) filterWhere.masterUserID = masterUserID;
-
-      whereClause = filterWhere;
+  whereClause = filterWhere;
 
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
       console.log("→ Built leadDetailsWhere:", JSON.stringify(leadDetailsWhere));
 
       // Add LeadDetails filter if needed
-      if (Object.keys(leadDetailsWhere).length > 0) {
-        include = [
-          ...include,
-          {
-            model: LeadDetails,
-            as: "details",
-            where: leadDetailsWhere,
-            required: true
+      // if (Object.keys(leadDetailsWhere).length > 0) {
+      //   include = [
+      //     ...include,
+      //     {
+      //       model: LeadDetails,
+      //       as: "details",
+      //       where: leadDetailsWhere,
+      //       required: true
             
-          }
-        ];
+      //     }
+      //   ];
+        if (Object.keys(leadDetailsWhere).length > 0) {
+    include.push({
+      model: LeadDetails,
+      as: "details",
+      where: leadDetailsWhere,
+      required: true
+    });
+  } else {
+    include.push({
+      model: LeadDetails,
+      as: "details",
+      required: false
+    });
+  }
+
+  if (Object.keys(personWhere).length > 0) {
+    include.push({
+      model: Person,
+      as: "LeadPerson",
+      required: true,
+      where: personWhere
+    });
+  } else {
+    include.push({
+      model: Person,
+      as: "LeadPerson",
+      required: false
+    });
+  }
+
+  if (Object.keys(organizationWhere).length > 0) {
+    include.push({
+      model: Organization,
+      as: "LeadOrganization",
+      required: true,
+      where: organizationWhere
+    });
+  } else {
+    include.push({
+      model: Organization,
+      as: "LeadOrganization",
+      required: false
+    });
+  
         console.log("→ Updated include with LeadDetails where:", JSON.stringify(leadDetailsWhere));
       }
     } else {
@@ -921,50 +998,169 @@ const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
 //   }
 // };
 
+// exports.updateLead = async (req, res) => {
+//   const { leadId } = req.params;
+//   const updateObj = req.body;
+
+//   try {
+//     // Get all columns for Lead and LeadDetails
+//     const leadFields = Object.keys(Lead.rawAttributes);
+//     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+
+//     // Split the update object
+//     const leadData = {};
+//     const leadDetailsData = {};
+
+//   //.......................changes..................
+
+
+//     for (const key in updateObj) {
+//       if (leadFields.includes(key)) {
+//         leadData[key] = updateObj[key];
+//       } else if (leadDetailsFields.includes(key)) {
+//         leadDetailsData[key] = updateObj[key];
+//       }
+//     }
+
+//     // Update Lead
+//     const lead = await Lead.findByPk(leadId);
+//     if (!lead) {
+//       return res.status(404).json({ message: "Lead not found" });
+//     }
+//     await lead.update(leadData);
+
+//     // Update or create LeadDetails
+//     let leadDetails = await LeadDetails.findOne({ where: { leadId } });
+//     if (leadDetails) {
+//       await leadDetails.update(leadDetailsData);
+//     } else if (Object.keys(leadDetailsData).length > 0) {
+//       leadDetailsData.leadId = leadId;
+//       leadDetails = await LeadDetails.create(leadDetailsData);
+//     }
+
+//     res.status(200).json({ message: "Lead updated successfully", lead, leadDetails });
+//   } catch (error) {
+//     console.error("Error updating lead:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 exports.updateLead = async (req, res) => {
   const { leadId } = req.params;
   const updateObj = req.body;
 
+  console.log("Request body:", updateObj);
+
   try {
-    // Get all columns for Lead and LeadDetails
+    // Get all columns for Lead, LeadDetails, Person, and Organization
     const leadFields = Object.keys(Lead.rawAttributes);
     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+    const personFields = Object.keys(Person.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+    console.log("Lead fields:", leadFields);
+    console.log("LeadDetails fields:", leadDetailsFields);
+    console.log("Person fields:", personFields);
+    console.log("Organization fields:", organizationFields);
 
     // Split the update object
     const leadData = {};
     const leadDetailsData = {};
+    const personData = {};
+    const organizationData = {};
 
-    for (const key in updateObj) {
-      if (leadFields.includes(key)) {
-        leadData[key] = updateObj[key];
-      } else if (leadDetailsFields.includes(key)) {
-        leadDetailsData[key] = updateObj[key];
+for (const key in updateObj) {
+  if (leadFields.includes(key)) {
+    leadData[key] = updateObj[key];
+  }
+  if (personFields.includes(key)) {
+    personData[key] = updateObj[key];
+  }
+  if (organizationFields.includes(key)) {
+    organizationData[key] = updateObj[key];
+  }
+  if (leadDetailsFields.includes(key)) {
+    leadDetailsData[key] = updateObj[key];
+  }
+}
+
+    console.log("leadData:", leadData);
+    console.log("leadDetailsData:", leadDetailsData);
+    console.log("personData:", personData);
+    console.log("organizationData:", organizationData);
+
+    // Update Lead
+    const lead = await Lead.findByPk(leadId);
+    console.log("Fetched lead:", lead ? lead.toJSON() : null);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Update or create Organization
+    let orgRecord;
+    if (Object.keys(organizationData).length > 0) {
+      orgRecord = await Organization.findOne({ where: { leadOrganizationId: lead.leadOrganizationId } });
+      console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
+      if (orgRecord) {
+        await orgRecord.update(organizationData);
+        console.log("Organization updated:", orgRecord.toJSON());
+      } else {
+        orgRecord = await Organization.create(organizationData);
+        console.log("Organization created:", orgRecord.toJSON());
+        leadData.leadOrganizationId = orgRecord.leadOrganizationId;
+        await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
+        console.log("Lead updated with new leadOrganizationId:", orgRecord.leadOrganizationId);
+      }
+    }
+
+    // Update or create Person
+    let personRecord;
+    if (Object.keys(personData).length > 0) {
+      personRecord = await Person.findOne({ where: { personId: lead.personId } });
+      console.log("Fetched personRecord:", personRecord ? personRecord.toJSON() : null);
+      if (personRecord) {
+        await personRecord.update(personData);
+        console.log("Person updated:", personRecord.toJSON());
+      } else {
+        if (orgRecord) personData.leadOrganizationId = orgRecord.leadOrganizationId;
+        personRecord = await Person.create(personData);
+        console.log("Person created:", personRecord.toJSON());
+        leadData.personId = personRecord.personId;
+        await lead.update({ personId: personRecord.personId });
+        console.log("Lead updated with new personId:", personRecord.personId);
       }
     }
 
     // Update Lead
-    const lead = await Lead.findByPk(leadId);
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
+    if (Object.keys(leadData).length > 0) {
+      await lead.update(leadData);
+      console.log("Lead updated:", lead.toJSON());
     }
-    await lead.update(leadData);
 
     // Update or create LeadDetails
     let leadDetails = await LeadDetails.findOne({ where: { leadId } });
+    console.log("Fetched leadDetails:", leadDetails ? leadDetails.toJSON() : null);
     if (leadDetails) {
-      await leadDetails.update(leadDetailsData);
+      if (Object.keys(leadDetailsData).length > 0) {
+        await leadDetails.update(leadDetailsData);
+        console.log("LeadDetails updated:", leadDetails.toJSON());
+      }
     } else if (Object.keys(leadDetailsData).length > 0) {
       leadDetailsData.leadId = leadId;
       leadDetails = await LeadDetails.create(leadDetailsData);
+      console.log("LeadDetails created:", leadDetails.toJSON());
     }
 
-    res.status(200).json({ message: "Lead updated successfully", lead, leadDetails });
+    res.status(200).json({
+      message: "Lead updated successfully",
+      lead,
+      leadDetails,
+      person: personRecord,
+      organization: orgRecord
+    });
   } catch (error) {
     console.error("Error updating lead:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
 exports.deleteLead = async (req, res) => {
   const { leadId } = req.params; // Use leadId from the request parameters
 
