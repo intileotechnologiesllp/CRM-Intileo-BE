@@ -612,31 +612,26 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
   });
 }
 let masterUserID;
-if (req.role === "admin") {
-  // Admin: show all leads, do NOT filter by masterUserID
-  masterUserID = null;
-} else {
-  // General user: only their leads
-  masterUserID = req.adminId;
+if (req.role !== "admin") {
+  whereClause[Op.or] = [
+    { masterUserID: req.adminId },
+    { ownerId: req.adminId }
+  ];
 }
-
+// if (req.role !== "admin") {
+//   whereClause[Op.or] = [
+//     { masterUserID: req.adminId },
+//     { ownerId: req.adminId }
+//   ];
+// }
 // If a specific masterUserID is requested (e.g., for filtering by user)
 if (queryMasterUserID && queryMasterUserID !== "all") {
   masterUserID = queryMasterUserID;
 }
     // masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
-if (req.role !== "admin") {
-  // Show leads where user is masterUserID or ownerId
-  whereClause[Op.or] = [
-    { masterUserID: masterUserID },
-    { ownerId: masterUserID }
-  ];
-} else if (masterUserID) {
-  // For admin, only filter if a specific masterUserID is requested
-  whereClause.masterUserID = masterUserID;
-}
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
+
 //................................................................//filter
 if (filterId) {
   // Fetch the saved filter
@@ -708,7 +703,13 @@ if (filterId) {
   // Merge with archive/masterUserID filters
   if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
   if (masterUserID) filterWhere.masterUserID = masterUserID;
-
+if (req.role !== "admin") {
+  filterWhere[Op.or] = [
+    ...(filterWhere[Op.or] || []),
+    { masterUserID: req.adminId },
+    { ownerId: req.adminId }
+  ];
+}
   whereClause = filterWhere;
 
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
