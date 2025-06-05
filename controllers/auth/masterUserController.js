@@ -581,6 +581,8 @@ exports.getProfile = async (req, res) => {
         "department",
         "profileImage",
         "email",
+        "loginType",
+        "userType", // Include userType in the response
         "createdAt",   // Add this line
         "updatedAt",
       ],
