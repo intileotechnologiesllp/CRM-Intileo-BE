@@ -625,7 +625,16 @@ if (queryMasterUserID && queryMasterUserID !== "all") {
   masterUserID = queryMasterUserID;
 }
     // masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
-
+if (req.role !== "admin") {
+  // Show leads where user is masterUserID or ownerId
+  whereClause[Op.or] = [
+    { masterUserID: masterUserID },
+    { ownerId: masterUserID }
+  ];
+} else if (masterUserID) {
+  // For admin, only filter if a specific masterUserID is requested
+  whereClause.masterUserID = masterUserID;
+}
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
 //................................................................//filter
