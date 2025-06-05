@@ -1340,10 +1340,29 @@ exports.updateLeadCustomFields = async (req, res) => {
 
 exports.getNonAdminMasterUserNames = async (req, res) => {
   try {
+    const { search, userType } = req.query; // Add more filters as needed
+
+    // Build where clause
+    const where = {
+      userType: { [Op.ne]: "admin" }
+    };
+
+    // Search by name (case-insensitive)
+    if (search) {
+      where.name = { [Op.like]: `%${search}%` };
+    }
+
+    // Optional: filter by userType (e.g., "general", "master")
+    if (userType) {
+      where.userType = userType;
+    }
+
     const users = await MasterUser.findAll({
-      where: { userType: { [Op.ne]: "admin" } },
-      attributes: ["masterUserID", "name"], // Only return id and name
+      where,
+      attributes: ["masterUserID", "name", "userType"], // Add more fields if needed
+      order: [["name", "ASC"]]
     });
+
     res.status(200).json({ users });
   } catch (error) {
     console.error("Error fetching master users:", error);
