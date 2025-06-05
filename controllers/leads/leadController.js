@@ -548,6 +548,8 @@ exports.getLeads = async (req, res) => {
   } = req.query;
 
   try {
+        // Determine masterUserID based on role
+
         const pref = await LeadColumnPreference.findOne();
     // let leadAttributes, leadDetailsAttributes;
     // if (pref && Array.isArray(pref.columns)) {
@@ -607,8 +609,8 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
     attributes: leadDetailsAttributes
   });
 }
-
-    let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
+let masterUserID = req.role === "admin" ? "all" : req.adminId;
+     masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
 
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
@@ -1694,6 +1696,39 @@ const { noteId } = req.params;
     res.status(500).json({ message: "Internal server error" });
   }
 
+};
+exports.updateLeadNote = async (req, res) => {
+  const { noteId } = req.params;
+  const { content } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!noteId) {
+    return res.status(400).json({ message: "noteId is required." });
+  }
+  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+    return res.status(400).json({ message: "Note is required and must be under 100KB." });
+  }
+
+  try {
+    const note = await LeadNote.findByPk(noteId);
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if the note belongs to the current user
+    if (note.masterUserID !== masterUserID) {
+      return res.status(403).json({ message: "You do not have permission to edit this note." });
+    }
+
+    note.content = content;
+    await note.save();
+
+    res.status(200).json({ message: "Note updated successfully.", note });
+  } catch (error) {
+    console.error("Error updating note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
 };
 
 
