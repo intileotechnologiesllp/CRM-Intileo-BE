@@ -602,11 +602,13 @@ if (filterId) {
   // Merge with archive/masterUserID filters
   if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
   if (masterUserID) filterWhere.masterUserID = masterUserID;
+// filepath: [leadController.js](http://_vscodecontentref_/6)
 if (req.role !== "admin") {
+  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
   filterWhere[Op.or] = [
     ...(filterWhere[Op.or] || []),
-    { masterUserID: req.adminId },
-    { ownerId: req.adminId }
+    { masterUserID: userId },
+    { ownerId: userId }
   ];
 }
   whereClause = filterWhere;
