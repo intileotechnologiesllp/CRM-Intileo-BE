@@ -546,6 +546,8 @@ exports.getLeads = async (req, res) => {
     masterUserID: queryMasterUserID,
     filterId
   } = req.query;
+  console.log(req.role, "role of the user............");
+  
 
   try {
         // Determine masterUserID based on role
@@ -609,8 +611,20 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
     attributes: leadDetailsAttributes
   });
 }
-let masterUserID = req.role === "admin" ? "all" : req.adminId;
-     masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
+let masterUserID;
+if (req.role === "admin") {
+  // Admin: show all leads, do NOT filter by masterUserID
+  masterUserID = null;
+} else {
+  // General user: only their leads
+  masterUserID = req.adminId;
+}
+
+// If a specific masterUserID is requested (e.g., for filtering by user)
+if (queryMasterUserID && queryMasterUserID !== "all") {
+  masterUserID = queryMasterUserID;
+}
+    // masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
 
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
