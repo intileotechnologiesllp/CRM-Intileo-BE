@@ -26,6 +26,7 @@ router.post("/by-master-user", leadController.getLeadsByMasterUser);
 router.get("/get-All-lead-details/:leadId", verifyToken, leadController.getAllLeadDetails);
 router.post("/add-lead-note/:leadId", verifyToken, leadController.addLeadNote);
 router.get("/delete-lead-note/:noteId", verifyToken, leadController.deleteLeadNote);
+router.post("/update-lead-note/:noteId", verifyToken, leadController.updateLeadNote);
 
 
 module.exports = router;

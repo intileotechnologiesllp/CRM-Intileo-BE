@@ -78,19 +78,43 @@ exports.createOrganization = async (req, res) => {
 };
 exports.getContactTimeline = async (req, res) => {
   try {
-    // Get monthsBack from query, default to 3
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    // Search
+    const search = req.query.search || "";
+const searchFilter = search
+  ? {
+      [Op.or]: [
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } },
+        { jobTitle: { [Op.like]: `%${search}%` } },
+        { personLabels: { [Op.like]: `%${search}%` } },
+        { organization: { [Op.like]: `%${search}%` } }, // Assuming organization is a field in Person
+      ],
+    }
+  : {};
+
+    // Date filter (monthsBack)
     const monthsBack = parseInt(req.query.monthsBack) || 3;
     const fromDate = new Date();
     fromDate.setMonth(fromDate.getMonth() - monthsBack);
 
-    // Fetch all persons with their organization
-    const persons = await Person.findAll({
+    // Main query
+    const { count, rows: persons } = await Person.findAndCountAll({
+      where: {
+        ...searchFilter,
+        createdAt: { [Op.gte]: fromDate },
+      },
       include: [
         {
           model: Organization,
           as: "LeadOrganization",
-          attributes: ["leadOrganizationId", "organization"]
-        }
+          attributes: ["leadOrganizationId", "organization"],
+        },
       ],
       attributes: [
         "personId",
@@ -99,19 +123,25 @@ exports.getContactTimeline = async (req, res) => {
         "phone",
         "jobTitle",
         "personLabels",
-        "leadOrganizationId"
+        "leadOrganizationId",
+        "createdAt",
       ],
-      order: [["contactPerson", "ASC"]]
+      order: [["contactPerson", "ASC"]],
+      limit,
+      offset,
     });
-
-    // Optionally, fetch recent activities for each person (leads, emails, notes)
-    // Example: filter leads, emails, notes by createdAt >= fromDate
-    // You can add similar filters for emails and notes if you include them here
 
     res.status(200).json({
       message: "Contact timeline fetched successfully",
-      persons,
-      filter: { monthsBack, fromDate }
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+      filter: { monthsBack, fromDate },
+      search,
+      persons
     });
   } catch (error) {
     console.error("Error fetching contact timeline:", error);
@@ -214,6 +244,79 @@ exports.getOrganizationTimeline = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching organization timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonFields = async (req, res) => {
+  try {
+    // You can customize or fetch this list from your model or config if needed
+    const fields = [
+      { key: "contactPerson", label: "Name" },
+      { key: "firstName", label: "First name" },
+      { key: "lastName", label: "Last name" },
+      { key: "email", label: "Email" },
+      { key: "phone", label: "Phone" },
+      { key: "jobTitle", label: "Job title" },
+      { key: "birthday", label: "Birthday" },
+      { key: "personLabels", label: "Labels" },
+      { key: "organization", label: "Organization" },
+      { key: "owner", label: "Owner" },
+      { key: "notes", label: "Notes" },
+      { key: "postalAddress", label: "Postal address" },
+      { key: "postalAddressDetails", label: "Postal address (details)" },
+      { key: "visibleTo", label: "Visible to" },
+      { key: "createdAt", label: "Person created" },
+      { key: "updatedAt", label: "Update time" },
+      { key: "activitiesToDo", label: "Activities to do" },
+      { key: "doneActivities", label: "Done activities" },
+      { key: "closedDeals", label: "Closed deals" },
+      { key: "openDeals", label: "Open deals" },
+      { key: "wonDeals", label: "Won deals" },
+      { key: "lostDeals", label: "Lost deals" },
+      { key: "totalActivities", label: "Total activities" },
+      { key: "lastActivityDate", label: "Last activity date" },
+      { key: "nextActivityDate", label: "Next activity date" },
+      { key: "lastEmailReceived", label: "Last email received" },
+      { key: "lastEmailSent", label: "Last email sent" },
+      { key: "emailMessagesCount", label: "Email messages count" },
+      { key: "instantMessenger", label: "Instant messenger" }
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching person fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getOrganizationFields = async (req, res) => {
+  try {
+    const fields = [
+      { key: "organization", label: "Organization name" },
+      { key: "organizationLabels", label: "Labels" },
+      { key: "address", label: "Address" },
+      { key: "addressDetails", label: "Address (details)" },
+      { key: "visibleTo", label: "Visible to" },
+      { key: "createdAt", label: "Organization created" },
+      { key: "updatedAt", label: "Update time" },
+      { key: "owner", label: "Owner" },
+      { key: "people", label: "People" },
+      { key: "notes", label: "Notes" },
+      { key: "activitiesToDo", label: "Activities to do" },
+      { key: "doneActivities", label: "Done activities" },
+      { key: "closedDeals", label: "Closed deals" },
+      { key: "openDeals", label: "Open deals" },
+      { key: "wonDeals", label: "Won deals" },
+      { key: "lostDeals", label: "Lost deals" },
+      { key: "totalActivities", label: "Total activities" },
+      { key: "lastActivityDate", label: "Last activity date" },
+      { key: "nextActivityDate", label: "Next activity date" },
+      { key: "lastEmailReceived", label: "Last email received" },
+      { key: "lastEmailSent", label: "Last email sent" },
+      { key: "emailMessagesCount", label: "Email messages count" }
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching organization fields:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
