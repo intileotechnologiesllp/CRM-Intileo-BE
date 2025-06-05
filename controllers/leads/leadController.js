@@ -430,109 +430,6 @@ exports.unarchiveLead = async (req, res) => {
   }
 };
 
-// exports.getLeads = async (req, res) => {
-//   const {
-//     isArchived,
-//     search,
-//     page = 1,
-//     limit = 10,
-//     sortBy = "createdAt",
-//     order = "DESC",
-//     masterUserID:queryMasterUserID
-//   } = req.query;
-
-//   const { valueLabels } = req.body || {}; // Get valueLabels from the request body
-
-//   try {
-//     const whereClause = {};
-// //let masterUserID = queryMasterUserID || req.adminId;
-//     // Allow masterUserID=all to fetch all leads, otherwise filter
-//     let masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
-//     // Update valueLabels for all records if provided
-//     if (valueLabels) {
-//       const [updatedCount] = await Lead.update(
-//         { valueLabels }, // Set the new value for valueLabels
-//         { where: {} } // Update all records
-//       );
-
-//       // Log the update in the audit trail
-//       await logAuditTrail(
-//         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//         "LEAD_UPDATE_ALL_LABELS", // Mode
-//         req.adminId, // Admin ID of the user making the update
-//         `Updated valueLabels for ${updatedCount} records`, // Description
-//         null
-//       );
-//     }
-
-//     // Filter by archive status if `isArchived` is provided
-//     if (isArchived !== undefined) {
-//       whereClause.isArchived = isArchived === "true"; // Convert string to boolean
-//     }
-//         if (masterUserID) {
-//       whereClause.masterUserID = masterUserID;
-//     }
-
-//     // Add search functionality
-//     if (search) {
-//       whereClause[Op.or] = [
-//         { contactPerson: { [Op.like]: `%${search}%` } }, // Search by contact person
-//         { organization: { [Op.like]: `%${search}%` } }, // Search by organization
-//         { title: { [Op.like]: `%${search}%` } }, // Search by title
-//         { email: { [Op.like]: `%${search}%` } }, // Search by email
-//         { phone: { [Op.like]: `%${search}%` } }, // Search by phone
-//       ];
-//     }
-
-//   //   // Pagination
-//     const offset = (page - 1) * limit;
-//     // --- Get user column preferences ---
-//     // const masterUserID = req.adminId;
-//     // const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
-//     // const columns = pref ? pref.columns : null;
-//     //     // Only use valid Lead fields
-//     // const validLeadFields = Object.keys(Lead.rawAttributes);
-//     // const leadAttributes = columns && columns.length
-//     //   ? columns
-//     //       .map(col => typeof col === "string" ? col : col.key)
-//     //       .filter(key => validLeadFields.includes(key))
-//     //   : undefined;
-
-//     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
-//     const leads = await Lead.findAndCountAll({
-//       where: whereClause,
-//       include: [
-//         {
-//           model: LeadDetails,
-//           as: "details", // Use the alias defined in the association
-//           required: false, // Include leads even if they don't have leadDetails
-//         },
-//       ],
-//       limit: parseInt(limit), // Number of records per page
-//       offset: parseInt(offset), // Skip records for pagination
-//       order: [[sortBy, order.toUpperCase()]], // Sorting (e.g., createdAt DESC)
-//       // attributes:leadAttributes, // Only these columns
-//     });
-
-//     res.status(200).json({
-//       message: "Leads fetched successfully",
-//       totalRecords: leads.count, // Total number of records
-//       totalPages: Math.ceil(leads.count / limit), // Total number of pages
-//       currentPage: parseInt(page), // Current page
-//       leads: leads.rows, // Leads data with leadDetails
-//     });
-//   } catch (error) {
-//     console.error("Error fetching leads:", error);
-//     await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_FETCH", // Mode
-//       null, // No user ID for failed sign-in
-//       "Error fetching leads: " + error.message, // Error description
-//       null
-//     );
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 //...................new code..........................
 exports.getLeads = async (req, res) => {
@@ -612,10 +509,12 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
   });
 }
 let masterUserID;
+// filepath: [leadController.js](http://_vscodecontentref_/5)
 if (req.role !== "admin") {
+  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
   whereClause[Op.or] = [
-    { masterUserID: req.adminId },
-    { ownerId: req.adminId }
+    { masterUserID: userId },
+    { ownerId: userId }
   ];
 }
 // if (req.role !== "admin") {
@@ -625,9 +524,9 @@ if (req.role !== "admin") {
 //   ];
 // }
 // If a specific masterUserID is requested (e.g., for filtering by user)
-if (queryMasterUserID && queryMasterUserID !== "all") {
-  masterUserID = queryMasterUserID;
-}
+// if (queryMasterUserID && queryMasterUserID !== "all") {
+//   masterUserID = queryMasterUserID;
+// }
     // masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
