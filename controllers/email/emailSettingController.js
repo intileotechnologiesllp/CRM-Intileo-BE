@@ -128,9 +128,9 @@ exports.getDefaultEmail = async (req, res) => {
       where: { masterUserID },
     });
 
-    // if (!defaultEmail) {
-    //   return res.status(200).json({ message: "Default email not set." });
-    // }
+    if (!defaultEmail) {
+      return res.status(200).json({ message: "Default email not set." });
+    }
 
     res.status(200).json({
       message: "Default email fetched successfully.",
