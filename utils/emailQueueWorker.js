@@ -698,14 +698,14 @@ async function startFetchInboxWorker() {
     "FETCH_INBOX_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const { masterUserID, email, appPassword, batchSize, page, days,provider } = JSON.parse(msg.content.toString());
+        const { masterUserID, email, appPassword, batchSize, page, days,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
                 adminId: masterUserID,
-                body: { email, appPassword,provider },
+                body: { email, appPassword,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure },
                 // body: { appPassword },
                 query: { batchSize, page, days }
               },
