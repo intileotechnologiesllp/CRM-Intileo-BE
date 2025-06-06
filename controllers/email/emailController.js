@@ -254,17 +254,44 @@ const provider = req.body?.provider; // Default to gmail
 
     if (existingCredential) {
       // Update existing credentials
-      await existingCredential.update({ email, appPassword,provider });
+      // await existingCredential.update({ email, appPassword,provider });
+        await existingCredential.update({
+    email,
+    appPassword,
+    provider,
+    // Add custom provider fields
+    imapHost: provider === "custom" ? req.body.imapHost : null,
+    imapPort: provider === "custom" ? req.body.imapPort : null,
+    imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  });
       console.log(`User credentials updated for masterUserID: ${masterUserID}`);
     } else {
       // Create new credentials
-      await UserCredential.create({
-        masterUserID,
-        email,
-        appPassword,
-        provider
-      });
-      console.log(`User credentials added for masterUserID: ${masterUserID}`);
+      // await UserCredential.create({
+      //   masterUserID,
+      //   email,
+      //   appPassword,
+      //   provider
+      // });
+      // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+        // Create new credentials
+  await UserCredential.create({
+    masterUserID,
+    email,
+    appPassword,
+    provider,
+    // Add custom provider fields
+    imapHost: provider === "custom" ? req.body.imapHost : null,
+    imapPort: provider === "custom" ? req.body.imapPort : null,
+    imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  });
+  console.log(`User credentials added for masterUserID: ${masterUserID}`);
     }
 
     // Fetch emails after saving credentials
@@ -349,6 +376,7 @@ const folderMap = PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"]
       console.log(`Using SINCE date: ${sinceDate}`);
 
       const searchCriteria = [["SINCE", sinceDate]];
+      // const searchCriteria = ["ALL"];
       const fetchOptions = {
         bodies: "",
         struct: true,
