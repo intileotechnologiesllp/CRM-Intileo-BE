@@ -25,7 +25,7 @@ const DefaultEmail = sequelize.define("DefaultEmail", {
   },
   provider: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
     // defaultValue: "gmail", // Default to gmail
     validate: {
       isIn: [['gmail', 'outlook', 'yahoo', 'custom',"yandex"]], // Restrict to known providers
