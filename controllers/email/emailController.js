@@ -169,53 +169,53 @@ const provider = req.body?.provider; // Default to gmail
     //   },
     // };
         // Get provider config (gmail, yandex, etc.)
-let imapConfig;
+// let imapConfig;
 
-    if (provider === "custom") {
-      console.log("Using custom IMAP settings for provider:", provider);
+//     if (provider === "custom") {
+//       console.log("Using custom IMAP settings for provider:", provider);
       
-      // Fetch custom IMAP settings from UserCredential
-      const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-      console.log(userCredential, "userCredential");
+//       // Fetch custom IMAP settings from UserCredential
+//       const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+//       console.log(userCredential, "userCredential");
       
-      if (!userCredential || !userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
-      }
-      imapConfig = {
-        imap: {
-          user: email,
-          password: appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    } else {
-      // Use static config for known providers
-      const providerConfig = PROVIDER_CONFIG[provider];
-      if (!providerConfig) {
-        return res.status(400).json({ message: "Unsupported provider." });
-      }
-            imapConfig = {
-        imap: {
-          user: email,
-          password: appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    }
-    try {
-      const testConnection = await Imap.connect(imapConfig);
-      await testConnection.end(); // Close test connection
-    } catch (err) {
-      return res.status(401).json({ message: "Invalid email or app password. Please check your credentials." });
-    }
+//       if (!userCredential || !userCredential.imapHost || !userCredential.imapPort) {
+//         return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+//       }
+//       imapConfig = {
+//         imap: {
+//           user: email,
+//           password: appPassword,
+//           host: userCredential.imapHost,
+//           port: userCredential.imapPort,
+//           tls: userCredential.imapTLS,
+//           authTimeout: 30000,
+//           tlsOptions: { rejectUnauthorized: false },
+//         },
+//       };
+//     } else {
+//       // Use static config for known providers
+//       const providerConfig = PROVIDER_CONFIG[provider];
+//       if (!providerConfig) {
+//         return res.status(400).json({ message: "Unsupported provider." });
+//       }
+//             imapConfig = {
+//         imap: {
+//           user: email,
+//           password: appPassword,
+//           host: providerConfig.host,
+//           port: providerConfig.port,
+//           tls: providerConfig.tls,
+//           authTimeout: 30000,
+//           tlsOptions: { rejectUnauthorized: false },
+//         },
+//       };
+//     }
+    // try {
+    //   const testConnection = await Imap.connect(imapConfig);
+    //   await testConnection.end(); // Close test connection
+    // } catch (err) {
+    //   return res.status(401).json({ message: "Invalid email or app password. Please check your credentials." });
+    // }
     await publishToQueue("FETCH_INBOX_QUEUE", {
       masterUserID,
       email,
@@ -223,7 +223,13 @@ let imapConfig;
       batchSize,
       page,
       days,
-      provider
+      provider,
+    imapHost: req.body.imapHost,
+  imapPort: req.body.imapPort,
+  imapTLS: req.body.imapTLS,
+  smtpHost: req.body.smtpHost,
+  smtpPort: req.body.smtpPort,
+  smtpSecure: req.body.smtpSecure
     });
     res.status(200).json({ message: "Inbox fetch job queued successfully." });
   } catch (error) {
