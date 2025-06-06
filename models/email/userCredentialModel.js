@@ -10,12 +10,12 @@ const UserCredential = sequelize.define("UserCredential", {
   },
   email: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
     unique: true,
   },
   appPassword: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
   },
   syncStartDate: {
     type: DataTypes.STRING,
