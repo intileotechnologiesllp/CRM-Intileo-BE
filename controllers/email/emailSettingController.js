@@ -12,7 +12,19 @@ const multer = require("multer");
 const path = require("path");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { Op } = require("sequelize");
-
+const PROVIDER_CONFIG = {
+  gmail: {
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
+  },
+  yandex: {
+    host: "imap.yandex.com",
+    port: 993,
+    tls: true,
+  },
+  // Add more providers as needed
+};
 // Configure storage for signature images
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -56,7 +68,7 @@ const formatDateForIMAP = (date) => {
 
 exports.createOrUpdateDefaultEmail = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, senderName, isDefault } = req.body;
+  const { email, appPassword, senderName, isDefault, provider } = req.body; // <-- add provider here
 
   try {
     // Validate input
@@ -79,9 +91,12 @@ exports.createOrUpdateDefaultEmail = async (req, res) => {
       where: { masterUserID, email },
     });
 
+    const updateData = { appPassword, senderName, isDefault };
+    if (provider) updateData.provider = provider; // <-- add this line
+
     if (existingDefaultEmail) {
       // Update existing default email
-      await existingDefaultEmail.update({ appPassword, senderName, isDefault });
+      await existingDefaultEmail.update(updateData);
       return res
         .status(200)
         .json({ message: "Default email updated successfully." });
@@ -94,6 +109,7 @@ exports.createOrUpdateDefaultEmail = async (req, res) => {
       appPassword,
       senderName,
       isDefault,
+      provider // <-- add this line
     });
 
     res.status(201).json({ message: "Default email created successfully." });
@@ -302,19 +318,51 @@ const { syncStartDate:inputSyncStartDate } = req.body; // or req.query.syncStart
     console.log(`Fetching emails since ${humanReadableSinceDate}`);
 
     // Connect to IMAP server
-    const imapConfig = {
-      imap: {
-        user: userEmail,
-        password: userPassword,
-        host: "imap.gmail.com",
-        port: 993,
-        tls: true,
-        authTimeout: 30000,
-        tlsOptions: {
-          rejectUnauthorized: false,
-        },
-      },
-    };
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail,
+    //     password: userPassword,
+    //     host: "imap.gmail.com",
+    //     port: 993,
+    //     tls: true,
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false,
+    //     },
+    //   },
+    // };
+const provider = userCredential.provider || "gmail"; // default to gmail
+
+let imapConfig;
+if (provider === "custom") {
+  if (!userCredential.imapHost || !userCredential.imapPort) {
+    return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+  }
+  imapConfig = {
+    imap: {
+      user: userCredential.email,
+      password: userCredential.appPassword,
+      host: userCredential.imapHost,
+      port: userCredential.imapPort,
+      tls: userCredential.imapTLS,
+      authTimeout: 30000,
+      tlsOptions: { rejectUnauthorized: false },
+    },
+  };
+} else {
+  const providerConfig = PROVIDER_CONFIG[provider];
+  imapConfig = {
+    imap: {
+      user: userCredential.email,
+      password: userCredential.appPassword,
+      host: providerConfig.host,
+      port: providerConfig.port,
+      tls: providerConfig.tls,
+      authTimeout: 30000,
+      tlsOptions: { rejectUnauthorized: false },
+    },
+  };
+}
 
     const connection = await Imap.connect(imapConfig);
 
@@ -755,17 +803,50 @@ exports.downloadAttachment = async (req, res) => {
     if (!userCredential) return res.status(404).json({ message: "User credentials not found." });
 
     // Connect to IMAP and fetch the email
-    const imapConfig = {
-      imap: {
-        user: userCredential.email,
-        password: userCredential.appPassword,
-        host: "imap.gmail.com",
-        port: 993,
-        tls: true,
-        authTimeout: 30000,
-        tlsOptions: { rejectUnauthorized: false },
-      },
-    };
+    // const imapConfig = {
+    //   imap: {
+    //     user: userCredential.email,
+    //     password: userCredential.appPassword,
+    //     host: "imap.gmail.com",
+    //     port: 993,
+    //     tls: true,
+    //     authTimeout: 30000,
+    //     tlsOptions: { rejectUnauthorized: false },
+    //   },
+    // };
+const provider = userCredential.provider || "gmail"; // default to gmail
+
+let imapConfig;
+if (provider === "custom") {
+  if (!userCredential.imapHost || !userCredential.imapPort) {
+    return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+  }
+  imapConfig = {
+    imap: {
+      user: userCredential.email,
+      password: userCredential.appPassword,
+      host: userCredential.imapHost,
+      port: userCredential.imapPort,
+      tls: userCredential.imapTLS,
+      authTimeout: 30000,
+      tlsOptions: { rejectUnauthorized: false },
+    },
+  };
+} else {
+  const providerConfig = PROVIDER_CONFIG[provider];
+  imapConfig = {
+    imap: {
+      user: userCredential.email,
+      password: userCredential.appPassword,
+      host: providerConfig.host,
+      port: providerConfig.port,
+      tls: providerConfig.tls,
+      authTimeout: 30000,
+      tlsOptions: { rejectUnauthorized: false },
+    },
+  };
+}
+
     const connection = await Imap.connect(imapConfig);
     await connection.openBox(email.folder);
 

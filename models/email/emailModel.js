@@ -36,10 +36,10 @@ const Email = sequelize.define("Email", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  body: {
-    type: DataTypes.TEXT,
-    allowNull: true,
-  },
+body: {
+  type: DataTypes.TEXT('long'), // or 'medium' if you prefer
+  allowNull: true,
+},
   folder: {
     type: DataTypes.ENUM("inbox", "drafts", "outbox", "sent", "archive", "trash"),
     allowNull: false,
