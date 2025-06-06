@@ -23,6 +23,14 @@ const DefaultEmail = sequelize.define("DefaultEmail", {
     type: DataTypes.BOOLEAN, // Field to indicate if this is the default email
     defaultValue: false, // Default to false
   },
+  provider: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    // defaultValue: "gmail", // Default to gmail
+    validate: {
+      isIn: [['gmail', 'outlook', 'yahoo', 'custom',"yandex"]], // Restrict to known providers
+    },
+  }, 
 });
 
 module.exports = DefaultEmail;

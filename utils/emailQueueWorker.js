@@ -13,6 +13,19 @@ const { fetchInboxEmails } = require("../controllers/email/emailController");
 const QUEUE_NAME = "email-fetch-queue";
 const SCHEDULED_QUEUE = "scheduled-email-queue";
 const QUEUE = "EMAIL_QUEUE";
+const PROVIDER_SMTP_CONFIG = {
+  gmail: {
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+  },
+  yandex: {
+    host: "smtp.yandex.com",
+    port: 465,
+    secure: true,
+  },
+  // Add more providers as needed
+};
 
 // const limit = pLimit(5); // Limit concurrency to 5
 
@@ -73,15 +86,48 @@ async function startScheduledEmailWorker() {
             where: { masterUserID: email.masterUserID },
           });
           if (!userCredential) return channel.ack(msg);
-
+const provider = userCredential.provider; // default to gmail
           // Send email
-          const transporter = nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-              user: userCredential.email,
-              pass: userCredential.appPassword,
-            },
-          });
+          let transporterConfig;
+if (provider === "gmail" || provider === "yandex") {
+  const smtp = PROVIDER_SMTP_CONFIG[provider];
+  transporterConfig = {
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    auth: {
+      user: userCredential.email,
+      pass: userCredential.appPassword,
+    },
+  };
+} else if (provider === "custom") {
+  transporterConfig = {
+    host: userCredential.smtpHost,
+    port: userCredential.smtpPort,
+    secure: userCredential.smtpSecure, // true/false
+    auth: {
+      user: userCredential.email,
+      pass: userCredential.appPassword,
+    },
+  };
+  } else {
+  // fallback to gmail
+  transporterConfig = {
+    service: "gmail",
+    auth: {
+      user: userCredential.email,
+      pass: userCredential.appPassword,
+    },
+  };
+}
+const transporter = nodemailer.createTransport(transporterConfig);
+          // const transporter = nodemailer.createTransport({
+          //   service: "gmail",
+          //   auth: {
+          //     user: userCredential.email,
+          //     pass: userCredential.appPassword,
+          //   },
+          // });
 
           const info = await transporter.sendMail({
             from: userCredential.email,
@@ -264,6 +310,7 @@ async function sendEmailJob(emailData) {
   let SENDER_NAME = emailData.senderName;
   let signatureBlock = "";
   let userCredential;
+  
 
   // Fetch password if not provided
   if (!emailData.senderPassword) {
@@ -323,13 +370,52 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
   };
 
   // Send email
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: SENDER_EMAIL,
-      pass: SENDER_PASSWORD,
-    },
-  });
+  const provider =
+  emailData.provider ||
+  (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
+  (userCredential?.provider)
+
+    let transporterConfig;
+  if (provider === "gmail" || provider === "yandex") {
+    const smtp = PROVIDER_SMTP_CONFIG[provider];
+    transporterConfig = {
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
+    };
+  } else if (provider === "custom") {
+    transporterConfig = {
+      host: userCredential.smtpHost,
+      port: userCredential.smtpPort,
+      secure: userCredential.smtpSecure, // true/false
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
+    };
+  } else {
+    // fallback to gmail
+    transporterConfig = {
+      service: "gmail",
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
+          };
+  }
+
+  const transporter = nodemailer.createTransport(transporterConfig);
+  // const transporter = nodemailer.createTransport({
+  //   service: "gmail",
+  //   auth: {
+  //     user: SENDER_EMAIL,
+  //     pass: SENDER_PASSWORD,
+  //   },
+  // });
 
   const info = await transporter.sendMail(mailOptions);
 
@@ -612,14 +698,14 @@ async function startFetchInboxWorker() {
     "FETCH_INBOX_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const { masterUserID, email, appPassword, batchSize, page, days } = JSON.parse(msg.content.toString());
+        const { masterUserID, email, appPassword, batchSize, page, days,provider } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
                 adminId: masterUserID,
-                body: { email, appPassword },
+                body: { email, appPassword,provider },
                 // body: { appPassword },
                 query: { batchSize, page, days }
               },

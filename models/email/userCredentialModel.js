@@ -67,6 +67,39 @@ smartBcc: {
     allowNull: true, // Optional field
     defaultValue: [], // Default to an empty array
   },
+  provider: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: "gmail", // Default to gmail
+    validate: {
+      isIn: [['gmail', 'outlook', 'yahoo', 'custom',"yandex"]], // Restrict to known providers
+    },
+  },  
+    // Add these fields for custom provider support
+  imapHost: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  imapPort: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  imapTLS: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+  },
+  smtpHost: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  smtpPort: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  smtpSecure: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+  },
 });
 
 module.exports = UserCredential;
