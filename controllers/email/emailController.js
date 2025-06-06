@@ -2349,20 +2349,7 @@ exports.getUserCredential = async (req, res) => {
 
     res.status(200).json({
       message: "User credentials fetched successfully.",
-      credential: {
-        email: userCredential.email,
-        appPassword: userCredential.appPassword,
-        syncStartDate: userCredential.syncStartDate,
-        syncFolders: userCredential.syncFolders,
-        syncAllFolders: userCredential.syncAllFolders,
-        isTrackOpenEmail: userCredential.isTrackOpenEmail,
-        isTrackClickEmail: userCredential.isTrackClickEmail,
-        signature: userCredential.signature,
-        signatureName: userCredential.signatureName,
-        signatureImage: userCredential.signatureImage,
-        smartBcc: userCredential.smartBcc,
-        blockedEmail: userCredential.blockedEmail, // You may want to exclude this in production for security reasons
-      },
+      credential: userCredential, // Return all fields
     });
   } catch (error) {
     console.error("Error fetching user credentials:", error);
