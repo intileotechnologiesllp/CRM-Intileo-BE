@@ -7,13 +7,13 @@ const Organization = require("./leads/leadOrganizationModel");
 Lead.hasOne(LeadDetails, { foreignKey: "leadId", as: "details", onDelete: "CASCADE" });
 LeadDetails.belongsTo(Lead, { foreignKey: "leadId", as: "lead" });
 
-Lead.belongsTo(Person, { foreignKey: "personId" });
+Lead.belongsTo(Person, { as: "LeadPerson",foreignKey: "personId" });
 Person.hasMany(Lead, { foreignKey: "personId" });
 
-Lead.belongsTo(Organization, { foreignKey: "leadOrganizationId" });
+Lead.belongsTo(Organization, { as:"LeadOrganization",foreignKey: "leadOrganizationId" });
 Organization.hasMany(Lead, { foreignKey: "leadOrganizationId" });
 Person.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "LeadOrganization" });
-Organization.hasMany(Person, { foreignKey: "leadOrganizationId", as: "persons" });
+Organization.hasMany(Person, { foreignKey: "leadOrganizationId", as: "LeadPerson" });
 
 module.exports = {
   Lead,
