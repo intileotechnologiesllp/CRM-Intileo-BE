@@ -555,6 +555,12 @@ if (!include.some(i => i.as === "LeadOrganization")) {
     required: false
   });
 }
+  include.push({
+    model: MasterUser,
+    as: "Owner",
+    attributes: ["name", "masterUserID"],
+    required: false
+  });
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -576,6 +582,11 @@ if (!include.some(i => i.as === "LeadOrganization")) {
 // });
 const flatLeads = leads.rows.map(lead => {
   const leadObj = lead.toJSON();
+  // Overwrite ownerName with the latest Owner.name if present
+  if (leadObj.Owner && leadObj.Owner.name) {
+    leadObj.ownerName = leadObj.Owner.name;
+  }
+  delete leadObj.Owner; // Remove the nested Owner object
   delete leadObj.LeadPerson;
   delete leadObj.LeadOrganization;
   if (leadObj.details) {
