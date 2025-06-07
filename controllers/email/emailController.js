@@ -1835,7 +1835,7 @@ if (actionType === "forward") {
       // Add tracking pixel for email open tracking
       const generateTrackingPixel = (messageId) => {
         const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
-        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;" />`;
+        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;"alt="" />`;
       };
 
       // Add tracking links for click tracking
