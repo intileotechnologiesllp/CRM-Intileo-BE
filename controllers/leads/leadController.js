@@ -15,164 +15,7 @@ const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
-// exports.createLead = async (req, res) => {
-//   const {
-//     contactPerson,
-//     organization,
-//     title,
-//     valueLabels,
-//     expectedCloseDate,
-//     sourceChannel,
-//     sourceChannelID,
-//     serviceType,
-//     scopeOfServiceType,
-//     phone,
-//     email,
-//     company,
-//     proposalValue,
-//     esplProposalNo,
-//     projectLocation,
-//     organizationCountry,
-//     proposalSentDate,
-//     status
-//   } = req.body;
 
-//   console.log(req.role, "role of the user............");
-
-//   try {
-//     // Ensure only admins can create leads
-//     // if (req.user.role !== "admin") {
-//     //   return res
-//     //     .status(403)
-//     //     .json({ message: "Access denied. Only admins can create leads." });
-//     // }
-
-//     // Create the lead with the masterUserID from the authenticated user
-//     if (!["admin", "general", "master"].includes(req.role)) {
-//       await logAuditTrail(
-//         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//         "LEAD_CREATION", // Mode
-//         null, // No user ID for failed sign-in
-//         "Access denied. You do not have permission to create leads.", // Error description
-//         null
-//       );
-//       return res.status(403).json({
-//         message: "Access denied. You do not have permission to create leads.",
-//       });
-//     }
-//     // // 1. Find or create Organization
-//     // let orgRecord = await Organization.findOne({ where: { organization } });
-//     // if (!orgRecord) {
-//     //   orgRecord = await Organization.create({ organization,masterUserID: req.adminId });
-//     // }
-
-//     // // 2. Find or create Person (linked to organization)
-//     // let personRecord = await Person.findOne({ where: { email } });
-//     // if (!personRecord) {
-//     //   personRecord = await Person.create({
-//     //     contactPerson,
-//     //     email,
-//     //     phone,
-//     //     organizationId: orgRecord.organizationId,
-//     //     masterUserID: req.adminId
-//     //   });
-//     // }
-//     // 1. Find or create Organization
-// let orgRecord = await Organization.findOne({ where: { organization } });
-// if (!orgRecord) {
-//   orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
-// }
-
-// // 2. Find or create Person (linked to organization)
-// let personRecord = await Person.findOne({ where: { email } });
-// if (!personRecord) {
-//   personRecord = await Person.create({
-//     contactPerson,
-//     email,
-//     phone,
-//     organizationId: orgRecord.organizationId,
-//     masterUserID: req.adminId
-//   });
-// }
-
-// // 3. Check for duplicate lead (same person, organization, and title)
-// const existingLead = await Lead.findOne({
-//   where: {
-//     personId: personRecord.personId,
-//     organizationId: orgRecord.organizationId,
-//     title
-//   }
-// });
-
-// if (existingLead) {
-//   return res.status(409).json({
-//     message: "A lead with this person, organization, and title already exists."
-//   });
-// }
-
-//     // const lead = await Lead.create({
-//     //   contactPerson,
-//     //   organization,
-//     //   title,
-//     //   valueLabels,
-//     //   expectedCloseDate,
-//     //   sourceChannel,
-//     //   sourceChannelID,
-//     //   serviceType,
-//     //   scopeOfServiceType,
-//     //   phone,
-//     //   email,
-//     //   company,
-//     //   proposalValue,
-//     //   esplProposalNo,
-//     //   projectLocation,
-//     //   organizationCountry,
-//     //   proposalSentDate,
-//     //   status,
-//     //   masterUserID: req.adminId, // Associate the lead with the authenticated user
-//     // });
-//         const lead = await Lead.create({
-//       personId: personRecord.personId,
-//       organizationId: orgRecord.organizationId,
-//       title,
-//       valueLabels,
-//       expectedCloseDate,
-//       sourceChannel,
-//       sourceChannelID,
-//       serviceType,
-//       scopeOfServiceType,
-//       company,
-//       proposalValue,
-//       esplProposalNo,
-//       projectLocation,
-//       organizationCountry,
-//       proposalSentDate,
-//       status,
-//       masterUserID: req.adminId
-//     });
-//     await historyLogger(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
-//       "LEAD_CREATION", // Mode
-//       lead.masterUserID, // Created by (Admin ID)
-//       lead.leadId, // Record ID (Country ID)
-//       null,
-//       `Lead is created by  ${req.role}`, // Description
-//       null // Changes logged as JSON
-//     );
-//     res.status(201).json({ message: "Lead created successfully", lead });
-//   } catch (error) {
-//     console.error("Error creating lead:", error);
-
-//     await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_CREATION", // Mode
-//       null, // No user ID for failed sign-in
-//       "Error creating lead: " + error.message, // Error description
-//       null
-//     );
-//     res.status(500).json(error);
-//   }
-// };
 
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
@@ -697,7 +540,21 @@ if (req.role !== "admin") {
     console.log("→ Final include:", JSON.stringify(include));
     console.log("→ Pagination: limit =", limit, "offset =", offset);
     console.log("→ Order:", sortBy, order);
-
+// Always include Person and Organization
+if (!include.some(i => i.as === "LeadPerson")) {
+  include.push({
+    model: Person,
+    as: "LeadPerson",
+    required: false
+  });
+}
+if (!include.some(i => i.as === "LeadOrganization")) {
+  include.push({
+    model: Organization,
+    as: "LeadOrganization",
+    required: false
+  });
+}
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -709,14 +566,25 @@ if (req.role !== "admin") {
     });
 
     console.log("→ Query executed. Total records:", leads.count);
-    const flatLeads = leads.rows.map(lead => {
+//     const flatLeads = leads.rows.map(lead => {
+//   const leadObj = lead.toJSON();
+//   if (leadObj.details) {
+//     Object.assign(leadObj, leadObj.details);
+//     delete leadObj.details;
+//   }
+//   return leadObj;
+// });
+const flatLeads = leads.rows.map(lead => {
   const leadObj = lead.toJSON();
+  delete leadObj.LeadPerson;
+  delete leadObj.LeadOrganization;
   if (leadObj.details) {
     Object.assign(leadObj, leadObj.details);
     delete leadObj.details;
   }
   return leadObj;
 });
+console.log(leads.rows, "leads rows after flattening");
 // Collect all related persons, organizations, and leadDetails
 const persons = leads.rows
   .map(lead => lead.LeadPerson ? lead.LeadPerson.toJSON() : null)
