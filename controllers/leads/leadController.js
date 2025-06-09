@@ -598,16 +598,15 @@ if (req.role === "admin") {
   persons = await Person.findAll({ raw: true });
   organizations = await Organization.findAll({ raw: true });
 } else {
-  persons = await Person.findAll({
-    // where: { masterUserID: req.adminId },
-        where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId }
-      ]
-    },
-    raw: true
-  });
+  // persons = await Person.findAll({
+  //   // where: { masterUserID: req.adminId },
+  //       where: {
+  //     [Op.or]: [
+  //       { masterUserID: req.adminId }
+  //     ]
+  //   },
+  //   raw: true
+  // });
   organizations = await Organization.findAll({
     // where: { masterUserID: req.adminId },
     where: {
@@ -650,7 +649,15 @@ organizations = organizations.map(o => ({
 // 4. Count leads for each person and organization
 const personIds = persons.map(p => p.personId);
 const orgIds = organizations.map(o => o.leadOrganizationId);
-
+  persons = await Person.findAll({
+    where: {
+      [Op.or]: [
+        { masterUserID: req.adminId },
+        { leadOrganizationId: orgIds }
+      ]
+    },
+    raw: true
+  });
 const leadCounts = await Lead.findAll({
   attributes: [
     "personId",
