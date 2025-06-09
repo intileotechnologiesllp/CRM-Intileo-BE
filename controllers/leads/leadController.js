@@ -599,11 +599,23 @@ if (req.role === "admin") {
   organizations = await Organization.findAll({ raw: true });
 } else {
   persons = await Person.findAll({
-    where: { masterUserID: req.adminId },
+    // where: { masterUserID: req.adminId },
+        where: {
+      [Op.or]: [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId }
+      ]
+    },
     raw: true
   });
   organizations = await Organization.findAll({
-    where: { masterUserID: req.adminId },
+    // where: { masterUserID: req.adminId },
+    where: {
+      [Op.or]: [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId }
+      ]
+    },
     raw: true
   });
 }
