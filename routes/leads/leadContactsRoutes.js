@@ -13,7 +13,7 @@ router.get("/get-organization-timeline/:organizationId", leadContactsController.
 router.get("/get-person-fields", leadContactsController.getPersonFields);
 router.get("/get-organization-fields", leadContactsController.getOrganizationFields);
 router.post("/update-person-fields/:personId", verifyToken, leadContactsController.updatePerson);
-router.post("/update-organization-fields/:organizationId", verifyToken, leadContactsController.updateOrganization);
+router.post("/update-organization-fields/:leadOrganizationId", verifyToken, leadContactsController.updateOrganization);
 
 
 
