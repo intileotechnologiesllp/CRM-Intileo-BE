@@ -2,7 +2,7 @@
 const { Op } = require("sequelize");
 const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
-  const { MasterUser } = require("../../models/master/masterUserModel");
+  const MasterUser = require("../../models/master/masterUserModel");
 
 
 exports.createPerson = async (req, res) => {
