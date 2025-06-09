@@ -54,10 +54,11 @@ exports.createPerson = async (req, res) => {
 exports.createOrganization = async (req, res) => {
   try {
     const masterUserID = req.adminId; // Get the master user ID from the request
+     const ownerId = req.body.ownerId || masterUserID;
     if (!req.body || !req.body.organization) {
       return res.status(400).json({ message: "Organization name is required." });
     }
-    const { organization, organizationLabels, address, visibleTo } = req.body;
+    const { organization, organizationLabels, address, visibleTo} = req.body;
     // Check if organization already exists
     const existingOrg = await Organization.findOne({ where: { organization } });
     if (existingOrg) {
@@ -68,7 +69,8 @@ exports.createOrganization = async (req, res) => {
       organizationLabels,
       address,
       visibleTo,
-      masterUserID
+      masterUserID,
+      ownerId // Set the owner ID if provided
     });
     res.status(201).json({ message: "Organization created successfully", organization: org });
   } catch (error) {
