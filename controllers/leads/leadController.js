@@ -664,12 +664,26 @@ leadCounts.forEach(lc => {
 });
 
 // 5. Attach ownerName and leadCount to each person and organization
+// persons = persons.map(p => {
+//   const org = orgMap[p.leadOrganizationId];
+//   const ownerId = org ? org.ownerId : null;
+//   return {
+//     ...p,
+//     ownerName: ownerId ? ownerMap[ownerId] || null : null,
+//     leadCount: personLeadCountMap[p.personId] || 0
+//   };
+// });
 persons = persons.map(p => {
-  const org = orgMap[p.leadOrganizationId];
-  const ownerId = org ? org.ownerId : null;
+  let ownerName = null;
+  if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+    const org = orgMap[p.leadOrganizationId];
+    if (org.ownerId && ownerMap[org.ownerId]) {
+      ownerName = ownerMap[org.ownerId];
+    }
+  }
   return {
     ...p,
-    ownerName: ownerId ? ownerMap[ownerId] || null : null,
+    ownerName,
     leadCount: personLeadCountMap[p.personId] || 0
   };
 });
