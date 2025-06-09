@@ -609,12 +609,9 @@ if (req.role === "admin") {
 }
 
 // 2. Get all unique ownerIds from persons and organizations
-const ownerIds = [
-  ...new Set([
-    ...persons.map(p => p.ownerId).filter(Boolean),
-    ...organizations.map(o => o.ownerId).filter(Boolean)
-  ])
-];
+const orgOwnerIds = organizations.map(o => o.ownerId).filter(Boolean);
+const personOwnerIds = persons.map(p => p.ownerId).filter(Boolean);
+const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
 
 // 3. Fetch owner names from MasterUser
 const owners = await MasterUser.findAll({
@@ -622,8 +619,21 @@ const owners = await MasterUser.findAll({
   attributes: ["masterUserID", "name"],
   raw: true
 });
+const orgMap = {};
+organizations.forEach(org => {
+  orgMap[org.leadOrganizationId] = org;
+});
 const ownerMap = {};
 owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
+persons = persons.map(p => ({
+  ...p,
+  ownerName: ownerMap[p.ownerId] || null
+}));
+
+organizations = organizations.map(o => ({
+  ...o,
+  ownerName: ownerMap[o.ownerId] || null
+}));
 
 // 4. Count leads for each person and organization
 const personIds = persons.map(p => p.personId);
@@ -654,11 +664,15 @@ leadCounts.forEach(lc => {
 });
 
 // 5. Attach ownerName and leadCount to each person and organization
-persons = persons.map(p => ({
-  ...p,
-  ownerName: ownerMap[p.ownerId] || null,
-  leadCount: personLeadCountMap[p.personId] || 0
-}));
+persons = persons.map(p => {
+  const org = orgMap[p.leadOrganizationId];
+  const ownerId = org ? org.ownerId : null;
+  return {
+    ...p,
+    ownerName: ownerId ? ownerMap[ownerId] || null : null,
+    leadCount: personLeadCountMap[p.personId] || 0
+  };
+});
 
 organizations = organizations.map(o => ({
   ...o,

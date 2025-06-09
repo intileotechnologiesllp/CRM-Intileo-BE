@@ -27,6 +27,10 @@ const LeadOrganization = sequelize.define("LeadOrganization", {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
 },
+ownerId:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Owner ID of the organization
+}
   // Add more fields as needed
 }, {
   //tableName: "leadorganizations" // <-- Set your desired table name here
