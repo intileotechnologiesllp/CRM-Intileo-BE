@@ -322,3 +322,51 @@ exports.getOrganizationFields = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+exports.updateOrganization = async (req, res) => {
+  try {
+    const { leadOrganizationId } = req.params; // Use leadOrganizationId from params
+    const updateFields = req.body;
+
+    // Find the organization by leadOrganizationId
+    const org = await Organization.findByPk(leadOrganizationId);
+    if (!org) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Update all fields provided in req.body
+    await org.update(updateFields);
+
+    res.status(200).json({ message: "Organization updated successfully", organization: org });
+  } catch (error) {
+    console.error("Error updating organization:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.updatePerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const updateFields = req.body;
+
+    // Find the person
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // If ownerId is being updated, also update it in the related organization
+    if (updateFields.ownerId && person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org) {
+        await org.update({ ownerId: updateFields.ownerId });
+      }
+    }
+
+    // Update all fields provided in req.body for the person
+    await person.update(updateFields);
+
+    res.status(200).json({ message: "Person updated successfully", person });
+  } catch (error) {
+    console.error("Error updating person:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
