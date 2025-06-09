@@ -2,6 +2,7 @@
 const { Op } = require("sequelize");
 const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
+  const { MasterUser } = require("../../models/master/masterUserModel");
 
 
 exports.createPerson = async (req, res) => {
@@ -364,7 +365,23 @@ exports.updatePerson = async (req, res) => {
     // Update all fields provided in req.body for the person
     await person.update(updateFields);
 
-    res.status(200).json({ message: "Person updated successfully", person });
+    // Fetch ownerName via organization.ownerId and MasterUser
+    let ownerName = null;
+    if (person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org && org.ownerId) {
+      
+        const owner = await MasterUser.findByPk(org.ownerId);
+        if (owner) {
+          ownerName = owner.name;
+        }
+      }
+    }
+
+    res.status(200).json({ 
+      message: "Person updated successfully", 
+      person: { ...person.toJSON(), ownerName }
+    });
   } catch (error) {
     console.error("Error updating person:", error);
     res.status(500).json({ message: "Internal server error" });
