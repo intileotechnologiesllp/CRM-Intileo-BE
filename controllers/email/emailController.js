@@ -156,66 +156,7 @@ const provider = req.body?.provider; // Default to gmail
     console.log(req.adminId, "masterUserID");
     
 
-    // --- Validate IMAP credentials before queueing ---
-    // const imapConfig = {
-    //   imap: {
-    //     user: email,
-    //     password: appPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 10000,
-    //     tlsOptions: { rejectUnauthorized: false },
-    //   },
-    // };
-        // Get provider config (gmail, yandex, etc.)
-// let imapConfig;
 
-//     if (provider === "custom") {
-//       console.log("Using custom IMAP settings for provider:", provider);
-      
-//       // Fetch custom IMAP settings from UserCredential
-//       const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-//       console.log(userCredential, "userCredential");
-      
-//       if (!userCredential || !userCredential.imapHost || !userCredential.imapPort) {
-//         return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
-//       }
-//       imapConfig = {
-//         imap: {
-//           user: email,
-//           password: appPassword,
-//           host: userCredential.imapHost,
-//           port: userCredential.imapPort,
-//           tls: userCredential.imapTLS,
-//           authTimeout: 30000,
-//           tlsOptions: { rejectUnauthorized: false },
-//         },
-//       };
-//     } else {
-//       // Use static config for known providers
-//       const providerConfig = PROVIDER_CONFIG[provider];
-//       if (!providerConfig) {
-//         return res.status(400).json({ message: "Unsupported provider." });
-//       }
-//             imapConfig = {
-//         imap: {
-//           user: email,
-//           password: appPassword,
-//           host: providerConfig.host,
-//           port: providerConfig.port,
-//           tls: providerConfig.tls,
-//           authTimeout: 30000,
-//           tlsOptions: { rejectUnauthorized: false },
-//         },
-//       };
-//     }
-    // try {
-    //   const testConnection = await Imap.connect(imapConfig);
-    //   await testConnection.end(); // Close test connection
-    // } catch (err) {
-    //   return res.status(401).json({ message: "Invalid email or app password. Please check your credentials." });
-    // }
     await publishToQueue("FETCH_INBOX_QUEUE", {
       masterUserID,
       email,
@@ -1605,6 +1546,48 @@ exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
   dynamicUpload,
   async (req, res) => {
+    
+    if (Array.isArray(req.body.emails) && req.body.emails.length > 0) {
+      const masterUserID = req.adminId;
+      let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+
+      // Fetch sender info once for all emails (customize if needed per email)
+      const defaultEmail = await DefaultEmail.findOne({
+        where: { masterUserID, isDefault: true },
+      });
+      if (defaultEmail) {
+        SENDER_EMAIL = defaultEmail.email;
+        SENDER_PASSWORD = defaultEmail.appPassword;
+        SENDER_NAME = defaultEmail.senderName || (await MasterUser.findOne({ where: { masterUserID } })).name;
+      } else {
+        const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+        if (!userCredential) {
+          return res.status(404).json({ message: "User credentials not found for the given user." });
+        }
+        SENDER_EMAIL = userCredential.email;
+        SENDER_PASSWORD = userCredential.appPassword;
+        SENDER_NAME = (await MasterUser.findOne({ where: { masterUserID } })).name;
+      }
+
+      for (const email of req.body.emails) {
+        const emailData = {
+          ...email,
+          sender: SENDER_EMAIL,
+          senderName: SENDER_NAME,
+          masterUserID,
+          folder: "sent",
+          createdAt: new Date(),
+          isDraft: false,
+        };
+        await publishToQueue("EMAIL_QUEUE", emailData);
+      }
+
+      return res.status(200).json({
+        message: `${req.body.emails.length} emails queued for sending.`,
+      });
+    }
+    // --- End bulk email logic ---
+
     const {
       to,
       cc,
@@ -2074,34 +2057,7 @@ if (!finalTo && !finalCc && !finalBccValue) {
           attachments
           // isShared: isShared === true || isShared === "true", // ensure boolean
         };
-        // savedEmail = await Email.create(emailData);
 
-        // Save attachments in the database
-        // const savedAttachments =
-        //   req.files && req.files.length > 0
-        //     ? req.files.map((file) => ({
-        //         emailID: savedEmail.emailID,
-        //         filename: file.originalname,
-        //         filePath: file.path,
-        //       }))
-        //     : [];
-        // const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        // savedAttachments = req.files.map((file) => ({
-        //   emailID: savedEmail.emailID,
-        //   filename: file.filename,
-        //   filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-        //     file.filename
-        //   )}`, // Save public URL in DB
-        //   size: file.size,
-        //   contentType: file.mimetype,
-        // }));
-
-        // if (savedAttachments.length > 0) {
-        //   await Attachment.bulkCreate(savedAttachments);
-        //   console.log(
-        //     `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-        //   );
-        // }
          await publishToQueue("EMAIL_QUEUE", emailData);
       // }
     
