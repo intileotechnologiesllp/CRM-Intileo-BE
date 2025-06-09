@@ -618,7 +618,16 @@ if (req.role === "admin") {
     raw: true
   });
 }
-
+const orgIds = organizations.map(o => o.leadOrganizationId);
+  persons = await Person.findAll({
+    where: {
+      [Op.or]: [
+        { masterUserID: req.adminId },
+        { leadOrganizationId: orgIds }
+      ]
+    },
+    raw: true
+  });
 // 2. Get all unique ownerIds from persons and organizations
 const orgOwnerIds = organizations.map(o => o.ownerId).filter(Boolean);
 const personOwnerIds = persons.map(p => p.ownerId).filter(Boolean);
@@ -648,16 +657,16 @@ organizations = organizations.map(o => ({
 
 // 4. Count leads for each person and organization
 const personIds = persons.map(p => p.personId);
-const orgIds = organizations.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { leadOrganizationId: orgIds }
-      ]
-    },
-    raw: true
-  });
+// const orgIds = organizations.map(o => o.leadOrganizationId);
+//   persons = await Person.findAll({
+//     where: {
+//       [Op.or]: [
+//         { masterUserID: req.adminId },
+//         { leadOrganizationId: orgIds }
+//       ]
+//     },
+//     raw: true
+//   });
 const leadCounts = await Lead.findAll({
   attributes: [
     "personId",
