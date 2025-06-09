@@ -2,6 +2,7 @@
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 //const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
 const { Op } = require("sequelize"); // Import Sequelize operators
+const Sequelize = require("sequelize");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
@@ -572,14 +573,7 @@ if (!include.some(i => i.as === "LeadOrganization")) {
     });
 
     console.log("→ Query executed. Total records:", leads.count);
-//     const flatLeads = leads.rows.map(lead => {
-//   const leadObj = lead.toJSON();
-//   if (leadObj.details) {
-//     Object.assign(leadObj, leadObj.details);
-//     delete leadObj.details;
-//   }
-//   return leadObj;
-// });
+
 const flatLeads = leads.rows.map(lead => {
   const leadObj = lead.toJSON();
   // Overwrite ownerName with the latest Owner.name if present
@@ -596,18 +590,90 @@ const flatLeads = leads.rows.map(lead => {
   return leadObj;
 });
 console.log(leads.rows, "leads rows after flattening");
-// Collect all related persons, organizations, and leadDetails
-const persons = leads.rows
-  .map(lead => lead.LeadPerson ? lead.LeadPerson.toJSON() : null)
-  .filter(Boolean);
 
-const organizations = leads.rows
-  .map(lead => lead.LeadOrganization ? lead.LeadOrganization.toJSON() : null)
-  .filter(Boolean);
+let persons, organizations;
 
-const leadDetails = leads.rows
-  .map(lead => lead.details ? lead.details : null)
-  .filter(Boolean);
+// 1. Fetch all persons and organizations (already in your code)
+if (req.role === "admin") {
+  persons = await Person.findAll({ raw: true });
+  organizations = await Organization.findAll({ raw: true });
+} else {
+  persons = await Person.findAll({
+    where: { masterUserID: req.adminId },
+    raw: true
+  });
+  organizations = await Organization.findAll({
+    where: { masterUserID: req.adminId },
+    raw: true
+  });
+}
+
+// 2. Get all unique ownerIds from persons and organizations
+const ownerIds = [
+  ...new Set([
+    ...persons.map(p => p.ownerId).filter(Boolean),
+    ...organizations.map(o => o.ownerId).filter(Boolean)
+  ])
+];
+
+// 3. Fetch owner names from MasterUser
+const owners = await MasterUser.findAll({
+  where: { masterUserID: ownerIds },
+  attributes: ["masterUserID", "name"],
+  raw: true
+});
+const ownerMap = {};
+owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
+
+// 4. Count leads for each person and organization
+const personIds = persons.map(p => p.personId);
+const orgIds = organizations.map(o => o.leadOrganizationId);
+
+const leadCounts = await Lead.findAll({
+  attributes: [
+    "personId",
+    "leadOrganizationId",
+    [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
+  ],
+  where: {
+    [Op.or]: [
+      { personId: personIds },
+      { leadOrganizationId: orgIds }
+    ]
+  },
+  group: ["personId", "leadOrganizationId"],
+  raw: true
+});
+
+// Build maps for quick lookup
+const personLeadCountMap = {};
+const orgLeadCountMap = {};
+leadCounts.forEach(lc => {
+  if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+  if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+});
+
+// 5. Attach ownerName and leadCount to each person and organization
+persons = persons.map(p => ({
+  ...p,
+  ownerName: ownerMap[p.ownerId] || null,
+  leadCount: personLeadCountMap[p.personId] || 0
+}));
+
+organizations = organizations.map(o => ({
+  ...o,
+  ownerName: ownerMap[o.ownerId] || null,
+  leadCount: orgLeadCountMap[o.leadOrganizationId] || 0
+}));
+// const leadDetails = leads.rows
+//   .map(lead => lead.details ? lead.details : null)
+//   .filter(Boolean);
+//   const uniquePersons = Array.from(
+//   new Map(persons.map(p => [p.personId, p])).values()
+// );
+// const uniqueOrganizations = Array.from(
+//   new Map(organizations.map(o => [o.leadOrganizationId, o])).values()
+// );
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,
@@ -616,8 +682,8 @@ const leadDetails = leads.rows
       // leads: leads.rows,
       leads: flatLeads, // Return flattened leads with leadDetails merged
         persons,
-  organizations,
-  leadDetails
+  organizations
+  // leadDetails
     });
   } catch (error) {
     console.error("Error fetching leads:", error);
@@ -680,20 +746,7 @@ const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
   .map(([key]) => key);
 
 const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
-  // if (
-  //   ["createdAt", "updatedAt", "expectedCloseDate", "proposalSentDate", "nextActivityDate", "archiveTime"].includes(cond.field)
-  // ) {
-  //   // If useExactDate is true, use the value directly
-  //   if (cond.useExactDate) {
-  //     // Validate the date
-  //     const date = new Date(cond.value);
-  //     if (isNaN(date.getTime())) return {};
-  //     return {
-  //       [cond.field]: {
-  //         [ops[operator] || Op.eq]: date,
-  //       },
-  //     };
-  //   }
+
   if (allDateFields.includes(cond.field)) {
     if (cond.useExactDate) {
       const date = new Date(cond.value);
@@ -1051,29 +1104,7 @@ exports.getAllLeadDetails = async (req, res) => {
       return res.status(404).json({ message: "Lead or lead email not found." });
     }
     const clientEmail = lead.email;
-    // const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-    // if (!userCredential) {
-    //   return res.status(404).json({ message: "User credentials not found." });
-    // }
-    // const userEmail = userCredential.email.toLowerCase();
 
-    // Find all emails between user and client (both directions)
-    // let emails = await Email.findAll({
-    //   where: {
-    //     [Op.or]: [
-    //       {
-    //         sender: userEmail,
-    //         recipient: { [Op.like]: `%${clientEmail}%` }
-    //       },
-    //       {
-    //         sender: clientEmail,
-    //         recipient: { [Op.like]: `%${userEmail}%` }
-    //       }
-    //     ]
-    //   },
-    //   include: [{ model: Attachment, as: "attachments" }],
-    //   order: [["createdAt", "ASC"]]
-    // });
     let emails = await Email.findAll({
   where: {
     [Op.or]: [
@@ -1168,156 +1199,7 @@ exports.getAllLeadDetails = async (req, res) => {
   }
 };
 
-// exports.getConversationWithClient = async (req, res) => {
-//   const { clientEmail } = req.body;
-//   const { leadId } = req.params;
 
-//   if (!clientEmail) {
-//     return res.status(400).json({ message: "clientEmail is required." });
-//   }
-//     if (!leadId) {
-//     return res.status(400).json({ message: "leadId is required in params." });
-//   }
-
-//   try {
-//     // 1. Find all emails where clientEmail is sender or recipient (sent/received)
-//     const baseEmails = await Email.findAll({
-//       where: {
-//         [Op.or]: [
-//           { sender: clientEmail },
-//           { recipient: { [Op.like]: `%${clientEmail}%` } }
-//         ]
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]]
-//     });
-
-//     if (!baseEmails.length) {
-//       return res.status(404).json({ message: "No emails found for this client." });
-//     }
-
-//     // 2. Collect all thread IDs (messageId, inReplyTo, references)
-//     const threadIds = [];
-//     baseEmails.forEach(email => {
-//       if (email.messageId) threadIds.push(email.messageId);
-//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
-//       if (email.references) threadIds.push(...email.references.split(" "));
-//     });
-//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
-
-//     // 3. Fetch all related emails in the thread (replied/conversation)
-//     let repliedEmails = [];
-//     if (uniqueThreadIds.length > 0) {
-//       repliedEmails = await Email.findAll({
-//         where: {
-//           [Op.or]: [
-//             { messageId: { [Op.in]: uniqueThreadIds } },
-//             { inReplyTo: { [Op.in]: uniqueThreadIds } },
-//             {
-//               references: {
-//                 [Op.or]: uniqueThreadIds.map(id => ({
-//                   [Op.like]: `%${id}%`
-//                 }))
-//               }
-//             }
-//           ]
-//         },
-//         include: [{ model: Attachment, as: "attachments" }],
-//         order: [["createdAt", "ASC"]]
-//       });
-//     }
-
-//     // 4. Combine and deduplicate by messageId
-//     const allEmails = [...baseEmails, ...repliedEmails];
-//     const seen = new Set();
-//     const uniqueEmails = allEmails.filter(email => {
-//       if (seen.has(email.messageId)) return false;
-//       seen.add(email.messageId);
-//       return true;
-//     });
-
-//       //Fetch notes for this leadId
-//     const notes = await LeadNote.findAll({
-//       where: { leadId },
-//       order: [["createdAt", "DESC"]],
-//     });
-
-//     res.status(200).json({
-//       message: "Conversation and related emails fetched successfully.",
-//       emails: uniqueEmails,
-//       notes
-//     });
-//   } catch (error) {
-//     console.error("Error fetching conversation:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
-
-//........................only reply thread for client conversation................./
-// exports.getConversationWithClient = async (req, res) => {
-//   const { clientEmail } = req.body;
-
-//   if (!clientEmail) {
-//     return res.status(400).json({ message: "clientEmail is required." });
-//   }
-
-//   try {
-//     // Step 1: Find all emails where clientEmail is sender or recipient
-//     const baseEmails = await Email.findAll({
-//       where: {
-//         [Op.or]: [
-//           { sender: clientEmail },
-//           { recipient: { [Op.like]: `%${clientEmail}%` } }
-//         ]
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]]
-//     });
-
-//     if (!baseEmails.length) {
-//       return res.status(404).json({ message: "No emails found for this client." });
-//     }
-
-//     // Step 2: Collect all thread IDs (messageId, inReplyTo, references)
-//     const threadIds = [];
-//     baseEmails.forEach(email => {
-//       if (email.messageId) threadIds.push(email.messageId);
-//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
-//       if (email.references) threadIds.push(...email.references.split(" "));
-//     });
-//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
-
-//     // Step 3: Fetch only replied/conversation emails (those with inReplyTo or references in the thread)
-//     const repliedEmails = await Email.findAll({
-//       where: {
-//         [Op.or]: [
-//           { inReplyTo: { [Op.in]: uniqueThreadIds } },
-//           {
-//             references: {
-//               [Op.or]: uniqueThreadIds.map(id => ({
-//                 [Op.like]: `%${id}%`
-//               }))
-//             }
-//           }
-//         ]
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]]
-//     });
-
-//     if (!repliedEmails.length) {
-//       return res.status(404).json({ message: "No replied conversation emails found for this client." });
-//     }
-
-//     res.status(200).json({
-//       message: "Replied conversation emails fetched successfully.",
-//       emails: repliedEmails
-//     });
-//   } catch (error) {
-//     console.error("Error fetching replied conversation emails:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
 
 exports.addLeadNote = async (req, res) => {
   const {content} = req.body;
