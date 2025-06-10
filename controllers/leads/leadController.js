@@ -294,19 +294,7 @@ exports.getLeads = async (req, res) => {
         // Determine masterUserID based on role
 
         const pref = await LeadColumnPreference.findOne();
-    // let leadAttributes, leadDetailsAttributes;
-    // if (pref && Array.isArray(pref.columns)) {
-    //   const leadFields = Object.keys(Lead.rawAttributes);
-    //   const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
-    //   leadAttributes = pref.columns
-    //     .filter(col => col.check && leadFields.includes(col.key))
-    //     .map(col => col.key);
-
-    //   leadDetailsAttributes = pref.columns
-    //     .filter(col => col.check && leadDetailsFields.includes(col.key))
-    //     .map(col => col.key);
-    // }
     let leadAttributes, leadDetailsAttributes;
 if (pref && pref.columns) {
   // Parse columns if it's a string
@@ -707,11 +695,13 @@ persons = persons.map(p => {
     const org = orgMap[p.leadOrganizationId];
     if (org.ownerId && ownerMap[org.ownerId]) {
       ownerName = ownerMap[org.ownerId];
+      // organization=ownerMap[org.organization]
     }
   }
   return {
     ...p,
     ownerName,
+    // organization,
     leadCount: personLeadCountMap[p.personId] || 0
   };
 });
@@ -1178,9 +1168,13 @@ exports.getAllLeadDetails = async (req, res) => {
       return !(hasRE && noThread);
     });
 
-    if (!emails.length) {
-      return res.status(404).json({ message: "No emails found for this conversation." });
-    }
+    // if (!emails.length) {
+    //   return res.status(404).json({ message: "No emails found for this conversation." });
+    // }
+    let emailsExist = emails.length > 0;
+if (!emailsExist) {
+  emails = null; // or emails = [];
+}
 
     // Gather all thread IDs from these emails
     const threadIds = [];
@@ -1247,7 +1241,8 @@ exports.getAllLeadDetails = async (req, res) => {
       lead,
       leadDetails,
       notes:notesWithCreator,
-      emails: relatedEmails
+      // emails: relatedEmails
+      emails: emailsExist ? relatedEmails : null // or [] if you prefer
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
