@@ -1566,47 +1566,6 @@ exports.composeEmail = [
   dynamicUpload,
   async (req, res) => {
     
-    if (Array.isArray(req.body.emails) && req.body.emails.length > 0) {
-      const masterUserID = req.adminId;
-      let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
-
-      // Fetch sender info once for all emails (customize if needed per email)
-      const defaultEmail = await DefaultEmail.findOne({
-        where: { masterUserID, isDefault: true },
-      });
-      if (defaultEmail) {
-        SENDER_EMAIL = defaultEmail.email;
-        SENDER_PASSWORD = defaultEmail.appPassword;
-        SENDER_NAME = defaultEmail.senderName || (await MasterUser.findOne({ where: { masterUserID } })).name;
-      } else {
-        const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-        if (!userCredential) {
-          return res.status(404).json({ message: "User credentials not found for the given user." });
-        }
-        SENDER_EMAIL = userCredential.email;
-        SENDER_PASSWORD = userCredential.appPassword;
-        SENDER_NAME = (await MasterUser.findOne({ where: { masterUserID } })).name;
-      }
-
-      for (const email of req.body.emails) {
-        const emailData = {
-          ...email,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          masterUserID,
-          folder: "sent",
-          createdAt: new Date(),
-          isDraft: false,
-        };
-        await publishToQueue("EMAIL_QUEUE", emailData);
-      }
-
-      return res.status(200).json({
-        message: `${req.body.emails.length} emails queued for sending.`,
-      });
-    }
-    // --- End bulk email logic ---
-
     const {
       to,
       cc,
