@@ -192,7 +192,13 @@ exports.getPersonTimeline = async (req, res) => {
     emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
     emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
     const allEmails = Array.from(allEmailsMap.values());
-
+  // Collect all attachments from emails
+    const files = [];
+    allEmails.forEach(email => {
+      if (email.attachments && Array.isArray(email.attachments)) {
+        email.attachments.forEach(file => files.push(file));
+      }
+    });
     // Fetch related notes
     const notes = await LeadNote.findAll({ where: { leadId: leads.map(l => l.leadId) } });
 
@@ -200,7 +206,8 @@ exports.getPersonTimeline = async (req, res) => {
       person,
       leads,
       emails: allEmails,
-      notes
+      notes,
+      files
     });
   } catch (error) {
     console.error("Error fetching person timeline:", error);
@@ -257,13 +264,20 @@ exports.getOrganizationTimeline = async (req, res) => {
     const allEmails = Array.from(allEmailsMap.values());
     // Fetch all notes linked to these leads
     const notes = await LeadNote.findAll({ where: { leadId: leadIds } });
-
+    // Collect all attachments from emails
+    const files = [];
+    allEmails.forEach(email => {
+      if (email.attachments && Array.isArray(email.attachments)) {
+        email.attachments.forEach(file => files.push(file));
+      }
+    });
     res.status(200).json({
       organization,
       persons,
       leads,
       emails: allEmails,
-      notes
+      notes,
+      files
     });
   } catch (error) {
     console.error("Error fetching organization timeline:", error);
