@@ -1171,9 +1171,9 @@ exports.getAllLeadDetails = async (req, res) => {
     // if (!emails.length) {
     //   return res.status(404).json({ message: "No emails found for this conversation." });
     // }
-    let emailsExist = emails.length > 0;
+let emailsExist = emails.length > 0;
 if (!emailsExist) {
-  emails = null; // or emails = [];
+  emails = [];
 }
 
     // Gather all thread IDs from these emails
@@ -1241,8 +1241,8 @@ if (!emailsExist) {
       lead,
       leadDetails,
       notes:notesWithCreator,
-      // emails: relatedEmails
-      emails: emailsExist ? relatedEmails : null // or [] if you prefer
+      emails: relatedEmails
+     // emails: emailsExist ? relatedEmails : null // or [] if you prefer
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
