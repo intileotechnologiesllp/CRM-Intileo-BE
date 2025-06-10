@@ -1055,41 +1055,60 @@ exports.getEmails = async (req, res) => {
         isRead: false, // Count only unread emails
       },
     });
-
+//................................original important
     // Group emails by conversation (thread)
-    let responseThreads;
-    if (folder === "drafts") {
-      // For drafts, group by draftId if available, else by messageId
-      const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.draftId || email.messageId;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-    } else {
-      // For other folders, group by inReplyTo or messageId
-      const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.inReplyTo || email.messageId;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-//       const threads = {};
-// emails.forEach((email) => {
-//   const threadKey = email.threadId || email.messageId;
-//   if (!threads[threadKey]) {
-//     threads[threadKey] = [];
-//   }
-//   threads[threadKey].push(email);
-// });
-//  responseThreads = Object.values(threads);
+    // let responseThreads;
+    // if (folder === "drafts") {
+    //   // For drafts, group by draftId if available, else by messageId
+    //   const threads = {};
+    //   emails.forEach((email) => {
+    //     const threadId = email.draftId || email.messageId;
+    //     if (!threads[threadId]) {
+    //       threads[threadId] = [];
+    //     }
+    //     threads[threadId].push(email);
+    //   });
+    //   responseThreads = Object.values(threads);
+    // } else {
+    //   // For other folders, group by inReplyTo or messageId
+    //   const threads = {};
+    //   emails.forEach((email) => {
+    //     const threadId = email.inReplyTo || email.messageId;
+    //     if (!threads[threadId]) {
+    //       threads[threadId] = [];
+    //     }
+    //     threads[threadId].push(email);
+    //   });
+    //   responseThreads = Object.values(threads);
+
+    // }
+    //............................end of original important
+
+let responseThreads;
+if (folder === "drafts" || folder === "trash") {
+  // For drafts and trash, group by draftId if available, else by emailID
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
+    if (!threads[threadId]) {
+      threads[threadId] = [];
     }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+} else {
+  // For other folders, group by inReplyTo or messageId
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.inReplyTo || email.messageId || email.emailID;
+    if (!threads[threadId]) {
+      threads[threadId] = [];
+    }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+}
+
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
