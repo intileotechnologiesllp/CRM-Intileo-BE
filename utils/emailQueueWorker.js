@@ -277,32 +277,32 @@ const transporter = nodemailer.createTransport(transporterConfig);
 // }
 
 // --- Update EMAIL_QUEUE consumer ---
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
+// async function startEmailWorker() {
+//   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+//   const connection = await amqp.connect(amqpUrl);
+//   const channel = await connection.createChannel();
+//   await channel.assertQueue(QUEUE, { durable: true });
 
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendQueuedEmail(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send queued email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
-      }
-    },
-    { noAck: false }
-  );
+//   channel.consume(
+//     QUEUE,
+//     async (msg) => {
+//       if (msg !== null) {
+//         const emailData = JSON.parse(msg.content.toString());
+//         limit(() =>
+//           sendQueuedEmail(emailData)
+//             .then(() => channel.ack(msg))
+//             .catch((err) => {
+//               console.error("Failed to send queued email:", err);
+//               channel.nack(msg, false, false); // Discard on error
+//             })
+//         );
+//       }
+//     },
+//     { noAck: false }
+//   );
 
-  console.log("Email worker started and waiting for jobs...");
-}
+//   console.log("Email worker started and waiting for jobs...");
+// }
 async function sendEmailJob(emailData) {
   let draftEmail = null;
   let SENDER_EMAIL = emailData.sender;

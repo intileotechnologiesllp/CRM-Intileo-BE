@@ -1571,7 +1571,7 @@ exports.composeEmail = [
       cc,
       bcc,
       subject,
-      text,
+      text, 
       html,
       templateID,
       actionType,
