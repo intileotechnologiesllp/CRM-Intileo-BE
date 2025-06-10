@@ -349,17 +349,7 @@ if (req.role !== "admin") {
     { ownerId: userId }
   ];
 }
-// if (req.role !== "admin") {
-//   whereClause[Op.or] = [
-//     { masterUserID: req.adminId },
-//     { ownerId: req.adminId }
-//   ];
-// }
-// If a specific masterUserID is requested (e.g., for filtering by user)
-// if (queryMasterUserID && queryMasterUserID !== "all") {
-//   masterUserID = queryMasterUserID;
-// }
-    // masterUserID = queryMasterUserID === "all" ? null : (queryMasterUserID || req.adminId);
+
     console.log("→ Query params:", req.query);
     console.log("→ masterUserID resolved:", masterUserID);
 
@@ -448,18 +438,6 @@ if (req.role !== "admin") {
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
       console.log("→ Built leadDetailsWhere:", JSON.stringify(leadDetailsWhere));
 
-      // Add LeadDetails filter if needed
-      // if (Object.keys(leadDetailsWhere).length > 0) {
-      //   include = [
-      //     ...include,
-      //     {
-      //       model: LeadDetails,
-      //       as: "details",
-      //       where: leadDetailsWhere,
-      //       required: true
-            
-      //     }
-      //   ];
         if (Object.keys(leadDetailsWhere).length > 0) {
     include.push({
       model: LeadDetails,
@@ -586,15 +564,7 @@ if (req.role === "admin") {
   persons = await Person.findAll({ raw: true });
   organizations = await Organization.findAll({ raw: true });
 } else {
-  // persons = await Person.findAll({
-  //   // where: { masterUserID: req.adminId },
-  //       where: {
-  //     [Op.or]: [
-  //       { masterUserID: req.adminId }
-  //     ]
-  //   },
-  //   raw: true
-  // });
+
   organizations = await Organization.findAll({
     // where: { masterUserID: req.adminId },
     where: {
@@ -645,16 +615,7 @@ organizations = organizations.map(o => ({
 
 // 4. Count leads for each person and organization
 const personIds = persons.map(p => p.personId);
-// const orgIds = organizations.map(o => o.leadOrganizationId);
-//   persons = await Person.findAll({
-//     where: {
-//       [Op.or]: [
-//         { masterUserID: req.adminId },
-//         { leadOrganizationId: orgIds }
-//       ]
-//     },
-//     raw: true
-//   });
+
 const leadCounts = await Lead.findAll({
   attributes: [
     "personId",
@@ -679,16 +640,6 @@ leadCounts.forEach(lc => {
   if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
 });
 
-// 5. Attach ownerName and leadCount to each person and organization
-// persons = persons.map(p => {
-//   const org = orgMap[p.leadOrganizationId];
-//   const ownerId = org ? org.ownerId : null;
-//   return {
-//     ...p,
-//     ownerName: ownerId ? ownerMap[ownerId] || null : null,
-//     leadCount: personLeadCountMap[p.personId] || 0
-//   };
-// });
 persons = persons.map(p => {
   let ownerName = null;
   if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
@@ -711,15 +662,7 @@ organizations = organizations.map(o => ({
   ownerName: ownerMap[o.ownerId] || null,
   leadCount: orgLeadCountMap[o.leadOrganizationId] || 0
 }));
-// const leadDetails = leads.rows
-//   .map(lead => lead.details ? lead.details : null)
-//   .filter(Boolean);
-//   const uniquePersons = Array.from(
-//   new Map(persons.map(p => [p.personId, p])).values()
-// );
-// const uniqueOrganizations = Array.from(
-//   new Map(organizations.map(o => [o.leadOrganizationId, o])).values()
-// );
+
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,
