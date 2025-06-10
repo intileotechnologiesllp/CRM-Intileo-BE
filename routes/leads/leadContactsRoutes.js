@@ -14,6 +14,7 @@ router.get("/get-person-fields", leadContactsController.getPersonFields);
 router.get("/get-organization-fields", leadContactsController.getOrganizationFields);
 router.post("/update-person-fields/:personId", verifyToken, leadContactsController.updatePerson);
 router.post("/update-organization-fields/:leadOrganizationId", verifyToken, leadContactsController.updateOrganization);
+router.post("/link-person-organization", verifyToken, leadContactsController.linkPersonToOrganization);
 
 
 

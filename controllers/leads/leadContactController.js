@@ -171,27 +171,27 @@ exports.getPersonTimeline = async (req, res) => {
     const leads = await Lead.findAll({ where: { personId } });
 
     // Fetch related emails
-    const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
+   // const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
 
     // Fetch emails linked to leads
-    // const leadIds = leads.map(l => l.leadId);
-    // const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
+    const leadIds = leads.map(l => l.leadId);
+    const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
 
-    // // Fetch emails where person's email is sender or recipient
-    // const emailsByAddress = await Email.findAll({
-    //   where: {
-    //     [Op.or]: [
-    //       { sender: person.email },
-    //       { recipient: { [Op.like]: `%${person.email}%` } }
-    //     ]
-    //   }
-    // });
+    // Fetch emails where person's email is sender or recipient
+    const emailsByAddress = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } }
+        ]
+      }
+    });
 
-    // // Merge and deduplicate emails
-    // const allEmailsMap = new Map();
-    // emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
-    // emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
-    // const allEmails = Array.from(allEmailsMap.values());
+    // Merge and deduplicate emails
+    const allEmailsMap = new Map();
+    emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
+    emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
+    const allEmails = Array.from(allEmailsMap.values());
 
     // Fetch related notes
     const notes = await LeadNote.findAll({ where: { leadId: leads.map(l => l.leadId) } });
@@ -199,7 +199,7 @@ exports.getPersonTimeline = async (req, res) => {
     res.status(200).json({
       person,
       leads,
-      emails,
+      emails: allEmails,
       notes
     });
   } catch (error) {
@@ -233,8 +233,28 @@ exports.getOrganizationTimeline = async (req, res) => {
 
     // Fetch all emails linked to these leads
     const leadIds = leads.map(l => l.leadId);
-    const emails = await Email.findAll({ where: { leadId: leadIds } });
+   // const emails = await Email.findAll({ where: { leadId: leadIds } });
+    const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
 
+    // Fetch emails where any person's email is sender or recipient
+    const personEmails = persons.map(p => p.email).filter(Boolean);
+    let emailsByAddress = [];
+    if (personEmails.length > 0) {
+      emailsByAddress = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { sender: { [Op.in]: personEmails } },
+            { recipient: { [Op.or]: personEmails.map(email => ({ [Op.like]: `%${email}%` })) } }
+          ]
+        }
+      });
+    }
+
+    // Merge and deduplicate emails
+    const allEmailsMap = new Map();
+    emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
+    emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
+    const allEmails = Array.from(allEmailsMap.values());
     // Fetch all notes linked to these leads
     const notes = await LeadNote.findAll({ where: { leadId: leadIds } });
 
@@ -242,7 +262,7 @@ exports.getOrganizationTimeline = async (req, res) => {
       organization,
       persons,
       leads,
-      emails,
+      emails: allEmails,
       notes
     });
   } catch (error) {
@@ -384,6 +404,20 @@ exports.updatePerson = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating person:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.linkPersonToOrganization = async (req, res) => {
+  const { personId, organizationId } = req.body;
+  try {
+    const person = await Person.findByPk(personId);
+    if (!person) return res.status(404).json({ message: "Person not found" });
+
+    person.leadOrganizationId = organizationId;
+    await person.save();
+
+    res.status(200).json({ message: "Person linked to organization", person });
+  } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
 };
