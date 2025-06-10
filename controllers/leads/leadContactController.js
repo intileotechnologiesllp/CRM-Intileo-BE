@@ -1,33 +1,50 @@
- const { Lead, LeadDetails, Person, Organization } = require("../../models");
+const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const { Op } = require("sequelize");
 const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
-  const MasterUser = require("../../models/master/masterUserModel");
-
+const MasterUser = require("../../models/master/masterUserModel");
+const Attachment = require("../../models/email/attachmentModel");
 
 exports.createPerson = async (req, res) => {
   try {
     const masterUserID = req.adminId; // Get the master user ID from the request
     if (!req.body || !req.body.contactPerson || !req.body.email) {
-      return res.status(400).json({ message: "Contact person and email are required." });
+      return res
+        .status(400)
+        .json({ message: "Contact person and email are required." });
     }
-    const { contactPerson, email, phone, notes, postalAddress, birthday, jobTitle, personLabels, organization } = req.body;
-   // Check for duplicate person in the same organization
+    const {
+      contactPerson,
+      email,
+      phone,
+      notes,
+      postalAddress,
+      birthday,
+      jobTitle,
+      personLabels,
+      organization,
+    } = req.body;
+    // Check for duplicate person in the same organization
     const existingPerson = await Person.findOne({
       where: {
         contactPerson,
         organization,
         // Optionally, also check email for even stricter uniqueness:
         // email
-      }
+      },
     });
     if (existingPerson) {
-      return res.status(409).json({ message: "Person already exists in this organization.", person: existingPerson });
+      return res
+        .status(409)
+        .json({
+          message: "Person already exists in this organization.",
+          person: existingPerson,
+        });
     }
     // Create or find the organization
     const org = await Organization.findOrCreate({
       where: { organization },
-      defaults: { organization }
+      defaults: { organization },
     });
 
     // Create the person
@@ -42,7 +59,7 @@ exports.createPerson = async (req, res) => {
       personLabels,
       organization: org[0].organization,
       leadOrganizationId: org[0].leadOrganizationId, // Link to org
-      masterUserID
+      masterUserID,
     });
 
     res.status(201).json({ message: "Person created successfully", person });
@@ -55,15 +72,22 @@ exports.createPerson = async (req, res) => {
 exports.createOrganization = async (req, res) => {
   try {
     const masterUserID = req.adminId; // Get the master user ID from the request
-     const ownerId = req.body.ownerId || masterUserID;
+    const ownerId = req.body.ownerId || masterUserID;
     if (!req.body || !req.body.organization) {
-      return res.status(400).json({ message: "Organization name is required." });
+      return res
+        .status(400)
+        .json({ message: "Organization name is required." });
     }
-    const { organization, organizationLabels, address, visibleTo} = req.body;
+    const { organization, organizationLabels, address, visibleTo } = req.body;
     // Check if organization already exists
     const existingOrg = await Organization.findOne({ where: { organization } });
     if (existingOrg) {
-      return res.status(409).json({ message: "Organization already exists.", organization: existingOrg });
+      return res
+        .status(409)
+        .json({
+          message: "Organization already exists.",
+          organization: existingOrg,
+        });
     }
     const org = await Organization.create({
       organization,
@@ -71,9 +95,14 @@ exports.createOrganization = async (req, res) => {
       address,
       visibleTo,
       masterUserID,
-      ownerId // Set the owner ID if provided
+      ownerId, // Set the owner ID if provided
     });
-    res.status(201).json({ message: "Organization created successfully", organization: org });
+    res
+      .status(201)
+      .json({
+        message: "Organization created successfully",
+        organization: org,
+      });
   } catch (error) {
     console.error("Error creating organization:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -88,18 +117,18 @@ exports.getContactTimeline = async (req, res) => {
 
     // Search
     const search = req.query.search || "";
-const searchFilter = search
-  ? {
-      [Op.or]: [
-        { contactPerson: { [Op.like]: `%${search}%` } },
-        { email: { [Op.like]: `%${search}%` } },
-        { phone: { [Op.like]: `%${search}%` } },
-        { jobTitle: { [Op.like]: `%${search}%` } },
-        { personLabels: { [Op.like]: `%${search}%` } },
-        { organization: { [Op.like]: `%${search}%` } }, // Assuming organization is a field in Person
-      ],
-    }
-  : {};
+    const searchFilter = search
+      ? {
+          [Op.or]: [
+            { contactPerson: { [Op.like]: `%${search}%` } },
+            { email: { [Op.like]: `%${search}%` } },
+            { phone: { [Op.like]: `%${search}%` } },
+            { jobTitle: { [Op.like]: `%${search}%` } },
+            { personLabels: { [Op.like]: `%${search}%` } },
+            { organization: { [Op.like]: `%${search}%` } }, // Assuming organization is a field in Person
+          ],
+        }
+      : {};
 
     // Date filter (monthsBack)
     const monthsBack = parseInt(req.query.monthsBack) || 3;
@@ -144,7 +173,7 @@ const searchFilter = search
       },
       filter: { monthsBack, fromDate },
       search,
-      persons
+      persons,
     });
   } catch (error) {
     console.error("Error fetching contact timeline:", error);
@@ -159,9 +188,9 @@ exports.getPersonTimeline = async (req, res) => {
         {
           model: Organization,
           as: "LeadOrganization",
-          attributes: ["leadOrganizationId", "organization"]
-        }
-      ]
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
     });
     if (!person) {
       return res.status(404).json({ message: "Person not found" });
@@ -171,10 +200,10 @@ exports.getPersonTimeline = async (req, res) => {
     const leads = await Lead.findAll({ where: { personId } });
 
     // Fetch related emails
-   // const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
+    // const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
 
     // Fetch emails linked to leads
-    const leadIds = leads.map(l => l.leadId);
+    const leadIds = leads.map((l) => l.leadId);
     const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
 
     // Fetch emails where person's email is sender or recipient
@@ -182,32 +211,49 @@ exports.getPersonTimeline = async (req, res) => {
       where: {
         [Op.or]: [
           { sender: person.email },
-          { recipient: { [Op.like]: `%${person.email}%` } }
-        ]
-      }
+          { recipient: { [Op.like]: `%${person.email}%` } },
+        ],
+      },
     });
-
+    console.log("leadIds:", leadIds);
+    console.log("emailsByLead:", emailsByLead.length);
+    console.log("emailsByAddress:", emailsByAddress.length);
     // Merge and deduplicate emails
     const allEmailsMap = new Map();
-    emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
-    emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
-  // Collect all attachments from emails
-    const files = [];
-    allEmails.forEach(email => {
-      if (email.attachments && Array.isArray(email.attachments)) {
-        email.attachments.forEach(file => files.push(file));
-      }
-    });
+
+    // Fetch all attachments for these emails from the Attachments model
+    const emailIDs = allEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+      });
+      console.log(files.length, "files found for emails");
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      allEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with its related email
+      files = files.map((file) => ({
+        ...file.toJSON(),
+        email: emailMap.get(file.emailID) || null,
+      }));
+    }
+
     // Fetch related notes
-    const notes = await LeadNote.findAll({ where: { leadId: leads.map(l => l.leadId) } });
+    const notes = await LeadNote.findAll({
+      where: { leadId: leads.map((l) => l.leadId) },
+    });
 
     res.status(200).json({
       person,
       leads,
       emails: allEmails,
       notes,
-      files
+      files,
     });
   } catch (error) {
     console.error("Error fetching person timeline:", error);
@@ -225,59 +271,80 @@ exports.getOrganizationTimeline = async (req, res) => {
     }
 
     // Fetch all persons in this organization
-    const persons = await Person.findAll({ where: { leadOrganizationId: organizationId } });
+    const persons = await Person.findAll({
+      where: { leadOrganizationId: organizationId },
+    });
 
     // Fetch all leads for this organization (directly or via persons)
-    const personIds = persons.map(p => p.personId);
+    const personIds = persons.map((p) => p.personId);
     const leads = await Lead.findAll({
       where: {
         [Op.or]: [
           { leadOrganizationId: organizationId },
-          { personId: personIds }
-        ]
-      }
+          { personId: personIds },
+        ],
+      },
     });
 
     // Fetch all emails linked to these leads
-    const leadIds = leads.map(l => l.leadId);
-   // const emails = await Email.findAll({ where: { leadId: leadIds } });
+    const leadIds = leads.map((l) => l.leadId);
     const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
 
     // Fetch emails where any person's email is sender or recipient
-    const personEmails = persons.map(p => p.email).filter(Boolean);
+    const personEmails = persons.map((p) => p.email).filter(Boolean);
     let emailsByAddress = [];
     if (personEmails.length > 0) {
       emailsByAddress = await Email.findAll({
         where: {
           [Op.or]: [
             { sender: { [Op.in]: personEmails } },
-            { recipient: { [Op.or]: personEmails.map(email => ({ [Op.like]: `%${email}%` })) } }
-          ]
-        }
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
+            },
+          ],
+        },
       });
     }
 
-    // Merge and deduplicate emails
+    // Merge and deduplicate emails by emailID
     const allEmailsMap = new Map();
-    emailsByLead.forEach(email => allEmailsMap.set(email.emailId, email));
-    emailsByAddress.forEach(email => allEmailsMap.set(email.emailId, email));
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
+
+    // Fetch all attachments for these emails from the Attachments model
+    const emailIDs = allEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+      });
+
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      allEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with its related email
+      files = files.map((file) => ({
+        ...file.toJSON(),
+        email: emailMap.get(file.emailID) || null,
+      }));
+    }
+
     // Fetch all notes linked to these leads
     const notes = await LeadNote.findAll({ where: { leadId: leadIds } });
-    // Collect all attachments from emails
-    const files = [];
-    allEmails.forEach(email => {
-      if (email.attachments && Array.isArray(email.attachments)) {
-        email.attachments.forEach(file => files.push(file));
-      }
-    });
+
     res.status(200).json({
       organization,
       persons,
       leads,
       emails: allEmails,
       notes,
-      files
+      files, // Attachments with related email data
     });
   } catch (error) {
     console.error("Error fetching organization timeline:", error);
@@ -316,7 +383,7 @@ exports.getPersonFields = async (req, res) => {
       { key: "lastEmailReceived", label: "Last email received" },
       { key: "lastEmailSent", label: "Last email sent" },
       { key: "emailMessagesCount", label: "Email messages count" },
-      { key: "instantMessenger", label: "Instant messenger" }
+      { key: "instantMessenger", label: "Instant messenger" },
     ];
     res.status(200).json({ fields });
   } catch (error) {
@@ -349,7 +416,7 @@ exports.getOrganizationFields = async (req, res) => {
       { key: "nextActivityDate", label: "Next activity date" },
       { key: "lastEmailReceived", label: "Last email received" },
       { key: "lastEmailSent", label: "Last email sent" },
-      { key: "emailMessagesCount", label: "Email messages count" }
+      { key: "emailMessagesCount", label: "Email messages count" },
     ];
     res.status(200).json({ fields });
   } catch (error) {
@@ -371,7 +438,12 @@ exports.updateOrganization = async (req, res) => {
     // Update all fields provided in req.body
     await org.update(updateFields);
 
-    res.status(200).json({ message: "Organization updated successfully", organization: org });
+    res
+      .status(200)
+      .json({
+        message: "Organization updated successfully",
+        organization: org,
+      });
   } catch (error) {
     console.error("Error updating organization:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -404,7 +476,6 @@ exports.updatePerson = async (req, res) => {
     if (person.leadOrganizationId) {
       const org = await Organization.findByPk(person.leadOrganizationId);
       if (org && org.ownerId) {
-      
         const owner = await MasterUser.findByPk(org.ownerId);
         if (owner) {
           ownerName = owner.name;
@@ -412,9 +483,9 @@ exports.updatePerson = async (req, res) => {
       }
     }
 
-    res.status(200).json({ 
-      message: "Person updated successfully", 
-      person: { ...person.toJSON(), ownerName }
+    res.status(200).json({
+      message: "Person updated successfully",
+      person: { ...person.toJSON(), ownerName },
     });
   } catch (error) {
     console.error("Error updating person:", error);
