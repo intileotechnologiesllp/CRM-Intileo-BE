@@ -288,7 +288,6 @@ exports.getLeads = async (req, res) => {
     filterId
   } = req.query;
   console.log(req.role, "role of the user............");
-  
 
   try {
         // Determine masterUserID based on role
@@ -557,14 +556,13 @@ const flatLeads = leads.rows.map(lead => {
 });
 console.log(leads.rows, "leads rows after flattening");
 
-let persons, organizations;
+// let persons, organizations;
 
 // 1. Fetch all persons and organizations (already in your code)
 if (req.role === "admin") {
   persons = await Person.findAll({ raw: true });
   organizations = await Organization.findAll({ raw: true });
 } else {
-
   organizations = await Organization.findAll({
     // where: { masterUserID: req.adminId },
     where: {
@@ -586,6 +584,19 @@ const orgIds = organizations.map(o => o.leadOrganizationId);
     },
     raw: true
   });
+
+// Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
+const orgPersonsMap = {};
+persons.forEach(p => {
+  if (p.leadOrganizationId) {
+    if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
+    orgPersonsMap[p.leadOrganizationId].push({
+      personId: p.personId,
+      contactPerson: p.contactPerson
+    });
+  }
+});
+
 // 2. Get all unique ownerIds from persons and organizations
 const orgOwnerIds = organizations.map(o => o.ownerId).filter(Boolean);
 const personOwnerIds = persons.map(p => p.ownerId).filter(Boolean);
@@ -660,7 +671,8 @@ persons = persons.map(p => {
 organizations = organizations.map(o => ({
   ...o,
   ownerName: ownerMap[o.ownerId] || null,
-  leadCount: orgLeadCountMap[o.leadOrganizationId] || 0
+  leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+  persons: orgPersonsMap[o.leadOrganizationId] || [] // <-- add this line
 }));
 
     res.status(200).json({
