@@ -32,12 +32,22 @@ exports.getLeadFilters = async (req, res) => {
   const masterUserID = req.adminId; // or req.user.id
 
   try {
-    // Fetch private filters for this user and public filters
+    // // Fetch private filters for this user and public filters
+    // const filters = await LeadFilter.findAll({
+    //   where: {
+    //     [Op.or]: [
+    //       { masterUserID, visibility: "Private" },
+    //       { visibility: "Public" }
+    //     ]
+    //   }
+    // });
+    // res.status(200).json({ filters });
+        // Fetch all filters: public for everyone, private only for this user
     const filters = await LeadFilter.findAll({
       where: {
         [Op.or]: [
-          { masterUserID, visibility: "Private" },
-          { visibility: "Public" }
+          { visibility: "Public" },
+          { visibility: "Private", masterUserID }
         ]
       }
     });

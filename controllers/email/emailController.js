@@ -592,22 +592,7 @@ if (userCredential && userCredential.blockedEmail) {
       ? referencesHeader.join(" ") // Convert array to string
       : referencesHeader || null;
     //................................
-// let threadId = null;
-// const referencesHeader = parsedEmail.headers.get("references");
-// const references = Array.isArray(referencesHeader)
-//   ? referencesHeader.join(" ")
-//   : referencesHeader || null;
 
-// if (referencesHeader) {
-//   if (Array.isArray(referencesHeader)) {
-//     threadId = referencesHeader[0];
-//   } else if (typeof referencesHeader === "string") {
-//     threadId = referencesHeader.split(" ")[0];
-//   }
-// }
-// if (!threadId) {
-//   threadId = parsedEmail.messageId;
-// }
       
 
     const emailData = {
@@ -689,32 +674,7 @@ if (userCredential && userCredential.blockedEmail) {
       }
     }
 
-    // Save related emails in the database
-    // for (const relatedEmail of relatedEmails) {
-    //   const existingRelatedEmail = await Email.findOne({
-    //     where: { messageId: relatedEmail.messageId },
-    //   });
-
-    //   if (!existingRelatedEmail) {
-    //     await Email.create(relatedEmail);
-    //     console.log(`Related email saved: ${relatedEmail.messageId}`);
-    //   } else {
-    //     console.log(`Related email already exists: ${relatedEmail.messageId}`);
-    //   }
-    // }
-    // // Sae related emails in the database
-    // for (const relatedEmail of relatedEmails) {
-    //   const existingRelatedEmail = await Email.findOne({
-    //     where: { messageId: relatedEmail.messageId },
-    //   });
-
-    //   if (!existingRelatedEmail) {
-    //     await Email.create(relatedEmail);
-    //     console.log(`Related email saved: ${relatedEmail.messageId}`);
-    //   } else {
-    //     console.log(`Related email already exists: ${relatedEmail.messageId}`);
-    //   }
-    // }
+ 
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
