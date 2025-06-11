@@ -9,7 +9,7 @@ const sequelize = require("../../config/db");
     leadOrganizationId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "leadorganizations", key: "leadOrganizationId" },
+      references: { model: "LeadOrganizations", key: "leadOrganizationId" },
       onDelete: "CASCADE",
     },
     content: {
