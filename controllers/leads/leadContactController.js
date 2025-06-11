@@ -276,7 +276,11 @@ exports.getOrganizationTimeline = async (req, res) => {
     const persons = await Person.findAll({
       where: { leadOrganizationId: organizationId },
     });
-
+    // Add array of { personId, contactPerson } to organization object
+    organization.dataValues.persons = persons.map(p => ({
+      personId: p.personId,
+      contactPerson: p.contactPerson
+    }));
     // Fetch all leads for this organization (directly or via persons)
     const personIds = persons.map((p) => p.personId);
     const leads = await Lead.findAll({
