@@ -17,9 +17,21 @@ Person.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "LeadOrga
 Organization.hasMany(Person, { foreignKey: "leadOrganizationId", as: "LeadPerson" });
 Lead.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
 
+// // PersonNote associations
+// Person.hasMany(PersonNote, { foreignKey: "personId", as: "notes" });
+// PersonNote.belongsTo(Person, { foreignKey: "personId", as: "person" });
+// MasterUser.hasMany(PersonNote, { foreignKey: "createdBy", as: "personNotes" });
+// PersonNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
+
+// // OrganizationNote associations
+// Organization.hasMany(OrganizationNote, { foreignKey: "leadOrganizationId", as: "notes" });
+// OrganizationNote.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "LeadOrganization" });
+// MasterUser.hasMany(OrganizationNote, { foreignKey: "createdBy", as: "organizationNotes" });
+// OrganizationNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
+
 module.exports = {
   Lead,
   LeadDetails,
   Person,
-  Organization,
+  Organization
 };

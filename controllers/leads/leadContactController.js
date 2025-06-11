@@ -4,6 +4,8 @@ const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const Attachment = require("../../models/email/attachmentModel");
+const OrganizationNote = require("../../models/leads/organizationNoteModel");
+const PersonNote = require("../../models/leads/personNoteModel");
 
 exports.createPerson = async (req, res) => {
   try {
@@ -493,15 +495,59 @@ exports.updatePerson = async (req, res) => {
   }
 };
 exports.linkPersonToOrganization = async (req, res) => {
-  const { personId, organizationId } = req.body;
+  const { personId, leadOrganizationId } = req.body;
   try {
     const person = await Person.findByPk(personId);
     if (!person) return res.status(404).json({ message: "Person not found" });
 
-    person.leadOrganizationId = organizationId;
+    if (person.leadOrganizationId && person.leadOrganizationId !== leadOrganizationId) {
+      return res.status(400).json({
+        message: "Person is already linked to another organization.",
+        currentOrganizationId: person.leadOrganizationId
+      });
+    }
+
+    person.leadOrganizationId = leadOrganizationId;
     await person.save();
 
     res.status(200).json({ message: "Person linked to organization", person });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.addPersonNote = async (req, res) => {
+  const { personId } = req.params; // Get personId from params
+  if (!personId) {
+    return res.status(400).json({ message: "Person ID is required." });
+  }
+  const { content } = req.body;
+  try {
+    // You should have a PersonNote model/table
+    const note = await PersonNote.create({
+      personId,
+      content,
+      createdBy: req.adminId // or req.user.id
+    });
+    res.status(201).json({ message: "Note added to person", note });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.addOrganizationNote = async (req, res) => {
+  const { leadOrganizationId } = req.params; // Get leadOrganizationId from params
+  if (!leadOrganizationId) {
+    return res.status(400).json({ message: "Organization ID is required." });
+  }
+  const {content } = req.body;
+  try {
+    // You should have an OrganizationNote model/table
+    const note = await OrganizationNote.create({
+      leadOrganizationId,
+      content,
+      createdBy: req.adminId
+    });
+    res.status(201).json({ message: "Note added to organization", note });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
