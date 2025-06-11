@@ -276,32 +276,86 @@ const transporter = nodemailer.createTransport(transporterConfig);
 //   console.log(`Queued email sent and saved: ${info.messageId}`);
 // }
 
+
+
 // --- Update EMAIL_QUEUE consumer ---
+// async function startEmailWorker() {
+//   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+//   const connection = await amqp.connect(amqpUrl);
+//   const channel = await connection.createChannel();
+//   await channel.assertQueue(QUEUE, { durable: true });
+
+//   channel.consume(
+//     QUEUE,
+//     async (msg) => {
+//       if (msg !== null) {
+//         const emailData = JSON.parse(msg.content.toString());
+//         limit(() =>
+//           sendQueuedEmail(emailData)
+//             .then(() => channel.ack(msg))
+//             .catch((err) => {
+//               console.error("Failed to send queued email:", err);
+//               channel.nack(msg, false, false); // Discard on error
+//             })
+//         );
+//       }
+//     },
+//     { noAck: false }
+//   );
+
+//   console.log("Email worker started and waiting for jobs...");
+// }
+
+///.......................new............
+
+
 async function startEmailWorker() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
+  let connection, channel;
 
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendQueuedEmail(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send queued email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
-      }
-    },
-    { noAck: false }
-  );
+  async function connect() {
+    try {
+      connection = await amqp.connect(amqpUrl);
+      channel = await connection.createChannel();
+      await channel.assertQueue(QUEUE, { durable: true });
 
-  console.log("Email worker started and waiting for jobs...");
+      channel.consume(
+        QUEUE,
+        async (msg) => {
+          if (msg !== null) {
+            const emailData = JSON.parse(msg.content.toString());
+            limit(() =>
+              sendQueuedEmail(emailData)
+                .then(() => {
+                  if (channel.connection.stream.writable) channel.ack(msg);
+                })
+                .catch((err) => {
+                  console.error("Failed to send queued email:", err);
+                  if (channel.connection.stream.writable) channel.nack(msg, false, false);
+                })
+            );
+          }
+        },
+        { noAck: false }
+      );
+
+      connection.on("error", (err) => {
+        console.error("AMQP connection error:", err);
+      });
+
+      connection.on("close", () => {
+        console.error("AMQP connection closed. Reconnecting in 5s...");
+        setTimeout(connect, 5000);
+      });
+
+      console.log("Email worker started and waiting for jobs...");
+    } catch (err) {
+      console.error("Failed to connect to RabbitMQ:", err);
+      setTimeout(connect, 5000);
+    }
+  }
+
+  connect();
 }
 async function sendEmailJob(emailData) {
   let draftEmail = null;
