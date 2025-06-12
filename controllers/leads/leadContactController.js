@@ -171,7 +171,7 @@ exports.createOrganization = async (req, res) => {
       });
   } catch (error) {
     console.error("Error creating organization:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error"});
   }
 };
 exports.getContactTimeline = async (req, res) => {
@@ -574,11 +574,44 @@ exports.linkPersonToOrganization = async (req, res) => {
         currentOrganizationId: person.leadOrganizationId
       });
     }
-
     person.leadOrganizationId = leadOrganizationId;
     await person.save();
 
-    res.status(200).json({ message: "Person linked to organization", person });
+    // Fetch the organization data
+    const organization = await Organization.findByPk(leadOrganizationId);
+
+    // Fetch all persons linked to this organization
+    let linkedPersons = await Person.findAll({
+      where: { leadOrganizationId },
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "leadOrganizationId",
+        "createdAt"
+      ],
+      raw: true
+    });
+
+    // Add ownerName and organization data to each person
+    let ownerName = null;
+    if (organization && organization.ownerId) {
+      const owner = await MasterUser.findByPk(organization.ownerId);
+      if (owner) ownerName = owner.name;
+    }
+    linkedPersons = linkedPersons.map(p => ({
+      ...p,
+      ownerName,
+      organization: organization ? organization.toJSON() : null
+    }));
+
+    res.status(200).json({
+      message: "Person linked to organization",
+      linkedPersons
+    });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }

@@ -1880,56 +1880,6 @@ if (actionType === "forward") {
         references: referencesHeader || undefined,
       };
 
-      // Send the email
-      // const info = await transporter.sendMail(mailOptions);
-      // await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
-
-
-      // let savedEmail;
-      // let savedAttachments = [];
-      // console.log(draftId, ".............");
-
-      // // if (draftId) {
-      //   // Update the existing draft record to be a sent email
-      //   savedEmail = await draftEmail.update({
-      //     // messageId: info.messageId,
-      //     inReplyTo: inReplyToHeader || null,
-      //     references: referencesHeader || null,
-      //     sender: SENDER_EMAIL,
-      //     senderName: SENDER_NAME,
-      //     recipient: to || draftEmail.recipient,
-      //     cc: cc || draftEmail.cc,
-      //     bcc: bcc || draftEmail.bcc,
-      //     subject: finalSubject,
-      //     body: `${text || html}`,
-      //     folder: "sent",
-      //     createdAt: new Date(),
-      //     masterUserID,
-      //     tempMessageId,
-      //   });
-
-      //   // Update attachments if new ones are uploaded
-      //   if (req.files && req.files.length > 0) {
-      //     await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-      //      const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-      //     savedAttachments = req.files.map((file) => ({
-      //             emailID: savedEmail.emailID,
-      //     filename: file.filename,
-      //     filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-      //       file.filename
-      //     )}`, // Save public URL in DB
-      //     size: file.size,
-      //     contentType: file.mimetype,
-      //     }));
-      //     await Attachment.bulkCreate(savedAttachments);
-      //   } else {
-      //     // If no new attachments, fetch existing ones for response
-      //     savedAttachments = await Attachment.findAll({
-      //       where: { emailID: draftEmail.emailID },
-      //     });
-      //   }
-      // } else {
-        // ... (your existing logic for new sent emails) ...
 const baseURL = process.env.LOCALHOST_URL;
 //         const attachments = req.files && req.files.length > 0
 //   ? req.files.map((file) => ({
@@ -2177,19 +2127,6 @@ exports.addUserCredential = async (req, res) => {
       where: { masterUserID },
     });
 
-    // Prepare the fields to update
-    // const updateData = {};
-    // if (email) updateData.email = email;
-    // if (appPassword) updateData.appPassword = appPassword;
-    // if (syncStartDate) updateData.syncStartDate = syncStartDate;
-    // if (syncFolders) updateData.syncFolders = syncFolders;
-    // if (syncAllFolders !== undefined)
-    //   updateData.syncAllFolders = syncAllFolders;
-    // if (isTrackOpenEmail !== undefined)
-    //   updateData.isTrackOpenEmail = isTrackOpenEmail;
-    // if (isTrackClickEmail !== undefined)
-    //   updateData.isTrackClickEmail = isTrackClickEmail;
-    // if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail; // <-- Add this line
 
         const updateData = {};
     if (email) updateData.email = email;
@@ -2485,16 +2422,7 @@ exports.scheduleEmail = [
         await Attachment.bulkCreate(savedAttachments);
       }
 
-      // // Fetch the full email data with attachments for response
-      // const fullEmail = await Email.findOne({
-      //   where: { emailID: scheduledEmail.emailID },
-      //   include: [
-      //     {
-      //       model: Attachment,
-      //       as: "attachments",
-      //     },
-      //   ],
-      // });
+
 
       res.status(200).json({
         message: "Email scheduled successfully.",
