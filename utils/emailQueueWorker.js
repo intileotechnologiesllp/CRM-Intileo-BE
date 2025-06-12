@@ -504,8 +504,8 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
       const savedAttachments = emailData.attachments.map(file => ({
         emailID:draftEmail.emailID,
         filename: file.filename,
-        // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
-        filePath: file.path,
+        filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+       // filePath: file.path,
         size: file.size,
         contentType: file.contentType,
       }));
@@ -542,7 +542,8 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
           // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
           //   file.filename
           // )}`,
-          filePath: file.path,
+          //filePath: file.path,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
         size: file.size,
         contentType: file.contentType,
       }));
