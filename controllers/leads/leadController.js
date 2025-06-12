@@ -17,7 +17,7 @@ const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 
-
+const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
   const {
@@ -891,6 +891,18 @@ for (const key in updateObj) {
       return res.status(404).json({ message: "Lead not found" });
     }
 
+    let ownerChanged = false;
+    let newOwner = null;
+    let assigner = null;
+    if (
+      updateObj.ownerId &&
+      updateObj.ownerId !== lead.ownerId
+    ) {
+      ownerChanged = true;
+      newOwner = await MasterUser.findByPk(updateObj.ownerId);
+      assigner = await MasterUser.findByPk(req.adminId);
+    }
+
     // Update or create Organization
     let orgRecord;
     if (Object.keys(organizationData).length > 0) {
@@ -930,6 +942,22 @@ for (const key in updateObj) {
     if (Object.keys(leadData).length > 0) {
       await lead.update(leadData);
       console.log("Lead updated:", lead.toJSON());
+    }
+
+        // --- Send email if owner changed ---
+    if (
+      ownerChanged &&
+      newOwner &&
+      newOwner.email &&
+      assigner &&
+      assigner.email
+    ) {
+      await sendEmail(
+        assigner.email, // from
+        newOwner.email, // to
+        "You have been assigned a new lead",
+        `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
+      );
     }
         // --- Detect owner change ---
     // let ownerChanged = false;
