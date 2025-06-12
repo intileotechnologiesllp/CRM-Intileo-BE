@@ -567,13 +567,7 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
-// let blockedList = [];
-// if (userCredential && userCredential.blockedEmail) {
-//   blockedList = userCredential.blockedEmail
-//     .split(",")
-//     .map(e => e.trim().toLowerCase())
-//     .filter(Boolean);
-// }
+
 let blockedList = [];
 if (userCredential && userCredential.blockedEmail) {
   blockedList = Array.isArray(userCredential.blockedEmail)
@@ -581,7 +575,15 @@ if (userCredential && userCredential.blockedEmail) {
     : [];
 }
     const senderEmail = parsedEmail.from ? parsedEmail.from.value[0].address.toLowerCase() : null;
-    if (blockedList.includes(senderEmail)) {
+        // Sponsored patterns (add more as needed)
+    const sponsoredPatterns = [
+      /no-?reply/i,
+      /mailer-?daemon/i,
+      /demon\.mailer/i,
+      /sponsored/i
+    ];
+    const isSponsored = sponsoredPatterns.some(pattern => pattern.test(senderEmail));
+    if (blockedList.includes(senderEmail) || isSponsored) {
       console.log(`Blocked email from: ${senderEmail}`);
       connection.end();
       return { message: `Blocked email from: ${senderEmail}` };
