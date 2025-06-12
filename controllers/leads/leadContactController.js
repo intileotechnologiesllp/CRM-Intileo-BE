@@ -109,7 +109,7 @@ exports.createPerson = async (req, res) => {
       // Only create/find organization if provided
       [org] = await Organization.findOrCreate({
         where: { organization },
-        defaults: { organization },
+        defaults: { organization,masterUserID} // <-- add masterUserID here
       });
     }
 
