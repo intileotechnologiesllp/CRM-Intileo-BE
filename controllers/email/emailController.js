@@ -198,48 +198,100 @@ const provider = req.body?.provider; // Default to gmail
     const existingCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
+    const smtpConfigByProvider = {
+  gmail:   { smtpHost: "smtp.gmail.com",   smtpPort: 465, smtpSecure: true },
+  yandex:  { smtpHost: "smtp.yandex.com",  smtpPort: 465, smtpSecure: true },
+  yahoo:   { smtpHost: "smtp.mail.yahoo.com", smtpPort: 465, smtpSecure: true },
+  outlook: { smtpHost: "smtp.office365.com", smtpPort: 587, smtpSecure: false }
+};
 
-    if (existingCredential) {
-      // Update existing credentials
-      // await existingCredential.update({ email, appPassword,provider });
-        await existingCredential.update({
-    email,
-    appPassword,
-    provider,
-    // Add custom provider fields
-    imapHost: provider === "custom" ? req.body.imapHost : null,
-    imapPort: provider === "custom" ? req.body.imapPort : null,
-    imapTLS: provider === "custom" ? req.body.imapTLS : null,
-    smtpHost: provider === "custom" ? req.body.smtpHost : null,
-    smtpPort: provider === "custom" ? req.body.smtpPort : null,
-    smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
-  });
-      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-    } else {
-      // Create new credentials
-      // await UserCredential.create({
-      //   masterUserID,
-      //   email,
-      //   appPassword,
-      //   provider
-      // });
-      // console.log(`User credentials added for masterUserID: ${masterUserID}`);
-        // Create new credentials
-  await UserCredential.create({
-    masterUserID,
-    email,
-    appPassword,
-    provider,
-    // Add custom provider fields
-    imapHost: provider === "custom" ? req.body.imapHost : null,
-    imapPort: provider === "custom" ? req.body.imapPort : null,
-    imapTLS: provider === "custom" ? req.body.imapTLS : null,
-    smtpHost: provider === "custom" ? req.body.smtpHost : null,
-    smtpPort: provider === "custom" ? req.body.smtpPort : null,
-    smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
-  });
-  console.log(`User credentials added for masterUserID: ${masterUserID}`);
-    }
+// ...inside exports.fetchInboxEmails = async (req, res) => {
+  // ...existing code...
+
+  // Prepare SMTP config for saving
+  let smtpHost = null, smtpPort = null, smtpSecure = null;
+  if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+    const smtpConfig = smtpConfigByProvider[provider];
+    smtpHost = smtpConfig.smtpHost;
+    smtpPort = smtpConfig.smtpPort;
+    smtpSecure = smtpConfig.smtpSecure;
+  } else if (provider === "custom") {
+    smtpHost = req.body.smtpHost;
+    smtpPort = req.body.smtpPort;
+    smtpSecure = req.body.smtpSecure;
+  }
+      if (existingCredential) {
+    await existingCredential.update({
+      email,
+      appPassword,
+      provider,
+      imapHost: provider === "custom" ? req.body.imapHost : null,
+      imapPort: provider === "custom" ? req.body.imapPort : null,
+      imapTLS: provider === "custom" ? req.body.imapTLS : null,
+      smtpHost,
+      smtpPort,
+      smtpSecure
+    });
+    console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+  } else {
+    await UserCredential.create({
+      masterUserID,
+      email,
+      appPassword,
+      provider,
+      imapHost: provider === "custom" ? req.body.imapHost : null,
+      imapPort: provider === "custom" ? req.body.imapPort : null,
+      imapTLS: provider === "custom" ? req.body.imapTLS : null,
+      smtpHost,
+      smtpPort,
+      smtpSecure
+    });
+    console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  }
+//....................................original code........................................
+  //   if (existingCredential) {
+  //     // Update existing credentials
+  //     // await existingCredential.update({ email, appPassword,provider });
+  //       await existingCredential.update({
+  //   email,
+  //   appPassword,
+  //   provider,
+  //   // Add custom provider fields
+  //   imapHost: provider === "custom" ? req.body.imapHost : null,
+  //   imapPort: provider === "custom" ? req.body.imapPort : null,
+  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  // });
+  //     console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+  //   } else {
+  //     // Create new credentials
+  //     // await UserCredential.create({
+  //     //   masterUserID,
+  //     //   email,
+  //     //   appPassword,
+  //     //   provider
+  //     // });
+  //     // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  //       // Create new credentials
+  // await UserCredential.create({
+  //   masterUserID,
+  //   email,
+  //   appPassword,
+  //   provider,
+  //   // Add custom provider fields
+  //   imapHost: provider === "custom" ? req.body.imapHost : null,
+  //   imapPort: provider === "custom" ? req.body.imapPort : null,
+  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  // });
+  // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  //   }
+
+  //...................orginal code end.......................
 
     // Fetch emails after saving credentials
     console.log("Fetching emails for masterUserID:", masterUserID);
