@@ -1946,8 +1946,8 @@ const baseURL = process.env.LOCALHOST_URL;
         attachments = req.files.map((file) => ({
           filename: file.filename,
           originalname: file.originalname,
-          // path: file.path,
-          path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
+          path: file.path,
+         // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
           size: file.size,
           contentType: file.mimetype,
         }));
@@ -1998,14 +1998,7 @@ if (!finalTo && !finalCc && !finalBccValue) {
 
          await publishToQueue("EMAIL_QUEUE", emailData);
       // }
-    
 
-      // Generate public URLs for attachments
-      // const attachmentLinks = savedAttachments.map((attachment) => ({
-      //   filename: attachment.filename,
-      //   link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
-      // }));
-// await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,

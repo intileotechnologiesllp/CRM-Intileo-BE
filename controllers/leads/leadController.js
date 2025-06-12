@@ -527,6 +527,12 @@ if (!include.some(i => i.as === "LeadOrganization")) {
     attributes: ["name", "masterUserID"],
     required: false
   });
+  if (!leadAttributes.includes('leadOrganizationId')) {
+  leadAttributes.push('leadOrganizationId');
+}
+if (!leadAttributes.includes('personId')) {
+  leadAttributes.push('personId');
+}
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -559,31 +565,77 @@ console.log(leads.rows, "leads rows after flattening");
 // let persons, organizations;
 
 // 1. Fetch all persons and organizations (already in your code)
-if (req.role === "admin") {
-  persons = await Person.findAll({ raw: true });
-  organizations = await Organization.findAll({ raw: true });
+// if (req.role === "admin") {
+//   persons = await Person.findAll({ raw: true });
+//   organizations = await Organization.findAll({ raw: true });
+// } else {
+//   organizations = await Organization.findAll({
+//     // where: { masterUserID: req.adminId },
+//     where: {
+//       [Op.or]: [
+//         { masterUserID: req.adminId },
+//         { ownerId: req.adminId }
+//       ]
+//     },
+//     raw: true
+//   });
+// }
+// const orgIds = organizations.map(o => o.leadOrganizationId);
+//   persons = await Person.findAll({
+//     where: {
+//       [Op.or]: [
+//         { masterUserID: req.adminId },
+//         { leadOrganizationId: orgIds }
+//       ]
+//     },
+//     raw: true
+//   });
+console.log("flatLeads:", flatLeads);
+const personIdsFromLeads = flatLeads.map(l => l.personId).filter(Boolean);
+const orgIdsFromLeads = flatLeads.map(l => l.leadOrganizationId).filter(Boolean);
+
+// Fallback: if IDs are missing, use names
+if (personIdsFromLeads.length === 0) {
+  const contactPersons = flatLeads.map(l => l.contactPerson).filter(Boolean);
+  persons = await Person.findAll({
+    where: { contactPerson: { [Op.in]: contactPersons } },
+    raw: true
+  });
 } else {
-  organizations = await Organization.findAll({
-    // where: { masterUserID: req.adminId },
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId }
-      ]
-    },
+  persons = await Person.findAll({
+    where: { personId: { [Op.in]: personIdsFromLeads } },
     raw: true
   });
 }
-const orgIds = organizations.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { leadOrganizationId: orgIds }
-      ]
-    },
+
+// if (orgIdsFromLeads.length === 0) {
+//   const orgNames = flatLeads.map(l => l.organization).filter(Boolean);
+//   organizations = await Organization.findAll({
+//     where: { organization: { [Op.in]: orgNames } },
+//     raw: true
+//   });
+// } else {
+//   organizations = await Organization.findAll({
+//     where: { leadOrganizationId: { [Op.in]: orgIdsFromLeads } },
+//     raw: true
+//   });
+// }
+ console.log("Using orgIdsFromLeads to fetch organizations:", orgIdsFromLeads.length);
+if (orgIdsFromLeads.length > 0) {
+ 
+  
+  organizations = await Organization.findAll({
+    where: { leadOrganizationId: { [Op.in]: orgIdsFromLeads } },
     raw: true
   });
+} else {
+  const orgNames = flatLeads.map(l => l.organization).filter(Boolean);
+  organizations = await Organization.findAll({
+    where: { organization: { [Op.in]: orgNames } },
+    raw: true
+  });
+}
+
 
 // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
 const orgPersonsMap = {};
@@ -636,7 +688,8 @@ const leadCounts = await Lead.findAll({
   where: {
     [Op.or]: [
       { personId: personIds },
-      { leadOrganizationId: orgIds }
+      // { leadOrganizationId: orgIds }
+      { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
     ]
   },
   group: ["personId", "leadOrganizationId"],
@@ -878,6 +931,17 @@ for (const key in updateObj) {
       await lead.update(leadData);
       console.log("Lead updated:", lead.toJSON());
     }
+        // --- Detect owner change ---
+    // let ownerChanged = false;
+    // let newOwner = null;
+    // let oldOwner = null;
+    // if (updateObj.ownerId && updateObj.ownerId !== lead.ownerId) {
+    //   ownerChanged = true;
+    //   // Fetch new owner info
+    //   newOwner = await MasterUser.findByPk(updateObj.ownerId);
+    //   // Fetch old owner info (optional)
+    //   oldOwner = await MasterUser.findByPk(lead.ownerId);
+    // }
 
     // Update or create LeadDetails
     let leadDetails = await LeadDetails.findOne({ where: { leadId } });
@@ -892,7 +956,15 @@ for (const key in updateObj) {
       leadDetails = await LeadDetails.create(leadDetailsData);
       console.log("LeadDetails created:", leadDetails.toJSON());
     }
-
+    // // --- Send email if owner changed ---
+    // if (ownerChanged && newOwner && newOwner.email) {
+    //   // You should have a sendEmail utility function
+    //   await sendEmail(
+    //     newOwner.email,
+    //     "You have been assigned a new lead",
+    //     `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}".\n\nPlease check your CRM dashboard for details.`
+    //   );
+    // }
     res.status(200).json({
       message: "Lead updated successfully",
       lead,

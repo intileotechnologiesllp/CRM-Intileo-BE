@@ -13,7 +13,6 @@ exports.saveLeadFilter = async (req, res) => {
   if (!filterName || !filterConfig) {
     return res.status(400).json({ message: "filterName and filterConfig are required." });
   }
-
   try {
     const filter = await LeadFilter.create({
       filterName,
