@@ -574,43 +574,20 @@ exports.linkPersonToOrganization = async (req, res) => {
         currentOrganizationId: person.leadOrganizationId
       });
     }
-    person.leadOrganizationId = leadOrganizationId;
-    await person.save();
 
-    // Fetch the organization data
+    // Fetch the organization name
     const organization = await Organization.findByPk(leadOrganizationId);
-
-    // Fetch all persons linked to this organization
-    let linkedPersons = await Person.findAll({
-      where: { leadOrganizationId },
-      attributes: [
-        "personId",
-        "contactPerson",
-        "email",
-        "phone",
-        "jobTitle",
-        "personLabels",
-        "leadOrganizationId",
-        "createdAt"
-      ],
-      raw: true
-    });
-
-    // Add ownerName and organization data to each person
-    let ownerName = null;
-    if (organization && organization.ownerId) {
-      const owner = await MasterUser.findByPk(organization.ownerId);
-      if (owner) ownerName = owner.name;
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
     }
-    linkedPersons = linkedPersons.map(p => ({
-      ...p,
-      ownerName,
-      organization: organization ? organization.toJSON() : null
-    }));
+
+    person.leadOrganizationId = leadOrganizationId;
+    person.organization = organization.organization; // Update the organization column
+    await person.save();
 
     res.status(200).json({
       message: "Person linked to organization",
-      linkedPersons
+      person
     });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
@@ -674,6 +651,54 @@ exports.getAllContactPersons = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPersonsByOrganization = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  try {
+    // Find the organization
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Find all persons linked to this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId },
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "organization"
+      ],
+      order: [["contactPerson", "ASC"]]
+    });
+
+    // Fetch ownerName from MasterUser using organization.ownerId
+    let ownerName = null;
+    if (organization.ownerId) {
+      const owner = await MasterUser.findByPk(organization.ownerId);
+      if (owner) {
+        ownerName = owner.name;
+      }
+    }
+
+    // Add ownerName to each person object
+    const personsWithOwner = persons.map(person => ({
+      ...person.toJSON(),
+      ownerName
+    }));
+
+    res.status(200).json({
+      organization: organization.organization,
+      persons: personsWithOwner
+    });
+  } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
 };
