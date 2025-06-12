@@ -18,6 +18,7 @@ router.post("/link-person-organization", verifyToken, leadContactsController.lin
 router.post("/create-person-note/:personId", verifyToken, leadContactsController.addPersonNote);
 router.post("/create-organization-note/:leadOrganizationId", verifyToken, leadContactsController.addOrganizationNote);
 router.get("/get-all-Persons",leadContactsController.getAllContactPersons);
+router.get("/get-all-persons-by-organization/:leadOrganizationId", leadContactsController.getPersonsByOrganization);
 
 
 
