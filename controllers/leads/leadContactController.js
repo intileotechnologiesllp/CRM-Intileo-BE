@@ -653,3 +653,22 @@ exports.addOrganizationNote = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+exports.getAllContactPersons = async (req, res) => {
+  try {
+    const persons = await Person.findAll({
+      attributes: ["personId", "contactPerson"],
+      order: [["contactPerson", "ASC"]],
+      raw: true
+    });
+
+    res.status(200).json({
+      contactPersons: persons // Array of { personId, contactPerson }
+    });
+  } catch (error) {
+    console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
