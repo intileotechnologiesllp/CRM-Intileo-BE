@@ -945,20 +945,20 @@ for (const key in updateObj) {
     }
 
         // --- Send email if owner changed ---
-    if (
-      ownerChanged &&
-      newOwner &&
-      newOwner.email &&
-      assigner &&
-      assigner.email
-    ) {
-      await sendEmail(
-        assigner.email, // from
-        newOwner.email, // to
-        "You have been assigned a new lead",
-        `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
-      );
-    }
+if (
+  ownerChanged &&
+  newOwner &&
+  newOwner.email &&
+  assigner &&
+  assigner.email
+) {
+  await sendEmail(assigner.email, {
+    from: assigner.email,
+    to: newOwner.email,
+    subject: "You have been assigned a new lead",
+    text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
+  });
+}
         // --- Detect owner change ---
     // let ownerChanged = false;
     // let newOwner = null;
