@@ -656,7 +656,14 @@ exports.addOrganizationNote = async (req, res) => {
 
 exports.getAllContactPersons = async (req, res) => {
   try {
+    const { search = "" } = req.query;
+
+    const where = search
+      ? { contactPerson: { [Op.like]: `%${search}%` } }
+      : {};
+
     const persons = await Person.findAll({
+      where,
       attributes: ["personId", "contactPerson"],
       order: [["contactPerson", "ASC"]],
       raw: true
