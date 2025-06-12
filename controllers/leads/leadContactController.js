@@ -7,9 +7,73 @@ const Attachment = require("../../models/email/attachmentModel");
 const OrganizationNote = require("../../models/leads/organizationNoteModel");
 const PersonNote = require("../../models/leads/personNoteModel");
 
+// exports.createPerson = async (req, res) => {
+//   try {
+//     const masterUserID = req.adminId; // Get the master user ID from the request
+//     if (!req.body || !req.body.contactPerson || !req.body.email) {
+//       return res
+//         .status(400)
+//         .json({ message: "Contact person and email are required." });
+//     }
+//     const {
+//       contactPerson,
+//       email,
+//       phone,
+//       notes,
+//       postalAddress,
+//       birthday,
+//       jobTitle,
+//       personLabels,
+//       organization,
+//     } = req.body;
+//     // Check for duplicate person in the same organization
+//     const existingPerson = await Person.findOne({
+//       where: {
+//         contactPerson,
+//         organization,
+//         // Optionally, also check email for even stricter uniqueness:
+//         // email
+//       },
+//     });
+//     if (existingPerson) {
+//       return res
+//         .status(409)
+//         .json({
+//           message: "Person already exists in this organization.",
+//           person: existingPerson,
+//         });
+//     }
+//     // Create or find the organization
+//     const org = await Organization.findOrCreate({
+//       where: { organization },
+//       defaults: { organization },
+//     });
+
+//     // Create the person
+//     const person = await Person.create({
+//       contactPerson,
+//       email,
+//       phone,
+//       notes,
+//       postalAddress,
+//       birthday,
+//       jobTitle,
+//       personLabels,
+//       organization: org[0].organization,
+//       leadOrganizationId: org[0].leadOrganizationId, // Link to org
+//       masterUserID,
+//     });
+
+//     res.status(201).json({ message: "Person created successfully", person });
+//   } catch (error) {
+//     console.error("Error creating person:", error);
+//     res.status(500).json({ message: "Internal server error", error });
+//   }
+// };
+
 exports.createPerson = async (req, res) => {
   try {
-    const masterUserID = req.adminId; // Get the master user ID from the request
+    const masterUserID = req.adminId;
     if (!req.body || !req.body.contactPerson || !req.body.email) {
       return res
         .status(400)
@@ -24,30 +88,30 @@ exports.createPerson = async (req, res) => {
       birthday,
       jobTitle,
       personLabels,
-      organization,
+      organization, // may be undefined or empty
     } = req.body;
-    // Check for duplicate person in the same organization
-    const existingPerson = await Person.findOne({
-      where: {
-        contactPerson,
-        organization,
-        // Optionally, also check email for even stricter uniqueness:
-        // email
-      },
-    });
+
+    // Check for duplicate person in the same organization (or globally if no org)
+    const whereClause = organization
+      ? { contactPerson, organization }
+      : { contactPerson, organization: null };
+
+    const existingPerson = await Person.findOne({ where: whereClause });
     if (existingPerson) {
-      return res
-        .status(409)
-        .json({
-          message: "Person already exists in this organization.",
-          person: existingPerson,
-        });
+      return res.status(409).json({
+        message: "Person already exists" + (organization ? " in this organization." : "."),
+        person: existingPerson,
+      });
     }
-    // Create or find the organization
-    const org = await Organization.findOrCreate({
-      where: { organization },
-      defaults: { organization },
-    });
+
+    let org = null;
+    if (organization) {
+      // Only create/find organization if provided
+      [org] = await Organization.findOrCreate({
+        where: { organization },
+        defaults: { organization },
+      });
+    }
 
     // Create the person
     const person = await Person.create({
@@ -59,8 +123,8 @@ exports.createPerson = async (req, res) => {
       birthday,
       jobTitle,
       personLabels,
-      organization: org[0].organization,
-      leadOrganizationId: org[0].leadOrganizationId, // Link to org
+      organization: org ? org.organization : null,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
       masterUserID,
     });
 
