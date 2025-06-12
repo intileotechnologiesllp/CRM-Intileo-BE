@@ -542,8 +542,8 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
           // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
           //   file.filename
           // )}`,
-          //filePath: file.path,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+          filePath: file.path,
+         // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
         size: file.size,
         contentType: file.contentType,
       }));
