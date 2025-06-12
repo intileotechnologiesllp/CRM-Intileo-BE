@@ -1,7 +1,10 @@
 const nodemailer = require("nodemailer");
-const { UserCredential } = require("../models/email/userCredentialModel"); // Adjust path as needed
+const UserCredential = require("../models/email/userCredentialModel"); // Adjust path as needed
 
 async function sendEmail(adminEmail, { from, to, subject, text }) {
+    console.log(`Sending email from: ${from}, to: ${to}, subject: ${subject}`);
+    console.log(adminEmail," adminEmail");
+    
   // Fetch user credentials from DB
   const userCredential = await UserCredential.findOne({ where: { email: adminEmail } });
   if (!userCredential) {
