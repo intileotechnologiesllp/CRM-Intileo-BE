@@ -30,6 +30,7 @@ const Email = require("./models/email/emailModel"); // Import Email model
 const leadFilterRoutes = require("./routes/leads/leadFilterRoutes"); // Import lead filter routes
 const leadColumnController=require("./routes/leads/leadColumnRoutes.js"); // Import lead column controller
 const leadContactsRoutes = require("./routes/leads/leadContactsRoutes.js"); // Import lead contacts routes
+const dealRoutes = require("./routes/deals/dealsRoutes.js"); // Import deal routes
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
@@ -71,6 +72,7 @@ app.use("/api/email-settings", emailSettingController); // Register email settin
 app.use("/api/lead-filters", leadFilterRoutes); // Register lead filter routes
 app.use("/api/lead-column", leadColumnController); // Register lead column controller routes
 app.use("/api/lead-contacts", leadContactsRoutes); // Register lead contacts routes
+app.use("/api/deals", dealRoutes); // Register deal routes
 
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
