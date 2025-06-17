@@ -3,6 +3,7 @@ const Lead = require("../../models/leads/leadsModel");
 const Person = require("../../models/leads/leadPersonModel");
 const Organization = require("../../models/leads/leadOrganizationModel");
 const { Op } = require("sequelize");
+const { fn, col, literal } = require("sequelize");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -197,10 +198,10 @@ exports.getDeals = async (req, res) => {
     });
 
     res.status(200).json({
-      deals,
       total,
       totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page)
+      currentPage: parseInt(page),
+      deals,
     });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
@@ -222,6 +223,26 @@ exports.updateDeal = async (req, res) => {
     await deal.update(updateFields);
 
     res.status(200).json({ message: "Deal updated successfully", deal });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getDealSummaryByCurrency = async (req, res) => {
+  try {
+    // Group by currency and aggregate value, weightedValue, and count
+    const summary = await Deal.findAll({
+      attributes: [
+        "currency",
+        [fn("SUM", col("value")), "totalValue"],
+        // Replace 'weightedValue' with your actual weighted value logic/column if you have one
+        [fn("SUM", col("value")), "weightedValue"], // Example: same as value, adjust as needed
+        [fn("COUNT", col("dealId")), "dealCount"]
+      ],
+      group: ["currency"]
+    });
+
+    res.status(200).json({ summary });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
