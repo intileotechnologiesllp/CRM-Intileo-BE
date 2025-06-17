@@ -32,6 +32,7 @@ exports.createDeal = async (req, res) => {
       phone,
       email,
       sourceOrgin,
+      leadId
     } = req.body;
 
     // Validate required fields here...
