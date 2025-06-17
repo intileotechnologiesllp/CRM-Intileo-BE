@@ -148,6 +148,10 @@ const Deal = sequelize.define("Deal", {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to false (not archived)
   },
+  status:{
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   createdAt: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,

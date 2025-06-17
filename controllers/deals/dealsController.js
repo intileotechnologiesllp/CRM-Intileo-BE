@@ -5,6 +5,7 @@ const Organization = require("../../models/leads/leadOrganizationModel");
 const { Op } = require("sequelize");
 const { fn, col, literal } = require("sequelize");
 const DealDetails = require("../../models/deals/dealsDetailModel");
+const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -242,7 +243,7 @@ exports.getDeals = async (req, res) => {
 exports.updateDeal = async (req, res) => {
   try {
     const { dealId } = req.params;
-    const updateFields = { ...req.body };
+    const updateFields = {...req.body };
 
     // Separate DealDetails fields
     const dealDetailsFields = {};
@@ -260,7 +261,16 @@ exports.updateDeal = async (req, res) => {
     if (!deal) {
       return res.status(404).json({ message: "Deal not found." });
     }
-    await deal.update(updateFields);
+       // Check if pipelineStage is changing
+    // Only check for pipelineStage if it's in the request body
+    if (updateFields.pipelineStage && updateFields.pipelineStage !== deal.pipelineStage) {
+      await DealStageHistory.create({
+        dealId: deal.dealId,
+        stageName: updateFields.pipelineStage,
+        enteredAt: new Date()
+      });
+    }
+       await deal.update({...updateFields });
 
     // Update or create DealDetails
     if (Object.keys(dealDetailsFields).length > 0) {
@@ -310,6 +320,8 @@ exports.updateDeal = async (req, res) => {
 
     res.status(200).json({ message: "Deal, person, and organization updated successfully" });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -429,6 +441,47 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
+        // --- Pipeline stage days calculation ---
+    const stageHistory = await DealStageHistory.findAll({
+      where: { dealId },
+      order: [['enteredAt', 'ASC']]
+    });
+
+    const now = new Date();
+    const pipelineStages = [];
+
+    for (let i = 0; i < stageHistory.length; i++) {
+      const stage = stageHistory[i];
+      const nextStage = stageHistory[i + 1];
+      const start = new Date(stage.enteredAt);
+      const end = nextStage ? new Date(nextStage.enteredAt) : now;
+      const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+      pipelineStages.push({
+        stageName: stage.stageName,
+        days
+      });
+    }
+
+        // Calculate avgTimeToWon for all won deals
+    const wonDeals = await Deal.findAll({ where: { status: 'won' } });
+    let avgTimeToWon = 0;
+    if (wonDeals.length) {
+      const totalDays = wonDeals.reduce((sum, d) => {
+        if (d.wonDate && d.createdAt) {
+          const days = Math.floor((d.wonDate - d.createdAt) / (1000 * 60 * 60 * 24));
+          return sum + days;
+        }
+        return sum;
+      }, 0);
+      avgTimeToWon = Math.round(totalDays / wonDeals.length);
+    }
+        // ...existing overview calculations...
+    // const now = new Date();
+    const createdAt = deal.createdAt;
+    const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+    const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
+    const inactiveDays = 0; // Placeholder until you have activities
+
     // Send all person data
     const personArr = deal.Person ? [deal.Person.toJSON ? deal.Person.toJSON() : deal.Person] : [];
 
@@ -463,12 +516,39 @@ exports.getDealDetail = async (req, res) => {
     res.status(200).json({
       deal: dealObj,
       person: personArr,
-      organization: orgArr
+      organization: orgArr,
+            pipelineStages, // [{ stageName: 'Qualified', days: 216 }, ...]
+      currentStage: pipelineStages[pipelineStages.length - 1]?.stageName || deal.pipelineStage,
+      overview: {
+        dealAge,
+        avgTimeToWon,
+        inactiveDays,
+        createdAt
+      },
+      participants: []
     });
 
       } catch (error) {
         console.log(error);
         
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+exports.deleteDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    await deal.destroy();
+
+    res.status(200).json({ message: "Deal deleted successfully." });
+  } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
 };
