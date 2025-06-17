@@ -4,6 +4,7 @@ const Person = require("../../models/leads/leadPersonModel");
 const Organization = require("../../models/leads/leadOrganizationModel");
 const { Op } = require("sequelize");
 const { fn, col, literal } = require("sequelize");
+const DealDetails = require("../../models/deals/dealsDetailModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -297,7 +298,7 @@ exports.archiveDeal = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
     await deal.update({ isArchived: true });
-    res.status(200).json({ message: "Deal archived successfully." });
+    res.status(200).json({ message: "Deal archived successfully.",deal});
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
@@ -310,7 +311,114 @@ exports.unarchiveDeal = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
     await deal.update({ isArchived: false });
-    res.status(200).json({ message: "Deal unarchived successfully." });
+    res.status(200).json({ message: "Deal unarchived successfully.",deal });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getDealsByStage = async (req, res) => {
+  try {
+    const allStages = [
+      "Qualified",
+      "Contact Made",
+      "Proposal Made",
+      "Negotiations Started"
+      // ...add all your stages here
+    ];
+
+    const result = [];
+    let totalDeals = 0;
+
+    for (const stage of allStages) {
+      const deals = await Deal.findAll({
+        where: { pipelineStage: stage},
+        order: [["createdAt", "DESC"]]
+      });
+
+      const totalValue = deals.reduce((sum, deal) => sum + (deal.value || 0), 0);
+      const dealCount = deals.length;
+      totalDeals += dealCount;
+
+      result.push({
+        stage,
+        totalValue,
+        dealCount,
+        deals
+      });
+    }
+
+    res.status(200).json({
+      totalDeals,
+      stages: result
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getDealDetail = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId, {
+      include: [
+        { model: DealDetails, as: "details" },
+        { model: Person, as: "Person" },
+        { model: Organization, as: "Organization" }
+      ]
+    });
+
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Prepare arrays
+    const personArr = deal.Person ? [{
+      personId: deal.Person.personId,
+      contactPerson: deal.Person.contactPerson,
+      email: deal.Person.email,
+      phone: deal.Person.phone
+      // ...other person fields
+    }] : [];
+
+    const orgArr = deal.Organization ? [{
+      leadOrganizationId: deal.Organization.leadOrganizationId,
+      organization: deal.Organization.organization,
+      address: deal.Organization.address,
+      country: deal.Organization.country
+      // ...other org fields
+    }] : [];
+
+    // Flat deal object
+    const dealObj = {
+      dealId: deal.dealId,
+      title: deal.title,
+      value: deal.value,
+      pipeline: deal.pipeline,
+      pipelineStage: deal.pipelineStage,
+      status: deal.status || "open",
+      createdAt: deal.createdAt,
+      expectedCloseDate: deal.expectedCloseDate,
+      serviceType: deal.serviceType,
+      proposalValue: deal.proposalValue,
+      esplProposalNo: deal.esplProposalNo,
+      projectLocation: deal.projectLocation,
+      organizationCountry: deal.organizationCountry,
+      proposalSentDate: deal.proposalSentDate,
+      sourceOrgin: deal.sourceOrgin,
+      sourceChannel: deal.sourceChannel,
+      sourceChannelId: deal.sourceChannelId,
+      statusSummary: deal.details?.statusSummary,
+      responsiblePerson: deal.details?.responsiblePerson,
+      rfpReceivedDate: deal.details?.rfpReceivedDate
+      // ...other deal fields
+    };
+
+    res.status(200).json({
+      deal: dealObj,
+      person: personArr,
+      organization: orgArr
+    });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }

@@ -12,6 +12,7 @@ router.get("/get-deal-summary-by-currency",verifyToken, dealsController.getDealS
 // router.get("/get-archived-deals", verifyToken, dealsController.getArchivedDeals);
 router.get("/archive-deal/:dealId", verifyToken, dealsController.archiveDeal);
 router.get("/unarchive-deal/:dealId", verifyToken, dealsController.unarchiveDeal);
+router.get("/deals-by-pipeline",verifyToken, dealsController.getDealsByStage);
 
 
 module.exports = router;
