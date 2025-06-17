@@ -36,7 +36,7 @@ exports.createDeal = async (req, res) => {
     } = req.body;
 
     // Validate required fields here...
-
+let ownerId = req.user?.id || req.adminId || req.body.ownerId;
 
 
  // Validation
