@@ -82,29 +82,40 @@ const masterUserID = req.adminId
     }
         // 1. Find or create Organization
     let org = null;
-    if (organization) {
-      org = await Organization.findOrCreate({
-        where: { organization },
-        defaults: { organization }
-      });
-      org = org[0]; // findOrCreate returns [instance, created]
+if (organization) {
+let org;
+if (organization) {
+  org = await Organization.findOne({ where: { organization } });
+  if (!org) {
+    org = await Organization.create({
+      organization,
+      masterUserID // make sure this is set
+    });
+  }
+} else {
+  return res.status(400).json({ message: "Organization name is required." });
+} // findOrCreate returns [instance, created]
     }
         // 2. Find or create Person
     let person = null;
     if (contactPerson) {
   const masterUserID = req.adminId;
 
-person = await Person.findOrCreate({
-  where: { contactPerson, email },
-  defaults: {
-    contactPerson,
-    email,
-    phone,
-    leadOrganizationId: org ? org.leadOrganizationId : null,
-    masterUserID // <-- Make sure this is present and not null!
+let person;
+if (email) {
+  person = await Person.findOne({ where: { email } });
+  if (!person) {
+    person = await Person.create({
+      contactPerson,
+      email,
+      phone,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
+      masterUserID
+    });
   }
-});
-      person = person[0];
+} else {
+  return res.status(400).json({ message: "Email is required for contact person." });
+}
     }
     // Create the lead
     const deal = await Deal.create({
@@ -159,7 +170,8 @@ exports.getDeals = async (req, res) => {
       search = "",
       pipeline,
       pipelineStage,
-      ownerId
+      ownerId,
+      isArchived
     } = req.query;
 
     const where = {};
@@ -186,6 +198,11 @@ exports.getDeals = async (req, res) => {
     // Filter by ownerId
     if (ownerId) {
       where.ownerId = ownerId;
+    }
+
+        // Add isArchived filter if provided
+    if (typeof isArchived !== "undefined") {
+      where.isArchived = isArchived === "true";
     }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -228,21 +245,60 @@ exports.updateDeal = async (req, res) => {
   }
 };
 
-exports.getDealSummaryByCurrency = async (req, res) => {
+
+exports.getDealSummary = async (req, res) => {
   try {
-    // Group by currency and aggregate value, weightedValue, and count
-    const summary = await Deal.findAll({
+    // 1. Per-currency summary
+    const currencySummary = await Deal.findAll({
       attributes: [
         "currency",
         [fn("SUM", col("value")), "totalValue"],
-        // Replace 'weightedValue' with your actual weighted value logic/column if you have one
-        [fn("SUM", col("value")), "weightedValue"], // Example: same as value, adjust as needed
+        // Replace with your actual weighted value logic if needed
+        [fn("SUM", col("value")), "weightedValue"],
         [fn("COUNT", col("dealId")), "dealCount"]
       ],
       group: ["currency"]
     });
 
-    res.status(200).json({ summary });
+    // 2. Overall summary
+    const overall = await Deal.findAll({
+      attributes: [
+        [fn("SUM", col("value")), "totalValue"],
+        [fn("SUM", col("value")), "weightedValue"],
+        [fn("COUNT", col("dealId")), "dealCount"]
+      ]
+    });
+
+    res.status(200).json({
+      overall: overall[0],         // { totalValue, weightedValue, dealCount }
+      currencySummary              // array of per-currency summaries
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.archiveDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+    await deal.update({ isArchived: true });
+    res.status(200).json({ message: "Deal archived successfully." });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.unarchiveDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+    await deal.update({ isArchived: false });
+    res.status(200).json({ message: "Deal unarchived successfully." });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }

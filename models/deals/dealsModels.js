@@ -144,6 +144,10 @@ const Deal = sequelize.define("Deal", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
+  isArchived: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false, // Default to false (not archived)
+  },
   createdAt: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
