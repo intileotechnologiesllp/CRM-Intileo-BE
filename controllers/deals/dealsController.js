@@ -31,7 +31,7 @@ exports.createDeal = async (req, res) => {
       sbuClass,
       phone,
       email,
-      sourceOrgin
+      sourceOrgin,
     } = req.body;
 
     // Validate required fields here...
@@ -57,14 +57,20 @@ exports.createDeal = async (req, res) => {
     // 1. Set masterUserID at the top, before using it anywhere
 const masterUserID = req.adminId
         // 1. Check if a matching lead exists
-    const existingLead = await Lead.findOne({
-      where: {
-        contactPerson,
-        organization,
-        title
-        // You can adjust the matching logic as needed
+
+    let existingLead = null;
+
+    // 2. If sourceOrgin is '2', require and use leadId
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      if (!leadId) {
+        return res.status(400).json({ message: "leadId is required when sourceOrgin is 2." });
       }
-    });
+      existingLead = await Lead.findByPk(leadId);
+      if (!existingLead) {
+        return res.status(404).json({ message: "Lead not found." });
+      }
+      // Use existingLead data for the deal (e.g., ownerId = existingLead.ownerId)
+    
         let ownerId = req.adminId// fallback if no lead
     if (existingLead) {
       ownerId = existingLead.ownerId; // use the lead's ownerId if converting
@@ -78,8 +84,9 @@ const masterUserID = req.adminId
       // await existingLead.update({ convertedToDeal: true }); // if you have such a field
       // Or: await existingLead.update({ dealId: newDealId });
       //  // after deal is created
-      await existingLead.update({ dealId: deal.dealId });
+      // await existingLead.update({ dealId: deal.dealId });
     }
+  }
         // 1. Find or create Organization
     let org = null;
 if (organization) {
