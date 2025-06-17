@@ -125,12 +125,13 @@ if (email) {
   return res.status(400).json({ message: "Email is required for contact person." });
 }
     }
-    if (!dealData.contactPerson) {
+if (!(person ? person.contactPerson : contactPerson)) {
   return res.status(400).json({ message: "contactPerson is required." });
 }
     // Create the lead
     const deal = await Deal.create({
-      contactPerson: person ? person.contactPerson : null,
+      // contactPerson: person ? person.contactPerson : null,
+     contactPerson: person ? person.contactPerson : contactPerson,
       organization: org ? org.organization : null,
       personId: person ? person.personId : null,
       leadOrganizationId: org ? org.leadOrganizationId : null,
