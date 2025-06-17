@@ -959,17 +959,8 @@ if (
     text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
   });
 }
-        // --- Detect owner change ---
-    // let ownerChanged = false;
-    // let newOwner = null;
-    // let oldOwner = null;
-    // if (updateObj.ownerId && updateObj.ownerId !== lead.ownerId) {
-    //   ownerChanged = true;
-    //   // Fetch new owner info
-    //   newOwner = await MasterUser.findByPk(updateObj.ownerId);
-    //   // Fetch old owner info (optional)
-    //   oldOwner = await MasterUser.findByPk(lead.ownerId);
-    // }
+
+
 
     // Update or create LeadDetails
     let leadDetails = await LeadDetails.findOne({ where: { leadId } });
@@ -1391,6 +1382,230 @@ exports.updateLeadNote = async (req, res) => {
     res.status(200).json({ message: "Note updated successfully.", note });
   } catch (error) {
     console.error("Error updating note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPersons = async (req, res) => {
+  const {
+    search,
+    page = 1,
+    limit = 10,
+    sortBy = "createdAt",
+    order = "DESC",
+    filterId
+  } = req.query;
+
+  console.log(req.role, "Role of the user");
+  
+
+  try {
+    // 1. Build where clauses and includes (reuse your dynamic filter logic)
+    let personWhere = {};
+    let organizationWhere = {};
+    let include = [];
+
+    // --- Dynamic filter logic (reuse from getLeads) ---
+    if (filterId) {
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
+      const filterConfig = typeof filter.filterConfig === "string"
+        ? JSON.parse(filter.filterConfig)
+        : filter.filterConfig;
+
+      const personFields = Object.keys(Person.rawAttributes);
+      const organizationFields = Object.keys(Organization.rawAttributes);
+
+      // AND conditions
+      if (filterConfig.all && filterConfig.all.length > 0) {
+        personWhere[Op.and] = [];
+        organizationWhere[Op.and] = [];
+        filterConfig.all.forEach(cond => {
+          if (personFields.includes(cond.field)) personWhere[Op.and].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field)) organizationWhere[Op.and].push(buildCondition(cond));
+        });
+        if (!personWhere[Op.and].length) delete personWhere[Op.and];
+        if (!organizationWhere[Op.and].length) delete organizationWhere[Op.and];
+      }
+      // OR conditions
+      if (filterConfig.any && filterConfig.any.length > 0) {
+        personWhere[Op.or] = [];
+        organizationWhere[Op.or] = [];
+        filterConfig.any.forEach(cond => {
+          if (personFields.includes(cond.field)) personWhere[Op.or].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field)) organizationWhere[Op.or].push(buildCondition(cond));
+        });
+        if (!personWhere[Op.or].length) delete personWhere[Op.or];
+        if (!organizationWhere[Op.or].length) delete organizationWhere[Op.or];
+      }
+    } else {
+      // Only show persons and organizations created by this user
+    if (req.role !== "admin") {
+        personWhere.masterUserID = req.adminId;
+        organizationWhere.masterUserID = req.adminId;
+      }
+
+      // Optional: add search logic
+      if (search) {
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `%${search}%` } },
+          { email: { [Op.like]: `%${search}%` } },
+          { phone: { [Op.like]: `%${search}%` } }
+        ];
+        organizationWhere[Op.or] = [
+          { organization: { [Op.like]: `%${search}%` } },
+          { address: { [Op.like]: `%${search}%` } }
+        ];
+      }
+    }
+
+
+    // 2. Search logic
+    if (search) {
+      personWhere[Op.or] = [
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } }
+      ];
+      organizationWhere[Op.or] = [
+        { organization: { [Op.like]: `%${search}%` } },
+        { address: { [Op.like]: `%${search}%` } }
+      ];
+    }
+
+    // 3. Fetch all organizations (with pagination)
+let persons, organizationsRaw;
+
+if (req.role === "admin") {
+  // 1. Fetch all organizations (with pagination and filters)
+  const orgOffset = (page - 1) * limit;
+  organizationsRaw = await Organization.findAndCountAll({
+    where: organizationWhere,
+    limit: parseInt(limit),
+    offset: parseInt(orgOffset),
+    order: [[sortBy, order.toUpperCase()]],
+    raw: true
+  });
+
+  // 2. Fetch all persons for these organizations
+  const orgIds = organizationsRaw.rows.map(o => o.leadOrganizationId);
+  persons = await Person.findAll({
+    where: {
+      ...personWhere,
+      leadOrganizationId: { [Op.in]: orgIds }
+    },
+    raw: true
+  });
+} else {
+// 1. Fetch all persons (filtered)
+persons = await Person.findAll({
+  where: personWhere,
+  raw: true
+});
+
+// 2. Get unique orgIds from filtered persons
+const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+
+// 3. Fetch only organizations for those orgIds (with pagination)
+const orgOffset = (page - 1) * limit;
+organizationsRaw = await Organization.findAndCountAll({
+  where: {
+    ...organizationWhere,
+    leadOrganizationId: { [Op.in]: orgIds }
+  },
+  limit: parseInt(limit),
+  offset: parseInt(orgOffset),
+  order: [[sortBy, order.toUpperCase()]],
+  raw: true
+});
+}
+  // 2. Get unique orgIds from filtered persons
+ // const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+    // 5. Count leads for each person and organization
+    const personIds = persons.map(p => p.personId);
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
+      ],
+      where: {
+        [Op.or]: [
+          { personId: personIds },
+          { leadOrganizationId: orgIds }
+        ]
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach(lc => {
+      if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // 6. Fetch owner names
+    const ownerIds = [
+      ...organizationsRaw.rows.map(o => o.ownerId).filter(Boolean),
+      ...persons.map(p => p.ownerId).filter(Boolean)
+    ];
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true
+    });
+    const ownerMap = {};
+    owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
+
+    // 7. Attach persons to organizations
+    const orgPersonsMap = {};
+    persons.forEach(p => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson
+        });
+      }
+    });
+
+// 8. Format organizations, only include those with at least one person
+const organizations = organizationsRaw.rows
+  .map(o => ({
+    ...o,
+    ownerName: ownerMap[o.ownerId] || null,
+    leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+    persons: orgPersonsMap[o.leadOrganizationId] || []
+  }));
+
+// If not admin, filter out organizations without persons
+const finalOrganizations = req.role === "admin"
+  ? organizations
+  : organizations.filter(org => org.persons.length > 0);
+
+    // 9. Format persons
+    persons = persons.map(p => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+      leadCount: personLeadCountMap[p.personId] || 0
+    }));
+
+    res.status(200).json({
+      message: "Data fetched successfully",
+      totalRecords: organizationsRaw.count,
+      totalPages: Math.ceil(organizationsRaw.count / limit),
+      currentPage: parseInt(page),
+      persons,
+      organizations:finalOrganizations
+    });
+  } catch (error) {
+    console.error("Error fetching data:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

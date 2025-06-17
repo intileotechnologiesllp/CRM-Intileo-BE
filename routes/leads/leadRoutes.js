@@ -27,6 +27,7 @@ router.get("/get-All-lead-details/:leadId", verifyToken, leadController.getAllLe
 router.post("/add-lead-note/:leadId", verifyToken, leadController.addLeadNote);
 router.get("/delete-lead-note/:noteId", verifyToken, leadController.deleteLeadNote);
 router.post("/update-lead-note/:noteId", verifyToken, leadController.updateLeadNote);
+router.get("/get-persons",verifyToken, leadController.getPersons);
 
 
 module.exports = router;
