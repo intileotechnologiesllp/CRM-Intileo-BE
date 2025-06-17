@@ -235,6 +235,8 @@ exports.getDeals = async (req, res) => {
       deals,
     });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -355,6 +357,8 @@ exports.getDealSummary = async (req, res) => {
       currencySummary              // array of per-currency summaries
     });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -368,6 +372,8 @@ exports.archiveDeal = async (req, res) => {
     await deal.update({ isArchived: true });
     res.status(200).json({ message: "Deal archived successfully.",deal});
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -381,6 +387,8 @@ exports.unarchiveDeal = async (req, res) => {
     await deal.update({ isArchived: false });
     res.status(200).json({ message: "Deal unarchived successfully.",deal });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -549,6 +557,8 @@ exports.deleteDeal = async (req, res) => {
 
     res.status(200).json({ message: "Deal deleted successfully." });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
