@@ -238,21 +238,77 @@ exports.getDeals = async (req, res) => {
   }
 };
 
+
 exports.updateDeal = async (req, res) => {
   try {
     const { dealId } = req.params;
-    const updateFields = req.body;
+    const updateFields = { ...req.body };
 
-    // Optionally: Validate fields here
+    // Separate DealDetails fields
+    const dealDetailsFields = {};
+    if ('statusSummary' in updateFields) dealDetailsFields.statusSummary = updateFields.statusSummary;
+    if ('responsiblePerson' in updateFields) dealDetailsFields.responsiblePerson = updateFields.responsiblePerson;
+    if ('rfpReceivedDate' in updateFields) dealDetailsFields.rfpReceivedDate = updateFields.rfpReceivedDate;
 
+    // Remove DealDetails fields from main update
+    delete updateFields.statusSummary;
+    delete updateFields.responsiblePerson;
+    delete updateFields.rfpReceivedDate;
+
+    // Update Deal
     const deal = await Deal.findByPk(dealId);
     if (!deal) {
       return res.status(404).json({ message: "Deal not found." });
     }
-
     await deal.update(updateFields);
 
-    res.status(200).json({ message: "Deal updated successfully", deal });
+    // Update or create DealDetails
+    if (Object.keys(dealDetailsFields).length > 0) {
+      let dealDetails = await DealDetails.findOne({ where: { dealId } });
+      if (dealDetails) {
+        await dealDetails.update(dealDetailsFields);
+      } else {
+        await DealDetails.create({ dealId, ...dealDetailsFields });
+      }
+    }
+
+    // Update all fields of Person
+    if (deal.personId) {
+      const person = await Person.findByPk(deal.personId);
+      if (person) {
+        // Only update fields that exist in the Person model
+        const personAttributes = Object.keys(Person.rawAttributes);
+        const personUpdate = {};
+        for (const key of personAttributes) {
+          if (key in req.body) {
+            personUpdate[key] = req.body[key];
+          }
+        }
+        if (Object.keys(personUpdate).length > 0) {
+          await person.update(personUpdate);
+        }
+      }
+    }
+
+    // Update all fields of Organization
+    if (deal.leadOrganizationId) {
+      const org = await Organization.findByPk(deal.leadOrganizationId);
+      if (org) {
+        // Only update fields that exist in the Organization model
+        const orgAttributes = Object.keys(Organization.rawAttributes);
+        const orgUpdate = {};
+        for (const key of orgAttributes) {
+          if (key in req.body) {
+            orgUpdate[key] = req.body[key];
+          }
+        }
+        if (Object.keys(orgUpdate).length > 0) {
+          await org.update(orgUpdate);
+        }
+      }
+    }
+
+    res.status(200).json({ message: "Deal, person, and organization updated successfully" });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
@@ -357,6 +413,7 @@ exports.getDealsByStage = async (req, res) => {
   }
 };
 
+// ...existing code...
 exports.getDealDetail = async (req, res) => {
   try {
     const { dealId } = req.params;
@@ -372,24 +429,13 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
-    // Prepare arrays
-    const personArr = deal.Person ? [{
-      personId: deal.Person.personId,
-      contactPerson: deal.Person.contactPerson,
-      email: deal.Person.email,
-      phone: deal.Person.phone
-      // ...other person fields
-    }] : [];
+    // Send all person data
+    const personArr = deal.Person ? [deal.Person.toJSON ? deal.Person.toJSON() : deal.Person] : [];
 
-    const orgArr = deal.Organization ? [{
-      leadOrganizationId: deal.Organization.leadOrganizationId,
-      organization: deal.Organization.organization,
-      address: deal.Organization.address,
-      country: deal.Organization.country
-      // ...other org fields
-    }] : [];
+    // Send all organization data
+    const orgArr = deal.Organization ? [deal.Organization.toJSON ? deal.Organization.toJSON() : deal.Organization] : [];
 
-    // Flat deal object
+    // Flat deal object (as before)
     const dealObj = {
       dealId: deal.dealId,
       title: deal.title,
@@ -419,7 +465,10 @@ exports.getDealDetail = async (req, res) => {
       person: personArr,
       organization: orgArr
     });
-  } catch (error) {
+
+      } catch (error) {
+        console.log(error);
+        
     res.status(500).json({ message: "Internal server error" });
   }
 };
