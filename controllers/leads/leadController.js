@@ -100,19 +100,29 @@ if (!orgRecord || !orgRecord.leadOrganizationId) {
         masterUserID: req.adminId
       });
     }
-        const duplicateLead = await Lead.findOne({
-      where: {
-        organization,
-        contactPerson,
-        // email,
-        title
-      }
-    });
-    if (duplicateLead) {
-      return res.status(409).json({
-        message: "Lead Already Exist."
-      });
-    }
+    //     const duplicateLead = await Lead.findOne({
+    //   where: {
+    //     organization,
+    //     contactPerson,
+    //     // email,
+    //     title
+    //   }
+    // });
+    // if (duplicateLead) {
+    //   return res.status(409).json({
+    //     message: "Lead Already Exist."
+    //   });
+    // }
+const duplicateByOrg = await Lead.findOne({ where: { organization } });
+const duplicateByTitle = await Lead.findOne({ where: { title } });
+const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
+
+if (duplicateByOrg || duplicateByTitle || duplicateByContact) {
+  return res.status(409).json({
+    message: "A lead with this organization, title, or contact person already exists."
+  });
+}
+
      const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
     const ownerName = owner ? owner.name : null;
     const lead = await Lead.create({
@@ -533,6 +543,7 @@ if (!include.some(i => i.as === "LeadOrganization")) {
 // if (!leadAttributes.includes('personId')) {
 //   leadAttributes.push('personId');
 // }
+whereClause.dealId = null;
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
