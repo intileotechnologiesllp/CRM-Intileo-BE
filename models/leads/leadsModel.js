@@ -176,14 +176,10 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.STRING,
     allowNull: true, // Source origin of the lead
   },
-//   dealId: {
-//   type: DataTypes.INTEGER,
-//   allowNull: true,
-//   references: {
-//     model: 'Deals',
-//     key: 'dealId'
-//   }
-// }
+  dealId: {
+  type: DataTypes.INTEGER,
+  allowNull: true,
+}
 });
 
 

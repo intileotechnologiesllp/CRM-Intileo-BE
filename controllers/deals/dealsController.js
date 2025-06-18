@@ -6,6 +6,11 @@ const { Op } = require("sequelize");
 const { fn, col, literal } = require("sequelize");
 const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
+const DealParticipant = require("../../models/deals/dealPartcipentsModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const DealNote = require("../../models/deals/delasNoteModel");
+const Email=require("../../models/email/emailModel");
+const Attachment = require("../../models/email/attachmentModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -33,8 +38,7 @@ exports.createDeal = async (req, res) => {
       sbuClass,
       phone,
       email,
-      sourceOrgin,
-      leadId
+      sourceOrgin
     } = req.body;
 
     // Validate required fields here...
@@ -64,36 +68,22 @@ const masterUserID = req.adminId
     let existingLead = null;
 
     // 2. If sourceOrgin is '2', require and use leadId
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
-      if (!leadId) {
-        return res.status(400).json({ message: "leadId is required when sourceOrgin is 2." });
-      }
-      existingLead = await Lead.findByPk(leadId);
-      if (!existingLead) {
-        return res.status(404).json({ message: "Lead not found." });
-      }
-      // Use existingLead data for the deal (e.g., ownerId = existingLead.ownerId)
-    
-        let ownerId = req.adminId// fallback if no lead
-    if (existingLead) {
-      ownerId = existingLead.ownerId; // use the lead's ownerId if converting
-    }
-    //const masterUserID = req.user?.id || req.adminId || req.body.masterUserID;
-    let leadId = null;
-    if (existingLead) {
-      leadId = existingLead.leadId;
-
-      // Optionally, mark the lead as converted or link the deal
-      // await existingLead.update({ convertedToDeal: true }); // if you have such a field
-      // Or: await existingLead.update({ dealId: newDealId });
-      //  // after deal is created
-      // await existingLead.update({ dealId: deal.dealId });
-    }
+    let leadId = req.body.leadId;
+ if (sourceOrgin === "2" || sourceOrgin === 2) {
+  if (!leadId) {
+    return res.status(400).json({ message: "leadId is required when sourceOrgin is 2." });
   }
+  existingLead = await Lead.findByPk(leadId);
+  if (!existingLead) {
+    return res.status(404).json({ message: "Lead not found." });
+  }
+  ownerId = existingLead.ownerId; // assign, don't redeclare
+  leadId = existingLead.leadId;   // assign, don't redeclare
+  // Optionally, update the lead after deal creation
+}
         // 1. Find or create Organization
     let org = null;
 if (organization) {
-let org;
 if (organization) {
   org = await Organization.findOne({ where: { organization } });
   if (!org) {
@@ -111,9 +101,10 @@ if (organization) {
     if (contactPerson) {
   const masterUserID = req.adminId;
 
-let person;
 if (email) {
   person = await Person.findOne({ where: { email } });
+  console.log(person.personId," person found");
+  
   if (!person) {
     person = await Person.create({
       contactPerson,
@@ -122,6 +113,7 @@ if (email) {
       leadOrganizationId: org ? org.leadOrganizationId : null,
       masterUserID
     });
+
   }
 } else {
   return res.status(400).json({ message: "Email is required for contact person." });
@@ -131,12 +123,16 @@ if (!(person ? person.contactPerson : contactPerson)) {
   return res.status(400).json({ message: "contactPerson is required." });
 }
     // Create the lead
+    console.log(person.personId," before deal creation");
+    
     const deal = await Deal.create({
       // contactPerson: person ? person.contactPerson : null,
      contactPerson: person ? person.contactPerson : contactPerson,
       organization: org ? org.organization : null,
       personId: person ? person.personId : null,
       leadOrganizationId: org ? org.leadOrganizationId : null,
+  //       personId: person.personId,
+  // leadOrganizationId: org.leadOrganizationId,
        leadId, // link to the lead if found
       title,
       value,
@@ -165,10 +161,23 @@ if (!(person ? person.contactPerson : contactPerson)) {
       // Add personId, organizationId, etc. as needed
     });
     // Optionally, update the lead with the new dealId
+        await DealStageHistory.create({
+      dealId: deal.dealId,
+      stageName: deal.pipelineStage,
+      enteredAt: deal.createdAt // or new Date()
+    });
+        if (person || org) {
+      await DealParticipant.create({
+        dealId: deal.dealId,
+        personId: person ? person.personId : null,
+        leadOrganizationId: org ? org.leadOrganizationId : null
+      });
+    }
+    
     if (existingLead) {
       await existingLead.update({ dealId: deal.dealId });
     }
-    res.status(201).json({ message: "Lead created successfully", deal });
+    res.status(201).json({ message: "deal created successfully", deal });
   } catch (error) {
     console.log("Error creating deal:", error);
     
@@ -520,6 +529,88 @@ exports.getDealDetail = async (req, res) => {
       rfpReceivedDate: deal.details?.rfpReceivedDate
       // ...other deal fields
     };
+// Fetch participants for this deal
+const participants = await DealParticipant.findAll({
+  where: { dealId },
+  include: [
+    { model: Person, as: "Person", attributes: ["personId", "contactPerson", "email"] },
+    { model: Organization, as: "Organization", attributes: ["leadOrganizationId", "organization","masterUserID"] }
+  ]
+});
+const participantArr = await Promise.all(participants.map(async p => {
+  const person = p.Person;
+  const organization = p.Organization;
+
+  let closedDeals = 0, openDeals = 0, ownerName = null;
+
+  if (person) {
+    closedDeals = await Deal.count({ where: { personId: person.personId, status: "won" } });
+    openDeals = await Deal.count({ where: { personId: person.personId, status: "open" } });
+console.log("Person found:", person.contactPerson, "Closed Deals:", closedDeals, "Open Deals:", openDeals);
+
+    // Use ownerId or masterUserID from organization
+    console.log(organization.masterUserID, " organization masterUserID");
+    console.log(organization, " organization");
+    
+    
+    let ownerIdToUse = organization
+      ? (organization.ownerId || organization.masterUserID)
+      : null;
+console.log(ownerIdToUse, " ownerIdToUse");
+
+    if (ownerIdToUse) {
+      const owner = await MasterUser.findOne({ where: { masterUserID: ownerIdToUse } });
+      ownerName = owner ? owner.name : null;
+    }
+  }
+
+  return {
+    name: person ? person.contactPerson : null,
+    organization: organization ? organization.organization : null,
+    email: person ? person.email : null,
+    phone: person ? person.phone : null,
+    closedDeals,
+    openDeals,
+    owner: ownerName
+  };
+}));
+// Fetch emails linked to this deal
+const emailsByDeal = await Email.findAll({ where: { dealId } });
+let emailsByAddress = [];
+if (deal.email) {
+  emailsByAddress = await Email.findAll({
+    where: {
+      [Op.or]: [
+        { sender: deal.email },
+        { recipient: { [Op.like]: `%${deal.email}%` } },
+      ],
+    },
+  });
+}
+  // Merge and deduplicate emails
+    const allEmailsMap = new Map();
+    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    const allEmails = Array.from(allEmailsMap.values());
+
+    // Fetch all attachments for these emails
+    const emailIDs = allEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+      });
+      // Optionally, attach email info to each file
+      const emailMap = new Map();
+      allEmails.forEach((email) => emailMap.set(email.emailID, email));
+      files = files.map((file) => ({
+        ...file.toJSON(),
+        email: emailMap.get(file.emailID) || null,
+      }));
+    }
+
+    // Fetch notes for this deal
+    const notes = await DealNote.findAll({ where: { dealId } });
 
     res.status(200).json({
       deal: dealObj,
@@ -533,7 +624,9 @@ exports.getDealDetail = async (req, res) => {
         inactiveDays,
         createdAt
       },
-      participants: []
+      participants:participantArr,
+      emails: allEmails,
+      notes
     });
 
       } catch (error) {
@@ -559,6 +652,70 @@ exports.deleteDeal = async (req, res) => {
   } catch (error) {
     console.log(error);
     
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.linkParticipant = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { personId } = req.body;
+
+    // Require at least personId
+    if (!dealId || !personId) {
+      return res.status(400).json({ message: "dealId and personId are required." });
+    }
+
+    // Optionally, check if participant already linked
+    const exists = await DealParticipant.findOne({
+      where: { dealId, personId }
+    });
+    if (exists) {
+      return res.status(409).json({ message: "Participant already linked to this deal." });
+    }
+
+    const participant = await DealParticipant.create({
+      dealId,
+      personId
+    });
+
+    res.status(201).json({ message: "Participant linked successfully.", participant });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+exports.createNote = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { content } = req.body;
+    const createdBy = req.user?.masterUserID || req.adminId; // Adjust as per your auth
+
+    if (!content) {
+      return res.status(400).json({ message: "Note content is required." });
+    }
+
+    const note = await DealNote.create({
+      dealId,
+      content,
+      createdBy
+    });
+
+    res.status(201).json({ message: "Note created successfully.", note });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getNotes = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const notes = await DealNote.findAll({
+      where: { dealId },
+      order: [["createdAt", "DESC"]]
+    });
+    res.status(200).json({ notes });
+  } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
 };

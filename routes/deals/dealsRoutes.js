@@ -15,6 +15,9 @@ router.get("/unarchive-deal/:dealId", verifyToken, dealsController.unarchiveDeal
 router.get("/deals-by-pipeline",verifyToken, dealsController.getDealsByStage);
 router.get("/get-deal-details/:dealId", verifyToken, dealsController.getDealDetail);
 router.get("/delete-deal/:dealId", verifyToken, dealsController.deleteDeal);
+router.post("/link-participant/:dealId", verifyToken, dealsController.linkParticipant);
+router.post("create-note/:dealId", verifyToken, dealsController.createNote);
+router.get("/get-deal-notes/:dealId", verifyToken, dealsController.getNotes);
 
 
 module.exports = router;
