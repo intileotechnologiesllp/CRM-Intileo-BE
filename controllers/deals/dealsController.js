@@ -227,6 +227,14 @@ exports.getDeals = async (req, res) => {
     if (typeof isArchived !== "undefined") {
       where.isArchived = isArchived === "true";
     }
+    // --- Add this block to get checked columns ---
+    const pref = await DealColumnPreference.findOne();
+    let attributes;
+    if (pref) {
+      const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+      attributes = columns.filter(col => col.check).map(col => col.key);
+      if (attributes.length === 0) attributes = undefined; // fallback to all fields if none checked
+    }
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
@@ -234,7 +242,8 @@ exports.getDeals = async (req, res) => {
       where,
       limit: parseInt(limit),
       offset,
-      order: [["createdAt", "DESC"]]
+      order: [["createdAt", "DESC"]],
+      attributes // <-- only checked columns will be returned
     });
 
     res.status(200).json({
@@ -717,5 +726,132 @@ exports.getNotes = async (req, res) => {
     res.status(200).json({ notes });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// const Deal = require("../../models/deals/dealsModels");
+// let DealDetails;
+// try {
+//   DealDetails = require("../../models/deals/dealDetailsModel");
+// } catch (e) {
+//   DealDetails = null;
+// }
+const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
+
+exports.saveAllDealFieldsWithCheck = async (req, res) => {
+  // Get all field names from Deal and DealDetails models
+  const dealFields = Object.keys(Deal.rawAttributes);
+  const dealDetailsFields = DealDetails
+    ? Object.keys(DealDetails.rawAttributes)
+    : [];
+  const allFieldNames = Array.from(
+    new Set([...dealFields, ...dealDetailsFields])
+  );
+
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = allFieldNames.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    let pref = await DealColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await DealColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res.status(200).json({ message: "All deal columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all deal columns:", error);
+    res.status(500).json({ message: "Error saving all deal columns" });
+  }
+};
+exports.getDealFields = (req, res) => {
+  const fields = [
+    { key: "contactPerson", label: "Contact Person", check: false },
+    { key: "organization", label: "Organization", check: false },
+    { key: "title", label: "Title", check: false },
+    { key: "value", label: "Value", check: false },
+    { key: "currency", label: "Currency", check: false },
+    { key: "pipeline", label: "Pipeline", check: false },
+    { key: "pipelineStage", label: "Pipeline Stage", check: false },
+    { key: "label", label: "Label", check: false },
+    { key: "expectedCloseDate", label: "Expected Close Date", check: false },
+    { key: "sourceChannel", label: "Source Channel", check: false },
+    { key: "serviceType", label: "Service Type", check: false },
+    { key: "proposalValue", label: "Proposal Value", check: false },
+    { key: "proposalCurrency", label: "Proposal Currency", check: false },
+    { key: "esplProposalNo", label: "ESPL Proposal No.", check: false },
+    { key: "projectLocation", label: "Project Location", check: false },
+    { key: "organizationCountry", label: "Organization Country", check: false },
+    { key: "proposalSentDate", label: "Proposal Sent Date", check: false },
+    { key: "sourceRequired", label: "Source Required", check: false },
+    { key: "questionerShared", label: "Questioner Shared", check: false },
+    { key: "sectorialSector", label: "Sectorial Sector", check: false },
+    { key: "sbuClass", label: "SBU Class", check: false },
+    { key: "phone", label: "Phone", check: false },
+    { key: "email", label: "Email", check: false },
+    { key: "sourceOrgin", label: "Source Origin", check: false },
+    { key: "isArchived", label: "Is Archived", check: false },
+    { key: "status", label: "Status", check: false },
+    { key: "createdAt", label: "Created At", check: false },
+    { key: "updatedAt", label: "Updated At", check: false },
+    { key: "statusSummary", label: "Status Summary", check: false },
+    { key: "responsiblePerson", label: "Responsible Person", check: false },
+    { key: "rfpReceivedDate", label: "RFP Received Date", check: false }
+  ];
+  res.status(200).json({ fields });
+};
+exports.updateDealColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
+
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
+
+  try {
+    // Find the global DealColumnPreference record
+    let pref = await DealColumnPreference.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
+    }
+
+    // Parse columns if stored as string
+    let prefColumns = typeof pref.columns === "string"
+      ? JSON.parse(pref.columns)
+      : pref.columns;
+
+    // Update check status for matching columns
+    prefColumns = prefColumns.map(col => {
+      const found = columns.find(c => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    pref.columns = prefColumns;
+    await pref.save();
+    res.status(200).json({ message: "Columns updated", columns: pref.columns });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating columns" });
   }
 };
