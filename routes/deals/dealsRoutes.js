@@ -18,6 +18,9 @@ router.get("/delete-deal/:dealId", verifyToken, dealsController.deleteDeal);
 router.post("/link-participant/:dealId", verifyToken, dealsController.linkParticipant);
 router.post("create-note/:dealId", verifyToken, dealsController.createNote);
 router.get("/get-deal-notes/:dealId", verifyToken, dealsController.getNotes);
+router.get("/save-deal-fields", verifyToken, dealsController.saveAllDealFieldsWithCheck);
+router.get("/get-deal-fields", verifyToken, dealsController.getDealFields);
+router.post("/check-columns", verifyToken, dealsController.updateDealColumnChecks);
 
 
 module.exports = router;
