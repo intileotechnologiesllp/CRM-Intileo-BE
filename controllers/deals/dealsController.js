@@ -388,8 +388,72 @@ if (updateFields.pipelineStage && updateFields.pipelineStage !== deal.pipelineSt
         }
       }
     }
+    // After all updates and before sending the response:
+const updatedDeal = await Deal.findByPk(dealId, {
+  include: [
+    { model: DealDetails, as: "details" },
+    { model: Person, as: "Person" },
+    { model: Organization, as: "Organization" }
+  ]
+});
 
-    res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
+// Calculate pipeline stage days
+const stageHistory = await DealStageHistory.findAll({
+  where: { dealId },
+  order: [['enteredAt', 'ASC']]
+});
+
+const now = new Date();
+const pipelineStages = [];
+for (let i = 0; i < stageHistory.length; i++) {
+  const stage = stageHistory[i];
+  const nextStage = stageHistory[i + 1];
+  const start = new Date(stage.enteredAt);
+  const end = nextStage ? new Date(nextStage.enteredAt) : now;
+  const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+  pipelineStages.push({
+    stageName: stage.stageName,
+    days
+  });
+}
+const pipelineOrder = [
+  "Qualified",
+  "Contact Made",
+  "Proposal Made",
+  "Negotiations Started"
+];
+
+const stageDaysMap = new Map();
+for (const stage of pipelineStages) {
+  if (!stageDaysMap.has(stage.stageName)) {
+    stageDaysMap.set(stage.stageName, stage.days);
+  } else {
+    stageDaysMap.set(stage.stageName, stageDaysMap.get(stage.stageName) + stage.days);
+  }
+}
+
+let currentStageName = pipelineStages.length
+  ? pipelineStages[pipelineStages.length - 1].stageName
+  : null;
+
+let pipelineStagesUnique = [];
+if (currentStageName && pipelineOrder.includes(currentStageName)) {
+  const currentIdx = pipelineOrder.indexOf(currentStageName);
+  pipelineStagesUnique = pipelineOrder.slice(0, currentIdx + 1).map(stageName => ({
+    stageName,
+    days: stageDaysMap.get(stageName) || 0
+  }));
+}
+
+    //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
+    res.status(200).json({
+  message: "Deal, person, and organization updated successfully",
+  deal: updatedDeal,
+  person: updatedDeal.Person,
+  organization: updatedDeal.Organization,
+  pipelineStages: pipelineStagesUnique,
+  currentStage: currentStageName
+});
   } catch (error) {
     console.log(error);
     
