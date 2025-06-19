@@ -22,6 +22,9 @@ router.get("/save-deal-fields", verifyToken, dealsController.saveAllDealFieldsWi
 router.get("/get-deal-fields", verifyToken, dealsController.getDealFields);
 router.post("/check-columns", verifyToken, dealsController.updateDealColumnChecks);
 router.get("/get-deal-for-filter", verifyToken, dealsController.getDealFieldsForFilter);
+router.get("/mark-deal-as-won/:dealId", verifyToken, dealsController.markDealAsWon);
+router.post("/mark-deal-as-lost/:dealId", verifyToken, dealsController.markDealAsLost);
+router.get("/mark-deal-as-open/:dealId", verifyToken, dealsController.markDealAsOpen);
 
 
 module.exports = router;
