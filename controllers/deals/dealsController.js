@@ -449,8 +449,8 @@ if (currentStageName && pipelineOrder.includes(currentStageName)) {
     res.status(200).json({
   message: "Deal, person, and organization updated successfully",
   deal: updatedDeal,
-  person: updatedDeal.Person,
-  organization: updatedDeal.Organization,
+  person: updatedDeal.Person ? [updatedDeal.Person] : [],
+  organization: updatedDeal.Organization ? [updatedDeal.Organization] : [],
   pipelineStages: pipelineStagesUnique,
   currentStage: currentStageName
 });
