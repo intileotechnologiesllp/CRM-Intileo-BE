@@ -61,6 +61,13 @@ let ownerId = req.user?.id || req.adminId || req.body.ownerId;
     if (existingDeal) {
       return res.status(400).json({ message: "A deal with this title already exists." });
     }
+    // Check for duplicate contactPerson in the deals table
+const duplicateContactPerson = await Deal.findOne({ where: { contactPerson } });
+if (duplicateContactPerson) {
+  return res.status(409).json({
+    message: "A deal with this contact person already exists."
+  });
+}
     // 1. Set masterUserID at the top, before using it anywhere
 const masterUserID = req.adminId
         // 1. Check if a matching lead exists
@@ -85,7 +92,7 @@ const masterUserID = req.adminId
     let org = null;
 if (organization) {
 if (organization) {
-  org = await Organization.findOne({ where: { organization } });
+  org = await Organization.findOne({ where: { organization,address} });
   if (!org) {
     org = await Organization.create({
       organization,
@@ -381,7 +388,7 @@ exports.updateDeal = async (req, res) => {
       }
     }
 
-    res.status(200).json({ message: "Deal, person, and organization updated successfully" });
+    res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
   } catch (error) {
     console.log(error);
     

@@ -78,7 +78,7 @@ exports.createLead = async (req, res) => {
     }
 
         // 1. Find or create Organization
-let orgRecord = await Organization.findOne({ where: { organization } });
+let orgRecord = await Organization.findOne({ where: { organization,address } });
 if (!orgRecord) {
   orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
 }
@@ -113,13 +113,13 @@ if (!orgRecord || !orgRecord.leadOrganizationId) {
     //     message: "Lead Already Exist."
     //   });
     // }
-const duplicateByOrg = await Lead.findOne({ where: { organization } });
+// const duplicateByOrg = await Lead.findOne({ where: { organization } });
 const duplicateByTitle = await Lead.findOne({ where: { title } });
 const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
 
-if (duplicateByOrg || duplicateByTitle || duplicateByContact) {
+if (duplicateByTitle || duplicateByContact) {
   return res.status(409).json({
-    message: "A lead with this organization, title, or contact person already exists."
+    message: "A lead with this title or contact person already exists."
   });
 }
 
