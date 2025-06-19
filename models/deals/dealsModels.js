@@ -152,6 +152,10 @@ const Deal = sequelize.define("Deal", {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  source: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   createdAt: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
