@@ -333,14 +333,25 @@ exports.updateDeal = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
        // Check if pipelineStage is changing
-    // Only check for pipelineStage if it's in the request body
-    if (updateFields.pipelineStage && updateFields.pipelineStage !== deal.pipelineStage) {
-      await DealStageHistory.create({
+if (updateFields.pipelineStage && updateFields.pipelineStage !== deal.pipelineStage) {
+  // 1. Update exitedAt for previous stage
+  await DealStageHistory.update(
+    { exitedAt: new Date() },
+    {
+      where: {
         dealId: deal.dealId,
-        stageName: updateFields.pipelineStage,
-        enteredAt: new Date()
-      });
+        stageName: deal.pipelineStage,
+        exitedAt: null
+      }
     }
+  );
+  // 2. Create new stage entry
+  await DealStageHistory.create({
+    dealId: deal.dealId,
+    stageName: updateFields.pipelineStage,
+    enteredAt: new Date()
+  });
+}
        await deal.update({...updateFields });
 
     // Update or create DealDetails
@@ -518,26 +529,57 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
-        // --- Pipeline stage days calculation ---
-    const stageHistory = await DealStageHistory.findAll({
-      where: { dealId },
-      order: [['enteredAt', 'ASC']]
-    });
+    //     // --- Pipeline stage days calculation ---
+    // const stageHistory = await DealStageHistory.findAll({
+    //   where: { dealId },
+    //   order: [['enteredAt', 'ASC']]
+    // });
 
-    const now = new Date();
-    const pipelineStages = [];
+    // const now = new Date();
+    // const pipelineStages = [];
 
-    for (let i = 0; i < stageHistory.length; i++) {
-      const stage = stageHistory[i];
-      const nextStage = stageHistory[i + 1];
-      const start = new Date(stage.enteredAt);
-      const end = nextStage ? new Date(nextStage.enteredAt) : now;
-      const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
-      pipelineStages.push({
-        stageName: stage.stageName,
-        days
-      });
-    }
+    // for (let i = 0; i < stageHistory.length; i++) {
+    //   const stage = stageHistory[i];
+    //   const nextStage = stageHistory[i + 1];
+    //   const start = new Date(stage.enteredAt);
+    //   const end = nextStage ? new Date(nextStage.enteredAt) : now;
+    //   const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+    //   pipelineStages.push({
+    //     stageName: stage.stageName,
+    //     days
+    //   });
+    // }
+const stageHistory = await DealStageHistory.findAll({
+  where: { dealId },
+  order: [['enteredAt', 'ASC']]
+});
+
+const now = new Date();
+const pipelineStages = [];
+
+for (let i = 0; i < stageHistory.length; i++) {
+  const stage = stageHistory[i];
+  const nextStage = stageHistory[i + 1];
+  const start = new Date(stage.enteredAt);
+  const end = nextStage ? new Date(nextStage.enteredAt) : now;
+  const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
+  pipelineStages.push({
+    stageName: stage.stageName,
+    days
+  });
+}
+// Aggregate days per unique stage for frontend bar
+const stageDaysMap = new Map();
+
+for (const stage of pipelineStages) {
+  if (stageDaysMap.has(stage.stageName)) {
+    stageDaysMap.set(stage.stageName, stageDaysMap.get(stage.stageName) + stage.days);
+  } else {
+    stageDaysMap.set(stage.stageName, stage.days);
+  }
+}
+
+const pipelineStagesUnique = Array.from(stageDaysMap, ([stageName, days]) => ({ stageName, days }));
 
         // Calculate avgTimeToWon for all won deals
     const wonDeals = await Deal.findAll({ where: { status: 'won' } });
@@ -676,7 +718,8 @@ if (deal.email) {
       deal: dealObj,
       person: personArr,
       organization: orgArr,
-            pipelineStages, // [{ stageName: 'Qualified', days: 216 }, ...]
+            //pipelineStages, // [{ stageName: 'Qualified', days: 216 }, ...]
+      pipelineStages: pipelineStagesUnique, // Use unique stages with aggregated days
       currentStage: pipelineStages[pipelineStages.length - 1]?.stageName || deal.pipelineStage,
       overview: {
         dealAge,
