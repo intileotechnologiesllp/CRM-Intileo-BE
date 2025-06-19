@@ -38,7 +38,8 @@ exports.createDeal = async (req, res) => {
       sbuClass,
       phone,
       email,
-      sourceOrgin
+      sourceOrgin,
+      source
     } = req.body;
 
     // Validate required fields here...
@@ -166,6 +167,7 @@ if (!(person ? person.contactPerson : contactPerson)) {
       masterUserID: req.adminId, // Ensure masterUserID is set from the request
       ownerId,
       status: "open", // Default status
+      source
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
@@ -181,6 +183,7 @@ if (sourceOrgin === "2" || sourceOrgin === 2) {
        await DealDetails.create({
       dealId: deal.dealId, // or deal.id depending on your PK
       responsiblePerson,
+      ownerName: responsiblePerson, // or any other field you want to set
       // ...other dealDetails fields if needed
     });
     // Optionally, update the lead with the new dealId
@@ -974,7 +977,7 @@ exports.getDealFields = (req, res) => {
     { key: "proposalValue", label: "Proposal Value", check: false },
     { key: "proposalCurrency", label: "Proposal Currency", check: false },
     { key: "esplProposalNo", label: "ESPL Proposal No.", check: false },
-    { key: "projectLocation", label: "Project Location", check: false },
+    { key: "projectLocation", label: "Country of Project Location", check: false },
     { key: "organizationCountry", label: "Organization Country", check: false },
     { key: "proposalSentDate", label: "Proposal Sent Date", check: false },
     { key: "sourceRequired", label: "Source Required", check: false },
@@ -986,12 +989,24 @@ exports.getDealFields = (req, res) => {
     { key: "sourceOrgin", label: "Source Origin", check: false },
     { key: "isArchived", label: "Is Archived", check: false },
     { key: "status", label: "Status", check: false },
-    { key: "createdAt", label: "Created At", check: false },
+    { key: "createdAt", label: "Deal Created", check: false },
     { key: "updatedAt", label: "Updated At", check: false },
     { key: "statusSummary", label: "Status Summary", check: false },
     { key: "responsiblePerson", label: "Responsible Person", check: false },
-    { key: "rfpReceivedDate", label: "RFP Received Date", check: false }
+    { key: "rfpReceivedDate", label: "RFP Received Date", check: false },
+    {key:"owner",label:"Owner",check:false},
+    {key:"wonTime",label:"Won Time",check:false},
+    {key:"lostTime",label:"Lost Time",check:false},
+    {key:"scopeOfServiceType", label: "Scope of Service Type", check: false},
+    {key:"countryOfOrganizationCountry", label: "Country of Organization Country", check: false},
+    {key:"source",label:"Source",check:false},
+    {key:"lostReason",label:"Lost Reason",check:false},
+    {key:"status", label: "Status", check: false},
+    {key:"dealClosedOn", label: "Deal Closed On", check: false},
+    {key:"nextActivityDate", label: "Next Activity Date", check: false},
+    {key:"stateAndCountryProjectLocation", label: "State/Country of Project Location", check: false},
   ];
+
   res.status(200).json({ fields });
 };
 exports.updateDealColumnChecks = async (req, res) => {
