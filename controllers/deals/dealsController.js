@@ -160,6 +160,11 @@ if (!(person ? person.contactPerson : contactPerson)) {
       ownerId,
       // Add personId, organizationId, etc. as needed
     });
+       await DealDetails.create({
+      dealId: deal.dealId, // or deal.id depending on your PK
+      responsiblePerson,
+      // ...other dealDetails fields if needed
+    });
     // Optionally, update the lead with the new dealId
         await DealStageHistory.create({
       dealId: deal.dealId,
@@ -189,7 +194,7 @@ exports.getDeals = async (req, res) => {
   try {
     const {
       page = 1,
-      limit = 10,
+      limit = 50,
       search = "",
       pipeline,
       pipelineStage,
@@ -229,21 +234,46 @@ exports.getDeals = async (req, res) => {
     }
     // --- Add this block to get checked columns ---
     const pref = await DealColumnPreference.findOne();
-    let attributes;
+    // let attributes;
+    // if (pref) {
+    //   const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+    //   attributes = columns.filter(col => col.check).map(col => col.key);
+    //   if (attributes.length === 0) attributes = undefined; // fallback to all fields if none checked
+    // }
+       let attributes = [];
+    let dealDetailsAttributes = [];
     if (pref) {
       const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
-      attributes = columns.filter(col => col.check).map(col => col.key);
-      if (attributes.length === 0) attributes = undefined; // fallback to all fields if none checked
+      // Get all Deal and DealDetails fields
+      const dealFields = Object.keys(Deal.rawAttributes);
+      const dealDetailsFields = DealDetails ? Object.keys(DealDetails.rawAttributes) : [];
+      // Split checked columns by table
+      columns.filter(col => col.check).forEach(col => {
+        if (dealFields.includes(col.key)) attributes.push(col.key);
+        else if (dealDetailsFields.includes(col.key)) dealDetailsAttributes.push(col.key);
+      });
+      if (attributes.length === 0) attributes = undefined;
+      if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
     }
 
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    // const offset = (parseInt(page) - 1) * parseInt(limit);
+        // Pagination
+    const offset = (parseInt(req.query.page || 1) - 1) * parseInt(req.query.limit || 10);
+    // const limit = parseInt(req.query.limit || 10);
 
     const { rows: deals, count: total } = await Deal.findAndCountAll({
       where,
       limit: parseInt(limit),
       offset,
       order: [["createdAt", "DESC"]],
-      attributes // <-- only checked columns will be returned
+      attributes, // <-- only checked columns will be returned
+            include: [
+        {
+          model: DealDetails,
+          as: "details", // Make sure your association uses this alias
+          attributes: dealDetailsAttributes
+        }
+      ]
     });
 
     res.status(200).json({
@@ -830,7 +860,7 @@ exports.updateDealColumnChecks = async (req, res) => {
     // Find the global DealColumnPreference record
     let pref = await DealColumnPreference.findOne();
     if (!pref) {
-      return res.status(404).json({ message: "Preferences not found." });
+      return res.status(404).json({ message: "Preferences not found."});
     }
 
     // Parse columns if stored as string
