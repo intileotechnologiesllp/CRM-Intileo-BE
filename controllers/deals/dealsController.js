@@ -11,6 +11,8 @@ const MasterUser = require("../../models/master/masterUserModel");
 const DealNote = require("../../models/deals/delasNoteModel");
 const Email=require("../../models/email/emailModel");
 const Attachment = require("../../models/email/attachmentModel");
+const LeadFilter = require("../../models/leads/leadFiltersModel");
+const {convertRelativeDate} = require("../../utils/helper");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -255,12 +257,7 @@ exports.getDeals = async (req, res) => {
     }
     // --- Add this block to get checked columns ---
     const pref = await DealColumnPreference.findOne();
-    // let attributes;
-    // if (pref) {
-    //   const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
-    //   attributes = columns.filter(col => col.check).map(col => col.key);
-    //   if (attributes.length === 0) attributes = undefined; // fallback to all fields if none checked
-    // }
+
        let attributes = [];
     let dealDetailsAttributes = [];
     if (pref) {
@@ -276,6 +273,80 @@ exports.getDeals = async (req, res) => {
       if (attributes.length === 0) attributes = undefined;
       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
     }
+
+// --- DYNAMIC FILTERS START HERE ---
+if (req.query.filterId) {
+  const filter = await LeadFilter.findByPk(req.query.filterId);
+  if (filter) {
+    const filterConfig = typeof filter.filterConfig === "string"
+      ? JSON.parse(filter.filterConfig)
+      : filter.filterConfig;
+
+    const { all = [], any = [] } = filterConfig;
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const dealDetailsFields = DealDetails ? Object.keys(DealDetails.rawAttributes) : [];
+
+    let filterWhere = {};
+    let dealDetailsWhere = {};
+
+    if (all.length > 0) {
+      filterWhere[Op.and] = [];
+      dealDetailsWhere[Op.and] = [];
+      all.forEach(cond => {
+        if (dealFields.includes(cond.field)) {
+          filterWhere[Op.and].push(buildCondition(cond));
+        } else if (dealDetailsFields.includes(cond.field)) {
+          dealDetailsWhere[Op.and].push(buildCondition(cond));
+        }
+      });
+      if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+      if (dealDetailsWhere[Op.and].length === 0) delete dealDetailsWhere[Op.and];
+    }
+
+    if (any.length > 0) {
+      filterWhere[Op.or] = [];
+      dealDetailsWhere[Op.or] = [];
+      any.forEach(cond => {
+        if (dealFields.includes(cond.field)) {
+          filterWhere[Op.or].push(buildCondition(cond));
+        } else if (dealDetailsFields.includes(cond.field)) {
+          dealDetailsWhere[Op.or].push(buildCondition(cond));
+        }
+      });
+      if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+      if (dealDetailsWhere[Op.or].length === 0) delete dealDetailsWhere[Op.or];
+    }
+
+    // Merge with your existing where
+    Object.assign(where, filterWhere);
+
+    // Add DealDetails where to include
+    if (dealDetailsWhere && Object.keys(dealDetailsWhere).length > 0) {
+      // If you already have a DealDetails include, add where to it
+      let detailsInclude = {
+        model: DealDetails,
+        as: "details",
+        attributes: dealDetailsAttributes,
+        where: dealDetailsWhere
+      };
+      include = [detailsInclude];
+    } else {
+      include = [{
+        model: DealDetails,
+        as: "details",
+        attributes: dealDetailsAttributes
+      }];
+    }
+  }
+} else {
+  // If no filterId, use your default include logic
+  include = [{
+    model: DealDetails,
+    as: "details",
+    attributes: dealDetailsAttributes
+  }];
+}
+// --- DYNAMIC FILTERS END HERE ---
 
     // const offset = (parseInt(page) - 1) * parseInt(limit);
         // Pagination
@@ -312,6 +383,101 @@ if (attributes && !attributes.includes("dealId")) {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// --- Helper functions (reuse from your prompt) ---
+
+const operatorMap = {
+  "is": "eq",
+  "is not": "ne",
+  "is empty": "is empty",
+  "is not empty": "is not empty",
+  "is exactly or earlier than": "lte",
+  "is earlier than": "lt",
+  "is exactly or later than": "gte",
+  "is later than": "gt"
+  // Add more mappings if needed
+};
+
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle date fields
+  const leadDateFields = Object.entries(Lead.rawAttributes)
+  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+  .map(([key]) => key);
+
+const DealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
+  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+  .map(([key]) => key);
+
+const allDateFields = [...leadDateFields, ...DealDetailsDateFields];
+
+  if (allDateFields.includes(cond.field)) {
+    if (cond.useExactDate) {
+      const date = new Date(cond.value);
+      if (isNaN(date.getTime())) return {};
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: date,
+        },
+      };
+    }
+    // Otherwise, use relative date conversion
+    const dateRange = convertRelativeDate(cond.value);
+    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
+
+    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
+      return {
+        [cond.field]: {
+          [Op.between]: [dateRange.start, dateRange.end],
+        },
+      };
+    }
+    if (dateRange && isValidDate(dateRange.start)) {
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: dateRange.start,
+        },
+      };
+    }
+    return {};
+  }
+
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
 
 
 exports.updateDeal = async (req, res) => {
@@ -1046,3 +1212,152 @@ exports.updateDealColumnChecks = async (req, res) => {
     res.status(500).json({ message: "Error updating columns" });
   }
 };
+
+exports.markDealAsWon = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Update status to 'won'
+    await deal.update({ status: 'won' });
+
+    // Update DealDetails: wonTime and dealClosedOn
+    const now = new Date();
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        wonTime: now,
+        dealClosedOn: now
+      });
+    } else {
+      await DealDetails.create({
+        dealId,
+        wonTime: now,
+        dealClosedOn: now
+      });
+    }
+
+    // Add a new entry to DealStageHistory
+    await DealStageHistory.create({
+      dealId,
+      stageName: deal.pipelineStage, // keep current stage
+      enteredAt: now,
+      note: 'Marked as won'
+    });
+
+    res.status(200).json({ message: "Deal marked as won", deal });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.markDealAsLost = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { lostReason } = req.body; // Accept lostReason from request body
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    await deal.update({ status: 'lost' });
+
+    // Update DealDetails: lostTime and lostReason
+    const now = new Date();
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        lostTime: now,
+        lostReason: lostReason || dealDetails.lostReason
+      });
+    } else {
+      await DealDetails.create({
+        dealId,
+        lostTime: now,
+        lostReason: lostReason || null
+      });
+    }
+
+    res.status(200).json({ message: "Deal marked as lost", deal });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+}
+
+exports.markDealAsOpen = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const initialStage = 'Qualified'; // Set your initial pipeline stage here
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Update deal status and reset pipelineStage
+    await deal.update({ status: 'open', pipelineStage: initialStage });
+
+    // Reset closure fields in DealDetails
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        wonTime: null,
+        lostTime: null,
+        dealClosedOn: null,
+        lostReason: null
+      });
+    }
+
+    // Add a new entry to DealStageHistory to track reopening
+    await DealStageHistory.create({
+      dealId,
+      stageName: initialStage,
+      enteredAt: new Date()
+    });
+
+    res.status(200).json({ message: "Deal marked as open", deal });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getDealFieldsForFilter = (req, res) => {
+  const fields = [
+    { value: "dealId", label: "Deal ID" },
+    { value: "title", label: "Title" },
+    { value: "value", label: "Value" },
+    { value: "pipeline", label: "Pipeline" },
+    { value: "pipelineStage", label: "Pipeline Stage" },
+    { value: "status", label: "Status" },
+    { value: "expectedCloseDate", label: "Expected Close Date" },
+    { value: "serviceType", label: "Service Type" },
+    { value: "scopeOfServiceType", label: "Scope of Service Type" },
+    { value: "proposalValue", label: "Proposal Value" },
+    { value: "esplProposalNo", label: "ESPL Proposal No." },
+    { value: "projectLocation", label: "Project Location" },
+    { value: "organizationCountry", label: "Organization Country" },
+    { value: "proposalSentDate", label: "Proposal Sent Date" },
+    { value: "ownerId", label: "Owner" },
+    { value: "createdAt", label: "Deal Created" },
+    { value: "updatedAt", label: "Last Updated" },
+    { value: "masterUserID", label: "Creator" },
+    { value: "currency", label: "Currency" },
+    { value: "nextActivityDate", label: "Next Activity Date" },
+    { value: "responsiblePerson", label: "Responsible Person" },
+    { value: "rfpReceivedDate", label: "RFP Received Date" },
+    { value: "statusSummary", label: "Status Summary" },
+    { value: "wonTime", label: "Won Time" },
+    { value: "lostTime", label: "Lost Time" },
+    { value: "dealClosedOn", label: "Deal Closed On" },
+    { value: "lostReason", label: "Lost Reason" },
+    { value: "stateAndCountryProjectLocation", label: "State and Country Project Location" },
+    { value: "visibleTo", label: "Visible To" },
+    { value: "archiveTime", label: "Archive Time" },
+    // ...add more as needed
+  ];
+  res.status(200).json({ fields });
+}

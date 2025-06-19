@@ -21,6 +21,7 @@ router.get("/get-deal-notes/:dealId", verifyToken, dealsController.getNotes);
 router.get("/save-deal-fields", verifyToken, dealsController.saveAllDealFieldsWithCheck);
 router.get("/get-deal-fields", verifyToken, dealsController.getDealFields);
 router.post("/check-columns", verifyToken, dealsController.updateDealColumnChecks);
+router.get("/get-deal-for-filter", verifyToken, dealsController.getDealFieldsForFilter);
 
 
 module.exports = router;
