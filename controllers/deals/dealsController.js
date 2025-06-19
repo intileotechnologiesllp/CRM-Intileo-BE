@@ -332,20 +332,9 @@ exports.updateDeal = async (req, res) => {
     if (!deal) {
       return res.status(404).json({ message: "Deal not found." });
     }
-       // Check if pipelineStage is changing
+   // Check if pipelineStage is changing
+// Only check for pipelineStage if it's in the request body
 if (updateFields.pipelineStage && updateFields.pipelineStage !== deal.pipelineStage) {
-  // 1. Update exitedAt for previous stage
-  await DealStageHistory.update(
-    { exitedAt: new Date() },
-    {
-      where: {
-        dealId: deal.dealId,
-        stageName: deal.pipelineStage,
-        exitedAt: null
-      }
-    }
-  );
-  // 2. Create new stage entry
   await DealStageHistory.create({
     dealId: deal.dealId,
     stageName: updateFields.pipelineStage,
