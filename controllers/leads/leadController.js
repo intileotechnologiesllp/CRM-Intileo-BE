@@ -602,50 +602,7 @@ const orgIds = organizations.map(o => o.leadOrganizationId);
     raw: true
   });
 console.log("flatLeads:", flatLeads);
-// const personIdsFromLeads = flatLeads.map(l => l.personId).filter(Boolean);
-// const orgIdsFromLeads = flatLeads.map(l => l.leadOrganizationId).filter(Boolean);
 
-// // Fallback: if IDs are missing, use names
-// if (personIdsFromLeads.length === 0) {
-//   const contactPersons = flatLeads.map(l => l.contactPerson).filter(Boolean);
-//   persons = await Person.findAll({
-//     where: { contactPerson: { [Op.in]: contactPersons } },
-//     raw: true
-//   });
-// } else {
-//   persons = await Person.findAll({
-//     where: { personId: { [Op.in]: personIdsFromLeads } },
-//     raw: true
-//   });
-// }
-
-// if (orgIdsFromLeads.length === 0) {
-//   const orgNames = flatLeads.map(l => l.organization).filter(Boolean);
-//   organizations = await Organization.findAll({
-//     where: { organization: { [Op.in]: orgNames } },
-//     raw: true
-//   });
-// } else {
-//   organizations = await Organization.findAll({
-//     where: { leadOrganizationId: { [Op.in]: orgIdsFromLeads } },
-//     raw: true
-//   });
-// }
-//  console.log("Using orgIdsFromLeads to fetch organizations:", orgIdsFromLeads.length);
-// if (orgIdsFromLeads.length > 0) {
- 
-  
-//   organizations = await Organization.findAll({
-//     where: { leadOrganizationId: { [Op.in]: orgIdsFromLeads } },
-//     raw: true
-//   });
-// } else {
-//   const orgNames = flatLeads.map(l => l.organization).filter(Boolean);
-//   organizations = await Organization.findAll({
-//     where: { organization: { [Op.in]: orgNames } },
-//     raw: true
-//   });
-// }
 
 
 // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
