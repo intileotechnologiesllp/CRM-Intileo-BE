@@ -545,12 +545,6 @@ const stageHistory = await DealStageHistory.findAll({
 
 const now = new Date();
 const pipelineStages = [];
-const pipelineOrder = [
-  "Qualified",
-  "Contact Made",
-  "Proposal Made",
-  "Negotiations Started"
-];
 
 for (let i = 0; i < stageHistory.length; i++) {
   const stage = stageHistory[i];
@@ -583,10 +577,32 @@ for (const stage of pipelineStages) {
 }
 
 // Build the array for the bar (only up to and including current stage)
-const pipelineStagesUnique = pipelineOrder.map(stageName => ({
-  stageName,
-  days: stageDaysMap.get(stageName) || 0
-}));
+// const pipelineStagesUnique = orderedStages.map(stageName => ({
+//   stageName,
+//   days: stageDaysMap.get(stageName) || 0
+// }));
+// Define your pipeline order
+const pipelineOrder = [
+  "Qualified",
+  "Contact Made",
+  "Proposal Made",
+  "Negotiations Started"
+];
+
+// Build pipelineStagesUnique: only Qualified and the current stage
+let pipelineStagesUnique = [];
+if (currentStageName && pipelineOrder.includes(currentStageName)) {
+  if (currentStageName === "Qualified") {
+    pipelineStagesUnique = [
+      { stageName: "Qualified", days: stageDaysMap.get("Qualified") || 0 }
+    ];
+  } else {
+    pipelineStagesUnique = [
+      { stageName: "Qualified", days: stageDaysMap.get("Qualified") || 0 },
+      { stageName: currentStageName, days: stageDaysMap.get(currentStageName) || 0 }
+    ];
+  }
+}
 
         // Calculate avgTimeToWon for all won deals
     const wonDeals = await Deal.findAll({ where: { status: 'won' } });
