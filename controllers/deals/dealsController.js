@@ -569,17 +569,29 @@ for (let i = 0; i < stageHistory.length; i++) {
   });
 }
 // Aggregate days per unique stage for frontend bar
+// After building pipelineStages (with possible repeats)
 const stageDaysMap = new Map();
+const orderedStages = [];
+let currentStageName = pipelineStages.length
+  ? pipelineStages[pipelineStages.length - 1].stageName
+  : null;
 
 for (const stage of pipelineStages) {
-  if (stageDaysMap.has(stage.stageName)) {
-    stageDaysMap.set(stage.stageName, stageDaysMap.get(stage.stageName) + stage.days);
-  } else {
+  if (!stageDaysMap.has(stage.stageName)) {
+    orderedStages.push(stage.stageName);
     stageDaysMap.set(stage.stageName, stage.days);
+  } else {
+    stageDaysMap.set(stage.stageName, stageDaysMap.get(stage.stageName) + stage.days);
   }
+  // Stop if we've reached the current stage
+  if (stage.stageName === currentStageName) break;
 }
 
-const pipelineStagesUnique = Array.from(stageDaysMap, ([stageName, days]) => ({ stageName, days }));
+// Build the array for the bar (only up to and including current stage)
+const pipelineStagesUnique = orderedStages.map(stageName => ({
+  stageName,
+  days: stageDaysMap.get(stageName)
+}));
 
         // Calculate avgTimeToWon for all won deals
     const wonDeals = await Deal.findAll({ where: { status: 'won' } });
