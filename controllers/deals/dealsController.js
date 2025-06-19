@@ -157,9 +157,19 @@ if (!(person ? person.contactPerson : contactPerson)) {
       email,
       sourceOrgin,
       masterUserID: req.adminId, // Ensure masterUserID is set from the request
-      ownerId,
+      ownerId
       // Add personId, organizationId, etc. as needed
     });
+    let responsiblePerson = null;
+if (sourceOrgin === "2" || sourceOrgin === 2) {
+  // Use ownerId for responsible person
+  const owner = await MasterUser.findOne({ where: { masterUserID: ownerId } });
+  responsiblePerson = owner ? owner.name : null;
+} else {
+  // Use masterUserID for responsible person
+  const user = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
+  responsiblePerson = user ? user.name : null;
+}
        await DealDetails.create({
       dealId: deal.dealId, // or deal.id depending on your PK
       responsiblePerson,
