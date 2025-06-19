@@ -164,7 +164,8 @@ if (!(person ? person.contactPerson : contactPerson)) {
       email,
       sourceOrgin,
       masterUserID: req.adminId, // Ensure masterUserID is set from the request
-      ownerId
+      ownerId,
+      status: "open", // Default status
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
