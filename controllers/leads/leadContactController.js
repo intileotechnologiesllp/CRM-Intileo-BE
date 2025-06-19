@@ -6,6 +6,7 @@ const MasterUser = require("../../models/master/masterUserModel");
 const Attachment = require("../../models/email/attachmentModel");
 const OrganizationNote = require("../../models/leads/organizationNoteModel");
 const PersonNote = require("../../models/leads/personNoteModel");
+const Deal = require("../../models/deals/dealsModels");
 
 // exports.createPerson = async (req, res) => {
 //   try {
@@ -264,6 +265,7 @@ exports.getPersonTimeline = async (req, res) => {
 
     // Fetch related leads
     const leads = await Lead.findAll({ where: { personId } });
+    const deals = await Deal.findAll({ where: { personId } });
 
     // Fetch related emails
     // const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
@@ -317,6 +319,7 @@ exports.getPersonTimeline = async (req, res) => {
     res.status(200).json({
       person,
       leads,
+      deals,
       emails: allEmails,
       notes,
       files,
@@ -351,6 +354,16 @@ exports.getOrganizationTimeline = async (req, res) => {
       where: {
         [Op.or]: [
           { leadOrganizationId: organizationId },
+          { personId: personIds },
+        ],
+      },
+    });
+        // Fetch all deals for this organization (directly or via persons)
+    const deals = await Deal.findAll({
+      where: {
+        [Op.or]: [
+          { organizationId: organizationId }, // If you have this field
+          { leadOrganizationId: organizationId }, // Or this field, depending on your schema
           { personId: personIds },
         ],
       },
@@ -412,6 +425,7 @@ exports.getOrganizationTimeline = async (req, res) => {
       organization,
       persons,
       leads,
+      deals,
       emails: allEmails,
       notes,
       files, // Attachments with related email data
