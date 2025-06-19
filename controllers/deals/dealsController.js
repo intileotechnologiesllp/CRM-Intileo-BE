@@ -589,19 +589,14 @@ const pipelineOrder = [
   "Negotiations Started"
 ];
 
-// Build pipelineStagesUnique: only Qualified and the current stage
 let pipelineStagesUnique = [];
 if (currentStageName && pipelineOrder.includes(currentStageName)) {
-  if (currentStageName === "Qualified") {
-    pipelineStagesUnique = [
-      { stageName: "Qualified", days: stageDaysMap.get("Qualified") || 0 }
-    ];
-  } else {
-    pipelineStagesUnique = [
-      { stageName: "Qualified", days: stageDaysMap.get("Qualified") || 0 },
-      { stageName: currentStageName, days: stageDaysMap.get(currentStageName) || 0 }
-    ];
-  }
+  const currentIdx = pipelineOrder.indexOf(currentStageName);
+  // Always include all stages from "Qualified" up to and including the current stage
+  pipelineStagesUnique = pipelineOrder.slice(0, currentIdx + 1).map(stageName => ({
+    stageName,
+    days: stageDaysMap.get(stageName) || 0
+  }));
 }
 
         // Calculate avgTimeToWon for all won deals
