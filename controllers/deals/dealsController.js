@@ -260,7 +260,10 @@ exports.getDeals = async (req, res) => {
         // Pagination
     const offset = (parseInt(req.query.page || 1) - 1) * parseInt(req.query.limit || 10);
     // const limit = parseInt(req.query.limit || 10);
-
+// Always include dealId in attributes
+if (attributes && !attributes.includes("dealId")) {
+  attributes.unshift("dealId");
+}
     const { rows: deals, count: total } = await Deal.findAndCountAll({
       where,
       limit: parseInt(limit),
