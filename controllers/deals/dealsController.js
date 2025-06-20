@@ -182,6 +182,13 @@ if (sourceOrgin === "2" || sourceOrgin === 2) {
   const user = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
   responsiblePerson = user ? user.name : null;
 }
+
+if (sourceOrgin === 0 && req.body.emailID) {
+  await Email.update(
+    { leadId: lead.leadId },
+    { where: { emailID: req.body.emailID } }
+  );
+}
        await DealDetails.create({
       dealId: deal.dealId, // or deal.id depending on your PK
       responsiblePerson,

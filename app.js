@@ -31,6 +31,7 @@ const leadFilterRoutes = require("./routes/leads/leadFilterRoutes"); // Import l
 const leadColumnController=require("./routes/leads/leadColumnRoutes.js"); // Import lead column controller
 const leadContactsRoutes = require("./routes/leads/leadContactsRoutes.js"); // Import lead contacts routes
 const dealRoutes = require("./routes/deals/dealsRoutes.js"); // Import deal routes
+const activityRoutes = require("./routes/activity/activityRoutes.js"); // Import activity routes
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
@@ -73,6 +74,7 @@ app.use("/api/lead-filters", leadFilterRoutes); // Register lead filter routes
 app.use("/api/lead-column", leadColumnController); // Register lead column controller routes
 app.use("/api/lead-contacts", leadContactsRoutes); // Register lead contacts routes
 app.use("/api/deals", dealRoutes); // Register deal routes
+app.use("/api/activities", activityRoutes); // Register activity routes
 
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
