@@ -365,8 +365,8 @@ if (attributes && !attributes.includes("dealId")) {
 }
 if (req.role !== "admin") {
   where[Op.or] = [
-    { masterUserID: req.role.masterUserID },
-    { ownerId: req.role.masterUserID }
+    { masterUserID: req.adminId },
+    { ownerId: req.adminId }
   ];
 }
 
