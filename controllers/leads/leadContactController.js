@@ -368,7 +368,7 @@ exports.getOrganizationTimeline = async (req, res) => {
     //     ],
     //   },
     // });
-
+const deals = await Deal.findAll({ where: { organizationId } });
     // Fetch all emails linked to these leads
     const leadIds = leads.map((l) => l.leadId);
     const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
@@ -425,7 +425,7 @@ exports.getOrganizationTimeline = async (req, res) => {
       organization,
       persons,
       leads,
-      // deals,
+      deals,
       emails: allEmails,
       notes,
       files, // Attachments with related email data
