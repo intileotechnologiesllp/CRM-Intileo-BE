@@ -13,6 +13,7 @@ const Email=require("../../models/email/emailModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const {convertRelativeDate} = require("../../utils/helper");
+const Activity = require("../../models/activity/activityModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -978,7 +979,11 @@ if (deal.email) {
 
     // Fetch notes for this deal
     const notes = await DealNote.findAll({ where: { dealId } });
-
+    // Fetch activities for this deal
+    const activities = await Activity.findAll({
+      where: { dealId },
+      order: [["startDateTime", "DESC"]]
+    });
     res.status(200).json({
       deal: dealObj,
       person: personArr,
@@ -994,7 +999,8 @@ if (deal.email) {
       },
       participants:participantArr,
       emails: allEmails,
-      notes
+      notes,
+      activities
     });
 
       } catch (error) {
