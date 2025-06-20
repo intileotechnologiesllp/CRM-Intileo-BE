@@ -358,16 +358,16 @@ exports.getOrganizationTimeline = async (req, res) => {
         ],
       },
     });
-        // Fetch all deals for this organization (directly or via persons)
-    const deals = await Deal.findAll({
-      where: {
-        [Op.or]: [
-          { organizationId: organizationId }, // If you have this field
-          { leadOrganizationId: organizationId }, // Or this field, depending on your schema
-          { personId: personIds },
-        ],
-      },
-    });
+    //     // Fetch all deals for this organization (directly or via persons)
+    // const deals = await Deal.findAll({
+    //   where: {
+    //     [Op.or]: [
+    //       { organizationId: organizationId }, // If you have this field
+    //       { leadOrganizationId: organizationId }, // Or this field, depending on your schema
+    //       { personId: personIds },
+    //     ],
+    //   },
+    // });
 
     // Fetch all emails linked to these leads
     const leadIds = leads.map((l) => l.leadId);
@@ -425,7 +425,7 @@ exports.getOrganizationTimeline = async (req, res) => {
       organization,
       persons,
       leads,
-      deals,
+      // deals,
       emails: allEmails,
       notes,
       files, // Attachments with related email data
