@@ -95,7 +95,7 @@ const masterUserID = req.adminId
     let org = null;
 if (organization) {
 if (organization) {
-  org = await Organization.findOne({ where: { organization,address} });
+  org = await Organization.findOne({ where: { organization} });
   if (!org) {
     org = await Organization.create({
       organization,
