@@ -80,7 +80,7 @@ exports.createLead = async (req, res) => {
     }
 
         // 1. Find or create Organization
-let orgRecord = await Organization.findOne({ where: { organization,address } });
+let orgRecord = await Organization.findOne({ where: { organization} });
 if (!orgRecord) {
   orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
 }
