@@ -368,7 +368,8 @@ exports.getOrganizationTimeline = async (req, res) => {
     //     ],
     //   },
     // });
-const deals = await Deal.findAll({ where: { organizationId } });
+    // const leadOrganizationId=organizationId
+const deals = await Deal.findAll({ where: { leadOrganizationId:organizationId } });
     // Fetch all emails linked to these leads
     const leadIds = leads.map((l) => l.leadId);
     const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
