@@ -16,6 +16,7 @@ const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
+const Deal = require("../../models/deals/dealsModels"); // Import Deal model
 
 const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
@@ -1163,6 +1164,10 @@ exports.getAllLeadDetails = async (req, res) => {
     if (!lead || !lead.email) {
       return res.status(404).json({ message: "Lead or lead email not found." });
     }
+    //     const deal = await Deal.findByPk(dealId);
+    // if (!deal || !deal.email) {
+    //   return res.status(404).json({ message: "Lead or lead email not found." });
+    // }
     const clientEmail = lead.email;
 
     let emails = await Email.findAll({
