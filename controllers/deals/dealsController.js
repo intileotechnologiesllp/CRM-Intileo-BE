@@ -135,7 +135,6 @@ if (!(person ? person.contactPerson : contactPerson)) {
     // Create the lead
     console.log(person.personId," before deal creation");
     // Before saving to DB
-if (req.body.leadId === '') req.body.leadId = null;
     const deal = await Deal.create({
       // contactPerson: person ? person.contactPerson : null,
      contactPerson: person ? person.contactPerson : contactPerson,
@@ -364,6 +363,13 @@ if (req.query.filterId) {
 if (attributes && !attributes.includes("dealId")) {
   attributes.unshift("dealId");
 }
+if (req.role !== "admin") {
+  where[Op.or] = [
+    { masterUserID: req.role.masterUserID },
+    { ownerId: req.role.masterUserID }
+  ];
+}
+
     const { rows: deals, count: total } = await Deal.findAndCountAll({
       where,
       limit: parseInt(limit),
