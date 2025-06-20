@@ -134,7 +134,8 @@ if (!(person ? person.contactPerson : contactPerson)) {
 }
     // Create the lead
     console.log(person.personId," before deal creation");
-    
+    // Before saving to DB
+if (req.body.leadId === '') req.body.leadId = null;
     const deal = await Deal.create({
       // contactPerson: person ? person.contactPerson : null,
      contactPerson: person ? person.contactPerson : contactPerson,
