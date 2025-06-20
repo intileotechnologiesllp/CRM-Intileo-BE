@@ -17,6 +17,7 @@ const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 const Deal = require("../../models/deals/dealsModels"); // Import Deal model
+const Activity = require("../../models/activity/activityModel"); // Import Activity model
 
 const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
@@ -1254,13 +1255,17 @@ if (!emailsExist) {
       return noteObj;
     });
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
-
+    const activities = await Activity.findAll({
+      where: { leadId },
+      order: [["startDateTime", "DESC"]]
+    });
     res.status(200).json({
       message: "leads data fetched successfully.",
       lead,
       leadDetails,
       notes:notesWithCreator,
-      emails: relatedEmails
+      emails: relatedEmails,
+      activities
      // emails: emailsExist ? relatedEmails : null // or [] if you prefer
     });
   } catch (error) {
