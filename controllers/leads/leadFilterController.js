@@ -29,7 +29,7 @@ exports.saveLeadFilter = async (req, res) => {
 };
 exports.getLeadFilters = async (req, res) => {
   const masterUserID = req.adminId; // or req.user.id
-
+ const { entityType } = req.query; // 'Lead' or 'Deal'
   try {
 
         // Fetch all filters: public for everyone, private only for this user
@@ -41,7 +41,17 @@ exports.getLeadFilters = async (req, res) => {
         ]
       }
     });
-    res.status(200).json({ filters });
+        // Filter by entityType if provided
+    let filtered = filters;
+    if (entityType) {
+      filtered = filters.filter(f => {
+        const all = f.filterConfig.all || [];
+        const any = f.filterConfig.any || [];
+        const allEntities = [...all, ...any];
+        return allEntities.some(cond => cond.entity === entityType);
+      });
+    }
+    res.status(200).json({ filters:filtered });
   } catch (error) {
     console.error("Error fetching filters:", error);
     res.status(500).json({ message: "Internal server error" });
