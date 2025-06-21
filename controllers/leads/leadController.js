@@ -90,7 +90,14 @@ console.log("orgRecord after create/find:", orgRecord?.organizationId, orgRecord
 if (!orgRecord || !orgRecord.leadOrganizationId) {
   return res.status(500).json({ message: "Failed to create/find organization." });
 }
+const duplicateByTitle = await Lead.findOne({ where: { title } });
+const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
 
+if (duplicateByTitle || duplicateByContact) {
+  return res.status(409).json({
+    message: "A lead with this title or contact person already exists."
+  });
+}
     // 2. Find or create Person (linked to organization)
     let personRecord = await Person.findOne({ where: { email } });
     if (!personRecord) {
@@ -116,14 +123,6 @@ if (!orgRecord || !orgRecord.leadOrganizationId) {
     //   });
     // }
 // const duplicateByOrg = await Lead.findOne({ where: { organization } });
-const duplicateByTitle = await Lead.findOne({ where: { title } });
-const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
-
-if (duplicateByTitle || duplicateByContact) {
-  return res.status(409).json({
-    message: "A lead with this title or contact person already exists."
-  });
-}
 
      const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
     const ownerName = owner ? owner.name : null;
