@@ -8,69 +8,7 @@ const OrganizationNote = require("../../models/leads/organizationNoteModel");
 const PersonNote = require("../../models/leads/personNoteModel");
 const Deal = require("../../models/deals/dealsModels");
 
-// exports.createPerson = async (req, res) => {
-//   try {
-//     const masterUserID = req.adminId; // Get the master user ID from the request
-//     if (!req.body || !req.body.contactPerson || !req.body.email) {
-//       return res
-//         .status(400)
-//         .json({ message: "Contact person and email are required." });
-//     }
-//     const {
-//       contactPerson,
-//       email,
-//       phone,
-//       notes,
-//       postalAddress,
-//       birthday,
-//       jobTitle,
-//       personLabels,
-//       organization,
-//     } = req.body;
-//     // Check for duplicate person in the same organization
-//     const existingPerson = await Person.findOne({
-//       where: {
-//         contactPerson,
-//         organization,
-//         // Optionally, also check email for even stricter uniqueness:
-//         // email
-//       },
-//     });
-//     if (existingPerson) {
-//       return res
-//         .status(409)
-//         .json({
-//           message: "Person already exists in this organization.",
-//           person: existingPerson,
-//         });
-//     }
-//     // Create or find the organization
-//     const org = await Organization.findOrCreate({
-//       where: { organization },
-//       defaults: { organization },
-//     });
 
-//     // Create the person
-//     const person = await Person.create({
-//       contactPerson,
-//       email,
-//       phone,
-//       notes,
-//       postalAddress,
-//       birthday,
-//       jobTitle,
-//       personLabels,
-//       organization: org[0].organization,
-//       leadOrganizationId: org[0].leadOrganizationId, // Link to org
-//       masterUserID,
-//     });
-
-//     res.status(201).json({ message: "Person created successfully", person });
-//   } catch (error) {
-//     console.error("Error creating person:", error);
-//     res.status(500).json({ message: "Internal server error", error });
-//   }
-// };
 
 exports.createPerson = async (req, res) => {
   try {
