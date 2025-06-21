@@ -8,7 +8,9 @@ router.post("/create-activity", verifyToken, activityController.createActivity);
 router.get("/get-activities", verifyToken, activityController.getActivities);
 router.get("/mark-as-done/:activityId", verifyToken, activityController.markActivityAsDone);
 router.post("/update-activity/:activityId", verifyToken, activityController.updateActivity);
-
+router.get("/save-activity-fields", verifyToken, activityController.saveAllActivityFieldsWithCheck);
+router.post("/check-columns", verifyToken, activityController.updateActivityColumnChecks);
+router.get("/get-activity-fields", verifyToken, activityController.getActivityFields);
 
 
 
