@@ -14,6 +14,7 @@ const Attachment = require("../../models/email/attachmentModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const {convertRelativeDate} = require("../../utils/helper");
 const Activity = require("../../models/activity/activityModel");
+const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -1101,7 +1102,7 @@ exports.getNotes = async (req, res) => {
 // } catch (e) {
 //   DealDetails = null;
 // }
-const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
+
 
 exports.saveAllDealFieldsWithCheck = async (req, res) => {
   // Get all field names from Deal and DealDetails models

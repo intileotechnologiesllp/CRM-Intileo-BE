@@ -5,6 +5,7 @@ const {convertRelativeDate} = require("../../utils/helper"); // Import the utili
 const Person = require("../../models/leads/leadPersonModel");
 const Organizations = require("../../models/leads/leadOrganizationModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
+const ActivityColumnPreference = require("../../models/activity/activityColumnModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
   try {
@@ -106,7 +107,17 @@ exports.getActivities = async (req, res) => {
       startDate,
       endDate
     } = req.query;
-
+    // --- Get checked columns ---
+    const pref = await ActivityColumnPreference.findOne();
+    let attributes = [];
+    if (pref) {
+      const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+      const activityFields = Object.keys(Activity.rawAttributes);
+      columns.filter(col => col.check && activityFields.includes(col.key)).forEach(col => {
+        attributes.push(col.key);
+      });
+      if (attributes.length === 0) attributes = undefined;
+    }
     const where = {};
     let filterWhere = {};
     // --- Dynamic Filter Logic ---
@@ -217,7 +228,12 @@ exports.getActivities = async (req, res) => {
 
     // Merge dynamic filter with standard filters
     const finalWhere = { ...filterWhere, ...where };
-
+const alwaysInclude = ["dealId", "leadId", "assignedTo", "leadOrganizationId", "personId","activityId"];
+if (attributes) {
+  alwaysInclude.forEach(field => {
+    if (!attributes.includes(field)) attributes.push(field);
+  });
+}
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { rows: activities, count: total } = await Activity.findAndCountAll({
@@ -225,6 +241,8 @@ exports.getActivities = async (req, res) => {
       limit: parseInt(limit),
       offset,
       order: [["startDateTime", "DESC"]],
+      attributes // <-- only checked columns will be returned
+
     });
 
     res.status(200).json({
@@ -398,4 +416,115 @@ exports.updateActivity = async (req, res) => {
     console.error("Error updating activity:", error);
     res.status(500).json({ message: "Internal server error" });
   }
+};
+
+
+
+exports.saveAllActivityFieldsWithCheck = async (req, res) => {
+  // Get all field names from Activity model
+  const activityFields = Object.keys(Activity.rawAttributes);
+
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = activityFields.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    let pref = await ActivityColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await ActivityColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res.status(200).json({ message: "All activity columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all activity columns:", error);
+    res.status(500).json({ message: "Error saving all activity columns" });
+  }
+};
+
+exports.updateActivityColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
+
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
+
+  try {
+    // Find the global ActivityColumnPreference record
+    let pref = await ActivityColumnPreference.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
+    }
+
+    // Parse columns if stored as string
+    let prefColumns = typeof pref.columns === "string"
+      ? JSON.parse(pref.columns)
+      : pref.columns;
+
+    // Update check status for matching columns
+    prefColumns = prefColumns.map(col => {
+      const found = columns.find(c => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    pref.columns = prefColumns;
+    await pref.save();
+    res.status(200).json({ message: "Columns updated", columns: pref.columns });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating columns" });
+  }
+};
+
+exports.getActivityFields = (req, res) => {
+  const fields = [
+    // { key: "activityId", label: "Activity ID", check: false }, // removed
+    { key: "type", label: "Type", check: false },
+    { key: "subject", label: "Subject", check: false },
+    { key: "startDateTime", label: "Start Date & Time", check: false },
+    { key: "endDateTime", label: "End Date & Time", check: false },
+    { key: "priority", label: "Priority", check: false },
+    { key: "guests", label: "Guests", check: false },
+    { key: "location", label: "Location", check: false },
+    { key: "videoCallIntegration", label: "Video Call Integration", check: false },
+    { key: "description", label: "Description", check: false },
+    { key: "status", label: "Status", check: false },
+    { key: "notes", label: "Notes", check: false },
+    { key: "assignedTo", label: "Assigned To", check: false }, // keep
+    // { key: "dealId", label: "Deal ID", check: false }, // removed
+    // { key: "leadId", label: "Lead ID", check: false }, // removed
+    // { key: "personId", label: "Person ID", check: false }, // removed
+    // { key: "leadOrganizationId", label: "Organization ID", check: false }, // removed
+    { key: "isDone", label: "Is Done", check: false },
+    // { key: "masterUserID", label: "Master User ID", check: false }, // removed
+    { key: "contactPerson", label: "Contact Person", check: false },
+    { key: "email", label: "Email", check: false },
+    { key: "organization", label: "Organization", check: false },
+    { key: "dueDate", label: "Due Date", check: false },
+    { key: "createdAt", label: "Created At", check: false },
+    { key: "updatedAt", label: "Updated At", check: false }
+  ];
+
+  res.status(200).json({ fields });
 };
