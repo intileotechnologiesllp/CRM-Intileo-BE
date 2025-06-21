@@ -15,9 +15,13 @@ const LeadFilter = require("../../models/leads/leadFiltersModel");
 const {convertRelativeDate} = require("../../utils/helper");
 const Activity = require("../../models/activity/activityModel");
 const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
+const {logAuditTrail} = require("../../utils/auditTrailLogger"); // Adjust path as needed
+const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const { getProgramId } = require("../../utils/programCache");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
+    const dealProgramId = getProgramId("DEALS");
     const {
       contactPerson,
       organization,
@@ -52,23 +56,59 @@ let ownerId = req.user?.id || req.adminId || req.body.ownerId;
 
  // Validation
     if (!title || typeof title !== "string" || !title.trim()) {
+await logAuditTrail(
+      dealProgramId,
+      "DEAL_CREATION",
+      req.role,
+      `Deal creation failed: Title is required.`,
+      req.adminId,
+    
+    );
       return res.status(400).json({ message: "Title is required." });
     }
     if (!email || !/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) {
+await logAuditTrail(
+      dealProgramId,
+      "DEAL_CREATION",
+      req.role,
+      `Deal creation failed: A valid email is required.`,
+      req.adminId,
+    );
       return res.status(400).json({ message: "A valid email is required." });
     }
     if (!phone || !/^\+?\d{7,15}$/.test(phone)) {
+await logAuditTrail(
+      dealProgramId,
+      "DEAL_CREATION",
+      req.role,
+      `Deal creation failed: A valid phone number is required.`,
+      req.adminId,
+    );
       return res.status(400).json({ message: "A valid phone number is required." });
     }
     // Find or create Person and Organization here...
     // Check for unique title
     const existingDeal = await Deal.findOne({ where: { title } });
     if (existingDeal) {
+await logAuditTrail(
+      dealProgramId,
+      "DEAL_CREATION",
+      req.role,
+      `Deal creation failed: A deal with this title already exists.`,
+      req.adminId,
+    );
       return res.status(400).json({ message: "A deal with this title already exists." });
     }
     // Check for duplicate contactPerson in the deals table
 const duplicateContactPerson = await Deal.findOne({ where: { contactPerson } });
 if (duplicateContactPerson) {
+await logAuditTrail(
+  dealProgramId,
+  "DEAL_CREATION",
+  req.role,
+  `Deal creation failed: A deal with this contact person already exists.`,
+  req.adminId,
+);
   return res.status(409).json({
     message: "A deal with this contact person already exists."
   });
@@ -83,10 +123,24 @@ const masterUserID = req.adminId
     let leadId = req.body.leadId;
  if (sourceOrgin === "2" || sourceOrgin === 2) {
   if (!leadId) {
+await logAuditTrail(
+    dealProgramId,
+    "DEAL_CREATION",
+    req.role,
+    `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+    req.adminId,
+  );
     return res.status(400).json({ message: "leadId is required when sourceOrgin is 2." });
   }
   existingLead = await Lead.findByPk(leadId);
   if (!existingLead) {
+await logAuditTrail(
+    dealProgramId,
+    "DEAL_CREATION",
+    req.role,
+    `Deal creation failed: Lead with leadId ${leadId} not found.`,
+    req.adminId,
+  );
     return res.status(404).json({ message: "Lead not found." });
   }
   ownerId = existingLead.ownerId; // assign, don't redeclare
@@ -105,6 +159,13 @@ if (organization) {
     });
   }
 } else {
+await logAuditTrail(
+    dealProgramId,
+    "DEAL_CREATION",
+    req.role,
+    `Deal creation failed: Organization name is required.`,
+    req.adminId,
+  );
   return res.status(400).json({ message: "Organization name is required." });
 } // findOrCreate returns [instance, created]
     }
@@ -115,9 +176,10 @@ if (organization) {
 
 if (email) {
   person = await Person.findOne({ where: { email } });
-  console.log(person.personId," person found");
+  // console.log(person.personId," person found");
   
   if (!person) {
+
     person = await Person.create({
       contactPerson,
       email,
@@ -128,6 +190,13 @@ if (email) {
 
   }
 } else {
+await logAuditTrail(
+  dealProgramId,
+  "DEAL_CREATION",
+  req.role,
+  `Deal creation failed: Email is required for contact person.`,
+  req.adminId,
+);
   return res.status(400).json({ message: "Email is required for contact person." });
 }
     }
@@ -137,6 +206,35 @@ if (!(person ? person.contactPerson : contactPerson)) {
     // Create the lead
     console.log(person.personId," before deal creation");
     // Before saving to DB
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+  if (!leadId) {
+await logAuditTrail(
+    dealProgramId,
+    "DEAL_CREATION",
+    req.role,
+    `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+    req.adminId,
+  );
+    return res.status(400).json({ message: "leadId is required when sourceOrgin is 2." });
+  }
+  existingLead = await Lead.findByPk(leadId);
+  if (!existingLead) {
+    return res.status(404).json({ message: "Lead not found." });
+  }
+  // Prevent conversion if already converted to a deal
+  if (existingLead.dealId) {
+    await logAuditTrail(
+      dealProgramId,
+      "DEAL_CREATION",
+      req.role,
+      `Deal creation failed: This lead is already converted to a deal.`,
+      req.adminId
+    );
+    return res.status(400).json({ message: "This lead is already converted to a deal." });
+  }
+  ownerId = existingLead.ownerId;
+  leadId = existingLead.leadId;
+}
     const deal = await Deal.create({
       // contactPerson: person ? person.contactPerson : null,
      contactPerson: person ? person.contactPerson : contactPerson,
@@ -214,6 +312,18 @@ if (sourceOrgin === 0 && req.body.emailID) {
     if (existingLead) {
       await existingLead.update({ dealId: deal.dealId });
     }
+
+  await historyLogger(
+    dealProgramId,
+    "DEAL_CREATION",
+    deal.masterUserID,
+    deal.dealId,
+    null,
+    `Deal is created by ${req.role}`,
+    null
+  );
+
+
     res.status(201).json({ message: "deal created successfully", deal });
   } catch (error) {
     console.log("Error creating deal:", error);
@@ -1094,14 +1204,6 @@ exports.getNotes = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-// const Deal = require("../../models/deals/dealsModels");
-// let DealDetails;
-// try {
-//   DealDetails = require("../../models/deals/dealDetailsModel");
-// } catch (e) {
-//   DealDetails = null;
-// }
 
 
 exports.saveAllDealFieldsWithCheck = async (req, res) => {

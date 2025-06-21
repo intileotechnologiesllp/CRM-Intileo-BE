@@ -32,6 +32,7 @@ const leadColumnController=require("./routes/leads/leadColumnRoutes.js"); // Imp
 const leadContactsRoutes = require("./routes/leads/leadContactsRoutes.js"); // Import lead contacts routes
 const dealRoutes = require("./routes/deals/dealsRoutes.js"); // Import deal routes
 const activityRoutes = require("./routes/activity/activityRoutes.js"); // Import activity routes
+const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js")
@@ -50,6 +51,8 @@ app.get("/api/env", (req, res) => {
     FRONTEND_URL: process.env.FRONTEND_URL,
   });
 });
+
+// await loadPrograms(); // Call this once at startup
 // Routes
 app.use("/api", adminRoutes);
 app.use("/api/designations", designationRoutes);
@@ -136,5 +139,15 @@ sequelize
   .catch((err) => console.error("Error syncing database:", err));
 
 // Start server
-const PORT = process.env.PORT || 3056;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+(async () => {
+  try {
+    await loadPrograms();
+    // Start server after loading programs
+    const PORT = process.env.PORT || 3056;
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    console.log("Program cache loaded.");
+  } catch (err) {
+    console.error("Failed to load program cache:", err);
+    process.exit(1);
+  }
+})();

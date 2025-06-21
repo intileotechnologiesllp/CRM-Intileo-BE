@@ -77,68 +77,6 @@ exports.deleteLeadColumn = async (req, res) => {
   }
 };
 
-// exports.getAllLeadFields = async (req, res) => {
-//   const masterUserID = req.adminId;
-//  const fields = [
-//     { value: "contactPerson", label: "Contact person" },
-//     { value: "organization", label: "Organization" },
-//     { value: "title", label: "Title" },
-//     { value: "valueLabels", label: "Value Labels" },
-//     { value: "expectedCloseDate", label: "Expected Close Date" },
-//     { value: "sourceChannel", label: "Source channel" },
-//     { value: "sourceChannelID", label: "Source channel ID" },
-//     { value: "serviceType", label: "Service Type" },
-//     { value: "scopeOfServiceType", label: "Scope of Service Type" },
-//     { value: "phone", label: "Person phone" },
-//     { value: "email", label: "Email" },
-//     { value: "company", label: "Company" },
-//     { value: "proposalValue", label: "Proposal Value" },
-//     { value: "esplProposalNo", label: "ESPL Proposal No." },
-//     { value: "projectLocation", label: "Project Location" },
-//     { value: "organizationCountry", label: "Organization Country" },
-//     { value: "proposalSentDate", label: "Proposal Sent Date" },
-//     { value: "status", label: "Status" },
-//     { value: "ownerId", label: "Owner" },
-//     { value: "createdAt", label: "Lead created" },
-//     { value: "updatedAt", label: "Last updated" },
-//     // Add any custom/virtual fields below
-//     { value: "masterUserID", label: "Creator" },
-//     { value: "currency", label: "Currency" },
-//     { value: "nextActivityDate", label: "Next activity date" },
-//     { value: "nextActivityStatus", label: "Next activity status" },
-//     { value: "reportsPrepared", label: "No. of reports prepared for the project" },
-//     { value: "organizationName", label: "Organization name" },
-//     { value: "seen", label: "Seen" },
-//     { value: "questionerShared", label: "Questioner Shared?" },
-//     { value: "responsiblePerson", label: "Responsible Person" },
-//     { value: "rfpReceivedDate", label: "RFP received Date" },
-//     { value: "sbuClass", label: "SBU Class" },
-//     { value: "sectoralSector", label: "Sectoral Sector" },
-//     { value: "source", label: "Source" },
-//     { value: "sourceOrigin", label: "Source origin" },
-//     { value: "sourceOriginID", label: "Source origin ID" },
-//     { value: "statusSummery", label: "Status Summery" },
-//     { value: "title", label: "Title" },
-//     { value: "updatedAt", label: "Update time" },
-//     { value: "value", label: "Value" },
-//     { value: "visibleTo", label: "Visible to" },
-//     {value:"archiveTime", label:"Archive time"},
-//     {value:"address", label:"Address"},
-//     // ...add more as needed
-//   ];
-//     try {
-//     const pref = await LeadColumnPreference.findOne({ where: { masterUserID } });
-//     let usedKeys = [];
-//     if (pref && Array.isArray(pref.columns)) {
-//       usedKeys = pref.columns.map(col => (typeof col === "string" ? col : col.key));
-//     }
-//     // Filter out fields that are already in preferences
-//     const availableFields = fields.filter(field => !usedKeys.includes(field.value));
-//     res.status(200).json({ fields: availableFields });
-//   } catch (error) {
-//     res.status(500).json({ message: "Error fetching lead fields" });
-//   }
-// };
 exports.saveAllLeadFieldsWithCheck = async (req, res) => {
   let LeadDetails;
   try {
@@ -228,4 +166,5 @@ exports.updateLeadColumnChecks = async (req, res) => {
     res.status(500).json({ message: "Error updating columns" });
   }
 };
+
 

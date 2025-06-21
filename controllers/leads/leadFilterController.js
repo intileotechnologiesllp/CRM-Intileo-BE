@@ -58,40 +58,6 @@ exports.getLeadFilters = async (req, res) => {
   }
 };
 
-
-
-// exports.useFilters = async (req, res) => {
-//   const { filterId } = req.params;
-
-//   try {
-//     // Fetch the saved filter
-//     const filter = await LeadFilter.findByPk(filterId);
-//     if (!filter) {
-//       return res.status(404).json({ message: "Filter not found." });
-//     }
-
-//     // Build the where clause from filterConfig
-//     const { all = [], any = [] } = filter.filterConfig;
-//     const where = {};
-
-//     if (all.length > 0) {
-//       where[Op.and] = all.map(buildCondition);
-//     }
-//     if (any.length > 0) {
-//       where[Op.or] = any.map(buildCondition);
-//     }
-
-//     // Fetch leads using the built where clause
-//     const leads = await Lead.findAll({ where });
-//     res.status(200).json({ leads });
-//   } catch (error) {
-//     console.error("Error fetching leads by filter:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-
-
 exports.useFilters = async (req, res) => {
   const { filterId } = req.params;
 

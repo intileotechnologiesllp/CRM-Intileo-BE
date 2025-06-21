@@ -710,6 +710,13 @@ organizations = organizations.map(o => ({
   // leadDetails
     });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_FETCH", // Mode
+      null, // No user ID for failed sign-in
+      "Error fetching leads: " + error.message, // Error description
+      null
+    );
     console.error("Error fetching leads:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -858,6 +865,13 @@ for (const key in updateObj) {
     const lead = await Lead.findByPk(leadId);
     console.log("Fetched lead:", lead ? lead.toJSON() : null);
     if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UPDATE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
       return res.status(404).json({ message: "Lead not found" });
     }
 
@@ -954,6 +968,18 @@ if (
     //     `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}".\n\nPlease check your CRM dashboard for details.`
     //   );
     // }
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
+      "LEAD_UPDATE", // Mode
+      lead.masterUserID, // Admin ID from the authenticated request
+      leadId, // Record ID (Lead ID)
+      req.adminId,
+      `Lead updated by "${req.role}"`, // Description
+      {
+        from: lead.toJSON(),
+        to: { ...leadData, leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : lead.leadOrganizationId, personId: personRecord ? personRecord.personId : lead.personId }
+      } // Changes logged as JSON
+    );
     res.status(200).json({
       message: "Lead updated successfully",
       lead,
@@ -1113,6 +1139,13 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
 
     res.status(200).json({ users });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "MASTER_USER_FETCH",
+      req.adminId,
+      `Error fetching master users: ${error.message}`,
+      null
+    );
     console.error("Error fetching master users:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -1129,16 +1162,38 @@ exports.getLeadsByMasterUser = async (req, res) => {
       // Find masterUserID by name
       const user = await MasterUser.findOne({ where: { name } });
       if (!user) {
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_FETCH_BY_MASTER_USER",
+          req.adminId,
+          `Master user with name "${name}" not found.`,
+          null
+        );
         return res.status(404).json({ message: "Master user not found." });
       }
       whereClause.masterUserID = user.masterUserID;
     } else {
+     await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_FETCH_BY_MASTER_USER",
+      req.adminId,
+      "Lead fetch failed: masterUserID or name is required.",
+      null
+    );
+      
       return res.status(400).json({ message: "Please provide masterUserID or name." });
     }
 
     const leads = await Lead.findAll({ where: whereClause });
     res.status(200).json({ leads });
   } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_FETCH_BY_MASTER_USER",
+      req.adminId,
+      `Error fetching leads by master user: ${error.message}`,
+      null
+    );
     console.error("Error fetching leads by master user:", error);
     res.status(500).json({ message: "Internal server error" });
   }
@@ -1156,6 +1211,14 @@ exports.getAllLeadDetails = async (req, res) => {
   // }
 
       if (!leadId) {
+        await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_DETAILS_FETCH",
+      masterUserID,
+      "Lead details fetch failed: leadId is required",
+      null
+    );
+    console.error("leadId is required in params.");
     return res.status(400).json({ message: "leadId is required in params." });
   }
 
@@ -1163,6 +1226,13 @@ exports.getAllLeadDetails = async (req, res) => {
     // Get the user's email address from credentials
     const lead = await Lead.findByPk(leadId);
     if (!lead || !lead.email) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_DETAILS_FETCH",
+        masterUserID,
+        "Lead details fetch failed: Lead or lead email not found.",
+        null
+      );
       return res.status(404).json({ message: "Lead or lead email not found." });
     }
     //     const deal = await Deal.findByPk(dealId);
@@ -1270,6 +1340,13 @@ if (!emailsExist) {
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_DETAILS_FETCH",
+      masterUserID,
+      `Lead details fetch failed: ${error.message}`,
+      null
+    );
     res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -1284,9 +1361,23 @@ exports.addLeadNote = async (req, res) => {
 
   // 100KB = 102400 bytes
   if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      "Note addition failed: Note is required and must be under 100KB.",
+      null
+    );
     return res.status(400).json({ message: "Note is required and must be under 100KB." });
   }
   if (!leadId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      "Note addition failed: leadId is required",
+      null
+    );
     return res.status(400).json({ message: "leadId is required." });
   }
 
@@ -1297,9 +1388,25 @@ exports.addLeadNote = async (req, res) => {
       content,
       createdBy,
     });
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      leadId,
+      createdBy,
+      `Note added to lead with ID ${leadId} by user ${req.role}`,
+      { content }
+    );
     res.status(201).json({ message: "Note added successfully", note });
   } catch (error) {
     console.error("Error adding note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      `Note addition failed: ${error.message}`,
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1308,24 +1415,61 @@ const { noteId } = req.params;
   const masterUserID = req.adminId;
 
   if (!noteId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      "Note deletion failed: noteId is required",
+      null
+    );
     return res.status(400).json({ message: "noteId is required." });
   }
 
   try {
     const note = await LeadNote.findByPk(noteId);
     if (!note) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_DELETE",
+        masterUserID,
+        `Note deletion failed: Note with ID ${noteId} not found`,
+        null
+      );
       return res.status(404).json({ message: "Note not found." });
     }
 
     // Check if the note belongs to the current user
     if (note.masterUserID !== masterUserID) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_DELETE",
+        masterUserID,
+        `Note deletion failed: User does not have permission to delete note with ID ${noteId}`,
+        null
+      );
       return res.status(403).json({ message: "You do not have permission to delete this note." });
     }
 
     await note.destroy();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      noteId,
+      req.adminId,
+      `Note with ID ${noteId} deleted by user ${req.role}`,
+      null
+    );
     res.status(200).json({ message: "Note deleted successfully." });
   } catch (error) {
     console.error("Error deleting note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      `Note deletion failed: ${error.message}`,
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 
@@ -1337,29 +1481,72 @@ exports.updateLeadNote = async (req, res) => {
 
   // Validate input
   if (!noteId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      "Note update failed: noteId is required",
+      null
+    );
     return res.status(400).json({ message: "noteId is required." });
   }
   if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      "Note update failed: Note is required and must be under 100KB.",
+      null
+    );
     return res.status(400).json({ message: "Note is required and must be under 100KB." });
   }
 
   try {
     const note = await LeadNote.findByPk(noteId);
     if (!note) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_UPDATE",
+        masterUserID,
+        `Note update failed: Note with ID ${noteId} not found`,
+        null
+      );
       return res.status(404).json({ message: "Note not found." });
     }
 
     // Check if the note belongs to the current user
     if (note.masterUserID !== masterUserID) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_UPDATE",
+        masterUserID,
+        `Note update failed: User does not have permission to edit note with ID ${noteId}`,
+        null
+      );
       return res.status(403).json({ message: "You do not have permission to edit this note." });
     }
 
     note.content = content;
     await note.save();
-
+await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      noteId,
+      req.adminId,
+      `Note with ID ${noteId} updated by user ${req.role}`,
+      { from: note.content, to: content }
+    );
     res.status(200).json({ message: "Note updated successfully.", note });
   } catch (error) {
     console.error("Error updating note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      `Note update failed: ${error.message}`,
+      null
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
