@@ -505,7 +505,13 @@ if (req.role !== "admin") {
     });
   } catch (error) {
     console.log(error);
-    
+    await logAuditTrail(
+      getProgramId("DEALS"),
+      "DEAL_FETCH",
+      req.role,
+      `Failed to fetch deals: ${error.message}`,
+      req.adminId
+    );
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -625,6 +631,13 @@ exports.updateDeal = async (req, res) => {
     // Update Deal
     const deal = await Deal.findByPk(dealId);
     if (!deal) {
+      await logAuditTrail(
+        getProgramId("DEALS"),
+        "DEAL_UPDATE",
+        req.role,
+        `Deal update failed: Deal with ID ${dealId} not found.`,
+        req.adminId
+      );
       return res.status(404).json({ message: "Deal not found." });
     }
    // Check if pipelineStage is changing
@@ -741,6 +754,15 @@ if (currentStageName && pipelineOrder.includes(currentStageName)) {
 }
 
     //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
+    await historyLogger(
+      getProgramId("DEALS"),
+      "DEAL_UPDATE",
+      req.adminId,
+      deal.dealId,
+      null,
+      `Deal updated by ${req.role}`,
+      null
+    );
     res.status(200).json({
   message: "Deal, person, and organization updated successfully",
   deal: updatedDeal,

@@ -462,19 +462,7 @@ for (const type of folderTypes) {
   }
 }
 
-    // // Fetch emails from Inbox, Drafts, Archive, and Sent folders
-    // console.log("Fetching emails from Inbox...");
-    // await fetchEmailsFromFolder("INBOX", "inbox");
 
-    // console.log("Fetching emails from Drafts...");
-    // await fetchEmailsFromFolder("[Gmail]/Drafts", "drafts");
-
-    // console.log("Fetching emails from Archive...");
-    // await fetchEmailsFromFolder("[Gmail]/All Mail", "archive");
-
-    // console.log("Fetching emails from Sent...");
-    // await fetchEmailsFromFolder("[Gmail]/Sent Mail", "sent");
-    // Fetch emails from Inbox, Drafts, Archive, and Sent folders
 console.log("Fetching emails from Inbox...");
 await fetchEmailsFromFolder(folderMap.inbox, "inbox");
 
@@ -1069,34 +1057,7 @@ exports.getEmails = async (req, res) => {
         isRead: false, // Count only unread emails
       },
     });
-//................................original important
-    // Group emails by conversation (thread)
-    // let responseThreads;
-    // if (folder === "drafts") {
-    //   // For drafts, group by draftId if available, else by messageId
-    //   const threads = {};
-    //   emails.forEach((email) => {
-    //     const threadId = email.draftId || email.messageId;
-    //     if (!threads[threadId]) {
-    //       threads[threadId] = [];
-    //     }
-    //     threads[threadId].push(email);
-    //   });
-    //   responseThreads = Object.values(threads);
-    // } else {
-    //   // For other folders, group by inReplyTo or messageId
-    //   const threads = {};
-    //   emails.forEach((email) => {
-    //     const threadId = email.inReplyTo || email.messageId;
-    //     if (!threads[threadId]) {
-    //       threads[threadId] = [];
-    //     }
-    //     threads[threadId].push(email);
-    //   });
-    //   responseThreads = Object.values(threads);
 
-    // }
-    //............................end of original important
 
 let responseThreads;
 if (folder === "drafts" || folder === "trash") {
@@ -1302,110 +1263,7 @@ const imapConfig = {
     // res.status(500).json({ message: "Internal server error." });
   }
 };
-//...........................changes............................
 
-// exports.getOneEmail = async (req, res) => {
-//   const { emailId } = req.params;
-//   const masterUserID = req.adminId;
-
-//   try {
-//     // Fetch the main email
-//     const mainEmail = await Email.findOne({
-//       where: { emailID: emailId },
-//       include: [{ model: Attachment, as: "attachments" }],
-//     });
-
-//     if (!mainEmail) {
-//       return res.status(404).json({ message: "Email not found." });
-//     }
-
-//     // Mark as read if not already
-//     if (!mainEmail.isRead) {
-//       await mainEmail.update({ isRead: true });
-//     }
-
-//     // Clean the body of the main email
-//     mainEmail.body = cleanEmailBody(mainEmail.body);
-
-//     // Add baseURL to attachment paths
-//     const baseURL = process.env.LOCALHOST_URL;
-//     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
-//       ...attachment.toJSON(),
-//       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//     }));
-
-//     // If this is a draft or trash, do NOT fetch related emails
-//     if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
-//       return res.status(200).json({
-//         message: `${mainEmail.folder} email fetched successfully.`,
-//         data: {
-//           email: mainEmail,
-//           relatedEmails: [],
-//         },
-//       });
-//     }
-
-//     // --- Gmail-like conversation grouping ---
-//     // Gather all thread IDs (messageId, inReplyTo, references)
-//     const threadIds = [
-//       mainEmail.messageId,
-//       mainEmail.inReplyTo,
-//       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
-//     ].filter(Boolean);
-
-//     // Fetch all related emails in the thread (across all users)
-//     let relatedEmails = await Email.findAll({
-//       where: {
-//         [Sequelize.Op.or]: [
-//           { messageId: { [Sequelize.Op.in]: threadIds } },
-//           { inReplyTo: { [Sequelize.Op.in]: threadIds } },
-//           {
-//             references: {
-//               [Sequelize.Op.or]: threadIds.map((id) => ({
-//                 [Sequelize.Op.like]: `%${id}%`,
-//               })),
-//             },
-//           },
-//         ],
-//         masterUserID,
-//         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]],
-//     });
-
-//     // Remove the main email from relatedEmails (by messageId)
-//     relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
-
-//     // Deduplicate relatedEmails by messageId (keep the first occurrence)
-//     const seen = new Set();
-//     relatedEmails = relatedEmails.filter(email => {
-//       if (seen.has(email.messageId)) return false;
-//       seen.add(email.messageId);
-//       return true;
-//     });
-
-//     // Clean the body and attachment paths for related emails
-//     relatedEmails.forEach((email) => {
-//       email.body = cleanEmailBody(email.body);
-//       email.attachments = email.attachments.map((attachment) => ({
-//         ...attachment,
-//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//       }));
-//     });
-
-//     res.status(200).json({
-//       message: "Email fetched successfully.",
-//       data: {
-//         email: mainEmail,
-//         relatedEmails,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error fetching email:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
@@ -1545,19 +1403,6 @@ conversation.push(...remaining);
       }));
     });
 
-    // res.status(200).json({
-    //   message: "Email fetched successfully.",
-    //   data: {
-    //     email: mainEmail,
-    //     relatedEmails,
-    //   },
-    // });
-    // Sort relatedEmails by createdAt ascending (oldest to newest)
-    //  allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-// The oldest email is the main email, the rest are relatedEmails
-// const sortedMainEmail = allEmails[0];
-// const sortedRelatedEmails = allEmails.slice(1);
 const sortedMainEmail = conversation[0];
 const sortedRelatedEmails = conversation.slice(1);
 
@@ -1935,15 +1780,7 @@ if (actionType === "forward") {
       };
 
 const baseURL = process.env.LOCALHOST_URL;
-//         const attachments = req.files && req.files.length > 0
-//   ? req.files.map((file) => ({
-//       filename: file.filename,
-//       originalname: file.originalname,
-//       path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
-//       size: file.size,
-//       contentType: file.mimetype,
-//     }))
-//   : [];
+
   
       let attachments = [];
       if (req.files && req.files.length > 0) {
