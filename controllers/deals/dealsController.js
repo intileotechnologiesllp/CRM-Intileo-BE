@@ -445,7 +445,7 @@ function buildCondition(cond) {
   }
 
   // Handle date fields
-  const leadDateFields = Object.entries(Lead.rawAttributes)
+  const leadDateFields = Object.entries(Deal.rawAttributes)
   .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
   .map(([key]) => key);
 

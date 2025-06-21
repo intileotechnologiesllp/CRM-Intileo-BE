@@ -1,6 +1,3 @@
-const { Op } = require("sequelize");
-const moment = require("moment"); // or use JS Date
-
 exports.getActivities = async (req, res) => {
   try {
     const {
@@ -14,16 +11,51 @@ exports.getActivities = async (req, res) => {
       leadOrganizationId,
       dealId,
       leadId,
-      dateFilter, // <-- new
-      startDate,  // for custom period
-      endDate     // for custom period
+      dateFilter,
+      filterId, // <-- support filterId
+      startDate,
+      endDate
     } = req.query;
 
     const where = {};
+    let filterWhere = {};
+    // --- Dynamic Filter Logic ---
+    if (filterId) {
+      const filter = await LeadFilter.findByPk(filterId); // Or ActivityFilter if you have one
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
+      const filterConfig = typeof filter.filterConfig === "string"
+        ? JSON.parse(filter.filterConfig)
+        : filter.filterConfig;
 
-    // ...existing filters...
+      const { all = [], any = [] } = filterConfig;
+      const activityFields = Object.keys(Activity.rawAttributes);
 
-    // Date filter logic
+      // "all" conditions (AND)
+      if (all.length > 0) {
+        filterWhere[Op.and] = [];
+        all.forEach(cond => {
+          if (activityFields.includes(cond.field)) {
+            filterWhere[Op.and].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+      }
+
+      // "any" conditions (OR)
+      if (any.length > 0) {
+        filterWhere[Op.or] = [];
+        any.forEach(cond => {
+          if (activityFields.includes(cond.field)) {
+            filterWhere[Op.or].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+      }
+    }
+
+    // --- Date filter logic (applies after dynamic filter) ---
     const now = moment().startOf('day');
     switch (dateFilter) {
       case "overdue":
@@ -71,12 +103,35 @@ exports.getActivities = async (req, res) => {
         break;
     }
 
-    // ...rest of your code (pagination, admin/user logic)...
+    // --- Standard filters (applies after dynamic filter) ---
+    if (search) {
+      where[Op.or] = [
+        { subject: { [Op.like]: `%${search}%` } },
+        { description: { [Op.like]: `%${search}%` } }
+      ];
+    }
+    if (type) where.type = type;
+    if (typeof isDone !== "undefined") where.isDone = isDone === "true";
+    if (personId) where.personId = personId;
+    if (leadOrganizationId) where.leadOrganizationId = leadOrganizationId;
+    if (dealId) where.dealId = dealId;
+    if (leadId) where.leadId = leadId;
+
+    // Only show all activities if user is admin
+    if (req.role !== "admin") {
+      where[Op.or] = [
+        { masterUserID: req.adminId },
+        { assignedTo: req.adminId }
+      ];
+    }
+
+    // Merge dynamic filter with standard filters
+    const finalWhere = { ...filterWhere, ...where };
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { rows: activities, count: total } = await Activity.findAndCountAll({
-      where,
+      where: finalWhere,
       limit: parseInt(limit),
       offset,
       order: [["startDateTime", "DESC"]],
@@ -93,3 +148,55 @@ exports.getActivities = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Helper function (reuse your buildCondition from getLeads)
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  // Map your operator strings to Sequelize ops as needed
+  const operatorMap = {
+    "is": "eq",
+    "is not": "ne",
+    "is empty": "is empty",
+    "is not empty": "is not empty",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt"
+  };
+
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
