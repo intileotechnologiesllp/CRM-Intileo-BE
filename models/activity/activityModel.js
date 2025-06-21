@@ -94,6 +94,22 @@ masterUserID: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
   },
+  contactPerson: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
+email: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
+organization: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
+dueDate: {
+  type: DataTypes.DATE,
+  allowNull: true,
+},
 }, {
   tableName: "Activities",
   timestamps: true,

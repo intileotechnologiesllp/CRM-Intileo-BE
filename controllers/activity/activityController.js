@@ -1,6 +1,10 @@
 const Activity = require("../../models/activity/activityModel");
 const { Op } = require("sequelize");
 const moment = require("moment"); // or use JS Date
+const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
+const Person = require("../../models/leads/leadPersonModel");
+const Organizations = require("../../models/leads/leadOrganizationModel");
+const LeadFilter = require("../../models/leads/leadFiltersModel");
 
 exports.createActivity = async (req, res) => {
   try {
@@ -27,12 +31,16 @@ exports.createActivity = async (req, res) => {
     let contactPerson = null;
     let email = null;
     if (personId) {
-      const person = await LeadPeople.findByPk(personId);
+      const person = await Person.findByPk(personId);
       if (person) {
-        contactPerson = person.name;
+        contactPerson = person.contactPerson;
         email = person.email;
+        console.log(person.contactPerson, person.email, "Contact Person and Email fetched in inside createActivity");
+        
       }
     }
+    console.log(contactPerson, email, "Contact Person and Email fetched");
+    
 
     // Fetch organization details
     let organization = null;
@@ -41,7 +49,11 @@ exports.createActivity = async (req, res) => {
       if (org) {
         organization = org.organization;
       }
+      console.log(org.organization, "Organization fetched inside createActivity");
+      
     }
+    console.log(organization, "Organization fetched");
+    
         // If guests is an array, convert to string for storage
     const guestsValue = Array.isArray(guests) ? JSON.stringify(guests) : guests;
     const activity = await Activity.create({
@@ -89,12 +101,51 @@ exports.getActivities = async (req, res) => {
       leadOrganizationId,
       dealId,
       leadId,
-      dateFilter
+      dateFilter,
+      filterId, // <-- support filterId
+      startDate,
+      endDate
     } = req.query;
 
     const where = {};
+    let filterWhere = {};
+    // --- Dynamic Filter Logic ---
+    if (filterId) {
+      const filter = await LeadFilter.findByPk(filterId); // Or ActivityFilter if you have one
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
+      const filterConfig = typeof filter.filterConfig === "string"
+        ? JSON.parse(filter.filterConfig)
+        : filter.filterConfig;
 
-    // Date filter logic
+      const { all = [], any = [] } = filterConfig;
+      const activityFields = Object.keys(Activity.rawAttributes);
+
+      // "all" conditions (AND)
+      if (all.length > 0) {
+        filterWhere[Op.and] = [];
+        all.forEach(cond => {
+          if (activityFields.includes(cond.field)) {
+            filterWhere[Op.and].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+      }
+
+      // "any" conditions (OR)
+      if (any.length > 0) {
+        filterWhere[Op.or] = [];
+        any.forEach(cond => {
+          if (activityFields.includes(cond.field)) {
+            filterWhere[Op.or].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+      }
+    }
+
+    // --- Date filter logic (applies after dynamic filter) ---
     const now = moment().startOf('day');
     switch (dateFilter) {
       case "overdue":
@@ -141,14 +192,14 @@ exports.getActivities = async (req, res) => {
         // No date filter
         break;
     }
-    // Search by subject or description
+
+    // --- Standard filters (applies after dynamic filter) ---
     if (search) {
       where[Op.or] = [
         { subject: { [Op.like]: `%${search}%` } },
         { description: { [Op.like]: `%${search}%` } }
       ];
     }
-
     if (type) where.type = type;
     if (typeof isDone !== "undefined") where.isDone = isDone === "true";
     if (personId) where.personId = personId;
@@ -164,10 +215,13 @@ exports.getActivities = async (req, res) => {
       ];
     }
 
+    // Merge dynamic filter with standard filters
+    const finalWhere = { ...filterWhere, ...where };
+
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { rows: activities, count: total } = await Activity.findAndCountAll({
-      where,
+      where: finalWhere,
       limit: parseInt(limit),
       offset,
       order: [["startDateTime", "DESC"]],
@@ -184,6 +238,98 @@ exports.getActivities = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+const operatorMap = {
+  "is": "eq",
+  "is not": "ne",
+  "is empty": "is empty",
+  "is not empty": "is not empty",
+  "is exactly or earlier than": "lte",
+  "is earlier than": "lt",
+  "is exactly or later than": "gte",
+  "is later than": "gt"
+  // Add more mappings if needed
+};
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle date fields
+  const leadDateFields = Object.entries(Activity.rawAttributes)
+  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+  .map(([key]) => key);
+
+// const DealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
+//   .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+//   .map(([key]) => key);
+
+const allDateFields = [...leadDateFields];
+
+  if (allDateFields.includes(cond.field)) {
+    if (cond.useExactDate) {
+      const date = new Date(cond.value);
+      if (isNaN(date.getTime())) return {};
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: date,
+        },
+      };
+    }
+    // Otherwise, use relative date conversion
+    const dateRange = convertRelativeDate(cond.value);
+    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
+
+    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
+      return {
+        [cond.field]: {
+          [Op.between]: [dateRange.start, dateRange.end],
+        },
+      };
+    }
+    if (dateRange && isValidDate(dateRange.start)) {
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: dateRange.start,
+        },
+      };
+    }
+    return {};
+  }
+
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
+
 
 exports.markActivityAsDone = async (req, res) => {
   try {
@@ -218,12 +364,12 @@ exports.updateActivity = async (req, res) => {
     if (!updateFields.personId) updateFields.personId = activity.personId;
     if (!updateFields.leadOrganizationId) updateFields.leadOrganizationId = activity.leadOrganizationId;
 
-    // Update LeadPeople if needed
+    // Update Person if needed
     if (
       updateFields.personId &&
       (updateFields.contactPerson || updateFields.email)
     ) {
-      await LeadPeople.update(
+      await Person.update(
         {
           ...(updateFields.contactPerson && { name: updateFields.contactPerson }),
           ...(updateFields.email && { email: updateFields.email }),
