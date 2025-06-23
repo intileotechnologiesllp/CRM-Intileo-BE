@@ -584,23 +584,76 @@ exports.addOrganizationNote = async (req, res) => {
   }
 };
 
+// exports.getAllContactPersons = async (req, res) => {
+//   try {
+//     const { search = "" } = req.query;
+
+//     const where = search
+//       ? { contactPerson: { [Op.like]: `%${search}%` } }
+//       : {};
+
+//     const persons = await Person.findAll({
+//       where,
+//       attributes: ["personId", "contactPerson", "email"],
+//       order: [["contactPerson", "ASC"]],
+//       raw: true
+//     });
+
+//     res.status(200).json({
+//       contactPersons: persons // Array of { personId, contactPerson }
+//     });
+//   } catch (error) {
+//     console.error("Error fetching contact persons:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
 exports.getAllContactPersons = async (req, res) => {
   try {
-    const { search = "" } = req.query;
+    const { search = "", page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const where = search
       ? { contactPerson: { [Op.like]: `%${search}%` } }
       : {};
 
-    const persons = await Person.findAll({
+    // Include organization using association
+    const { count, rows: persons } = await Person.findAndCountAll({
       where,
-      attributes: ["personId", "contactPerson", "email"],
+      attributes: ["personId", "contactPerson", "email", "leadOrganizationId"],
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization", // Make sure this matches your association
+          attributes: ["leadOrganizationId", "organization"]
+        }
+      ],
       order: [["contactPerson", "ASC"]],
-      raw: true
+      limit: parseInt(limit),
+      offset,
     });
 
+    // Format response to include organization info at top level
+    const contactPersons = persons.map(person => ({
+      personId: person.personId,
+      contactPerson: person.contactPerson,
+      email: person.email,
+      organization: person.LeadOrganization
+        ? {
+            leadOrganizationId: person.LeadOrganization.leadOrganizationId,
+            organization: person.LeadOrganization.organization
+          }
+        : null
+    }));
+
     res.status(200).json({
-      contactPersons: persons // Array of { personId, contactPerson }
+      contactPersons,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit)
+      }
     });
   } catch (error) {
     console.error("Error fetching contact persons:", error);

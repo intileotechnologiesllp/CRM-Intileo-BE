@@ -13,6 +13,7 @@ router.post("/check-columns", verifyToken, activityController.updateActivityColu
 router.get("/get-activity-fields", verifyToken, activityController.getActivityFields);
 router.get("/get-All-leads-and-deals", verifyToken, activityController.getAllLeadsAndDeals);
 router.get("/get-organization", verifyToken, activityController.getAllOrganizations);
+router.get("/get-calender-activities", verifyToken, activityController.getCalendarActivities);
 
 
 
