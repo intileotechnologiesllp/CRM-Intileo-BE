@@ -594,7 +594,7 @@ exports.getAllContactPersons = async (req, res) => {
 
     const persons = await Person.findAll({
       where,
-      attributes: ["personId", "contactPerson"],
+      attributes: ["personId", "contactPerson", "email"],
       order: [["contactPerson", "ASC"]],
       raw: true
     });
