@@ -1396,6 +1396,8 @@ exports.markDealAsWon = async (req, res) => {
 
     res.status(200).json({ message: "Deal marked as won", deal });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -1430,6 +1432,8 @@ exports.markDealAsLost = async (req, res) => {
 
     res.status(200).json({ message: "Deal marked as lost", deal });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 }
@@ -1467,6 +1471,8 @@ exports.markDealAsOpen = async (req, res) => {
 
     res.status(200).json({ message: "Deal marked as open", deal });
   } catch (error) {
+    console.log(error);
+    
     res.status(500).json({ message: "Internal server error" });
   }
 };
