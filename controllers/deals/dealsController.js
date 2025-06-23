@@ -1027,7 +1027,10 @@ if (currentStageName && pipelineOrder.includes(currentStageName)) {
       sourceChannelId: deal.sourceChannelId,
       statusSummary: deal.details?.statusSummary,
       responsiblePerson: deal.details?.responsiblePerson,
-      rfpReceivedDate: deal.details?.rfpReceivedDate
+      rfpReceivedDate: deal.details?.rfpReceivedDate,
+      wonTime:deal.details?.wonTime,
+      lostTime: deal.details?.lostTime,
+      lostReason: deal.details?.lostReason,
       // ...other deal fields
     };
 // Fetch participants for this deal
