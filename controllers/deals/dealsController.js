@@ -1213,6 +1213,7 @@ exports.createNote = async (req, res) => {
 
     res.status(201).json({ message: "Note created successfully.", note });
   } catch (error) {
+    console.log(error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
