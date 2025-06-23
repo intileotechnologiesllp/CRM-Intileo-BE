@@ -11,6 +11,8 @@ router.post("/update-activity/:activityId", verifyToken, activityController.upda
 router.get("/save-activity-fields", verifyToken, activityController.saveAllActivityFieldsWithCheck);
 router.post("/check-columns", verifyToken, activityController.updateActivityColumnChecks);
 router.get("/get-activity-fields", verifyToken, activityController.getActivityFields);
+router.get("/get-All-leads-and-deals", verifyToken, activityController.getAllLeadsAndDeals);
+router.get("/get-organization", verifyToken, activityController.getAllOrganizations);
 
 
 

@@ -6,6 +6,9 @@ const Person = require("../../models/leads/leadPersonModel");
 const Organizations = require("../../models/leads/leadOrganizationModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const ActivityColumnPreference = require("../../models/activity/activityColumnModel"); // Adjust path as needed
+const Lead = require("../../models/leads/leadsModel");
+const Deal = require("../../models/deals/dealsModels");
+//const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
   try {
@@ -528,3 +531,114 @@ exports.getActivityFields = (req, res) => {
 
   res.status(200).json({ fields });
 };
+
+exports.getAllLeadsAndDeals = async (req, res) => {
+  try {
+    // Pagination and search params
+    const {
+      page = 1,
+      limit = 20,
+      search = ""
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Search condition for leads and deals
+    const leadWhere = search
+      ? { title: { [Op.like]: `%${search}%` } }
+      : {};
+    const dealWhere = search
+      ? { title: { [Op.like]: `%${search}%` } }
+      : {};
+
+    // Fetch leads with pagination
+    const { rows: leadsRows, count: totalLeads } = await Lead.findAndCountAll({
+      attributes: ['leadId', 'title'],
+      where: leadWhere,
+      limit: parseInt(limit),
+      offset,
+      order: [['createdAt', 'DESC']]
+    });
+
+    // Fetch deals with pagination
+    const { rows: dealsRows, count: totalDeals } = await Deal.findAndCountAll({
+      attributes: ['dealId', 'title'],
+      where: dealWhere,
+      limit: parseInt(limit),
+      offset,
+      order: [['createdAt', 'DESC']]
+    });
+
+    // Format response
+    const leads = leadsRows.map(lead => ({
+      leadId: lead.leadId,
+      title: lead.title
+    }));
+
+    const deals = dealsRows.map(deal => ({
+      dealId: deal.dealId,
+      title: deal.title
+    }));
+
+    res.status(200).json({
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalLeads,
+        totalDeals,
+        totalLeadPages: Math.ceil(totalLeads / limit),
+        totalDealPages: Math.ceil(totalDeals / limit)
+      },
+       leads,
+      deals,
+    });
+  } catch (error) {
+    console.error("Error fetching leads and deals:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getAllOrganizations = async (req, res) => {
+  try {
+    // Pagination and search params
+    const {
+      page = 1,
+      limit = 20,
+      search = "",
+      // Add more filters as needed, e.g. country, status, etc.
+    } = req.query;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build where condition for search/filter
+    const where = {};
+    if (search) {
+      where.organization = { [Op.like]: `%${search}%` };
+    }
+    // Add more filters here if needed, e.g.:
+    // if (req.query.country) where.country = req.query.country;
+
+    // Fetch organizations with pagination and search
+    const { rows: organizations, count: total } = await Organizations.findAndCountAll({
+      attributes: ['leadOrganizationId', 'organization'],
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [['organization', 'ASC']]
+    });
+
+    res.status(200).json({
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit)
+      },
+       organizations
+    });
+  } catch (error) {
+    console.error("Error fetching organizations:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+}
+
