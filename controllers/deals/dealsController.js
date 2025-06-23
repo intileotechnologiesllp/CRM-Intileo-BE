@@ -779,36 +779,100 @@ if (currentStageName && pipelineOrder.includes(currentStageName)) {
 };
 
 
+// exports.getDealSummary = async (req, res) => {
+//   try {
+//     // 1. Per-currency summary
+//     const currencySummary = await Deal.findAll({
+//       attributes: [
+//         "currency",
+//         [fn("SUM", col("value")), "totalValue"],
+//         // Replace with your actual weighted value logic if needed
+//         [fn("SUM", col("value")), "weightedValue"],
+//         [fn("COUNT", col("dealId")), "dealCount"]
+//       ],
+//       group: ["currency"]
+//     });
+
+//     // 2. Overall summary
+//     const overall = await Deal.findAll({
+//       attributes: [
+//         [fn("SUM", col("value")), "totalValue"],
+//         [fn("SUM", col("value")), "weightedValue"],
+//         [fn("COUNT", col("dealId")), "dealCount"]
+//       ]
+//     });
+
+//     res.status(200).json({
+//       overall: overall[0],         // { totalValue, weightedValue, dealCount }
+//       currencySummary              // array of per-currency summaries
+//     });
+//   } catch (error) {
+//     console.log(error);
+    
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 exports.getDealSummary = async (req, res) => {
   try {
-    // 1. Per-currency summary
-    const currencySummary = await Deal.findAll({
-      attributes: [
-        "currency",
-        [fn("SUM", col("value")), "totalValue"],
-        // Replace with your actual weighted value logic if needed
-        [fn("SUM", col("value")), "weightedValue"],
-        [fn("COUNT", col("dealId")), "dealCount"]
-      ],
-      group: ["currency"]
+    // Fetch all deals with value, currency, and pipelineStage
+    const deals = await Deal.findAll({
+      attributes: ["value", "currency", "pipelineStage"],
+      raw: true
     });
 
-    // 2. Overall summary
-    const overall = await Deal.findAll({
-      attributes: [
-        [fn("SUM", col("value")), "totalValue"],
-        [fn("SUM", col("value")), "weightedValue"],
-        [fn("COUNT", col("dealId")), "dealCount"]
-      ]
+    // Probabilities for each stage
+    const stageProbabilities = {
+      "Qualified": 10,
+      "Contact Made": 25,
+      "Proposal Made": 50,
+      "Negotiations Started": 75
+      // Add more stages as needed
+    };
+
+    // Group deals by currency
+    const currencyMap = {};
+
+    let totalValue = 0;
+    let totalWeightedValue = 0;
+    let totalDealCount = 0;
+
+    deals.forEach(deal => {
+      const { currency, value, pipelineStage } = deal;
+      if (!currencyMap[currency]) {
+        currencyMap[currency] = {
+          totalValue: 0,
+          weightedValue: 0,
+          dealCount: 0
+        };
+      }
+      currencyMap[currency].totalValue += value || 0;
+      currencyMap[currency].weightedValue += ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
+      currencyMap[currency].dealCount += 1;
+
+      totalValue += value || 0;
+      totalWeightedValue += ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
+      totalDealCount += 1;
     });
+
+    // Format result as array
+    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
+      currency,
+      totalValue: data.totalValue,
+      weightedValue: data.weightedValue,
+      dealCount: data.dealCount
+    }));
+
+    // Optionally, sort by totalValue descending
+    summary.sort((a, b) => b.totalValue - a.totalValue);
 
     res.status(200).json({
-      overall: overall[0],         // { totalValue, weightedValue, dealCount }
-      currencySummary              // array of per-currency summaries
+      totalValue,
+      totalWeightedValue,
+      totalDealCount,
+      summary
     });
   } catch (error) {
-    console.log(error);
-    
+    console.error(error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
