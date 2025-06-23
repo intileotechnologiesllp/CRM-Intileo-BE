@@ -231,7 +231,7 @@ exports.getActivities = async (req, res) => {
 
     // Merge dynamic filter with standard filters
     const finalWhere = { ...filterWhere, ...where };
-const alwaysInclude = ["dealId", "leadId", "assignedTo", "leadOrganizationId", "personId","activityId"];
+const alwaysInclude = ["dealId", "leadId", "assignedTo", "leadOrganizationId", "personId","activityId","type","startDateTime","endDateTime"];
 if (attributes) {
   alwaysInclude.forEach(field => {
     if (!attributes.includes(field)) attributes.push(field);
@@ -641,4 +641,62 @@ exports.getAllOrganizations = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 }
+
+
+exports.getCalendarActivities = async (req, res) => {
+  try {
+    // Optional filters: user, date range, type, etc.
+    const {
+      startDate, // e.g. "2025-06-22"
+      endDate,   // e.g. "2025-06-28"
+      assignedTo,
+      type
+    } = req.query;
+
+    const where = {};
+
+    // Filter by date range
+    if (startDate && endDate) {
+      where.startDateTime = { [Op.gte]: new Date(startDate) };
+      where.endDateTime = { [Op.lte]: new Date(endDate) };
+    } else if (startDate) {
+      where.startDateTime = { [Op.gte]: new Date(startDate) };
+    } else if (endDate) {
+      where.endDateTime = { [Op.lte]: new Date(endDate) };
+    }
+
+    // Filter by assigned user
+    if (assignedTo) {
+      where.assignedTo = assignedTo;
+    }
+
+    // Filter by activity type (Meeting, Task, etc.)
+    if (type) {
+      where.type = type;
+    }
+
+    // Fetch activities
+    const activities = await Activity.findAll({
+      where,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "startDateTime",
+        "endDateTime",
+        "status",
+        "assignedTo",
+        "dealId",
+        "leadId"
+      ],
+      order: [["startDateTime", "ASC"]]
+    });
+
+    // Optionally, group by date or format as needed for your frontend calendar
+    res.status(200).json({ activities });
+  } catch (error) {
+    console.error("Error fetching calendar activities:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 
