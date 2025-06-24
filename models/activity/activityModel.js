@@ -120,5 +120,7 @@ Activity.associate = (models) => {
   Activity.belongsTo(models.Deal, { foreignKey: "dealId", as: "deal" });
   Activity.belongsTo(models.Lead, { foreignKey: "leadId", as: "lead" });
 };
+Activity.belongsTo(Lead, { foreignKey: "leadId" });
+Activity.belongsTo(Deal, { foreignKey: "dealId" });
 
 module.exports = Activity;

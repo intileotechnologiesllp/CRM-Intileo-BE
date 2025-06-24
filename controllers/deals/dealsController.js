@@ -230,7 +230,7 @@ await logAuditTrail(
       `Deal creation failed: This lead is already converted to a deal.`,
       req.adminId
     );
-    return res.status(400).json({ message: "This lead is already converted to a deal." });
+    return res.status(400).json({message: "This lead is already converted to a deal."});
   }
   ownerId = existingLead.ownerId;
   leadId = existingLead.leadId;

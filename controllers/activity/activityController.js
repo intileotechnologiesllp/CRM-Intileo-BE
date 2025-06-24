@@ -244,15 +244,38 @@ if (attributes) {
       limit: parseInt(limit),
       offset,
       order: [["startDateTime", "DESC"]],
-      attributes // <-- only checked columns will be returned
+      attributes, // <-- only checked columns will be returned
+      include: [
+    {
+      model: Lead,
+      attributes: ['title'],
+      required: false
+    },
+    {
+      model: Deal,
+      attributes: ['title'],
+      required: false
+    }
+  ]
 
     });
+
+const activitiesWithTitles = activities.map(activity => {
+  const data = activity.get ? activity.get({ plain: true }) : activity;
+  // Remove Lead and Deal objects, keep only leadTitle and dealTitle
+  const { Lead, Deal, ...rest } = data;
+  return {
+    ...rest,
+    leadTitle: Lead ? Lead.title : null,
+    dealTitle: Deal ? Deal.title : null
+  };
+});
 
     res.status(200).json({
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
-      activities,
+      activities: activitiesWithTitles,
     });
   } catch (error) {
     console.error("Error fetching activities:", error);
