@@ -260,14 +260,18 @@ if (attributes) {
 
     });
 
-const activitiesWithTitles = activities.map(activity => {
+const activitiesWithTitle = activities.map(activity => {
   const data = activity.get ? activity.get({ plain: true }) : activity;
-  // Remove Lead and Deal objects, keep only leadTitle and dealTitle
   const { Lead, Deal, ...rest } = data;
+  let title = null;
+  if (rest.leadId && Lead) {
+    title = Lead.title;
+  } else if (rest.dealId && Deal) {
+    title = Deal.title;
+  }
   return {
     ...rest,
-    leadTitle: Lead ? Lead.title : null,
-    dealTitle: Deal ? Deal.title : null
+    title
   };
 });
 
@@ -275,7 +279,7 @@ const activitiesWithTitles = activities.map(activity => {
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
-      activities: activitiesWithTitles,
+      activities: activitiesWithTitle,
     });
   } catch (error) {
     console.error("Error fetching activities:", error);
