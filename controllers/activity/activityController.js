@@ -7,6 +7,7 @@ const Organizations = require("../../models/leads/leadOrganizationModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const ActivityColumnPreference = require("../../models/activity/activityColumnModel"); // Adjust path as needed
 const Lead = require("../../models/leads/leadsModel");
+const LeadDetails = require("../../models/leads/leadDetailsModel");
 const Deal = require("../../models/deals/dealsModels");
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
@@ -84,6 +85,14 @@ exports.createActivity = async (req, res) => {
       organization,
       dueDate:endDateTime
     });
+
+        // Update nextActivity in Lead if leadId is present
+    if (leadId) {
+      await LeadDetails.update(
+        { nextActivityDate: startDateTime },
+        { where: { leadId } }
+      );
+    }
 
     res.status(201).json({ message: "Activity created successfully", activity });
   } catch (error) {
