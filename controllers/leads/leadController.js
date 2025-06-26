@@ -41,7 +41,8 @@ exports.createLead = async (req, res) => {
     organizationCountry,
     proposalSentDate,
     status,
-    sourceOrgin
+    sourceOrgin,
+    SBUClass
   } = req.body;
     // --- Add validation here ---
   if (!contactPerson || !organization || !title || !email) {
@@ -150,7 +151,8 @@ if (duplicateByTitle || duplicateByContact) {
       masterUserID: req.adminId,
       ownerId:req.adminId,// Associate the lead with the authenticated user
       ownerName,// Store the role of the user as ownerName,
-      sourceOrgin // Indicate that the lead was created manually
+      sourceOrgin, // Indicate that the lead was created manually
+      SBUClass
     });
 if (sourceOrgin === 0 && req.body.emailID) {
   await Email.update(
