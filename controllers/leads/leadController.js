@@ -8,10 +8,10 @@ const PROGRAMS = require("../../utils/programConstants"); // Import program cons
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
 const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
- //const Person = require("../../models/leads/leadPersonModel"); // Import Person model
- //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
-  const { Lead, LeadDetails, Person, Organization } = require("../../models");
-const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
+//const Person = require("../../models/leads/leadPersonModel"); // Import Person model
+//const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
+const { Lead, LeadDetails, Person, Organization } = require("../../models");
+const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
@@ -43,17 +43,23 @@ exports.createLead = async (req, res) => {
     status,
     sourceOrgin,
     SBUClass,
-    numberOfReportsPrepared
+    numberOfReportsPrepared,
   } = req.body;
-    // --- Add validation here ---
+  // --- Add validation here ---
   if (!contactPerson || !organization || !title || !email) {
-    return res.status(400).json({ message: "contactPerson, organization, title, and email are required." });
+    return res
+      .status(400)
+      .json({
+        message: "contactPerson, organization, title, and email are required.",
+      });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ message: "Invalid email format." });
   }
   if (proposalValue && proposalValue < 0) {
-    return res.status(400).json({ message: "Proposal value must be positive." });
+    return res
+      .status(400)
+      .json({ message: "Proposal value must be positive." });
   }
   // --- End validation ---
 
@@ -81,25 +87,34 @@ exports.createLead = async (req, res) => {
       });
     }
 
-        // 1. Find or create Organization
-let orgRecord = await Organization.findOne({ where: { organization} });
-if (!orgRecord) {
-  orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
-}
-console.log("orgRecord after create/find:", orgRecord?.organizationId, orgRecord?.organization);
+    // 1. Find or create Organization
+    let orgRecord = await Organization.findOne({ where: { organization } });
+    if (!orgRecord) {
+      orgRecord = await Organization.create({
+        organization,
+        masterUserID: req.adminId,
+      });
+    }
+    console.log(
+      "orgRecord after create/find:",
+      orgRecord?.organizationId,
+      orgRecord?.organization
+    );
 
-// Defensive: If orgRecord is still not found, stop!
-if (!orgRecord || !orgRecord.leadOrganizationId) {
-  return res.status(500).json({ message: "Failed to create/find organization." });
-}
-const duplicateByTitle = await Lead.findOne({ where: { title } });
-const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
+    // Defensive: If orgRecord is still not found, stop!
+    if (!orgRecord || !orgRecord.leadOrganizationId) {
+      return res
+        .status(500)
+        .json({ message: "Failed to create/find organization." });
+    }
+    const duplicateByTitle = await Lead.findOne({ where: { title } });
+    const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
 
-if (duplicateByTitle || duplicateByContact) {
-  return res.status(409).json({
-    message: "A lead with this title or contact person already exists."
-  });
-}
+    if (duplicateByTitle || duplicateByContact) {
+      return res.status(409).json({
+        message: "A lead with this title or contact person already exists.",
+      });
+    }
     // 2. Find or create Person (linked to organization)
     let personRecord = await Person.findOne({ where: { email } });
     if (!personRecord) {
@@ -108,7 +123,7 @@ if (duplicateByTitle || duplicateByContact) {
         email,
         phone,
         leadOrganizationId: orgRecord.leadOrganizationId,
-        masterUserID: req.adminId
+        masterUserID: req.adminId,
       });
     }
     //     const duplicateLead = await Lead.findOne({
@@ -124,13 +139,15 @@ if (duplicateByTitle || duplicateByContact) {
     //     message: "Lead Already Exist."
     //   });
     // }
-// const duplicateByOrg = await Lead.findOne({ where: { organization } });
+    // const duplicateByOrg = await Lead.findOne({ where: { organization } });
 
-     const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
+    const owner = await MasterUser.findOne({
+      where: { masterUserID: req.adminId },
+    });
     const ownerName = owner ? owner.name : null;
     const lead = await Lead.create({
-        personId: personRecord.personId,           // <-- Add this
-  leadOrganizationId: orgRecord.leadOrganizationId,
+      personId: personRecord.personId, // <-- Add this
+      leadOrganizationId: orgRecord.leadOrganizationId,
       contactPerson,
       organization,
       title,
@@ -150,35 +167,35 @@ if (duplicateByTitle || duplicateByContact) {
       proposalSentDate,
       status,
       masterUserID: req.adminId,
-      ownerId:req.adminId,// Associate the lead with the authenticated user
-      ownerName,// Store the role of the user as ownerName,
+      ownerId: req.adminId, // Associate the lead with the authenticated user
+      ownerName, // Store the role of the user as ownerName,
       sourceOrgin, // Indicate that the lead was created manually
       SBUClass,
-      numberOfReportsPrepared
+      numberOfReportsPrepared,
     });
-if (sourceOrgin === 0 && req.body.emailID) {
-  await Email.update(
-    { leadId: lead.leadId },
-    { where: { emailID: req.body.emailID } }
-  );
-}
+    if (sourceOrgin === 0 && req.body.emailID) {
+      await Email.update(
+        { leadId: lead.leadId },
+        { where: { emailID: req.body.emailID } }
+      );
+    }
     // --- Add this block to link existing emails to the new lead ---
-// await Email.update(
-//   { leadId: lead.leadId },
-//   {
-//     where: {
-//       [Op.or]: [
-//         { sender: lead.email },
-//         { recipient: { [Op.like]: `%${lead.email}%` } }
-//       ]
-//     }
-//   }
-// );
-// --- End block ---
+    // await Email.update(
+    //   { leadId: lead.leadId },
+    //   {
+    //     where: {
+    //       [Op.or]: [
+    //         { sender: lead.email },
+    //         { recipient: { [Op.like]: `%${lead.email}%` } }
+    //       ]
+    //     }
+    //   }
+    // );
+    // --- End block ---
     await LeadDetails.create({
       leadId: lead.leadId,
-      responsiblePerson:req.adminId,
-      sourceOrgin:sourceOrgin
+      responsiblePerson: req.adminId,
+      sourceOrgin: sourceOrgin,
     });
 
     await historyLogger(
@@ -204,7 +221,6 @@ if (sourceOrgin === 0 && req.body.emailID) {
     res.status(500).json(error);
   }
 };
-
 
 exports.archiveLead = async (req, res) => {
   const { leadId } = req.params; // Use leadId instead of id
@@ -289,7 +305,6 @@ exports.unarchiveLead = async (req, res) => {
   }
 };
 
-
 //...................new code..........................
 exports.getLeads = async (req, res) => {
   const {
@@ -300,40 +315,40 @@ exports.getLeads = async (req, res) => {
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
-    filterId
+    filterId,
   } = req.query;
   console.log(req.role, "role of the user............");
 
   try {
-        // Determine masterUserID based on role
+    // Determine masterUserID based on role
 
-        const pref = await LeadColumnPreference.findOne();
+    const pref = await LeadColumnPreference.findOne();
 
     let leadAttributes, leadDetailsAttributes;
-if (pref && pref.columns) {
-  // Parse columns if it's a string
-  const columns = typeof pref.columns === "string"
-    ? JSON.parse(pref.columns)
-    : pref.columns;
+    if (pref && pref.columns) {
+      // Parse columns if it's a string
+      const columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
 
-  const leadFields = Object.keys(Lead.rawAttributes);
-  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
-  leadAttributes = columns
-    .filter(col => col.check && leadFields.includes(col.key))
-    .map(col => col.key);
-    // Always include leadId
-if (!leadAttributes.includes('leadId')) {
-  leadAttributes.unshift('leadId');
-}
+      leadAttributes = columns
+        .filter((col) => col.check && leadFields.includes(col.key))
+        .map((col) => col.key);
+      // Always include leadId
+      if (!leadAttributes.includes("leadId")) {
+        leadAttributes.unshift("leadId");
+      }
 
-  leadDetailsAttributes = columns
-    .filter(col => col.check && leadDetailsFields.includes(col.key))
-    .map(col => col.key);
-}
+      leadDetailsAttributes = columns
+        .filter((col) => col.check && leadDetailsFields.includes(col.key))
+        .map((col) => col.key);
+    }
 
     console.log(leadAttributes, "leadAttributes from preferences");
-    
 
     let whereClause = {};
     // let include = [
@@ -342,18 +357,18 @@ if (!leadAttributes.includes('leadId')) {
     //     as: "details",
     //     required: false,
     //     attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
-      
+
     //   },
     // ];
     let include = [];
-if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
-  include.push({
-    model: LeadDetails,
-    as: "details",
-    required: false,
-    attributes: leadDetailsAttributes
-  });
-}
+    if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
+      include.push({
+        model: LeadDetails,
+        as: "details",
+        required: false,
+        attributes: leadDetailsAttributes,
+      });
+    }
 
     // Handle masterUserID filtering based on role and query parameters
     if (req.role === "admin") {
@@ -361,17 +376,17 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
       if (queryMasterUserID && queryMasterUserID !== "all") {
         whereClause[Op.or] = [
           { masterUserID: queryMasterUserID },
-          { ownerId: queryMasterUserID }
+          { ownerId: queryMasterUserID },
         ];
       }
       // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
     } else {
       // Non-admin users: filter by their own leads or specific user if provided
-      const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-      whereClause[Op.or] = [
-        { masterUserID: userId },
-        { ownerId: userId }
-      ];
+      const userId =
+        queryMasterUserID && queryMasterUserID !== "all"
+          ? queryMasterUserID
+          : req.adminId;
+      whereClause[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
     }
 
     console.log("→ Query params:", req.query);
@@ -379,172 +394,184 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
     console.log("→ req.adminId:", req.adminId);
     console.log("→ req.role:", req.role);
 
-//................................................................//filter
-if (filterId) {
-  // Fetch the saved filter
-  const filter = await LeadFilter.findByPk(filterId);
-  if (!filter) {
-    return res.status(404).json({ message: "Filter not found." });
-  }
-  const filterConfig = typeof filter.filterConfig === "string"
-    ? JSON.parse(filter.filterConfig)
-    : filter.filterConfig;
-
-  const { all = [], any = [] } = filterConfig;
-  const leadFields = Object.keys(Lead.rawAttributes);
-  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-  const personFields = Object.keys(Person.rawAttributes);
-  const organizationFields = Object.keys(Organization.rawAttributes);
-
-  let filterWhere = {};
-  let leadDetailsWhere = {};
-  let personWhere = {};
-  let organizationWhere = {};
-
-  // --- Your new filter logic for all ---
-  if (all.length > 0) {
-    filterWhere[Op.and] = [];
-    leadDetailsWhere[Op.and] = [];
-    personWhere[Op.and] = [];
-    organizationWhere[Op.and] = [];
-    all.forEach(cond => {
-      if (leadFields.includes(cond.field)) {
-        filterWhere[Op.and].push(buildCondition(cond));
-      } else if (leadDetailsFields.includes(cond.field)) {
-        leadDetailsWhere[Op.and].push(buildCondition(cond));
-      } else if (personFields.includes(cond.field)) {
-        personWhere[Op.and].push(buildCondition(cond));
-      } else if (organizationFields.includes(cond.field)) {
-        organizationWhere[Op.and].push(buildCondition(cond));
+    //................................................................//filter
+    if (filterId) {
+      // Fetch the saved filter
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
       }
-    });
-    if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-    if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
-    if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
-    if (organizationWhere[Op.and].length === 0) delete organizationWhere[Op.and];
-  }
+      const filterConfig =
+        typeof filter.filterConfig === "string"
+          ? JSON.parse(filter.filterConfig)
+          : filter.filterConfig;
 
-  // --- Your new filter logic for any ---
-  if (any.length > 0) {
-    filterWhere[Op.or] = [];
-    leadDetailsWhere[Op.or] = [];
-    personWhere[Op.or] = [];
-    organizationWhere[Op.or] = [];
-    any.forEach(cond => {
-      if (leadFields.includes(cond.field)) {
-        filterWhere[Op.or].push(buildCondition(cond));
-      } else if (leadDetailsFields.includes(cond.field)) {
-        leadDetailsWhere[Op.or].push(buildCondition(cond));
-      } else if (personFields.includes(cond.field)) {
-        personWhere[Op.or].push(buildCondition(cond));
-      } else if (organizationFields.includes(cond.field)) {
-        organizationWhere[Op.or].push(buildCondition(cond));
+      const { all = [], any = [] } = filterConfig;
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const personFields = Object.keys(Person.rawAttributes);
+      const organizationFields = Object.keys(Organization.rawAttributes);
+
+      let filterWhere = {};
+      let leadDetailsWhere = {};
+      let personWhere = {};
+      let organizationWhere = {};
+
+      // --- Your new filter logic for all ---
+      if (all.length > 0) {
+        filterWhere[Op.and] = [];
+        leadDetailsWhere[Op.and] = [];
+        personWhere[Op.and] = [];
+        organizationWhere[Op.and] = [];
+        all.forEach((cond) => {
+          if (leadFields.includes(cond.field)) {
+            filterWhere[Op.and].push(buildCondition(cond));
+          } else if (leadDetailsFields.includes(cond.field)) {
+            leadDetailsWhere[Op.and].push(buildCondition(cond));
+          } else if (personFields.includes(cond.field)) {
+            personWhere[Op.and].push(buildCondition(cond));
+          } else if (organizationFields.includes(cond.field)) {
+            organizationWhere[Op.and].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+        if (leadDetailsWhere[Op.and].length === 0)
+          delete leadDetailsWhere[Op.and];
+        if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
+        if (organizationWhere[Op.and].length === 0)
+          delete organizationWhere[Op.and];
       }
-    });
-    if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-    if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
-    if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
-    if (organizationWhere[Op.or].length === 0) delete organizationWhere[Op.or];
-  }
 
-  // Merge with archive/masterUserID filters
-  if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
-  
-  // Apply masterUserID filtering logic for filters
-  if (req.role === "admin") {
-    // Admin can filter by specific masterUserID or see all leads
-    if (queryMasterUserID && queryMasterUserID !== "all") {
-      if (filterWhere[Op.or]) {
-        // If there's already an Op.or condition from filters, we need to combine properly
-        filterWhere[Op.and] = [
-          { [Op.or]: filterWhere[Op.or] },
-          { [Op.or]: [
-            { masterUserID: queryMasterUserID },
-            { ownerId: queryMasterUserID }
-          ]}
-        ];
-        delete filterWhere[Op.or];
+      // --- Your new filter logic for any ---
+      if (any.length > 0) {
+        filterWhere[Op.or] = [];
+        leadDetailsWhere[Op.or] = [];
+        personWhere[Op.or] = [];
+        organizationWhere[Op.or] = [];
+        any.forEach((cond) => {
+          if (leadFields.includes(cond.field)) {
+            filterWhere[Op.or].push(buildCondition(cond));
+          } else if (leadDetailsFields.includes(cond.field)) {
+            leadDetailsWhere[Op.or].push(buildCondition(cond));
+          } else if (personFields.includes(cond.field)) {
+            personWhere[Op.or].push(buildCondition(cond));
+          } else if (organizationFields.includes(cond.field)) {
+            organizationWhere[Op.or].push(buildCondition(cond));
+          }
+        });
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+        if (leadDetailsWhere[Op.or].length === 0)
+          delete leadDetailsWhere[Op.or];
+        if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
+        if (organizationWhere[Op.or].length === 0)
+          delete organizationWhere[Op.or];
+      }
+
+      // Merge with archive/masterUserID filters
+      if (isArchived !== undefined)
+        filterWhere.isArchived = isArchived === "true";
+
+      // Apply masterUserID filtering logic for filters
+      if (req.role === "admin") {
+        // Admin can filter by specific masterUserID or see all leads
+        if (queryMasterUserID && queryMasterUserID !== "all") {
+          if (filterWhere[Op.or]) {
+            // If there's already an Op.or condition from filters, we need to combine properly
+            filterWhere[Op.and] = [
+              { [Op.or]: filterWhere[Op.or] },
+              {
+                [Op.or]: [
+                  { masterUserID: queryMasterUserID },
+                  { ownerId: queryMasterUserID },
+                ],
+              },
+            ];
+            delete filterWhere[Op.or];
+          } else {
+            filterWhere[Op.or] = [
+              { masterUserID: queryMasterUserID },
+              { ownerId: queryMasterUserID },
+            ];
+          }
+        }
       } else {
-        filterWhere[Op.or] = [
-          { masterUserID: queryMasterUserID },
-          { ownerId: queryMasterUserID }
-        ];
+        // Non-admin users: filter by their own leads or specific user if provided
+        const userId =
+          queryMasterUserID && queryMasterUserID !== "all"
+            ? queryMasterUserID
+            : req.adminId;
+        if (filterWhere[Op.or]) {
+          // If there's already an Op.or condition from filters, we need to combine properly
+          filterWhere[Op.and] = [
+            { [Op.or]: filterWhere[Op.or] },
+            { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
+          ];
+          delete filterWhere[Op.or];
+        } else {
+          filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
+        }
       }
-    }
-  } else {
-    // Non-admin users: filter by their own leads or specific user if provided
-    const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-    if (filterWhere[Op.or]) {
-      // If there's already an Op.or condition from filters, we need to combine properly
-      filterWhere[Op.and] = [
-        { [Op.or]: filterWhere[Op.or] },
-        { [Op.or]: [
-          { masterUserID: userId },
-          { ownerId: userId }
-        ]}
-      ];
-      delete filterWhere[Op.or];
-    } else {
-      filterWhere[Op.or] = [
-        { masterUserID: userId },
-        { ownerId: userId }
-      ];
-    }
-  }
-  whereClause = filterWhere;
+      whereClause = filterWhere;
 
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
-      console.log("→ Built leadDetailsWhere:", JSON.stringify(leadDetailsWhere));
+      console.log(
+        "→ Built leadDetailsWhere:",
+        JSON.stringify(leadDetailsWhere)
+      );
 
-        if (Object.keys(leadDetailsWhere).length > 0) {
-    include.push({
-      model: LeadDetails,
-      as: "details",
-      where: leadDetailsWhere,
-      required: true
-    });
-  } else {
-    include.push({
-      model: LeadDetails,
-      as: "details",
-      required: false
-    });
-  }
+      if (Object.keys(leadDetailsWhere).length > 0) {
+        include.push({
+          model: LeadDetails,
+          as: "details",
+          where: leadDetailsWhere,
+          required: true,
+        });
+      } else {
+        include.push({
+          model: LeadDetails,
+          as: "details",
+          required: false,
+        });
+      }
 
-  if (Object.keys(personWhere).length > 0) {
-    include.push({
-      model: Person,
-      as: "LeadPerson",
-      required: true,
-      where: personWhere
-    });
-  } else {
-    include.push({
-      model: Person,
-      as: "LeadPerson",
-      required: false
-    });
-  }
+      if (Object.keys(personWhere).length > 0) {
+        include.push({
+          model: Person,
+          as: "LeadPerson",
+          required: true,
+          where: personWhere,
+        });
+      } else {
+        include.push({
+          model: Person,
+          as: "LeadPerson",
+          required: false,
+        });
+      }
 
-  if (Object.keys(organizationWhere).length > 0) {
-    include.push({
-      model: Organization,
-      as: "LeadOrganization",
-      required: true,
-      where: organizationWhere
-    });
-  } else {
-    include.push({
-      model: Organization,
-      as: "LeadOrganization",
-      required: false
-    });
-  
-        console.log("→ Updated include with LeadDetails where:", JSON.stringify(leadDetailsWhere));
+      if (Object.keys(organizationWhere).length > 0) {
+        include.push({
+          model: Organization,
+          as: "LeadOrganization",
+          required: true,
+          where: organizationWhere,
+        });
+      } else {
+        include.push({
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        });
+
+        console.log(
+          "→ Updated include with LeadDetails where:",
+          JSON.stringify(leadDetailsWhere)
+        );
       }
     } else {
       // Standard search/filter logic
-      if (isArchived !== undefined) whereClause.isArchived = isArchived === "true";
+      if (isArchived !== undefined)
+        whereClause.isArchived = isArchived === "true";
 
       if (search) {
         whereClause[Op.or] = [
@@ -554,7 +581,10 @@ if (filterId) {
           { email: { [Op.like]: `%${search}%` } },
           { phone: { [Op.like]: `%${search}%` } },
         ];
-        console.log("→ Search applied, whereClause[Op.or]:", whereClause[Op.or]);
+        console.log(
+          "→ Search applied, whereClause[Op.or]:",
+          whereClause[Op.or]
+        );
       }
     }
 
@@ -564,34 +594,34 @@ if (filterId) {
     console.log("→ Final include:", JSON.stringify(include));
     console.log("→ Pagination: limit =", limit, "offset =", offset);
     console.log("→ Order:", sortBy, order);
-// Always include Person and Organization
-if (!include.some(i => i.as === "LeadPerson")) {
-  include.push({
-    model: Person,
-    as: "LeadPerson",
-    required: false
-  });
-}
-if (!include.some(i => i.as === "LeadOrganization")) {
-  include.push({
-    model: Organization,
-    as: "LeadOrganization",
-    required: false
-  });
-}
-  include.push({
-    model: MasterUser,
-    as: "Owner",
-    attributes: ["name", "masterUserID"],
-    required: false
-  });
-//   if (!leadAttributes.includes('leadOrganizationId')) {
-//   leadAttributes.push('leadOrganizationId');
-// }
-// if (!leadAttributes.includes('personId')) {
-//   leadAttributes.push('personId');
-// }
-whereClause.dealId = null;
+    // Always include Person and Organization
+    if (!include.some((i) => i.as === "LeadPerson")) {
+      include.push({
+        model: Person,
+        as: "LeadPerson",
+        required: false,
+      });
+    }
+    if (!include.some((i) => i.as === "LeadOrganization")) {
+      include.push({
+        model: Organization,
+        as: "LeadOrganization",
+        required: false,
+      });
+    }
+    include.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["name", "masterUserID"],
+      required: false,
+    });
+    //   if (!leadAttributes.includes('leadOrganizationId')) {
+    //   leadAttributes.push('leadOrganizationId');
+    // }
+    // if (!leadAttributes.includes('personId')) {
+    //   leadAttributes.push('personId');
+    // }
+    whereClause.dealId = null;
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
@@ -599,150 +629,153 @@ whereClause.dealId = null;
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[sortBy, order.toUpperCase()]],
-      attributes: leadAttributes && leadAttributes.length > 0 ? leadAttributes : undefined
+      attributes:
+        leadAttributes && leadAttributes.length > 0
+          ? leadAttributes
+          : undefined,
     });
 
     console.log("→ Query executed. Total records:", leads.count);
 
-const flatLeads = leads.rows.map(lead => {
-  const leadObj = lead.toJSON();
-  // Overwrite ownerName with the latest Owner.name if present
-  if (leadObj.Owner && leadObj.Owner.name) {
-    leadObj.ownerName = leadObj.Owner.name;
-  }
-  delete leadObj.Owner; // Remove the nested Owner object
-  delete leadObj.LeadPerson;
-  delete leadObj.LeadOrganization;
-  if (leadObj.details) {
-    Object.assign(leadObj, leadObj.details);
-    delete leadObj.details;
-  }
-  return leadObj;
-});
-console.log(leads.rows, "leads rows after flattening");
-
-// let persons, organizations;
-
-// 1. Fetch all persons and organizations (already in your code)
-if (req.role === "admin") {
-  persons = await Person.findAll({ raw: true });
-  organizations = await Organization.findAll({ raw: true });
-} else {
-  organizations = await Organization.findAll({
-    // where: { masterUserID: req.adminId },
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId }
-      ]
-    },
-    raw: true
-  });
-}
-const orgIds = organizations.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { leadOrganizationId: orgIds }
-      ]
-    },
-    raw: true
-  });
-console.log("flatLeads:", flatLeads);
-
-
-
-// Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
-const orgPersonsMap = {};
-persons.forEach(p => {
-  if (p.leadOrganizationId) {
-    if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
-    orgPersonsMap[p.leadOrganizationId].push({
-      personId: p.personId,
-      contactPerson: p.contactPerson
+    const flatLeads = leads.rows.map((lead) => {
+      const leadObj = lead.toJSON();
+      // Overwrite ownerName with the latest Owner.name if present
+      if (leadObj.Owner && leadObj.Owner.name) {
+        leadObj.ownerName = leadObj.Owner.name;
+      }
+      delete leadObj.Owner; // Remove the nested Owner object
+      delete leadObj.LeadPerson;
+      delete leadObj.LeadOrganization;
+      if (leadObj.details) {
+        Object.assign(leadObj, leadObj.details);
+        delete leadObj.details;
+      }
+      return leadObj;
     });
-  }
-});
+    console.log(leads.rows, "leads rows after flattening");
 
-// 2. Get all unique ownerIds from persons and organizations
-const orgOwnerIds = organizations.map(o => o.ownerId).filter(Boolean);
-const personOwnerIds = persons.map(p => p.ownerId).filter(Boolean);
-const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+    // let persons, organizations;
 
-// 3. Fetch owner names from MasterUser
-const owners = await MasterUser.findAll({
-  where: { masterUserID: ownerIds },
-  attributes: ["masterUserID", "name"],
-  raw: true
-});
-const orgMap = {};
-organizations.forEach(org => {
-  orgMap[org.leadOrganizationId] = org;
-});
-const ownerMap = {};
-owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
-persons = persons.map(p => ({
-  ...p,
-  ownerName: ownerMap[p.ownerId] || null
-}));
-
-organizations = organizations.map(o => ({
-  ...o,
-  ownerName: ownerMap[o.ownerId] || null
-}));
-
-// 4. Count leads for each person and organization
-const personIds = persons.map(p => p.personId);
-
-const leadCounts = await Lead.findAll({
-  attributes: [
-    "personId",
-    "leadOrganizationId",
-    [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
-  ],
-  where: {
-    [Op.or]: [
-      { personId: personIds },
-      { leadOrganizationId: orgIds }
-     // { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
-    ]
-  },
-  group: ["personId", "leadOrganizationId"],
-  raw: true
-});
-
-// Build maps for quick lookup
-const personLeadCountMap = {};
-const orgLeadCountMap = {};
-leadCounts.forEach(lc => {
-  if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
-  if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
-});
-
-persons = persons.map(p => {
-  let ownerName = null;
-  if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
-    const org = orgMap[p.leadOrganizationId];
-    if (org.ownerId && ownerMap[org.ownerId]) {
-      ownerName = ownerMap[org.ownerId];
-      // organization=ownerMap[org.organization]
+    // 1. Fetch all persons and organizations (already in your code)
+    if (req.role === "admin") {
+      persons = await Person.findAll({ raw: true });
+      organizations = await Organization.findAll({ raw: true });
+    } else {
+      organizations = await Organization.findAll({
+        // where: { masterUserID: req.adminId },
+        where: {
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        raw: true,
+      });
     }
-  }
-  return {
-    ...p,
-    ownerName,
-    // organization,
-    leadCount: personLeadCountMap[p.personId] || 0
-  };
-});
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+    persons = await Person.findAll({
+      where: {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      },
+      raw: true,
+    });
+    console.log("flatLeads:", flatLeads);
 
-organizations = organizations.map(o => ({
-  ...o,
-  ownerName: ownerMap[o.ownerId] || null,
-  leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-  persons: orgPersonsMap[o.leadOrganizationId] || [] // <-- add this line
-}));
+    // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
+      }
+    });
+
+    // 2. Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // 3. Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+    }));
+
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+    }));
+
+    // 4. Count leads for each person and organization
+    const personIds = persons.map((p) => p.personId);
+
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [
+          { personId: personIds },
+          { leadOrganizationId: orgIds },
+          // { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
+        ],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    persons = persons.map((p) => {
+      let ownerName = null;
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+          // organization=ownerMap[org.organization]
+        }
+      }
+      return {
+        ...p,
+        ownerName,
+        // organization,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
+    }));
 
     res.status(200).json({
       message: "Leads fetched successfully",
@@ -751,9 +784,9 @@ organizations = organizations.map(o => ({
       currentPage: parseInt(page),
       // leads: leads.rows,
       leads: flatLeads, // Return flattened leads with leadDetails merged
-        persons,
-  organizations
-  // leadDetails
+      persons,
+      organizations,
+      // leadDetails
     });
   } catch (error) {
     await logAuditTrail(
@@ -771,14 +804,14 @@ organizations = organizations.map(o => ({
 // --- Helper functions (reuse from your prompt) ---
 
 const operatorMap = {
-  "is": "eq",
+  is: "eq",
   "is not": "ne",
   "is empty": "is empty",
   "is not empty": "is not empty",
   "is exactly or earlier than": "lte",
   "is earlier than": "lt",
   "is exactly or later than": "gte",
-  "is later than": "gt"
+  "is later than": "gt",
   // Add more mappings if needed
 };
 
@@ -815,14 +848,14 @@ function buildCondition(cond) {
 
   // Handle date fields
   const leadDateFields = Object.entries(Lead.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
 
-const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
+  const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
 
-const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
+  const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
 
   if (allDateFields.includes(cond.field)) {
     if (cond.useExactDate) {
@@ -836,9 +869,13 @@ const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
     }
     // Otherwise, use relative date conversion
     const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
+    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
 
-    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
+    if (
+      dateRange &&
+      isValidDate(dateRange.start) &&
+      isValidDate(dateRange.end)
+    ) {
       return {
         [cond.field]: {
           [Op.between]: [dateRange.start, dateRange.end],
@@ -863,7 +900,6 @@ const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
   };
 }
 
-
 exports.updateLead = async (req, res) => {
   const { leadId } = req.params;
   const updateObj = req.body;
@@ -887,20 +923,20 @@ exports.updateLead = async (req, res) => {
     const personData = {};
     const organizationData = {};
 
-for (const key in updateObj) {
-  if (leadFields.includes(key)) {
-    leadData[key] = updateObj[key];
-  }
-  if (personFields.includes(key)) {
-    personData[key] = updateObj[key];
-  }
-  if (organizationFields.includes(key)) {
-    organizationData[key] = updateObj[key];
-  }
-  if (leadDetailsFields.includes(key)) {
-    leadDetailsData[key] = updateObj[key];
-  }
-}
+    for (const key in updateObj) {
+      if (leadFields.includes(key)) {
+        leadData[key] = updateObj[key];
+      }
+      if (personFields.includes(key)) {
+        personData[key] = updateObj[key];
+      }
+      if (organizationFields.includes(key)) {
+        organizationData[key] = updateObj[key];
+      }
+      if (leadDetailsFields.includes(key)) {
+        leadDetailsData[key] = updateObj[key];
+      }
+    }
 
     console.log("leadData:", leadData);
     console.log("leadDetailsData:", leadDetailsData);
@@ -924,10 +960,7 @@ for (const key in updateObj) {
     let ownerChanged = false;
     let newOwner = null;
     let assigner = null;
-    if (
-      updateObj.ownerId &&
-      updateObj.ownerId !== lead.ownerId
-    ) {
+    if (updateObj.ownerId && updateObj.ownerId !== lead.ownerId) {
       ownerChanged = true;
       newOwner = await MasterUser.findByPk(updateObj.ownerId);
       assigner = await MasterUser.findByPk(req.adminId);
@@ -936,7 +969,9 @@ for (const key in updateObj) {
     // Update or create Organization
     let orgRecord;
     if (Object.keys(organizationData).length > 0) {
-      orgRecord = await Organization.findOne({ where: { leadOrganizationId: lead.leadOrganizationId } });
+      orgRecord = await Organization.findOne({
+        where: { leadOrganizationId: lead.leadOrganizationId },
+      });
       console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
       if (orgRecord) {
         await orgRecord.update(organizationData);
@@ -946,20 +981,29 @@ for (const key in updateObj) {
         console.log("Organization created:", orgRecord.toJSON());
         leadData.leadOrganizationId = orgRecord.leadOrganizationId;
         await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
-        console.log("Lead updated with new leadOrganizationId:", orgRecord.leadOrganizationId);
+        console.log(
+          "Lead updated with new leadOrganizationId:",
+          orgRecord.leadOrganizationId
+        );
       }
     }
 
     // Update or create Person
     let personRecord;
     if (Object.keys(personData).length > 0) {
-      personRecord = await Person.findOne({ where: { personId: lead.personId } });
-      console.log("Fetched personRecord:", personRecord ? personRecord.toJSON() : null);
+      personRecord = await Person.findOne({
+        where: { personId: lead.personId },
+      });
+      console.log(
+        "Fetched personRecord:",
+        personRecord ? personRecord.toJSON() : null
+      );
       if (personRecord) {
         await personRecord.update(personData);
         console.log("Person updated:", personRecord.toJSON());
       } else {
-        if (orgRecord) personData.leadOrganizationId = orgRecord.leadOrganizationId;
+        if (orgRecord)
+          personData.leadOrganizationId = orgRecord.leadOrganizationId;
         personRecord = await Person.create(personData);
         console.log("Person created:", personRecord.toJSON());
         leadData.personId = personRecord.personId;
@@ -974,27 +1018,28 @@ for (const key in updateObj) {
       console.log("Lead updated:", lead.toJSON());
     }
 
-        // --- Send email if owner changed ---
-if (
-  ownerChanged &&
-  newOwner &&
-  newOwner.email &&
-  assigner &&
-  assigner.email
-) {
-  await sendEmail(assigner.email, {
-    from: assigner.email,
-    to: newOwner.email,
-    subject: "You have been assigned a new lead",
-    text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
-  });
-}
-
-
+    // --- Send email if owner changed ---
+    if (
+      ownerChanged &&
+      newOwner &&
+      newOwner.email &&
+      assigner &&
+      assigner.email
+    ) {
+      await sendEmail(assigner.email, {
+        from: assigner.email,
+        to: newOwner.email,
+        subject: "You have been assigned a new lead",
+        text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+      });
+    }
 
     // Update or create LeadDetails
     let leadDetails = await LeadDetails.findOne({ where: { leadId } });
-    console.log("Fetched leadDetails:", leadDetails ? leadDetails.toJSON() : null);
+    console.log(
+      "Fetched leadDetails:",
+      leadDetails ? leadDetails.toJSON() : null
+    );
     if (leadDetails) {
       if (Object.keys(leadDetailsData).length > 0) {
         await leadDetails.update(leadDetailsData);
@@ -1023,7 +1068,13 @@ if (
       `Lead updated by "${req.role}"`, // Description
       {
         from: lead.toJSON(),
-        to: { ...leadData, leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : lead.leadOrganizationId, personId: personRecord ? personRecord.personId : lead.personId }
+        to: {
+          ...leadData,
+          leadOrganizationId: orgRecord
+            ? orgRecord.leadOrganizationId
+            : lead.leadOrganizationId,
+          personId: personRecord ? personRecord.personId : lead.personId,
+        },
       } // Changes logged as JSON
     );
     res.status(200).json({
@@ -1031,7 +1082,7 @@ if (
       lead,
       leadDetails,
       person: personRecord,
-      organization: orgRecord
+      organization: orgRecord,
     });
   } catch (error) {
     console.error("Error updating lead:", error);
@@ -1125,7 +1176,9 @@ exports.updateLeadCustomFields = async (req, res) => {
   const { customFields } = req.body;
 
   if (!customFields || typeof customFields !== "object") {
-    return res.status(400).json({ message: "customFields must be a valid object." });
+    return res
+      .status(400)
+      .json({ message: "customFields must be a valid object." });
   }
 
   try {
@@ -1151,7 +1204,12 @@ exports.updateLeadCustomFields = async (req, res) => {
       { from: originalCustomFields, to: customFields }
     );
 
-    res.status(200).json({ message: "Custom fields updated successfully", customFields: lead.customFields });
+    res
+      .status(200)
+      .json({
+        message: "Custom fields updated successfully",
+        customFields: lead.customFields,
+      });
   } catch (error) {
     console.error("Error updating custom fields:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -1160,30 +1218,112 @@ exports.updateLeadCustomFields = async (req, res) => {
 
 exports.getNonAdminMasterUserNames = async (req, res) => {
   try {
-    const { search, userType } = req.query; // Add more filters as needed
+    const { search, userType } = req.query;
 
-    // Build where clause
-    const where = {
-      userType: { [Op.ne]: "admin" }
-    };
+    // Build base where clause
+    let where = {};
+    let users = [];
 
-    // Search by name (case-insensitive)
-    if (search) {
-      where.name = { [Op.like]: `%${search}%` };
+    if (req.role === "admin") {
+      // Admin can see all users (including other admins if needed for assignment)
+      where = {
+        // Remove the admin restriction if admins need to assign to other admins
+        // userType: { [Op.ne]: "admin" }
+      };
+
+      // Search by name (case-insensitive)
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
+
+      // Optional: filter by userType
+      if (userType) {
+        where.userType = userType;
+      }
+
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "master") {
+      // Master users can see general users and themselves
+      where = {
+        [Op.or]: [
+          { userType: "general" },
+          { masterUserID: req.adminId }, // Include themselves
+        ],
+      };
+
+      // Search by name (case-insensitive)
+      if (search) {
+        where[Op.and] = [
+          { [Op.or]: where[Op.or] },
+          { name: { [Op.like]: `%${search}%` } },
+        ];
+        delete where[Op.or];
+      }
+
+      // Optional: filter by userType (but respect the role restrictions)
+      if (userType && (userType === "general" || userType === "master")) {
+        if (userType === "general") {
+          where = { userType: "general" };
+        } else {
+          where = { masterUserID: req.adminId }; // Only themselves if filtering by master
+        }
+
+        if (search) {
+          where.name = { [Op.like]: `%${search}%` };
+        }
+      }
+
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "general") {
+      // General users can only see themselves
+      where = {
+        masterUserID: req.adminId,
+      };
+
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
+
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else {
+      // Invalid role - deny access
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "MASTER_USER_FETCH",
+        req.adminId,
+        `Access denied: Invalid role "${req.role}"`,
+        null
+      );
+      return res.status(403).json({
+        message: "Access denied. Invalid user role.",
+      });
     }
 
-    // Optional: filter by userType (e.g., "general", "master")
-    if (userType) {
-      where.userType = userType;
-    }
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "MASTER_USER_FETCH",
+      req.adminId,
+      `Successfully fetched ${users.length} users for role "${req.role}"`,
+      null
+    );
 
-    const users = await MasterUser.findAll({
-      where,
-      attributes: ["masterUserID", "name", "userType"], // Add more fields if needed
-      order: [["name", "ASC"]]
+    res.status(200).json({
+      users,
+      message: `Found ${users.length} users`,
+      userRole: req.role,
     });
-
-    res.status(200).json({ users });
   } catch (error) {
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
@@ -1219,15 +1359,17 @@ exports.getLeadsByMasterUser = async (req, res) => {
       }
       whereClause.masterUserID = user.masterUserID;
     } else {
-     await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_FETCH_BY_MASTER_USER",
-      req.adminId,
-      "Lead fetch failed: masterUserID or name is required.",
-      null
-    );
-      
-      return res.status(400).json({ message: "Please provide masterUserID or name." });
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_FETCH_BY_MASTER_USER",
+        req.adminId,
+        "Lead fetch failed: masterUserID or name is required.",
+        null
+      );
+
+      return res
+        .status(400)
+        .json({ message: "Please provide masterUserID or name." });
     }
 
     const leads = await Lead.findAll({ where: whereClause });
@@ -1245,8 +1387,6 @@ exports.getLeadsByMasterUser = async (req, res) => {
   }
 };
 
-
-
 exports.getAllLeadDetails = async (req, res) => {
   const masterUserID = req.adminId;
   // const { clientEmail } = req.body?.clientEmail;
@@ -1256,8 +1396,8 @@ exports.getAllLeadDetails = async (req, res) => {
   //   return res.status(400).json({ message: "clientEmail is required." });
   // }
 
-      if (!leadId) {
-        await logAuditTrail(
+  if (!leadId) {
+    await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_DETAILS_FETCH",
       masterUserID,
@@ -1288,33 +1428,36 @@ exports.getAllLeadDetails = async (req, res) => {
     const clientEmail = lead.email;
 
     let emails = await Email.findAll({
-  where: {
-    [Op.or]: [
-      { sender: clientEmail },
-      { recipient: { [Op.like]: `%${clientEmail}%` } }
-    ]
-  },
-  include: [{ model: Attachment, as: "attachments" }],
-  order: [["createdAt", "ASC"]]
-});
+      where: {
+        [Op.or]: [
+          { sender: clientEmail },
+          { recipient: { [Op.like]: `%${clientEmail}%` } },
+        ],
+      },
+      include: [{ model: Attachment, as: "attachments" }],
+      order: [["createdAt", "ASC"]],
+    });
     // Filter out emails with "RE:" in subject and no inReplyTo or references
-    emails = emails.filter(email => {
-      const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread = (!email.inReplyTo || email.inReplyTo === "") && (!email.references || email.references === "");
+    emails = emails.filter((email) => {
+      const hasRE =
+        email.subject && email.subject.toLowerCase().startsWith("re:");
+      const noThread =
+        (!email.inReplyTo || email.inReplyTo === "") &&
+        (!email.references || email.references === "");
       return !(hasRE && noThread);
     });
 
     // if (!emails.length) {
     //   return res.status(404).json({ message: "No emails found for this conversation." });
     // }
-let emailsExist = emails.length > 0;
-if (!emailsExist) {
-  emails = [];
-}
+    let emailsExist = emails.length > 0;
+    if (!emailsExist) {
+      emails = [];
+    }
 
     // Gather all thread IDs from these emails
     const threadIds = [];
-    emails.forEach(email => {
+    emails.forEach((email) => {
       if (email.messageId) threadIds.push(email.messageId);
       if (email.inReplyTo) threadIds.push(email.inReplyTo);
       if (email.references) threadIds.push(...email.references.split(" "));
@@ -1329,43 +1472,43 @@ if (!emailsExist) {
           { inReplyTo: { [Op.in]: uniqueThreadIds } },
           {
             references: {
-              [Op.or]: uniqueThreadIds.map(id => ({
-                [Op.like]: `%${id}%`
-              }))
-            }
-          }
-        ]
+              [Op.or]: uniqueThreadIds.map((id) => ({
+                [Op.like]: `%${id}%`,
+              })),
+            },
+          },
+        ],
       },
       include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "DESC"]]
+      order: [["createdAt", "DESC"]],
     });
 
     // Remove duplicates by messageId
     const seen = new Set();
-    relatedEmails = relatedEmails.filter(email => {
+    relatedEmails = relatedEmails.filter((email) => {
       if (seen.has(email.messageId)) return false;
       seen.add(email.messageId);
       return true;
     });
-        const notes = await LeadNote.findAll({
+    const notes = await LeadNote.findAll({
       where: { leadId },
       order: [["createdAt", "DESC"]],
     });
     // Get all unique creator IDs from notes
-    const creatorIds = [...new Set(notes.map(note => note.createdBy))];
+    const creatorIds = [...new Set(notes.map((note) => note.createdBy))];
 
     // Fetch all creators in one query
     const creators = await MasterUser.findAll({
       where: { masterUserID: creatorIds },
-      attributes: ["masterUserID", "name"]
+      attributes: ["masterUserID", "name"],
     });
     const creatorMap = {};
-    creators.forEach(user => {
+    creators.forEach((user) => {
       creatorMap[user.masterUserID] = user.name;
     });
 
     // Attach creatorName to each note
-    const notesWithCreator = notes.map(note => {
+    const notesWithCreator = notes.map((note) => {
       const noteObj = note.toJSON();
       noteObj.creatorName = creatorMap[note.createdBy] || null;
       return noteObj;
@@ -1373,16 +1516,16 @@ if (!emailsExist) {
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
     const activities = await Activity.findAll({
       where: { leadId },
-      order: [["startDateTime", "DESC"]]
+      order: [["startDateTime", "DESC"]],
     });
     res.status(200).json({
       message: "leads data fetched successfully.",
       lead,
       leadDetails,
-      notes:notesWithCreator,
+      notes: notesWithCreator,
       emails: relatedEmails,
-      activities
-     // emails: emailsExist ? relatedEmails : null // or [] if you prefer
+      activities,
+      // emails: emailsExist ? relatedEmails : null // or [] if you prefer
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
@@ -1397,16 +1540,14 @@ if (!emailsExist) {
   }
 };
 
-
-
 exports.addLeadNote = async (req, res) => {
-  const {content} = req.body;
+  const { content } = req.body;
   const { leadId } = req.params;
   const masterUserID = req.adminId;
   const createdBy = req.adminId;
 
   // 100KB = 102400 bytes
-  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+  if (!content || Buffer.byteLength(content, "utf8") > 102400) {
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_ADD",
@@ -1414,7 +1555,9 @@ exports.addLeadNote = async (req, res) => {
       "Note addition failed: Note is required and must be under 100KB.",
       null
     );
-    return res.status(400).json({ message: "Note is required and must be under 100KB." });
+    return res
+      .status(400)
+      .json({ message: "Note is required and must be under 100KB." });
   }
   if (!leadId) {
     await logAuditTrail(
@@ -1457,7 +1600,7 @@ exports.addLeadNote = async (req, res) => {
   }
 };
 exports.deleteLeadNote = async (req, res) => {
-const { noteId } = req.params;
+  const { noteId } = req.params;
   const masterUserID = req.adminId;
 
   if (!noteId) {
@@ -1493,7 +1636,9 @@ const { noteId } = req.params;
         `Note deletion failed: User does not have permission to delete note with ID ${noteId}`,
         null
       );
-      return res.status(403).json({ message: "You do not have permission to delete this note." });
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to delete this note." });
     }
 
     await note.destroy();
@@ -1518,7 +1663,6 @@ const { noteId } = req.params;
     );
     res.status(500).json({ message: "Internal server error" });
   }
-
 };
 exports.updateLeadNote = async (req, res) => {
   const { noteId } = req.params;
@@ -1536,7 +1680,7 @@ exports.updateLeadNote = async (req, res) => {
     );
     return res.status(400).json({ message: "noteId is required." });
   }
-  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
+  if (!content || Buffer.byteLength(content, "utf8") > 102400) {
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
@@ -1544,7 +1688,9 @@ exports.updateLeadNote = async (req, res) => {
       "Note update failed: Note is required and must be under 100KB.",
       null
     );
-    return res.status(400).json({ message: "Note is required and must be under 100KB." });
+    return res
+      .status(400)
+      .json({ message: "Note is required and must be under 100KB." });
   }
 
   try {
@@ -1569,12 +1715,14 @@ exports.updateLeadNote = async (req, res) => {
         `Note update failed: User does not have permission to edit note with ID ${noteId}`,
         null
       );
-      return res.status(403).json({ message: "You do not have permission to edit this note." });
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to edit this note." });
     }
 
     note.content = content;
     await note.save();
-await historyLogger(
+    await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_UPDATE",
       masterUserID,
@@ -1604,11 +1752,10 @@ exports.getPersons = async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     order = "DESC",
-    filterId
+    filterId,
   } = req.query;
 
   console.log(req.role, "Role of the user");
-  
 
   try {
     // 1. Build where clauses and includes (reuse your dynamic filter logic)
@@ -1622,9 +1769,10 @@ exports.getPersons = async (req, res) => {
       if (!filter) {
         return res.status(404).json({ message: "Filter not found." });
       }
-      const filterConfig = typeof filter.filterConfig === "string"
-        ? JSON.parse(filter.filterConfig)
-        : filter.filterConfig;
+      const filterConfig =
+        typeof filter.filterConfig === "string"
+          ? JSON.parse(filter.filterConfig)
+          : filter.filterConfig;
 
       const personFields = Object.keys(Person.rawAttributes);
       const organizationFields = Object.keys(Organization.rawAttributes);
@@ -1633,9 +1781,11 @@ exports.getPersons = async (req, res) => {
       if (filterConfig.all && filterConfig.all.length > 0) {
         personWhere[Op.and] = [];
         organizationWhere[Op.and] = [];
-        filterConfig.all.forEach(cond => {
-          if (personFields.includes(cond.field)) personWhere[Op.and].push(buildCondition(cond));
-          else if (organizationFields.includes(cond.field)) organizationWhere[Op.and].push(buildCondition(cond));
+        filterConfig.all.forEach((cond) => {
+          if (personFields.includes(cond.field))
+            personWhere[Op.and].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field))
+            organizationWhere[Op.and].push(buildCondition(cond));
         });
         if (!personWhere[Op.and].length) delete personWhere[Op.and];
         if (!organizationWhere[Op.and].length) delete organizationWhere[Op.and];
@@ -1644,16 +1794,18 @@ exports.getPersons = async (req, res) => {
       if (filterConfig.any && filterConfig.any.length > 0) {
         personWhere[Op.or] = [];
         organizationWhere[Op.or] = [];
-        filterConfig.any.forEach(cond => {
-          if (personFields.includes(cond.field)) personWhere[Op.or].push(buildCondition(cond));
-          else if (organizationFields.includes(cond.field)) organizationWhere[Op.or].push(buildCondition(cond));
+        filterConfig.any.forEach((cond) => {
+          if (personFields.includes(cond.field))
+            personWhere[Op.or].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field))
+            organizationWhere[Op.or].push(buildCondition(cond));
         });
         if (!personWhere[Op.or].length) delete personWhere[Op.or];
         if (!organizationWhere[Op.or].length) delete organizationWhere[Op.or];
       }
     } else {
       // Only show persons and organizations created by this user
-    if (req.role !== "admin") {
+      if (req.role !== "admin") {
         personWhere.masterUserID = req.adminId;
         organizationWhere.masterUserID = req.adminId;
       }
@@ -1663,148 +1815,153 @@ exports.getPersons = async (req, res) => {
         personWhere[Op.or] = [
           { contactPerson: { [Op.like]: `%${search}%` } },
           { email: { [Op.like]: `%${search}%` } },
-          { phone: { [Op.like]: `%${search}%` } }
+          { phone: { [Op.like]: `%${search}%` } },
         ];
         organizationWhere[Op.or] = [
           { organization: { [Op.like]: `%${search}%` } },
-          { address: { [Op.like]: `%${search}%` } }
+          { address: { [Op.like]: `%${search}%` } },
         ];
       }
     }
-
 
     // 2. Search logic
     if (search) {
       personWhere[Op.or] = [
         { contactPerson: { [Op.like]: `%${search}%` } },
         { email: { [Op.like]: `%${search}%` } },
-        { phone: { [Op.like]: `%${search}%` } }
+        { phone: { [Op.like]: `%${search}%` } },
       ];
       organizationWhere[Op.or] = [
         { organization: { [Op.like]: `%${search}%` } },
-        { address: { [Op.like]: `%${search}%` } }
+        { address: { [Op.like]: `%${search}%` } },
       ];
     }
 
     // 3. Fetch all organizations (with pagination)
-let persons, organizationsRaw;
+    let persons, organizationsRaw;
 
-if (req.role === "admin") {
-  // 1. Fetch all organizations (with pagination and filters)
-  const orgOffset = (page - 1) * limit;
-  organizationsRaw = await Organization.findAndCountAll({
-    where: organizationWhere,
-    limit: parseInt(limit),
-    offset: parseInt(orgOffset),
-    order: [[sortBy, order.toUpperCase()]],
-    raw: true
-  });
+    if (req.role === "admin") {
+      // 1. Fetch all organizations (with pagination and filters)
+      const orgOffset = (page - 1) * limit;
+      organizationsRaw = await Organization.findAndCountAll({
+        where: organizationWhere,
+        limit: parseInt(limit),
+        offset: parseInt(orgOffset),
+        order: [[sortBy, order.toUpperCase()]],
+        raw: true,
+      });
 
-  // 2. Fetch all persons for these organizations
-  const orgIds = organizationsRaw.rows.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      ...personWhere,
-      leadOrganizationId: { [Op.in]: orgIds }
-    },
-    raw: true
-  });
-} else {
-// 1. Fetch all persons (filtered)
-persons = await Person.findAll({
-  where: personWhere,
-  raw: true
-});
+      // 2. Fetch all persons for these organizations
+      const orgIds = organizationsRaw.rows.map((o) => o.leadOrganizationId);
+      persons = await Person.findAll({
+        where: {
+          ...personWhere,
+          leadOrganizationId: { [Op.in]: orgIds },
+        },
+        raw: true,
+      });
+    } else {
+      // 1. Fetch all persons (filtered)
+      persons = await Person.findAll({
+        where: personWhere,
+        raw: true,
+      });
 
-// 2. Get unique orgIds from filtered persons
-const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+      // 2. Get unique orgIds from filtered persons
+      const orgIds = [
+        ...new Set(persons.map((p) => p.leadOrganizationId).filter(Boolean)),
+      ];
 
-// 3. Fetch only organizations for those orgIds (with pagination)
-const orgOffset = (page - 1) * limit;
-organizationsRaw = await Organization.findAndCountAll({
-  where: {
-    ...organizationWhere,
-    leadOrganizationId: { [Op.in]: orgIds }
-  },
-  limit: parseInt(limit),
-  offset: parseInt(orgOffset),
-  order: [[sortBy, order.toUpperCase()]],
-  raw: true
-});
-}
-  // 2. Get unique orgIds from filtered persons
- // const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
-const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+      // 3. Fetch only organizations for those orgIds (with pagination)
+      const orgOffset = (page - 1) * limit;
+      organizationsRaw = await Organization.findAndCountAll({
+        where: {
+          ...organizationWhere,
+          leadOrganizationId: { [Op.in]: orgIds },
+        },
+        limit: parseInt(limit),
+        offset: parseInt(orgOffset),
+        order: [[sortBy, order.toUpperCase()]],
+        raw: true,
+      });
+    }
+    // 2. Get unique orgIds from filtered persons
+    // const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+    const orgIds = [
+      ...new Set(persons.map((p) => p.leadOrganizationId).filter(Boolean)),
+    ];
     // 5. Count leads for each person and organization
-    const personIds = persons.map(p => p.personId);
+    const personIds = persons.map((p) => p.personId);
     const leadCounts = await Lead.findAll({
       attributes: [
         "personId",
         "leadOrganizationId",
-        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
       ],
       where: {
-        [Op.or]: [
-          { personId: personIds },
-          { leadOrganizationId: orgIds }
-        ]
+        [Op.or]: [{ personId: personIds }, { leadOrganizationId: orgIds }],
       },
       group: ["personId", "leadOrganizationId"],
-      raw: true
+      raw: true,
     });
 
     // Build maps for quick lookup
     const personLeadCountMap = {};
     const orgLeadCountMap = {};
-    leadCounts.forEach(lc => {
-      if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
-      if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
     });
 
     // 6. Fetch owner names
     const ownerIds = [
-      ...organizationsRaw.rows.map(o => o.ownerId).filter(Boolean),
-      ...persons.map(p => p.ownerId).filter(Boolean)
+      ...organizationsRaw.rows.map((o) => o.ownerId).filter(Boolean),
+      ...persons.map((p) => p.ownerId).filter(Boolean),
     ];
     const owners = await MasterUser.findAll({
       where: { masterUserID: ownerIds },
       attributes: ["masterUserID", "name"],
-      raw: true
+      raw: true,
     });
     const ownerMap = {};
-    owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
 
     // 7. Attach persons to organizations
     const orgPersonsMap = {};
-    persons.forEach(p => {
+    persons.forEach((p) => {
       if (p.leadOrganizationId) {
-        if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
         orgPersonsMap[p.leadOrganizationId].push({
           personId: p.personId,
-          contactPerson: p.contactPerson
+          contactPerson: p.contactPerson,
         });
       }
     });
 
-// 8. Format organizations, only include those with at least one person
-const organizations = organizationsRaw.rows
-  .map(o => ({
-    ...o,
-    ownerName: ownerMap[o.ownerId] || null,
-    leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-    persons: orgPersonsMap[o.leadOrganizationId] || []
-  }));
+    // 8. Format organizations, only include those with at least one person
+    const organizations = organizationsRaw.rows.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [],
+    }));
 
-// If not admin, filter out organizations without persons
-const finalOrganizations = req.role === "admin"
-  ? organizations
-  : organizations.filter(org => org.persons.length > 0);
+    // If not admin, filter out organizations without persons
+    const finalOrganizations =
+      req.role === "admin"
+        ? organizations
+        : organizations.filter((org) => org.persons.length > 0);
 
     // 9. Format persons
-    persons = persons.map(p => ({
+    persons = persons.map((p) => ({
       ...p,
       ownerName: ownerMap[p.ownerId] || null,
-      leadCount: personLeadCountMap[p.personId] || 0
+      leadCount: personLeadCountMap[p.personId] || 0,
     }));
 
     res.status(200).json({
@@ -1813,12 +1970,10 @@ const finalOrganizations = req.role === "admin"
       totalPages: Math.ceil(organizationsRaw.count / limit),
       currentPage: parseInt(page),
       persons,
-      organizations:finalOrganizations
+      organizations: finalOrganizations,
     });
   } catch (error) {
     console.error("Error fetching data:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
