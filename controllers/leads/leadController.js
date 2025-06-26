@@ -11,13 +11,13 @@ const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // I
 //const Person = require("../../models/leads/leadPersonModel"); // Import Person model
 //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
 const { Lead, LeadDetails, Person, Organization } = require("../../models");
+const Activity = require("../../models/activity/activityModel"); // Only import Activity where needed
 const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 const Deal = require("../../models/deals/dealsModels"); // Import Deal model
-const Activity = require("../../models/activity/activityModel"); // Import Activity model
 
 const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
@@ -47,11 +47,9 @@ exports.createLead = async (req, res) => {
   } = req.body;
   // --- Add validation here ---
   if (!contactPerson || !organization || !title || !email) {
-    return res
-      .status(400)
-      .json({
-        message: "contactPerson, organization, title, and email are required.",
-      });
+    return res.status(400).json({
+      message: "contactPerson, organization, title, and email are required.",
+    });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ message: "Invalid email format." });
@@ -518,6 +516,11 @@ exports.getLeads = async (req, res) => {
         "→ Built leadDetailsWhere:",
         JSON.stringify(leadDetailsWhere)
       );
+      console.log("→ Built personWhere:", JSON.stringify(personWhere));
+      console.log(
+        "→ Built organizationWhere:",
+        JSON.stringify(organizationWhere)
+      );
 
       if (Object.keys(leadDetailsWhere).length > 0) {
         include.push({
@@ -562,12 +565,12 @@ exports.getLeads = async (req, res) => {
           as: "LeadOrganization",
           required: false,
         });
-
-        console.log(
-          "→ Updated include with LeadDetails where:",
-          JSON.stringify(leadDetailsWhere)
-        );
       }
+
+      console.log(
+        "→ Updated include with LeadDetails where:",
+        JSON.stringify(leadDetailsWhere)
+      );
     } else {
       // Standard search/filter logic
       if (isArchived !== undefined)
@@ -628,6 +631,7 @@ exports.getLeads = async (req, res) => {
       include,
       limit: parseInt(limit),
       offset: parseInt(offset),
+      // order: [[Lead, sortBy, order.toUpperCase()]],
       order: [[sortBy, order.toUpperCase()]],
       attributes:
         leadAttributes && leadAttributes.length > 0
@@ -855,7 +859,20 @@ function buildCondition(cond) {
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
-  const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
+  const personDateFields = Object.entries(Person.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
+
+  const organizationDateFields = Object.entries(Organization.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
+
+  const allDateFields = [
+    ...leadDateFields,
+    ...leadDetailsDateFields,
+    ...personDateFields,
+    ...organizationDateFields,
+  ];
 
   if (allDateFields.includes(cond.field)) {
     if (cond.useExactDate) {
@@ -1204,12 +1221,10 @@ exports.updateLeadCustomFields = async (req, res) => {
       { from: originalCustomFields, to: customFields }
     );
 
-    res
-      .status(200)
-      .json({
-        message: "Custom fields updated successfully",
-        customFields: lead.customFields,
-      });
+    res.status(200).json({
+      message: "Custom fields updated successfully",
+      customFields: lead.customFields,
+    });
   } catch (error) {
     console.error("Error updating custom fields:", error);
     res.status(500).json({ message: "Internal server error" });
