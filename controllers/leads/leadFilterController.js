@@ -4,14 +4,21 @@ const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
-const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
+const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import your LeadDetails model
 exports.saveLeadFilter = async (req, res) => {
-  const { filterName, filterConfig, visibility = "Private", columns } = req.body;
+  const {
+    filterName,
+    filterConfig,
+    visibility = "Private",
+    columns,
+  } = req.body;
   const masterUserID = req.adminId; // or req.user.id
 
   if (!filterName || !filterConfig) {
-    return res.status(400).json({ message: "filterName and filterConfig are required." });
+    return res
+      .status(400)
+      .json({ message: "filterName and filterConfig are required." });
   }
   try {
     const filter = await LeadFilter.create({
@@ -29,29 +36,35 @@ exports.saveLeadFilter = async (req, res) => {
 };
 exports.getLeadFilters = async (req, res) => {
   const masterUserID = req.adminId; // or req.user.id
- const { entityType } = req.query; // 'Lead' or 'Deal'
+  const { entityType } = req.query; // 'Lead' or 'Deal'
   try {
+    let filters;
 
-        // Fetch all filters: public for everyone, private only for this user
-    const filters = await LeadFilter.findAll({
-      where: {
-        [Op.or]: [
-          { visibility: "Public" },
-          { visibility: "Private", masterUserID }
-        ]
-      }
-    });
-        // Filter by entityType if provided
+    if (req.role === "admin") {
+      // Admin can see all filters
+      filters = await LeadFilter.findAll();
+    } else {
+      // Non-admin users: public filters for everyone, private only for this user
+      filters = await LeadFilter.findAll({
+        where: {
+          [Op.or]: [
+            { visibility: "Public" },
+            { visibility: "Private", masterUserID },
+          ],
+        },
+      });
+    }
+    // Filter by entityType if provided
     let filtered = filters;
     if (entityType) {
-      filtered = filters.filter(f => {
+      filtered = filters.filter((f) => {
         const all = f.filterConfig.all || [];
         const any = f.filterConfig.any || [];
         const allEntities = [...all, ...any];
-        return allEntities.some(cond => cond.entity === entityType);
+        return allEntities.some((cond) => cond.entity === entityType);
       });
     }
-    res.status(200).json({ filters:filtered });
+    res.status(200).json({ filters: filtered });
   } catch (error) {
     console.error("Error fetching filters:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -76,7 +89,8 @@ exports.useFilters = async (req, res) => {
     // List of fields that belong to LeadDetails
     const leadDetailsFields = [
       // Add all LeadDetails fields you want to support, e.g.:
-      "someLeadDetailsField", "anotherLeadDetailsField"
+      "someLeadDetailsField",
+      "anotherLeadDetailsField",
       // e.g. "archiveReason", "archivedBy", etc.
     ];
 
@@ -84,7 +98,7 @@ exports.useFilters = async (req, res) => {
     if (all.length > 0) {
       where[Op.and] = [];
       leadDetailsWhere[Op.and] = [];
-      all.forEach(cond => {
+      all.forEach((cond) => {
         if (leadDetailsFields.includes(cond.field)) {
           leadDetailsWhere[Op.and].push(buildCondition(cond));
         } else {
@@ -92,12 +106,13 @@ exports.useFilters = async (req, res) => {
         }
       });
       if (where[Op.and].length === 0) delete where[Op.and];
-      if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
+      if (leadDetailsWhere[Op.and].length === 0)
+        delete leadDetailsWhere[Op.and];
     }
     if (any.length > 0) {
       where[Op.or] = [];
       leadDetailsWhere[Op.or] = [];
-      any.forEach(cond => {
+      any.forEach((cond) => {
         if (leadDetailsFields.includes(cond.field)) {
           leadDetailsWhere[Op.or].push(buildCondition(cond));
         } else {
@@ -115,14 +130,14 @@ exports.useFilters = async (req, res) => {
         model: LeadDetails,
         as: "leadDetails", // Use the correct alias if you have one
         where: leadDetailsWhere,
-        required: true
+        required: true,
       });
     }
 
     // Fetch leads using the built where clause and include
     const leads = await Lead.findAll({
       where,
-      include
+      include,
     });
 
     res.status(200).json({ leads });
@@ -133,14 +148,14 @@ exports.useFilters = async (req, res) => {
 };
 // Operator label to backend key mapping
 const operatorMap = {
-  "is": "eq",
+  is: "eq",
   "is not": "ne",
   "is empty": "is empty",
   "is not empty": "is not empty",
   "is exactly or earlier than": "lte",
   "is earlier than": "lt",
   "is exactly or later than": "gte",
-  "is later than": "gt"
+  "is later than": "gt",
   // Add more mappings if needed
 };
 // Helper to build a single condition
@@ -177,14 +192,14 @@ function buildCondition(cond) {
 
   // Handle date fields
   const leadDateFields = Object.entries(Lead.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
 
-const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
+  const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
 
-const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
+  const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
   // if (
   //   ["createdAt", "updatedAt", "expectedCloseDate", "proposalSentDate", "nextActivityDate", "archiveTime"].includes(cond.field)
   // ) {
@@ -211,9 +226,13 @@ const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
     }
     // Otherwise, use relative date conversion
     const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
+    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
 
-    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
+    if (
+      dateRange &&
+      isValidDate(dateRange.start) &&
+      isValidDate(dateRange.end)
+    ) {
       return {
         [cond.field]: {
           [Op.between]: [dateRange.start, dateRange.end],
@@ -249,9 +268,11 @@ exports.updateLeadFilter = async (req, res) => {
       return res.status(404).json({ message: "Filter not found." });
     }
 
-    // Optional: Only allow the owner to edit
-    if (filter.masterUserID !== masterUserID) {
-      return res.status(403).json({ message: "You are not allowed to edit this filter." });
+    // Allow admin to edit any filter, non-admin can only edit their own filters
+    if (req.role !== "admin" && filter.masterUserID !== masterUserID) {
+      return res
+        .status(403)
+        .json({ message: "You are not allowed to edit this filter." });
     }
 
     // Update fields if provided
@@ -296,7 +317,10 @@ exports.getLeadFields = (req, res) => {
     { value: "currency", label: "Currency" },
     { value: "nextActivityDate", label: "Next activity date" },
     { value: "nextActivityStatus", label: "Next activity status" },
-    { value: "reportsPrepared", label: "No. of reports prepared for the project" },
+    {
+      value: "reportsPrepared",
+      label: "No. of reports prepared for the project",
+    },
     { value: "organizationName", label: "Organization name" },
     { value: "seen", label: "Seen" },
     { value: "questionerShared", label: "Questioner Shared?" },
@@ -312,12 +336,11 @@ exports.getLeadFields = (req, res) => {
     { value: "updatedAt", label: "Update time" },
     { value: "value", label: "Value" },
     { value: "visibleTo", label: "Visible to" },
-    {value:"archiveTime", label:"Archive time"},
+    { value: "archiveTime", label: "Archive time" },
     // ...add more as needed
   ];
   res.status(200).json({ fields });
 };
-
 
 exports.getAllLeadContactPersons = async (req, res) => {
   try {
@@ -325,9 +348,7 @@ exports.getAllLeadContactPersons = async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     // Build search condition for contactPerson
-    const where = search
-      ? { contactPerson: { [Op.like]: `%${search}%` } }
-      : {};
+    const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
 
     const { rows, count } = await Lead.findAndCountAll({
       where,
@@ -339,7 +360,7 @@ exports.getAllLeadContactPersons = async (req, res) => {
 
     // Extract contactPerson values
     const contactPersons = rows
-      .map(lead => lead.contactPerson)
+      .map((lead) => lead.contactPerson)
       .filter(Boolean);
 
     res.status(200).json({
