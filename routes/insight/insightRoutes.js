@@ -5,6 +5,8 @@ const insightController = require("../../controllers/insight/insightController")
 
 router.post("/create-dashboard",verifyToken,insightController.createDashboard);
 router.get("/get-dashboards", verifyToken, insightController.getDashboards);
+router.post("/create-report", verifyToken, insightController.createReport);
+router.get("/get-reports/:dashboardId", verifyToken, insightController.getReportsForDashboard);
 
 
 

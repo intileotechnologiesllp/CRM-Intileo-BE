@@ -1290,7 +1290,7 @@ if (!emailsExist) {
         ]
       },
       include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "ASC"]]
+      order: [["createdAt", "DESC"]]
     });
 
     // Remove duplicates by messageId
