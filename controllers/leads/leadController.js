@@ -296,7 +296,7 @@ exports.getLeads = async (req, res) => {
     isArchived,
     search,
     page = 1,
-    limit = 10,
+    limit = 20,
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
@@ -354,18 +354,30 @@ if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
     attributes: leadDetailsAttributes
   });
 }
-let masterUserID;
-// filepath: [leadController.js](http://_vscodecontentref_/5)
-if (req.role !== "admin") {
-  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-  whereClause[Op.or] = [
-    { masterUserID: userId },
-    { ownerId: userId }
-  ];
-}
+
+    // Handle masterUserID filtering based on role and query parameters
+    if (req.role === "admin") {
+      // Admin can filter by specific masterUserID or see all leads
+      if (queryMasterUserID && queryMasterUserID !== "all") {
+        whereClause[Op.or] = [
+          { masterUserID: queryMasterUserID },
+          { ownerId: queryMasterUserID }
+        ];
+      }
+      // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
+    } else {
+      // Non-admin users: filter by their own leads or specific user if provided
+      const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
+      whereClause[Op.or] = [
+        { masterUserID: userId },
+        { ownerId: userId }
+      ];
+    }
 
     console.log("→ Query params:", req.query);
-    console.log("→ masterUserID resolved:", masterUserID);
+    console.log("→ queryMasterUserID:", queryMasterUserID);
+    console.log("→ req.adminId:", req.adminId);
+    console.log("→ req.role:", req.role);
 
 //................................................................//filter
 if (filterId) {
@@ -437,16 +449,48 @@ if (filterId) {
 
   // Merge with archive/masterUserID filters
   if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
-  if (masterUserID) filterWhere.masterUserID = masterUserID;
-// filepath: [leadController.js](http://_vscodecontentref_/6)
-if (req.role !== "admin") {
-  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-  filterWhere[Op.or] = [
-    ...(filterWhere[Op.or] || []),
-    { masterUserID: userId },
-    { ownerId: userId }
-  ];
-}
+  
+  // Apply masterUserID filtering logic for filters
+  if (req.role === "admin") {
+    // Admin can filter by specific masterUserID or see all leads
+    if (queryMasterUserID && queryMasterUserID !== "all") {
+      if (filterWhere[Op.or]) {
+        // If there's already an Op.or condition from filters, we need to combine properly
+        filterWhere[Op.and] = [
+          { [Op.or]: filterWhere[Op.or] },
+          { [Op.or]: [
+            { masterUserID: queryMasterUserID },
+            { ownerId: queryMasterUserID }
+          ]}
+        ];
+        delete filterWhere[Op.or];
+      } else {
+        filterWhere[Op.or] = [
+          { masterUserID: queryMasterUserID },
+          { ownerId: queryMasterUserID }
+        ];
+      }
+    }
+  } else {
+    // Non-admin users: filter by their own leads or specific user if provided
+    const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
+    if (filterWhere[Op.or]) {
+      // If there's already an Op.or condition from filters, we need to combine properly
+      filterWhere[Op.and] = [
+        { [Op.or]: filterWhere[Op.or] },
+        { [Op.or]: [
+          { masterUserID: userId },
+          { ownerId: userId }
+        ]}
+      ];
+      delete filterWhere[Op.or];
+    } else {
+      filterWhere[Op.or] = [
+        { masterUserID: userId },
+        { ownerId: userId }
+      ];
+    }
+  }
   whereClause = filterWhere;
 
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
@@ -501,7 +545,6 @@ if (req.role !== "admin") {
     } else {
       // Standard search/filter logic
       if (isArchived !== undefined) whereClause.isArchived = isArchived === "true";
-      if (masterUserID) whereClause.masterUserID = masterUserID;
 
       if (search) {
         whereClause[Op.or] = [
