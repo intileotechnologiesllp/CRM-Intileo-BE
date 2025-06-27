@@ -32,9 +32,6 @@ Organization.hasMany(Person, {
 });
 Lead.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
 
-// // Deal associations
-// Deal.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
-
 // Activity associations - only define the hasMany side here
 // The belongsTo associations are already defined in activityModel.js
 Lead.hasMany(Activity, { foreignKey: "leadId", as: "Activities" });

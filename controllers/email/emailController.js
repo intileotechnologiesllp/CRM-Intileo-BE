@@ -178,12 +178,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
     });
     res.status(200).json({ message: "Inbox fetch job queued successfully." });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Failed to queue inbox fetch job.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to queue inbox fetch job.",
+      error: error.message,
+    });
   }
 };
 
@@ -354,11 +352,9 @@ exports.fetchInboxEmails = async (req, res) => {
       PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
     if (providerd === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res
-          .status(400)
-          .json({
-            message: "Custom IMAP settings are missing in user credentials.",
-          });
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
       }
       imapConfig = {
         imap: {
@@ -1372,7 +1368,7 @@ const getLinkedEntities = async (email) => {
       include: [
         {
           model: Organization,
-          as: "Organization",
+          as: "LeadOrganization",
           required: false,
         },
       ],
@@ -1419,8 +1415,8 @@ const getLinkedEntities = async (email) => {
       contactPerson: person.contactPerson,
       email: person.email,
       phone: person.phone,
-      organization: person.Organization
-        ? person.Organization.organization
+      organization: person.LeadOrganization
+        ? person.LeadOrganization.organization
         : null,
       createdAt: person.createdAt,
     }));
@@ -2018,11 +2014,9 @@ exports.composeEmail = [
       const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
 
       if (!finalTo && !finalCc && !finalBccValue) {
-        return res
-          .status(400)
-          .json({
-            message: "At least one recipient (to, cc, bcc) is required.",
-          });
+        return res.status(400).json({
+          message: "At least one recipient (to, cc, bcc) is required.",
+        });
       }
       const emailData = {
         // messageId: info.messageId,
