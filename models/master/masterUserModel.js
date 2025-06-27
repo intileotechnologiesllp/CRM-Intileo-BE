@@ -77,17 +77,34 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  bio:{
+  bio: {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  location:{
+  location: {
     type: DataTypes.STRING,
     allowNull: true,
   },
-  lastName:{
+  lastName: {
     type: DataTypes.STRING,
     allowNull: true,
+  },
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true, // Default to active
+  },
+  deactivatedAt: {
+    type: DataTypes.DATE,
+    allowNull: true, // Date when user was deactivated
+  },
+  deactivatedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // ID of admin who deactivated the user
+  },
+  deactivationReason: {
+    type: DataTypes.TEXT,
+    allowNull: true, // Reason for deactivation
   },
 });
 

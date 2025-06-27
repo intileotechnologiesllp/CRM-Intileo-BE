@@ -42,16 +42,33 @@ exports.createMasterUser = async (req, res) => {
     const adminId = req.adminId; // Admin ID from the authenticated request
     const adminName = req.role; // Admin name from the authenticated request
 
-    // Check if the email or mobile number already exists
+    // Check if the email, mobile number, or name already exists
     const existingUser = await MasterUser.findOne({
       where: {
-        [Op.or]: [{ email }, { mobileNumber }],
+        [Op.or]: [{ email }, { mobileNumber }, { name }],
       },
     });
     if (existingUser) {
-      return res
-        .status(400)
-        .json({ message: "Email or mobile number already exists" });
+      let message = "";
+      if (existingUser.email === email) {
+        message = "Email already exists";
+      } else if (existingUser.mobileNumber === mobileNumber) {
+        message = "Mobile number already exists";
+      } else if (existingUser.name === name) {
+        message = "User with this name already exists";
+      } else {
+        message = "Email, mobile number, or name already exists";
+      }
+      
+      await logAuditTrail(
+        PROGRAMS.MASTER_USER_MANAGEMENT,
+        "CREATE_MASTER_USER",
+        req.role,
+        message,
+        req.adminId
+      );
+      
+      return res.status(400).json({ message });
     }
 
     let resetToken = null; // Initialize reset token

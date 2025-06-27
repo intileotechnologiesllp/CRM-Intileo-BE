@@ -4,13 +4,48 @@ const masterUserPrivilegesController = require("../../controllers/privileges/mas
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const { model } = require("mongoose");
 
-
 // Create a new privilege
-router.post("/create", verifyToken, masterUserPrivilegesController.createPrivileges);
-router.post("/update", verifyToken, masterUserPrivilegesController.updatePrivileges);
-router.get("/get", verifyToken, masterUserPrivilegesController.getUsersWithPrivileges);
-router.post("/delete/:masterUserID", verifyToken, masterUserPrivilegesController.deletePrivileges);
-router.get("/privileges", verifyToken, masterUserPrivilegesController.getAllPrivileges);
+router.post(
+  "/create",
+  verifyToken,
+  masterUserPrivilegesController.createPrivileges
+);
+router.post(
+  "/update",
+  verifyToken,
+  masterUserPrivilegesController.updatePrivileges
+);
+router.get(
+  "/get",
+  verifyToken,
+  masterUserPrivilegesController.getUsersWithPrivileges
+);
+router.post(
+  "/delete/:masterUserID",
+  verifyToken,
+  masterUserPrivilegesController.deletePrivileges
+);
+router.get(
+  "/privileges",
+  verifyToken,
+  masterUserPrivilegesController.getAllPrivileges
+);
 
+// User deactivation routes
+router.put(
+  "/toggle-status/:masterUserID",
+  verifyToken,
+  masterUserPrivilegesController.toggleUserStatus
+);
+router.get(
+  "/deactivated-users",
+  verifyToken,
+  masterUserPrivilegesController.getDeactivatedUsers
+);
+router.put(
+  "/bulk-toggle-status",
+  verifyToken,
+  masterUserPrivilegesController.bulkToggleUserStatus
+);
 
 module.exports = router;
