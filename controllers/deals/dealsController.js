@@ -341,7 +341,8 @@ exports.getDeals = async (req, res) => {
       pipeline,
       pipelineStage,
       ownerId,
-      isArchived
+      isArchived,
+      masterUserID
     } = req.query;
 
     const where = {};
@@ -368,6 +369,11 @@ exports.getDeals = async (req, res) => {
     // Filter by ownerId
     if (ownerId) {
       where.ownerId = ownerId;
+    }
+
+    // Filter by masterUserID if provided
+    if (masterUserID) {
+      where.masterUserID = masterUserID;
     }
 
         // Add isArchived filter if provided

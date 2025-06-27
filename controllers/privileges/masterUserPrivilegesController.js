@@ -305,9 +305,8 @@ exports.getAllPrivileges = async (req, res) => {
   try {
     // Extract masterUserID from req.user (set by authMiddleware)
     const masterUserID = req.adminId;
-    console.log(req.adminId,"............................masterverID");
+    console.log(req.adminId, "............................masterverID");
     console.log(masterUserID);
-    
 
     // // Validate the input
     // if (!masterUserID) {
@@ -350,6 +349,247 @@ exports.getAllPrivileges = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching privileges:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Deactivate/Activate User
+exports.toggleUserStatus = async (req, res) => {
+  const { masterUserID } = req.params;
+  const { status, reason } = req.body; // status: "active"/"inactive", reason: optional reason for deactivation
+
+  try {
+    // Validate the input
+    if (!masterUserID) {
+      return res.status(400).json({
+        message: "Invalid input. Please provide a valid masterUserID.",
+      });
+    }
+
+    if (!status || !["active", "inactive"].includes(status)) {
+      return res.status(400).json({
+        message: "Invalid input. status must be either 'active' or 'inactive'.",
+      });
+    }
+
+    // Check if the master user exists
+    const masterUser = await MasterUser.findOne({ where: { masterUserID } });
+    if (!masterUser) {
+      return res.status(404).json({
+        message: "Master User not found.",
+      });
+    }
+
+    // Prevent admin from deactivating themselves
+    if (masterUserID == req.adminId && status === "inactive") {
+      return res.status(400).json({
+        message: "You cannot deactivate your own account.",
+      });
+    }
+
+    // Update user status
+    await masterUser.update({
+      status: status,
+      deactivatedAt: status === "inactive" ? new Date() : null,
+      deactivatedBy: status === "inactive" ? req.adminId : null,
+      deactivationReason: status === "inactive" ? reason || "No reason provided" : null,
+    });
+
+    // If deactivating user, optionally disable their privileges but don't delete them
+    if (status === "inactive") {
+      const userPrivileges = await MasterUserPrivileges.findOne({
+        where: { masterUserID },
+      });
+
+      if (userPrivileges) {
+        // Parse existing permissions
+        let permissions = userPrivileges.permissions || [];
+        if (typeof permissions === "string") {
+          permissions = JSON.parse(permissions);
+        }
+
+        // Disable all permissions (set all to false)
+        const disabledPermissions = permissions.map((permission) => ({
+          ...permission,
+          view: false,
+          edit: false,
+          delete: false,
+          create: false,
+        }));
+
+        // Update privileges with disabled permissions
+        userPrivileges.permissions = disabledPermissions;
+        userPrivileges.changed("permissions", true);
+        await userPrivileges.save();
+      }
+    } else {
+      // If reactivating user, you might want to restore their original privileges
+      // This would require storing original privileges somewhere or asking admin to reassign them
+      // For now, we'll just keep the existing (disabled) privileges as is
+      // Admin will need to manually re-enable permissions if needed
+    }
+
+    const action = status === "active" ? "activated" : "deactivated";
+    const message = `User ${action} successfully${
+      status === "inactive" && reason ? `. Reason: ${reason}` : ""
+    }`;
+
+    res.status(200).json({
+      message: message,
+      user: {
+        masterUserID: masterUser.masterUserID,
+        name: masterUser.name,
+        email: masterUser.email,
+        status: masterUser.status,
+        ...(status === "inactive" && {
+          deactivatedAt: masterUser.deactivatedAt,
+          deactivatedBy: masterUser.deactivatedBy,
+          deactivationReason: masterUser.deactivationReason,
+        }),
+      },
+    });
+  } catch (error) {
+    console.error("Error toggling user status:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get deactivated users
+exports.getDeactivatedUsers = async (req, res) => {
+  const {
+    page = 1,
+    limit = 10,
+    sortBy = "deactivatedAt",
+    sortOrder = "DESC",
+  } = req.query;
+
+  try {
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+
+    // Fetch deactivated users
+    const deactivatedUsers = await MasterUser.findAndCountAll({
+      where: {
+        status: "inactive",
+      },
+      attributes: [
+        "masterUserID",
+        "name",
+        "email",
+        "mobileNumber",
+        "userType",
+        "designation",
+        "department",
+        "status",
+        "deactivatedAt",
+        "deactivatedBy",
+        "deactivationReason",
+        "createdAt",
+      ],
+      include: [
+        {
+          model: MasterUser,
+          as: "DeactivatedByUser", // You'll need to add this association to the model
+          attributes: ["name", "email"],
+          required: false,
+        },
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [[sortBy, sortOrder.toUpperCase()]],
+    });
+
+    res.status(200).json({
+      message: "Deactivated users fetched successfully.",
+      totalRecords: deactivatedUsers.count,
+      totalPages: Math.ceil(deactivatedUsers.count / limit),
+      currentPage: parseInt(page),
+      users: deactivatedUsers.rows,
+    });
+  } catch (error) {
+    console.error("Error fetching deactivated users:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Bulk deactivate users
+exports.bulkToggleUserStatus = async (req, res) => {
+  const { userIds, status, reason } = req.body;
+
+  try {
+    // Validate input
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        message: "Invalid input. Please provide an array of user IDs.",
+      });
+    }
+
+    if (!status || !["active", "inactive"].includes(status)) {
+      return res.status(400).json({
+        message: "Invalid input. status must be either 'active' or 'inactive'.",
+      });
+    }
+
+    // Prevent admin from deactivating themselves
+    if (status === "inactive" && userIds.includes(req.adminId.toString())) {
+      return res.status(400).json({
+        message: "You cannot deactivate your own account.",
+      });
+    }
+
+    // Update multiple users
+    const updateData = {
+      status: status,
+      deactivatedAt: status === "inactive" ? new Date() : null,
+      deactivatedBy: status === "inactive" ? req.adminId : null,
+      deactivationReason: status === "inactive"
+        ? reason || "Bulk action - No reason provided"
+        : null,
+    };
+
+    const [updatedCount] = await MasterUser.update(updateData, {
+      where: {
+        masterUserID: userIds,
+      },
+    });
+
+    // If deactivating users, disable their privileges
+    if (status === "inactive") {
+      const usersPrivileges = await MasterUserPrivileges.findAll({
+        where: {
+          masterUserID: userIds,
+        },
+      });
+
+      for (const userPrivilege of usersPrivileges) {
+        let permissions = userPrivilege.permissions || [];
+        if (typeof permissions === "string") {
+          permissions = JSON.parse(permissions);
+        }
+
+        const disabledPermissions = permissions.map((permission) => ({
+          ...permission,
+          view: false,
+          edit: false,
+          delete: false,
+          create: false,
+        }));
+
+        userPrivilege.permissions = disabledPermissions;
+        userPrivilege.changed("permissions", true);
+        await userPrivilege.save();
+      }
+    }
+
+    const action = status === "active" ? "activated" : "deactivated";
+
+    res.status(200).json({
+      message: `${updatedCount} users ${action} successfully.`,
+      updatedCount: updatedCount,
+      action: action,
+    });
+  } catch (error) {
+    console.error("Error in bulk user status toggle:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
