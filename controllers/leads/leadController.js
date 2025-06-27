@@ -171,11 +171,24 @@ exports.createLead = async (req, res) => {
       SBUClass,
       numberOfReportsPrepared,
     });
-    if (sourceOrgin === 0 && req.body.emailID) {
-      await Email.update(
-        { leadId: lead.leadId },
-        { where: { emailID: req.body.emailID } }
-      );
+
+    // Link email to lead if sourceOrgin is 0 (email-created lead)
+    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
+      try {
+        console.log(`Linking email ${req.body.emailID} to lead ${lead.leadId}`);
+        const emailUpdateResult = await Email.update(
+          { leadId: lead.leadId },
+          { where: { emailID: req.body.emailID } }
+        );
+        console.log(`Email link result: ${emailUpdateResult[0]} rows updated`);
+
+        if (emailUpdateResult[0] === 0) {
+          console.warn(`No email found with emailID: ${req.body.emailID}`);
+        }
+      } catch (emailError) {
+        console.error("Error linking email to lead:", emailError);
+        // Don't fail the lead creation, just log the error
+      }
     }
     // --- Add this block to link existing emails to the new lead ---
     // await Email.update(
