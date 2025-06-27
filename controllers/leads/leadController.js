@@ -44,6 +44,7 @@ exports.createLead = async (req, res) => {
     sourceOrgin,
     SBUClass,
     numberOfReportsPrepared,
+    emailID, // Added emailID to the request body
   } = req.body;
 
   console.log("Request body email ID:", req.body.emailID);
@@ -176,17 +177,17 @@ exports.createLead = async (req, res) => {
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
-    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
+    if ((sourceOrgin === 0 || sourceOrgin === "0") && emailID) {
       try {
-        console.log(`Linking email ${req.body.emailID} to lead ${lead.leadId}`);
+        console.log(`Linking email ${emailID} to lead ${lead.leadId}`);
         const emailUpdateResult = await Email.update(
           { leadId: lead.leadId },
-          { where: { emailID: req.body.emailID } }
+          { where: { emailID:emailID } }
         );
         console.log(`Email link result: ${emailUpdateResult[0]} rows updated`);
 
         if (emailUpdateResult[0] === 0) {
-          console.warn(`No email found with emailID: ${req.body.emailID}`);
+          console.warn(`No email found with emailID: ${emailID}`);
         }
       } catch (emailError) {
         console.error("Error linking email to lead:", emailError);
