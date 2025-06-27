@@ -63,6 +63,29 @@ exports.createLead = async (req, res) => {
       .status(400)
       .json({ message: "Proposal value must be positive." });
   }
+
+  // Check for duplicate email in leads (enforce CRM best practice)
+  const existingLead = await Lead.findOne({ where: { email } });
+  if (existingLead) {
+    return res.status(409).json({
+      message:
+        "A lead with this email address already exists. Each lead must have a unique email address.",
+      existingLeadId: existingLead.leadId,
+      existingLeadTitle: existingLead.title,
+    });
+  }
+
+  // Check for duplicate organization in leads (enforce CRM best practice)
+  const existingOrgLead = await Lead.findOne({ where: { organization } });
+  if (existingOrgLead) {
+    return res.status(409).json({
+      message:
+        "A lead with this organization already exists. Each organization must be unique.",
+      existingLeadId: existingOrgLead.leadId,
+      existingLeadTitle: existingOrgLead.title,
+      existingOrganization: existingOrgLead.organization,
+    });
+  }
   // --- End validation ---
 
   console.log(req.role, "role of the user............");
@@ -182,7 +205,7 @@ exports.createLead = async (req, res) => {
         console.log(`Linking email ${emailID} to lead ${lead.leadId}`);
         const emailUpdateResult = await Email.update(
           { leadId: lead.leadId },
-          { where: { emailID:emailID } }
+          { where: { emailID: emailID } }
         );
         console.log(`Email link result: ${emailUpdateResult[0]} rows updated`);
 
@@ -989,6 +1012,46 @@ exports.updateLead = async (req, res) => {
         req.adminId
       );
       return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Check for email uniqueness if email is being updated
+    const emailToUpdate = leadData.email || personData.email;
+    if (emailToUpdate && emailToUpdate !== lead.email) {
+      const existingLead = await Lead.findOne({
+        where: {
+          email: emailToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this email address already exists. Each lead must have a unique email address.",
+          existingLeadId: existingLead.leadId,
+          existingLeadTitle: existingLead.title,
+        });
+      }
+    }
+
+    // Check for organization uniqueness if organization is being updated
+    const organizationToUpdate =
+      leadData.organization || organizationData.organization;
+    if (organizationToUpdate && organizationToUpdate !== lead.organization) {
+      const existingOrgLead = await Lead.findOne({
+        where: {
+          organization: organizationToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingOrgLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this organization already exists. Each organization must be unique.",
+          existingLeadId: existingOrgLead.leadId,
+          existingLeadTitle: existingOrgLead.title,
+          existingOrganization: existingOrgLead.organization,
+        });
+      }
     }
 
     let ownerChanged = false;
