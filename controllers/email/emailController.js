@@ -1461,6 +1461,7 @@ const getLinkedEntities = async (email) => {
       contactPerson: person.contactPerson,
       email: person.email,
       phone: person.phone,
+      leadOrganizationId: person.leadOrganizationId, // Add leadOrganizationId
       organization: person.LeadOrganization
         ? person.LeadOrganization.organization
         : null,
@@ -1487,6 +1488,7 @@ const getLinkedEntities = async (email) => {
 };
 
 // Helper function to aggregate linked entities from all emails in a conversation
+// Enhanced to include detailed participant information for uniqueParticipants
 const getAggregatedLinkedEntities = async (emails) => {
   try {
     const aggregatedEntities = {
@@ -1505,10 +1507,10 @@ const getAggregatedLinkedEntities = async (emails) => {
     };
 
     // Keep track of unique entities to avoid duplicates
-    const seenLeads = new Set();
-    const seenDeals = new Set();
-    const seenPersons = new Set();
-    const seenOrganizations = new Set();
+    // const seenLeads = new Set();
+    // const seenDeals = new Set();
+    // const seenPersons = new Set();
+    // const seenOrganizations = new Set();
 
     // Track conversation statistics
     emails.forEach((email) => {
@@ -1557,7 +1559,94 @@ const getAggregatedLinkedEntities = async (emails) => {
       aggregatedEntities.conversationStats.uniqueParticipants
     ).filter(Boolean);
 
-    // Process each email in the conversation
+    // Keep track of unique entities to avoid duplicates
+    const seenLeads = new Set();
+    const seenDeals = new Set();
+    const seenPersons = new Set(); // This will track all persons from both sources
+    const seenOrganizations = new Set();
+
+    // Fetch detailed participant data for ALL unique participants (conversation + linked entities)
+    const participantEmails =
+      aggregatedEntities.conversationStats.uniqueParticipants;
+
+    // Fetch ALL persons data for unique participants
+    const allParticipantPersons = await Person.findAll({
+      where: {
+        email: { [Sequelize.Op.in]: participantEmails },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Add all participant persons to the main persons array (with source info)
+    allParticipantPersons.forEach((person) => {
+      if (!seenPersons.has(person.personId)) {
+        seenPersons.add(person.personId);
+        aggregatedEntities.persons.push({
+          personId: person.personId,
+          contactPerson: person.contactPerson,
+          email: person.email,
+          phone: person.phone,
+          leadOrganizationId: person.leadOrganizationId,
+          organization: person.LeadOrganization
+            ? person.LeadOrganization.organization
+            : null,
+          createdAt: person.createdAt,
+          sourceEmail: {
+            emailId: null, // Participant from conversation, not specific email
+            messageId: null,
+            subject: "Conversation Participant",
+            createdAt: null,
+          },
+        });
+      }
+    });
+
+    // Fetch organizations related to all persons
+    const allPersonOrgIds = allParticipantPersons
+      .map((p) => p.leadOrganizationId)
+      .filter(Boolean);
+
+    // Add organizations from participants
+    if (allPersonOrgIds.length > 0) {
+      const participantOrganizations = await Organization.findAll({
+        where: {
+          leadOrganizationId: { [Sequelize.Op.in]: allPersonOrgIds },
+        },
+      });
+
+      participantOrganizations.forEach((org) => {
+        if (!seenOrganizations.has(org.leadOrganizationId)) {
+          seenOrganizations.add(org.leadOrganizationId);
+          aggregatedEntities.organizations.push({
+            leadOrganizationId: org.leadOrganizationId,
+            organization: org.organization,
+            country: org.organizationCountry,
+            createdAt: org.createdAt,
+            sourceEmail: {
+              emailId: null,
+              messageId: null,
+              subject: "Conversation Participant Organization",
+              createdAt: null,
+            },
+          });
+        }
+      });
+    }
+
+    // Update conversation stats to only include basic info
+    aggregatedEntities.conversationStats.participantSummary = {
+      totalParticipants: participantEmails.length,
+      emailAddresses: participantEmails,
+    };
+
+    // Process each email in the conversation for additional linked entities
     for (const email of emails) {
       const linkedEntities = await getLinkedEntities(email);
 
@@ -1593,12 +1682,13 @@ const getAggregatedLinkedEntities = async (emails) => {
         }
       });
 
-      // Aggregate persons (deduplicate by personId)
+      // Aggregate additional persons from linked entities (avoid duplicates)
       linkedEntities.persons.forEach((person) => {
         if (!seenPersons.has(person.personId)) {
           seenPersons.add(person.personId);
           aggregatedEntities.persons.push({
             ...person,
+            leadOrganizationId: person.leadOrganizationId,
             sourceEmail: {
               emailId: email.emailID,
               messageId: email.messageId,
@@ -1609,7 +1699,7 @@ const getAggregatedLinkedEntities = async (emails) => {
         }
       });
 
-      // Aggregate organizations (deduplicate by leadOrganizationId)
+      // Aggregate additional organizations from linked entities (avoid duplicates)
       linkedEntities.organizations.forEach((org) => {
         if (!seenOrganizations.has(org.leadOrganizationId)) {
           seenOrganizations.add(org.leadOrganizationId);
@@ -1651,6 +1741,11 @@ const getAggregatedLinkedEntities = async (emails) => {
       conversationStats: {
         totalEmails: 0,
         uniqueParticipants: [],
+        participantDetails: {
+          persons: [],
+          organizations: [],
+          emailAddresses: [],
+        },
         dateRange: { earliest: null, latest: null },
       },
     };
