@@ -15,7 +15,56 @@ const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
-
+const PROVIDER_CONFIG = {
+  gmail: {
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
+  },
+  yandex: {
+    host: "imap.yandex.com",
+    port: 993,
+    tls: true,
+  },
+    outlook: {
+    host: "outlook.office365.com",
+    port: 993,
+    tls: true,
+  },
+  yahoo: {
+    host: "imap.mail.yahoo.com",
+    port: 993,
+    tls: true,
+  },
+  // Add more providers as needed
+};
+// Add this near PROVIDER_CONFIG
+const PROVIDER_FOLDER_MAP = {
+  gmail: {
+    inbox: "INBOX",
+    drafts: "[Gmail]/Drafts",
+    sent: "[Gmail]/Sent Mail",
+    archive: "[Gmail]/All Mail"
+  },
+  yandex: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive"
+  },
+  outlook: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive"
+  },
+  custom: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive"
+  }
+};
 // Ensure the upload directory exists
 const uploadDir = path.join(__dirname, "../../uploads/attachments");
 if (!fs.existsSync(uploadDir)) {
@@ -80,7 +129,17 @@ const formatDateForIMAP = (date) => {
   const year = date.getFullYear();
   return `${day}-${month}-${year}`;
 };
-
+function flattenFolders(boxes, prefix = "") {
+  let folders = [];
+  for (const [name, box] of Object.entries(boxes)) {
+    const fullName = prefix ? `${prefix}${name}` : name;
+    folders.push(fullName);
+    if (box.children) {
+      folders = folders.concat(flattenFolders(box.children, `${fullName}${box.delimiter}`));
+    }
+  }
+  return folders;
+}
 
 exports.queueFetchInboxEmails = async (req, res) => {
   const { batchSize = 50, page = 1, days = 7 } = req.query;
@@ -88,8 +147,16 @@ exports.queueFetchInboxEmails = async (req, res) => {
   // const { email, appPassword } = req.body;
   const email = req.body?.email || req.email;
 const appPassword = req.body?.appPassword || req.appPassword;
+const provider = req.body?.provider; // Default to gmail
 
   try {
+        if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+    console.log(req.adminId, "masterUserID");
+    
+
+
     await publishToQueue("FETCH_INBOX_QUEUE", {
       masterUserID,
       email,
@@ -97,6 +164,13 @@ const appPassword = req.body?.appPassword || req.appPassword;
       batchSize,
       page,
       days,
+      provider,
+    imapHost: req.body.imapHost,
+  imapPort: req.body.imapPort,
+  imapTLS: req.body.imapTLS,
+  smtpHost: req.body.smtpHost,
+  smtpPort: req.body.smtpPort,
+  smtpSecure: req.body.smtpSecure
     });
     res.status(200).json({ message: "Inbox fetch job queued successfully." });
   } catch (error) {
@@ -112,10 +186,11 @@ exports.fetchInboxEmails = async (req, res) => {
   // const appPassword = req.body.appPassword;
   const email = req.body?.email || req.email;
 const appPassword = req.body?.appPassword || req.appPassword;
+const provider = req.body?.provider; // Default to gmail
 
   try {
     // Validate input
-    if (!masterUserID || !email || !appPassword) {
+    if (!masterUserID || !email || !appPassword || !provider) {
       return res.status(400).json({ message: "All fields are required." });
     }
 
@@ -123,20 +198,100 @@ const appPassword = req.body?.appPassword || req.appPassword;
     const existingCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
+    const smtpConfigByProvider = {
+  gmail:   { smtpHost: "smtp.gmail.com",   smtpPort: 465, smtpSecure: true },
+  yandex:  { smtpHost: "smtp.yandex.com",  smtpPort: 465, smtpSecure: true },
+  yahoo:   { smtpHost: "smtp.mail.yahoo.com", smtpPort: 465, smtpSecure: true },
+  outlook: { smtpHost: "smtp.office365.com", smtpPort: 587, smtpSecure: false }
+};
 
-    if (existingCredential) {
-      // Update existing credentials
-      await existingCredential.update({ email, appPassword });
-      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-    } else {
-      // Create new credentials
-      await UserCredential.create({
-        masterUserID,
-        email,
-        appPassword,
-      });
-      console.log(`User credentials added for masterUserID: ${masterUserID}`);
-    }
+// ...inside exports.fetchInboxEmails = async (req, res) => {
+  // ...existing code...
+
+  // Prepare SMTP config for saving
+  let smtpHost = null, smtpPort = null, smtpSecure = null;
+  if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+    const smtpConfig = smtpConfigByProvider[provider];
+    smtpHost = smtpConfig.smtpHost;
+    smtpPort = smtpConfig.smtpPort;
+    smtpSecure = smtpConfig.smtpSecure;
+  } else if (provider === "custom") {
+    smtpHost = req.body.smtpHost;
+    smtpPort = req.body.smtpPort;
+    smtpSecure = req.body.smtpSecure;
+  }
+      if (existingCredential) {
+    await existingCredential.update({
+      email,
+      appPassword,
+      provider,
+      imapHost: provider === "custom" ? req.body.imapHost : null,
+      imapPort: provider === "custom" ? req.body.imapPort : null,
+      imapTLS: provider === "custom" ? req.body.imapTLS : null,
+      smtpHost,
+      smtpPort,
+      smtpSecure
+    });
+    console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+  } else {
+    await UserCredential.create({
+      masterUserID,
+      email,
+      appPassword,
+      provider,
+      imapHost: provider === "custom" ? req.body.imapHost : null,
+      imapPort: provider === "custom" ? req.body.imapPort : null,
+      imapTLS: provider === "custom" ? req.body.imapTLS : null,
+      smtpHost,
+      smtpPort,
+      smtpSecure
+    });
+    console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  }
+//....................................original code........................................
+  //   if (existingCredential) {
+  //     // Update existing credentials
+  //     // await existingCredential.update({ email, appPassword,provider });
+  //       await existingCredential.update({
+  //   email,
+  //   appPassword,
+  //   provider,
+  //   // Add custom provider fields
+  //   imapHost: provider === "custom" ? req.body.imapHost : null,
+  //   imapPort: provider === "custom" ? req.body.imapPort : null,
+  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  // });
+  //     console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+  //   } else {
+  //     // Create new credentials
+  //     // await UserCredential.create({
+  //     //   masterUserID,
+  //     //   email,
+  //     //   appPassword,
+  //     //   provider
+  //     // });
+  //     // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  //       // Create new credentials
+  // await UserCredential.create({
+  //   masterUserID,
+  //   email,
+  //   appPassword,
+  //   provider,
+  //   // Add custom provider fields
+  //   imapHost: provider === "custom" ? req.body.imapHost : null,
+  //   imapPort: provider === "custom" ? req.body.imapPort : null,
+  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+  // });
+  // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+  //   }
+
+  //...................orginal code end.......................
 
     // Fetch emails after saving credentials
     console.log("Fetching emails for masterUserID:", masterUserID);
@@ -159,19 +314,52 @@ const appPassword = req.body?.appPassword || req.appPassword;
     const userPassword = userCredential.appPassword;
 
     console.log("Connecting to IMAP server...");
-    const imapConfig = {
-      imap: {
-        user: userEmail,
-        password: userPassword,
-        host: "imap.gmail.com",
-        port: 993,
-        tls: true,
-        authTimeout: 30000,
-        tlsOptions: {
-          rejectUnauthorized: false,
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail,
+    //     password: userPassword,
+    //     host: "imap.gmail.com",
+    //     port: 993,
+    //     tls: true,
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false,
+    //     },
+    //   },
+    // };
+    let imapConfig;
+    const providerd = userCredential.provider; // default to gmail
+
+const providerConfig = PROVIDER_CONFIG[providerd];
+const folderMap = PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
+    if (providerd === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
         },
-      },
-    };
+      };
+    } else {
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
 
     const connection = await Imap.connect(imapConfig);
 
@@ -187,6 +375,7 @@ const appPassword = req.body?.appPassword || req.appPassword;
       console.log(`Using SINCE date: ${sinceDate}`);
 
       const searchCriteria = [["SINCE", sinceDate]];
+      // const searchCriteria = ["ALL"];
       const fetchOptions = {
         bodies: "",
         struct: true,
@@ -260,19 +449,37 @@ const appPassword = req.body?.appPassword || req.appPassword;
         }
       }
     };
+    const boxes = await connection.getBoxes();
+const allFoldersArr = flattenFolders(boxes).map(f => f.toLowerCase());
+const folderTypes = ["inbox", "drafts", "archive", "sent"];
+for (const type of folderTypes) {
+  const folderName = folderMap[type];
+  if (allFoldersArr.includes(folderName.toLowerCase())) {
+    console.log(`Fetching emails from ${type}...`);
+    await fetchEmailsFromFolder(folderName, type);
+  } else {
+    console.log(`Folder "${folderName}" not found for provider ${provider}. Skipping.`);
+  }
+}
 
-    // Fetch emails from Inbox, Drafts, Archive, and Sent folders
-    console.log("Fetching emails from Inbox...");
-    await fetchEmailsFromFolder("INBOX", "inbox");
 
-    console.log("Fetching emails from Drafts...");
-    await fetchEmailsFromFolder("[Gmail]/Drafts", "drafts");
+console.log("Fetching emails from Inbox...");
+await fetchEmailsFromFolder(folderMap.inbox, "inbox");
 
-    console.log("Fetching emails from Archive...");
-    await fetchEmailsFromFolder("[Gmail]/All Mail", "archive");
+console.log("Fetching emails from Drafts...");
+await fetchEmailsFromFolder(folderMap.drafts, "drafts");
 
-    console.log("Fetching emails from Sent...");
-    await fetchEmailsFromFolder("[Gmail]/Sent Mail", "sent");
+console.log("Fetching emails from Archive...");
+// await fetchEmailsFromFolder(folderMap.archive, "archive");
+if (allFoldersArr.includes(folderMap.archive.toLowerCase())) {
+  console.log("Fetching emails from Archive...");
+  await fetchEmailsFromFolder(folderMap.archive, "archive");
+} else {
+  console.log(`Archive folder "${folderMap.archive}" not found for provider ${provider}. Skipping.`);
+}
+
+console.log("Fetching emails from Sent...");
+await fetchEmailsFromFolder(folderMap.sent, "sent");
 
     connection.end();
     console.log("IMAP connection closed.");
@@ -304,19 +511,51 @@ exports.fetchRecentEmail = async (adminId) => {
     const userPassword = userCredential.appPassword;
 
     console.log("Connecting to IMAP server...");
-    const imapConfig = {
-      imap: {
-        user: userEmail, // Use the email from the database
-        password: userPassword, // Use the app password from the database
-        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-        port: 993, // IMAP port
-        tls: true, // Use TLS
-        authTimeout: 30000,
-        tlsOptions: {
-          rejectUnauthorized: false, // Allow self-signed certificates
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail, // Use the email from the database
+    //     password: userPassword, // Use the app password from the database
+    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+    //     port: 993, // IMAP port
+    //     tls: true, // Use TLS
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false, // Allow self-signed certificates
+    //     },
+    //   },
+    // };
+    const provider = userCredential.provider; // default to gmail
+
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return { message: "Custom IMAP settings are missing in user credentials." };
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
         },
-      },
-    };
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
 
     const connection = await Imap.connect(imapConfig);
 
@@ -324,6 +563,18 @@ exports.fetchRecentEmail = async (adminId) => {
     await connection.openBox("INBOX");
 
     console.log("Fetching the most recent email...");
+
+
+    // // Fetch all emails, then get the most recent one
+    // const fetchOptions = { bodies: "", struct: true };
+    // const messages = await connection.search(["ALL"], fetchOptions);
+
+    // if (!messages.length) {
+    //   connection.end();
+    //   return { message: "No emails found." };
+    // }
+
+    //...................original code.................
     const sinceDate = formatDateForIMAP(
       new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     );
@@ -356,13 +607,7 @@ exports.fetchRecentEmail = async (adminId) => {
 
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
-// let blockedList = [];
-// if (userCredential && userCredential.blockedEmail) {
-//   blockedList = userCredential.blockedEmail
-//     .split(",")
-//     .map(e => e.trim().toLowerCase())
-//     .filter(Boolean);
-// }
+
 let blockedList = [];
 if (userCredential && userCredential.blockedEmail) {
   blockedList = Array.isArray(userCredential.blockedEmail)
@@ -370,7 +615,15 @@ if (userCredential && userCredential.blockedEmail) {
     : [];
 }
     const senderEmail = parsedEmail.from ? parsedEmail.from.value[0].address.toLowerCase() : null;
-    if (blockedList.includes(senderEmail)) {
+        // Sponsored patterns (add more as needed)
+    const sponsoredPatterns = [
+      /no-?reply/i,
+      /mailer-?daemon/i,
+      /demon\.mailer/i,
+      /sponsored/i
+    ];
+    const isSponsored = sponsoredPatterns.some(pattern => pattern.test(senderEmail));
+    if (blockedList.includes(senderEmail) || isSponsored) {
       console.log(`Blocked email from: ${senderEmail}`);
       connection.end();
       return { message: `Blocked email from: ${senderEmail}` };
@@ -381,22 +634,7 @@ if (userCredential && userCredential.blockedEmail) {
       ? referencesHeader.join(" ") // Convert array to string
       : referencesHeader || null;
     //................................
-// let threadId = null;
-// const referencesHeader = parsedEmail.headers.get("references");
-// const references = Array.isArray(referencesHeader)
-//   ? referencesHeader.join(" ")
-//   : referencesHeader || null;
 
-// if (referencesHeader) {
-//   if (Array.isArray(referencesHeader)) {
-//     threadId = referencesHeader[0];
-//   } else if (typeof referencesHeader === "string") {
-//     threadId = referencesHeader.split(" ")[0];
-//   }
-// }
-// if (!threadId) {
-//   threadId = parsedEmail.messageId;
-// }
       
 
     const emailData = {
@@ -478,32 +716,7 @@ if (userCredential && userCredential.blockedEmail) {
       }
     }
 
-    // Save related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
-
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
-    // Sae related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
-
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
+ 
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
@@ -845,40 +1058,32 @@ exports.getEmails = async (req, res) => {
       },
     });
 
-    // Group emails by conversation (thread)
-    let responseThreads;
-    if (folder === "drafts") {
-      // For drafts, group by draftId if available, else by messageId
-      const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.draftId || email.messageId;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-    } else {
-      // For other folders, group by inReplyTo or messageId
-      const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.inReplyTo || email.messageId;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-//       const threads = {};
-// emails.forEach((email) => {
-//   const threadKey = email.threadId || email.messageId;
-//   if (!threads[threadKey]) {
-//     threads[threadKey] = [];
-//   }
-//   threads[threadKey].push(email);
-// });
-//  responseThreads = Object.values(threads);
+
+let responseThreads;
+if (folder === "drafts" || folder === "trash") {
+  // For drafts and trash, group by draftId if available, else by emailID
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
+    if (!threads[threadId]) {
+      threads[threadId] = [];
     }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+} else {
+  // For other folders, group by inReplyTo or messageId
+  const threads = {};
+  emails.forEach((email) => {
+    const threadId = email.inReplyTo || email.messageId || email.emailID;
+    if (!threads[threadId]) {
+      threads[threadId] = [];
+    }
+    threads[threadId].push(email);
+  });
+  responseThreads = Object.values(threads);
+}
+
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
@@ -914,19 +1119,34 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
     console.log(userEmail);
 
     console.log("Connecting to IMAP server...");
-    const imapConfig = {
-      imap: {
-        user: userEmail, // Use the email from the database
-        password: userPassword, // Use the app password from the database
-        host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-        port: 993, // IMAP port
-        tls: true, // Use TLS
-        authTimeout: 30000,
-        tlsOptions: {
-          rejectUnauthorized: false, // Allow self-signed certificates
-        },
-      },
-    };
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail, // Use the email from the database
+    //     password: userPassword, // Use the app password from the database
+    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+    //     port: 993, // IMAP port
+    //     tls: true, // Use TLS
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false, // Allow self-signed certificates
+    //     },
+    //   },
+    // };
+    const provider = userCredential.provider; // default to gmail
+
+const providerConfig = PROVIDER_CONFIG[provider];
+const imapConfig = {
+  imap: {
+    user: userCredential.email,
+    password: userCredential.appPassword,
+    host: providerConfig.host,
+    port: providerConfig.port,
+    tls: providerConfig.tls,
+    authTimeout: 30000,
+    tlsOptions: { rejectUnauthorized: false },
+  },
+};
+    
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
 
@@ -1043,110 +1263,7 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
     // res.status(500).json({ message: "Internal server error." });
   }
 };
-//...........................changes............................
 
-// exports.getOneEmail = async (req, res) => {
-//   const { emailId } = req.params;
-//   const masterUserID = req.adminId;
-
-//   try {
-//     // Fetch the main email
-//     const mainEmail = await Email.findOne({
-//       where: { emailID: emailId },
-//       include: [{ model: Attachment, as: "attachments" }],
-//     });
-
-//     if (!mainEmail) {
-//       return res.status(404).json({ message: "Email not found." });
-//     }
-
-//     // Mark as read if not already
-//     if (!mainEmail.isRead) {
-//       await mainEmail.update({ isRead: true });
-//     }
-
-//     // Clean the body of the main email
-//     mainEmail.body = cleanEmailBody(mainEmail.body);
-
-//     // Add baseURL to attachment paths
-//     const baseURL = process.env.LOCALHOST_URL;
-//     mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
-//       ...attachment.toJSON(),
-//       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//     }));
-
-//     // If this is a draft or trash, do NOT fetch related emails
-//     if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
-//       return res.status(200).json({
-//         message: `${mainEmail.folder} email fetched successfully.`,
-//         data: {
-//           email: mainEmail,
-//           relatedEmails: [],
-//         },
-//       });
-//     }
-
-//     // --- Gmail-like conversation grouping ---
-//     // Gather all thread IDs (messageId, inReplyTo, references)
-//     const threadIds = [
-//       mainEmail.messageId,
-//       mainEmail.inReplyTo,
-//       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
-//     ].filter(Boolean);
-
-//     // Fetch all related emails in the thread (across all users)
-//     let relatedEmails = await Email.findAll({
-//       where: {
-//         [Sequelize.Op.or]: [
-//           { messageId: { [Sequelize.Op.in]: threadIds } },
-//           { inReplyTo: { [Sequelize.Op.in]: threadIds } },
-//           {
-//             references: {
-//               [Sequelize.Op.or]: threadIds.map((id) => ({
-//                 [Sequelize.Op.like]: `%${id}%`,
-//               })),
-//             },
-//           },
-//         ],
-//         masterUserID,
-//         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
-//       },
-//       include: [{ model: Attachment, as: "attachments" }],
-//       order: [["createdAt", "ASC"]],
-//     });
-
-//     // Remove the main email from relatedEmails (by messageId)
-//     relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
-
-//     // Deduplicate relatedEmails by messageId (keep the first occurrence)
-//     const seen = new Set();
-//     relatedEmails = relatedEmails.filter(email => {
-//       if (seen.has(email.messageId)) return false;
-//       seen.add(email.messageId);
-//       return true;
-//     });
-
-//     // Clean the body and attachment paths for related emails
-//     relatedEmails.forEach((email) => {
-//       email.body = cleanEmailBody(email.body);
-//       email.attachments = email.attachments.map((attachment) => ({
-//         ...attachment,
-//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//       }));
-//     });
-
-//     res.status(200).json({
-//       message: "Email fetched successfully.",
-//       data: {
-//         email: mainEmail,
-//         relatedEmails,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error fetching email:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
@@ -1286,19 +1403,6 @@ conversation.push(...remaining);
       }));
     });
 
-    // res.status(200).json({
-    //   message: "Email fetched successfully.",
-    //   data: {
-    //     email: mainEmail,
-    //     relatedEmails,
-    //   },
-    // });
-    // Sort relatedEmails by createdAt ascending (oldest to newest)
-    //  allEmails.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-// The oldest email is the main email, the rest are relatedEmails
-// const sortedMainEmail = allEmails[0];
-// const sortedRelatedEmails = allEmails.slice(1);
 const sortedMainEmail = conversation[0];
 const sortedRelatedEmails = conversation.slice(1);
 
@@ -1320,12 +1424,13 @@ exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
   dynamicUpload,
   async (req, res) => {
+    
     const {
       to,
       cc,
       bcc,
       subject,
-      text,
+      text, 
       html,
       templateID,
       actionType,
@@ -1550,7 +1655,7 @@ if (actionType === "forward") {
       // Add tracking pixel for email open tracking
       const generateTrackingPixel = (messageId) => {
         const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
-        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;" />`;
+        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;"alt="" />`;
       };
 
       // Add tracking links for click tracking
@@ -1674,65 +1779,53 @@ if (actionType === "forward") {
         references: referencesHeader || undefined,
       };
 
-      // Send the email
-      // const info = await transporter.sendMail(mailOptions);
-      // await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
+const baseURL = process.env.LOCALHOST_URL;
 
-
-      let savedEmail;
-      let savedAttachments = [];
-      console.log(draftId, ".............");
-
-      if (draftId) {
-        // Update the existing draft record to be a sent email
-        savedEmail = await draftEmail.update({
-          // messageId: info.messageId,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to || draftEmail.recipient,
-          cc: cc || draftEmail.cc,
-          bcc: bcc || draftEmail.bcc,
-          subject: finalSubject,
-          body: `${text || html}`,
-          folder: "sent",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-        });
-
-        // Update attachments if new ones are uploaded
-        if (req.files && req.files.length > 0) {
-          await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-           const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-          savedAttachments = req.files.map((file) => ({
-                  emailID: savedEmail.emailID,
+  
+      let attachments = [];
+      if (req.files && req.files.length > 0) {
+        attachments = req.files.map((file) => ({
           filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL in DB
+          originalname: file.originalname,
+          path: file.path,
+         // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
           size: file.size,
           contentType: file.mimetype,
-          }));
-          await Attachment.bulkCreate(savedAttachments);
-        } else {
-          // If no new attachments, fetch existing ones for response
-          savedAttachments = await Attachment.findAll({
-            where: { emailID: draftEmail.emailID },
-          });
-        }
-      } else {
-        // ... (your existing logic for new sent emails) ...
+        }));
+      } else if (draftId && draftEmail) {
+        // If no new files uploaded, fetch existing attachments from the draft
+        const oldAttachments = await Attachment.findAll({
+          where: { emailID: draftEmail.emailID },
+        });
+        attachments = oldAttachments.map((att) => ({
+          filename: att.filename,
+          originalname:att.originalname || att.filename,
+          path: att.filePath || att.path, // use filePath or path
+          size: att.size,
+          contentType: att.contentType,
+        }));
+      }
+
+  const finalTo = to || (draftEmail && draftEmail.recipient);
+const finalCc = cc || (draftEmail && draftEmail.cc);
+const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
+
+if (!finalTo && !finalCc && !finalBccValue) {
+  return res.status(400).json({ message: "At least one recipient (to, cc, bcc) is required." });
+}
         const emailData = {
           // messageId: info.messageId,
+          draftId:draftId || null,
           inReplyTo: inReplyToHeader || null,
           references: referencesHeader || null,
           sender: SENDER_EMAIL,
           senderName: SENDER_NAME,
-          recipient: to,
-          cc,
-          bcc,
+          // recipient: to,
+          // cc,
+          // bcc,
+     recipient: finalTo,
+  cc: finalCc,
+  bcc: finalBccValue,
           subject: finalSubject,
           body: finalBody,
           folder: "sent",
@@ -1740,48 +1833,17 @@ if (actionType === "forward") {
           masterUserID,
           tempMessageId,
           isDraft: false,
+          attachments
           // isShared: isShared === true || isShared === "true", // ensure boolean
         };
-        savedEmail = await Email.create(emailData);
 
-        // Save attachments in the database
-        // const savedAttachments =
-        //   req.files && req.files.length > 0
-        //     ? req.files.map((file) => ({
-        //         emailID: savedEmail.emailID,
-        //         filename: file.originalname,
-        //         filePath: file.path,
-        //       }))
-        //     : [];
-        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL in DB
-          size: file.size,
-          contentType: file.mimetype,
-        }));
+         await publishToQueue("EMAIL_QUEUE", emailData);
+      // }
 
-        if (savedAttachments.length > 0) {
-          await Attachment.bulkCreate(savedAttachments);
-          console.log(
-            `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
-          );
-        }
-      }
-
-      // Generate public URLs for attachments
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
-      }));
-await publishToQueue("EMAIL_QUEUE", { emailID: savedEmail.emailID });
       res.status(200).json({
         message: "Email sent and saved successfully.",
         // messageId: info.messageId,
-        attachments: attachmentLinks,
+        // attachments: attachmentLinks,
       });
     } catch (error) {
       console.error("Error sending email:", error);
@@ -1924,6 +1986,13 @@ exports.addUserCredential = async (req, res) => {
     isTrackOpenEmail,
     isTrackClickEmail,
     blockedEmail, // <-- Add this line
+    provider,
+    imapHost,      // <-- Add these lines
+    imapPort,
+    imapTLS,
+    smtpHost,
+    smtpPort,
+    smtpSecure
   } = req.body;
 
   try {
@@ -1949,19 +2018,26 @@ exports.addUserCredential = async (req, res) => {
       where: { masterUserID },
     });
 
-    // Prepare the fields to update
-    const updateData = {};
+
+        const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
     if (syncStartDate) updateData.syncStartDate = syncStartDate;
     if (syncFolders) updateData.syncFolders = syncFolders;
-    if (syncAllFolders !== undefined)
-      updateData.syncAllFolders = syncAllFolders;
-    if (isTrackOpenEmail !== undefined)
-      updateData.isTrackOpenEmail = isTrackOpenEmail;
-    if (isTrackClickEmail !== undefined)
-      updateData.isTrackClickEmail = isTrackClickEmail;
-    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail; // <-- Add this line
+    if (syncAllFolders !== undefined) updateData.syncAllFolders = syncAllFolders;
+    if (isTrackOpenEmail !== undefined) updateData.isTrackOpenEmail = isTrackOpenEmail;
+    if (isTrackClickEmail !== undefined) updateData.isTrackClickEmail = isTrackClickEmail;
+    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail;
+    if (provider) updateData.provider = provider;
+    // Add custom provider fields
+    if (provider === "custom") {
+      if (imapHost) updateData.imapHost = imapHost;
+      if (imapPort) updateData.imapPort = imapPort;
+      if (imapTLS !== undefined) updateData.imapTLS = imapTLS;
+      if (smtpHost) updateData.smtpHost = smtpHost;
+      if (smtpPort) updateData.smtpPort = smtpPort;
+      if (smtpSecure !== undefined) updateData.smtpSecure = smtpSecure;
+    }
 
     if (existingCredential) {
       // Update existing credentials
@@ -1987,6 +2063,14 @@ exports.addUserCredential = async (req, res) => {
       isTrackOpenEmail: isTrackOpenEmail || true,
       isTrackClickEmail: isTrackClickEmail || true,
       blockedEmail: blockedEmail || null, // <-- Add this line
+        provider: provider || "gmail",
+  // Add these lines for custom provider support
+  imapHost: provider === "custom" ? imapHost : null,
+  imapPort: provider === "custom" ? imapPort : null,
+  imapTLS: provider === "custom" ? imapTLS : null,
+  smtpHost: provider === "custom" ? smtpHost : null,
+  smtpPort: provider === "custom" ? smtpPort : null,
+  smtpSecure: provider === "custom" ? smtpSecure : null,
     });
 
     res.status(201).json({
@@ -2014,20 +2098,7 @@ exports.getUserCredential = async (req, res) => {
 
     res.status(200).json({
       message: "User credentials fetched successfully.",
-      credential: {
-        email: userCredential.email,
-        appPassword: userCredential.appPassword,
-        syncStartDate: userCredential.syncStartDate,
-        syncFolders: userCredential.syncFolders,
-        syncAllFolders: userCredential.syncAllFolders,
-        isTrackOpenEmail: userCredential.isTrackOpenEmail,
-        isTrackClickEmail: userCredential.isTrackClickEmail,
-        signature: userCredential.signature,
-        signatureName: userCredential.signatureName,
-        signatureImage: userCredential.signatureImage,
-        smartBcc: userCredential.smartBcc,
-        blockedEmail: userCredential.blockedEmail, // You may want to exclude this in production for security reasons
-      },
+      credential: userCredential, // Return all fields
     });
   } catch (error) {
     console.error("Error fetching user credentials:", error);
@@ -2138,11 +2209,19 @@ exports.saveDraft = [
           // Remove old attachments if updating
           await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
         }
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedDraft.emailID,
-          filename: file.originalname,
-          path: file.path,
-        }));
+        // savedAttachments = req.files.map((file) => ({
+        //   emailID: savedDraft.emailID,
+        //   filename: file.originalname,
+        //   path: file.path,
+        // }));
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+          const savedAttachments = req.files.map((file) => ({
+    emailID: savedDraft.emailID,
+    filename: file.filename,
+    filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+    size: file.size,
+    contentType: file.mimetype,
+  }));
         await Attachment.bulkCreate(savedAttachments);
       } else if (isUpdate) {
         // If no new attachments, fetch existing ones for response
@@ -2234,16 +2313,7 @@ exports.scheduleEmail = [
         await Attachment.bulkCreate(savedAttachments);
       }
 
-      // // Fetch the full email data with attachments for response
-      // const fullEmail = await Email.findOne({
-      //   where: { emailID: scheduledEmail.emailID },
-      //   include: [
-      //     {
-      //       model: Attachment,
-      //       as: "attachments",
-      //     },
-      //   ],
-      // });
+
 
       res.status(200).json({
         message: "Email scheduled successfully.",

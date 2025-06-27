@@ -13,6 +13,10 @@ const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
 const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
+const Lead = require("../../models/leads/leadsModel");
+const Deal = require("../../models/deals/dealsModels");
+const Person = require("../../models/leads/leadPersonModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
 const PROVIDER_CONFIG = {
@@ -26,7 +30,7 @@ const PROVIDER_CONFIG = {
     port: 993,
     tls: true,
   },
-    outlook: {
+  outlook: {
     host: "outlook.office365.com",
     port: 993,
     tls: true,
@@ -44,26 +48,26 @@ const PROVIDER_FOLDER_MAP = {
     inbox: "INBOX",
     drafts: "[Gmail]/Drafts",
     sent: "[Gmail]/Sent Mail",
-    archive: "[Gmail]/All Mail"
+    archive: "[Gmail]/All Mail",
   },
   yandex: {
     inbox: "INBOX",
     drafts: "Drafts",
     sent: "Sent",
-    archive: "Archive"
+    archive: "Archive",
   },
   outlook: {
     inbox: "INBOX",
     drafts: "Drafts",
     sent: "Sent",
-    archive: "Archive"
+    archive: "Archive",
   },
   custom: {
     inbox: "INBOX",
     drafts: "Drafts",
     sent: "Sent",
-    archive: "Archive"
-  }
+    archive: "Archive",
+  },
 };
 // Ensure the upload directory exists
 const uploadDir = path.join(__dirname, "../../uploads/attachments");
@@ -135,7 +139,9 @@ function flattenFolders(boxes, prefix = "") {
     const fullName = prefix ? `${prefix}${name}` : name;
     folders.push(fullName);
     if (box.children) {
-      folders = folders.concat(flattenFolders(box.children, `${fullName}${box.delimiter}`));
+      folders = folders.concat(
+        flattenFolders(box.children, `${fullName}${box.delimiter}`)
+      );
     }
   }
   return folders;
@@ -146,16 +152,14 @@ exports.queueFetchInboxEmails = async (req, res) => {
   const masterUserID = req.adminId;
   // const { email, appPassword } = req.body;
   const email = req.body?.email || req.email;
-const appPassword = req.body?.appPassword || req.appPassword;
-const provider = req.body?.provider; // Default to gmail
+  const appPassword = req.body?.appPassword || req.appPassword;
+  const provider = req.body?.provider; // Default to gmail
 
   try {
-        if (!masterUserID || !email || !appPassword) {
+    if (!masterUserID || !email || !appPassword) {
       return res.status(400).json({ message: "All fields are required." });
     }
     console.log(req.adminId, "masterUserID");
-    
-
 
     await publishToQueue("FETCH_INBOX_QUEUE", {
       masterUserID,
@@ -165,16 +169,21 @@ const provider = req.body?.provider; // Default to gmail
       page,
       days,
       provider,
-    imapHost: req.body.imapHost,
-  imapPort: req.body.imapPort,
-  imapTLS: req.body.imapTLS,
-  smtpHost: req.body.smtpHost,
-  smtpPort: req.body.smtpPort,
-  smtpSecure: req.body.smtpSecure
+      imapHost: req.body.imapHost,
+      imapPort: req.body.imapPort,
+      imapTLS: req.body.imapTLS,
+      smtpHost: req.body.smtpHost,
+      smtpPort: req.body.smtpPort,
+      smtpSecure: req.body.smtpSecure,
     });
     res.status(200).json({ message: "Inbox fetch job queued successfully." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to queue inbox fetch job.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to queue inbox fetch job.",
+        error: error.message,
+      });
   }
 };
 
@@ -185,8 +194,8 @@ exports.fetchInboxEmails = async (req, res) => {
   // const email = req.email; // Get email from the request body
   // const appPassword = req.body.appPassword;
   const email = req.body?.email || req.email;
-const appPassword = req.body?.appPassword || req.appPassword;
-const provider = req.body?.provider; // Default to gmail
+  const appPassword = req.body?.appPassword || req.appPassword;
+  const provider = req.body?.provider; // Default to gmail
 
   try {
     // Validate input
@@ -199,99 +208,109 @@ const provider = req.body?.provider; // Default to gmail
       where: { masterUserID },
     });
     const smtpConfigByProvider = {
-  gmail:   { smtpHost: "smtp.gmail.com",   smtpPort: 465, smtpSecure: true },
-  yandex:  { smtpHost: "smtp.yandex.com",  smtpPort: 465, smtpSecure: true },
-  yahoo:   { smtpHost: "smtp.mail.yahoo.com", smtpPort: 465, smtpSecure: true },
-  outlook: { smtpHost: "smtp.office365.com", smtpPort: 587, smtpSecure: false }
-};
+      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
+      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
+      yahoo: {
+        smtpHost: "smtp.mail.yahoo.com",
+        smtpPort: 465,
+        smtpSecure: true,
+      },
+      outlook: {
+        smtpHost: "smtp.office365.com",
+        smtpPort: 587,
+        smtpSecure: false,
+      },
+    };
 
-// ...inside exports.fetchInboxEmails = async (req, res) => {
-  // ...existing code...
+    // ...inside exports.fetchInboxEmails = async (req, res) => {
+    // ...existing code...
 
-  // Prepare SMTP config for saving
-  let smtpHost = null, smtpPort = null, smtpSecure = null;
-  if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
-    const smtpConfig = smtpConfigByProvider[provider];
-    smtpHost = smtpConfig.smtpHost;
-    smtpPort = smtpConfig.smtpPort;
-    smtpSecure = smtpConfig.smtpSecure;
-  } else if (provider === "custom") {
-    smtpHost = req.body.smtpHost;
-    smtpPort = req.body.smtpPort;
-    smtpSecure = req.body.smtpSecure;
-  }
-      if (existingCredential) {
-    await existingCredential.update({
-      email,
-      appPassword,
-      provider,
-      imapHost: provider === "custom" ? req.body.imapHost : null,
-      imapPort: provider === "custom" ? req.body.imapPort : null,
-      imapTLS: provider === "custom" ? req.body.imapTLS : null,
-      smtpHost,
-      smtpPort,
-      smtpSecure
-    });
-    console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-  } else {
-    await UserCredential.create({
-      masterUserID,
-      email,
-      appPassword,
-      provider,
-      imapHost: provider === "custom" ? req.body.imapHost : null,
-      imapPort: provider === "custom" ? req.body.imapPort : null,
-      imapTLS: provider === "custom" ? req.body.imapTLS : null,
-      smtpHost,
-      smtpPort,
-      smtpSecure
-    });
-    console.log(`User credentials added for masterUserID: ${masterUserID}`);
-  }
-//....................................original code........................................
-  //   if (existingCredential) {
-  //     // Update existing credentials
-  //     // await existingCredential.update({ email, appPassword,provider });
-  //       await existingCredential.update({
-  //   email,
-  //   appPassword,
-  //   provider,
-  //   // Add custom provider fields
-  //   imapHost: provider === "custom" ? req.body.imapHost : null,
-  //   imapPort: provider === "custom" ? req.body.imapPort : null,
-  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
-  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
-  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
-  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
-  // });
-  //     console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-  //   } else {
-  //     // Create new credentials
-  //     // await UserCredential.create({
-  //     //   masterUserID,
-  //     //   email,
-  //     //   appPassword,
-  //     //   provider
-  //     // });
-  //     // console.log(`User credentials added for masterUserID: ${masterUserID}`);
-  //       // Create new credentials
-  // await UserCredential.create({
-  //   masterUserID,
-  //   email,
-  //   appPassword,
-  //   provider,
-  //   // Add custom provider fields
-  //   imapHost: provider === "custom" ? req.body.imapHost : null,
-  //   imapPort: provider === "custom" ? req.body.imapPort : null,
-  //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
-  //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
-  //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
-  //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
-  // });
-  // console.log(`User credentials added for masterUserID: ${masterUserID}`);
-  //   }
+    // Prepare SMTP config for saving
+    let smtpHost = null,
+      smtpPort = null,
+      smtpSecure = null;
+    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+      const smtpConfig = smtpConfigByProvider[provider];
+      smtpHost = smtpConfig.smtpHost;
+      smtpPort = smtpConfig.smtpPort;
+      smtpSecure = smtpConfig.smtpSecure;
+    } else if (provider === "custom") {
+      smtpHost = req.body.smtpHost;
+      smtpPort = req.body.smtpPort;
+      smtpSecure = req.body.smtpSecure;
+    }
+    if (existingCredential) {
+      await existingCredential.update({
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    } else {
+      await UserCredential.create({
+        masterUserID,
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    }
+    //....................................original code........................................
+    //   if (existingCredential) {
+    //     // Update existing credentials
+    //     // await existingCredential.update({ email, appPassword,provider });
+    //       await existingCredential.update({
+    //   email,
+    //   appPassword,
+    //   provider,
+    //   // Add custom provider fields
+    //   imapHost: provider === "custom" ? req.body.imapHost : null,
+    //   imapPort: provider === "custom" ? req.body.imapPort : null,
+    //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+    // });
+    //     console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    //   } else {
+    //     // Create new credentials
+    //     // await UserCredential.create({
+    //     //   masterUserID,
+    //     //   email,
+    //     //   appPassword,
+    //     //   provider
+    //     // });
+    //     // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    //       // Create new credentials
+    // await UserCredential.create({
+    //   masterUserID,
+    //   email,
+    //   appPassword,
+    //   provider,
+    //   // Add custom provider fields
+    //   imapHost: provider === "custom" ? req.body.imapHost : null,
+    //   imapPort: provider === "custom" ? req.body.imapPort : null,
+    //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+    // });
+    // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    //   }
 
-  //...................orginal code end.......................
+    //...................orginal code end.......................
 
     // Fetch emails after saving credentials
     console.log("Fetching emails for masterUserID:", masterUserID);
@@ -330,11 +349,16 @@ const provider = req.body?.provider; // Default to gmail
     let imapConfig;
     const providerd = userCredential.provider; // default to gmail
 
-const providerConfig = PROVIDER_CONFIG[providerd];
-const folderMap = PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
+    const providerConfig = PROVIDER_CONFIG[providerd];
+    const folderMap =
+      PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
     if (providerd === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+        return res
+          .status(400)
+          .json({
+            message: "Custom IMAP settings are missing in user credentials.",
+          });
       }
       imapConfig = {
         imap: {
@@ -450,36 +474,39 @@ const folderMap = PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"]
       }
     };
     const boxes = await connection.getBoxes();
-const allFoldersArr = flattenFolders(boxes).map(f => f.toLowerCase());
-const folderTypes = ["inbox", "drafts", "archive", "sent"];
-for (const type of folderTypes) {
-  const folderName = folderMap[type];
-  if (allFoldersArr.includes(folderName.toLowerCase())) {
-    console.log(`Fetching emails from ${type}...`);
-    await fetchEmailsFromFolder(folderName, type);
-  } else {
-    console.log(`Folder "${folderName}" not found for provider ${provider}. Skipping.`);
-  }
-}
+    const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
+    const folderTypes = ["inbox", "drafts", "archive", "sent"];
+    for (const type of folderTypes) {
+      const folderName = folderMap[type];
+      if (allFoldersArr.includes(folderName.toLowerCase())) {
+        console.log(`Fetching emails from ${type}...`);
+        await fetchEmailsFromFolder(folderName, type);
+      } else {
+        console.log(
+          `Folder "${folderName}" not found for provider ${provider}. Skipping.`
+        );
+      }
+    }
 
+    console.log("Fetching emails from Inbox...");
+    await fetchEmailsFromFolder(folderMap.inbox, "inbox");
 
-console.log("Fetching emails from Inbox...");
-await fetchEmailsFromFolder(folderMap.inbox, "inbox");
+    console.log("Fetching emails from Drafts...");
+    await fetchEmailsFromFolder(folderMap.drafts, "drafts");
 
-console.log("Fetching emails from Drafts...");
-await fetchEmailsFromFolder(folderMap.drafts, "drafts");
+    console.log("Fetching emails from Archive...");
+    // await fetchEmailsFromFolder(folderMap.archive, "archive");
+    if (allFoldersArr.includes(folderMap.archive.toLowerCase())) {
+      console.log("Fetching emails from Archive...");
+      await fetchEmailsFromFolder(folderMap.archive, "archive");
+    } else {
+      console.log(
+        `Archive folder "${folderMap.archive}" not found for provider ${provider}. Skipping.`
+      );
+    }
 
-console.log("Fetching emails from Archive...");
-// await fetchEmailsFromFolder(folderMap.archive, "archive");
-if (allFoldersArr.includes(folderMap.archive.toLowerCase())) {
-  console.log("Fetching emails from Archive...");
-  await fetchEmailsFromFolder(folderMap.archive, "archive");
-} else {
-  console.log(`Archive folder "${folderMap.archive}" not found for provider ${provider}. Skipping.`);
-}
-
-console.log("Fetching emails from Sent...");
-await fetchEmailsFromFolder(folderMap.sent, "sent");
+    console.log("Fetching emails from Sent...");
+    await fetchEmailsFromFolder(folderMap.sent, "sent");
 
     connection.end();
     console.log("IMAP connection closed.");
@@ -529,7 +556,9 @@ exports.fetchRecentEmail = async (adminId) => {
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return { message: "Custom IMAP settings are missing in user credentials." };
+        return {
+          message: "Custom IMAP settings are missing in user credentials.",
+        };
       }
       imapConfig = {
         imap: {
@@ -563,7 +592,6 @@ exports.fetchRecentEmail = async (adminId) => {
     await connection.openBox("INBOX");
 
     console.log("Fetching the most recent email...");
-
 
     // // Fetch all emails, then get the most recent one
     // const fetchOptions = { bodies: "", struct: true };
@@ -608,34 +636,38 @@ exports.fetchRecentEmail = async (adminId) => {
     // Parse the raw email body using simpleParser
     const parsedEmail = await simpleParser(rawBody);
 
-let blockedList = [];
-if (userCredential && userCredential.blockedEmail) {
-  blockedList = Array.isArray(userCredential.blockedEmail)
-    ? userCredential.blockedEmail.map(e => String(e).trim().toLowerCase()).filter(Boolean)
-    : [];
-}
-    const senderEmail = parsedEmail.from ? parsedEmail.from.value[0].address.toLowerCase() : null;
-        // Sponsored patterns (add more as needed)
+    let blockedList = [];
+    if (userCredential && userCredential.blockedEmail) {
+      blockedList = Array.isArray(userCredential.blockedEmail)
+        ? userCredential.blockedEmail
+            .map((e) => String(e).trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+    }
+    const senderEmail = parsedEmail.from
+      ? parsedEmail.from.value[0].address.toLowerCase()
+      : null;
+    // Sponsored patterns (add more as needed)
     const sponsoredPatterns = [
       /no-?reply/i,
       /mailer-?daemon/i,
       /demon\.mailer/i,
-      /sponsored/i
+      /sponsored/i,
     ];
-    const isSponsored = sponsoredPatterns.some(pattern => pattern.test(senderEmail));
+    const isSponsored = sponsoredPatterns.some((pattern) =>
+      pattern.test(senderEmail)
+    );
     if (blockedList.includes(senderEmail) || isSponsored) {
       console.log(`Blocked email from: ${senderEmail}`);
       connection.end();
       return { message: `Blocked email from: ${senderEmail}` };
     }
-    
+
     const referencesHeader = parsedEmail.headers.get("references");
     const references = Array.isArray(referencesHeader)
       ? referencesHeader.join(" ") // Convert array to string
       : referencesHeader || null;
     //................................
-
-      
 
     const emailData = {
       messageId: parsedEmail.messageId || null,
@@ -716,7 +748,6 @@ if (userCredential && userCredential.blockedEmail) {
       }
     }
 
- 
     connection.end(); // Close the connection
     console.log("IMAP connection closed.");
 
@@ -1058,32 +1089,30 @@ exports.getEmails = async (req, res) => {
       },
     });
 
-
-let responseThreads;
-if (folder === "drafts" || folder === "trash") {
-  // For drafts and trash, group by draftId if available, else by emailID
-  const threads = {};
-  emails.forEach((email) => {
-    const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
-    if (!threads[threadId]) {
-      threads[threadId] = [];
+    let responseThreads;
+    if (folder === "drafts" || folder === "trash") {
+      // For drafts and trash, group by draftId if available, else by emailID
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+    } else {
+      // For other folders, group by inReplyTo or messageId
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.inReplyTo || email.messageId || email.emailID;
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
     }
-    threads[threadId].push(email);
-  });
-  responseThreads = Object.values(threads);
-} else {
-  // For other folders, group by inReplyTo or messageId
-  const threads = {};
-  emails.forEach((email) => {
-    const threadId = email.inReplyTo || email.messageId || email.emailID;
-    if (!threads[threadId]) {
-      threads[threadId] = [];
-    }
-    threads[threadId].push(email);
-  });
-  responseThreads = Object.values(threads);
-}
-
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
@@ -1134,19 +1163,19 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
     // };
     const provider = userCredential.provider; // default to gmail
 
-const providerConfig = PROVIDER_CONFIG[provider];
-const imapConfig = {
-  imap: {
-    user: userCredential.email,
-    password: userCredential.appPassword,
-    host: providerConfig.host,
-    port: providerConfig.port,
-    tls: providerConfig.tls,
-    authTimeout: 30000,
-    tlsOptions: { rejectUnauthorized: false },
-  },
-};
-    
+    const providerConfig = PROVIDER_CONFIG[provider];
+    const imapConfig = {
+      imap: {
+        user: userCredential.email,
+        password: userCredential.appPassword,
+        host: providerConfig.host,
+        port: providerConfig.port,
+        tls: providerConfig.tls,
+        authTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+
     console.log("Connecting to IMAP server...");
     const connection = await Imap.connect(imapConfig);
 
@@ -1264,6 +1293,156 @@ const imapConfig = {
   }
 };
 
+// Helper function to fetch linked entities for an email
+const getLinkedEntities = async (email) => {
+  try {
+    const linkedEntities = {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+    };
+
+    // Extract emails from sender and recipient
+    const emailAddresses = [];
+
+    if (email.sender) emailAddresses.push(email.sender);
+    if (email.recipient) {
+      // Split recipient emails (comma-separated)
+      const recipients = email.recipient.split(",").map((r) => r.trim());
+      emailAddresses.push(...recipients);
+    }
+    if (email.cc) {
+      const ccEmails = email.cc.split(",").map((r) => r.trim());
+      emailAddresses.push(...ccEmails);
+    }
+    if (email.bcc) {
+      const bccEmails = email.bcc.split(",").map((r) => r.trim());
+      emailAddresses.push(...bccEmails);
+    }
+
+    // Remove duplicates and filter out empty values
+    const uniqueEmails = [...new Set(emailAddresses)].filter(Boolean);
+
+    if (uniqueEmails.length === 0) {
+      return linkedEntities;
+    }
+
+    // Search for leads by email or by explicit linkage
+    const leads = await Lead.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { email: { [Sequelize.Op.in]: uniqueEmails } },
+          { leadId: email.leadId }, // If email has direct leadId reference
+        ],
+      },
+      include: [
+        {
+          model: MasterUser,
+          as: "Owner",
+          attributes: ["name", "masterUserID"],
+          required: false,
+        },
+      ],
+    });
+
+    // Search for deals by email or by explicit linkage
+    const deals = await Deal.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { email: { [Sequelize.Op.in]: uniqueEmails } },
+          { dealId: email.dealId }, // If email has direct dealId reference
+        ],
+      },
+      include: [
+        {
+          model: MasterUser,
+          as: "Owner",
+          attributes: ["name", "masterUserID"],
+          required: false,
+        },
+      ],
+    });
+
+    // Search for persons by email
+    const persons = await Person.findAll({
+      where: {
+        email: { [Sequelize.Op.in]: uniqueEmails },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "Organization",
+          required: false,
+        },
+      ],
+    });
+
+    // Search for organizations by finding persons first
+    const personOrgIds = persons
+      .map((p) => p.leadOrganizationId)
+      .filter(Boolean);
+    let organizations = [];
+
+    if (personOrgIds.length > 0) {
+      organizations = await Organization.findAll({
+        where: {
+          leadOrganizationId: { [Sequelize.Op.in]: personOrgIds },
+        },
+      });
+    }
+
+    // Format the results
+    linkedEntities.leads = leads.map((lead) => ({
+      leadId: lead.leadId,
+      title: lead.title,
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      status: lead.status,
+      owner: lead.Owner ? lead.Owner.name : null,
+      createdAt: lead.createdAt,
+    }));
+
+    linkedEntities.deals = deals.map((deal) => ({
+      dealId: deal.dealId,
+      title: deal.title,
+      contactPerson: deal.contactPerson,
+      organization: deal.organization,
+      status: deal.status,
+      value: deal.value,
+      owner: deal.Owner ? deal.Owner.name : null,
+      createdAt: deal.createdAt,
+    }));
+
+    linkedEntities.persons = persons.map((person) => ({
+      personId: person.personId,
+      contactPerson: person.contactPerson,
+      email: person.email,
+      phone: person.phone,
+      organization: person.Organization
+        ? person.Organization.organization
+        : null,
+      createdAt: person.createdAt,
+    }));
+
+    linkedEntities.organizations = organizations.map((org) => ({
+      leadOrganizationId: org.leadOrganizationId,
+      organization: org.organization,
+      country: org.organizationCountry,
+      createdAt: org.createdAt,
+    }));
+
+    return linkedEntities;
+  } catch (error) {
+    console.error("Error fetching linked entities:", error);
+    return {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+    };
+  }
+};
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
@@ -1300,22 +1479,26 @@ exports.getOneEmail = async (req, res) => {
       path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
-    // If this is a draft or trash, do NOT fetch related emails
+    // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
+      const linkedEntities = await getLinkedEntities(mainEmail);
       return res.status(200).json({
         message: "Draft email fetched successfully.",
         data: {
           email: mainEmail,
           relatedEmails: [],
+          linkedEntities,
         },
       });
     }
     if (mainEmail.folder === "trash") {
+      const linkedEntities = await getLinkedEntities(mainEmail);
       return res.status(200).json({
         message: "trash email fetched successfully.",
         data: {
           email: mainEmail,
           relatedEmails: [],
+          linkedEntities,
         },
       });
     }
@@ -1341,7 +1524,7 @@ exports.getOneEmail = async (req, res) => {
             },
           },
         ],
-        folder: { [Sequelize.Op.in]: ["inbox","sent"] },
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
       },
       include: [
         {
@@ -1351,48 +1534,57 @@ exports.getOneEmail = async (req, res) => {
       ],
       order: [["createdAt", "ASC"]],
     });
-// Remove the main email from relatedEmails
-//relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
-// Remove the main email from relatedEmails (by messageId)
+    // Remove the main email from relatedEmails
+    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
+    // Remove the main email from relatedEmails (by messageId)
 
-relatedEmails = relatedEmails.filter(email => email.messageId !== mainEmail.messageId);
+    relatedEmails = relatedEmails.filter(
+      (email) => email.messageId !== mainEmail.messageId
+    );
 
-// Deduplicate relatedEmails by messageId (keep the first occurrence)
-// const seen = new Set();
-// relatedEmails = relatedEmails.filter(email => {
-//   if (seen.has(email.messageId)) return false;
-//   seen.add(email.messageId);
-//   return true;
-// });
-let allEmails = [mainEmail, ...relatedEmails];
+    // Deduplicate relatedEmails by messageId (keep the first occurrence)
+    // const seen = new Set();
+    // relatedEmails = relatedEmails.filter(email => {
+    //   if (seen.has(email.messageId)) return false;
+    //   seen.add(email.messageId);
+    //   return true;
+    // });
+    let allEmails = [mainEmail, ...relatedEmails];
 
-//......changes
-const seen = new Set();
-allEmails = allEmails.filter(email => {
-  if (seen.has(email.messageId)) return false;
-  seen.add(email.messageId);
-  return true;
-});
-const emailMap = {};
-allEmails.forEach(email => {
-  emailMap[email.messageId] = email;
-});
-const conversation = [];
-let current = allEmails.find(email => !email.inReplyTo || !emailMap[email.inReplyTo]);
-while (current) {
-  conversation.push(current);
-  // Find the next email that replies to the current one
-  current = allEmails.find(email => email.inReplyTo === conversation[conversation.length - 1].messageId);
-}
+    //......changes
+    const seen = new Set();
+    allEmails = allEmails.filter((email) => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+    const emailMap = {};
+    allEmails.forEach((email) => {
+      emailMap[email.messageId] = email;
+    });
+    const conversation = [];
+    let current = allEmails.find(
+      (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
+    );
+    while (current) {
+      conversation.push(current);
+      // Find the next email that replies to the current one
+      current = allEmails.find(
+        (email) =>
+          email.inReplyTo === conversation[conversation.length - 1].messageId
+      );
+    }
 
-// // If some emails are not in the chain (e.g., forwards), add them by date
-const remaining = allEmails.filter(email => !conversation.includes(email));
-remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-conversation.push(...remaining);
+    // // If some emails are not in the chain (e.g., forwards), add them by date
+    const remaining = allEmails.filter(
+      (email) => !conversation.includes(email)
+    );
+    remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    conversation.push(...remaining);
 
-// // The first is the main email, the rest are related
-// const sortedMainEmail = conversation[0];
-// const sortedRelatedEmails = conversation.slice(1);
+    // // The first is the main email, the rest are related
+    // const sortedMainEmail = conversation[0];
+    // const sortedRelatedEmails = conversation.slice(1);
 
     // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
@@ -1403,16 +1595,20 @@ conversation.push(...remaining);
       }));
     });
 
-const sortedMainEmail = conversation[0];
-const sortedRelatedEmails = conversation.slice(1);
+    const sortedMainEmail = conversation[0];
+    const sortedRelatedEmails = conversation.slice(1);
 
-res.status(200).json({
-  message: "Email fetched successfully.",
-  data: {
-    email: sortedMainEmail,
-    relatedEmails: sortedRelatedEmails,
-  },
-});
+    // Fetch linked leads, deals, and contact persons
+    const linkedEntities = await getLinkedEntities(mainEmail);
+
+    res.status(200).json({
+      message: "Email fetched successfully.",
+      data: {
+        email: sortedMainEmail,
+        relatedEmails: sortedRelatedEmails,
+        linkedEntities, // Add linked entities to response
+      },
+    });
   } catch (error) {
     console.error("Error fetching email:", error);
     res.status(500).json({ message: "Internal server error." });
@@ -1424,13 +1620,12 @@ exports.composeEmail = [
   // upload.array("attachments"), // Use Multer to handle multiple file uploads
   dynamicUpload,
   async (req, res) => {
-    
     const {
       to,
       cc,
       bcc,
       subject,
-      text, 
+      text,
       html,
       templateID,
       actionType,
@@ -1446,9 +1641,6 @@ exports.composeEmail = [
       const defaultEmail = await DefaultEmail.findOne({
         where: { masterUserID, isDefault: true },
       });
-
-
-
 
       let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
 
@@ -1485,17 +1677,17 @@ exports.composeEmail = [
           });
         }
         // Add Smart BCC if set and not already in bcc
-// let bccList = [];
-// if (bcc) {
-//   bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
-// }
-// if (userCredential.smartBcc) {
-//   const smartBccEmail = userCredential.smartBcc.trim();
-//   if (!bccList.includes(smartBccEmail)) {
-//     bccList.push(smartBccEmail);
-//   }
-// }
-// const finalBcc = bccList.join(", ");
+        // let bccList = [];
+        // if (bcc) {
+        //   bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
+        // }
+        // if (userCredential.smartBcc) {
+        //   const smartBccEmail = userCredential.smartBcc.trim();
+        //   if (!bccList.includes(smartBccEmail)) {
+        //     bccList.push(smartBccEmail);
+        //   }
+        // }
+        // const finalBcc = bccList.join(", ");
 
         SENDER_EMAIL = userCredential.email;
         SENDER_PASSWORD = userCredential.appPassword;
@@ -1514,21 +1706,24 @@ exports.composeEmail = [
         SENDER_NAME = masterUser.name; // Use the name from MasterUser
       }
       // --- Smart BCC logic: always after sender is set ---
-const userCredentialForBcc = await UserCredential.findOne({
-  where: { masterUserID },
-});
+      const userCredentialForBcc = await UserCredential.findOne({
+        where: { masterUserID },
+      });
 
-let bccList = [];
-if (bcc) {
-  bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
-}
-if (userCredentialForBcc && userCredentialForBcc.smartBcc) {
-  const smartBccEmail = userCredentialForBcc.smartBcc.trim();
-  if (!bccList.includes(smartBccEmail)) {
-    bccList.push(smartBccEmail);
-  }
-}
-const finalBcc = bccList.join(", ");
+      let bccList = [];
+      if (bcc) {
+        bccList = bcc
+          .split(",")
+          .map((e) => e.trim())
+          .filter(Boolean);
+      }
+      if (userCredentialForBcc && userCredentialForBcc.smartBcc) {
+        const smartBccEmail = userCredentialForBcc.smartBcc.trim();
+        if (!bccList.includes(smartBccEmail)) {
+          bccList.push(smartBccEmail);
+        }
+      }
+      const finalBcc = bccList.join(", ");
 
       let finalSubject = subject;
       let finalBody = text || html;
@@ -1548,81 +1743,94 @@ const finalBcc = bccList.join(", ");
         finalBody = text || html || draftEmail.body;
       }
       // Handle reply action
-if (actionType === "reply") {
-  const originalEmail = await Email.findOne({
-    where: { messageId: replyToMessageId },
-  });
+      if (actionType === "reply") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
 
-  if (!originalEmail) {
-    return res.status(404).json({
-      message: "Original email not found for the given messageId.",
-    });
-  }
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
 
-  inReplyToHeader = originalEmail.messageId;
-  referencesHeader = originalEmail.references
-    ? `${originalEmail.references} ${originalEmail.messageId}`
-    : originalEmail.messageId;
+        inReplyToHeader = originalEmail.messageId;
+        referencesHeader = originalEmail.references
+          ? `${originalEmail.references} ${originalEmail.messageId}`
+          : originalEmail.messageId;
 
-  finalSubject = originalEmail.subject.startsWith("Re:") ? originalEmail.subject : `Re: ${originalEmail.subject}`;
-  finalBody = `${text || html}`;
-  req.body.to = originalEmail.sender;
-  req.body.cc = "";
-}
-if (actionType === "replyAll") {
-  const originalEmail = await Email.findOne({
-    where: { messageId: replyToMessageId },
-  });
+        finalSubject = originalEmail.subject.startsWith("Re:")
+          ? originalEmail.subject
+          : `Re: ${originalEmail.subject}`;
+        finalBody = `${text || html}`;
+        req.body.to = originalEmail.sender;
+        req.body.cc = "";
+      }
+      if (actionType === "replyAll") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
 
-  if (!originalEmail) {
-    return res.status(404).json({
-      message: "Original email not found for the given messageId.",
-    });
-  }
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
 
-  inReplyToHeader = originalEmail.messageId;
-  referencesHeader = originalEmail.references
-    ? `${originalEmail.references} ${originalEmail.messageId}`
-    : originalEmail.messageId;
+        inReplyToHeader = originalEmail.messageId;
+        referencesHeader = originalEmail.references
+          ? `${originalEmail.references} ${originalEmail.messageId}`
+          : originalEmail.messageId;
 
-  finalSubject = originalEmail.subject.startsWith("Re:") ? originalEmail.subject : `Re: ${originalEmail.subject}`;
-  finalBody = `${text || html}`;
+        finalSubject = originalEmail.subject.startsWith("Re:")
+          ? originalEmail.subject
+          : `Re: ${originalEmail.subject}`;
+        finalBody = `${text || html}`;
 
-  // Build recipients: all original To and CC, plus sender, except yourself
-  const currentUserEmail = SENDER_EMAIL.toLowerCase();
-  const allTo = (originalEmail.recipient || "").split(",").map(e => e.trim().toLowerCase());
-  const allCc = (originalEmail.cc || "").split(",").map(e => e.trim().toLowerCase());
-  const replyAllList = [originalEmail.sender, ...allTo, ...allCc]
-    .filter(email => email && email !== currentUserEmail);
-  // Remove duplicates
-  const uniqueReplyAll = [...new Set(replyAllList)];
-  // Set recipients for reply all
-  req.body.to = uniqueReplyAll[0] || "";
-  req.body.cc = uniqueReplyAll.slice(1).join(", ");
-}
-if (actionType === "forward") {
-  const originalEmail = await Email.findOne({
-    where: { messageId: replyToMessageId },
-  });
+        // Build recipients: all original To and CC, plus sender, except yourself
+        const currentUserEmail = SENDER_EMAIL.toLowerCase();
+        const allTo = (originalEmail.recipient || "")
+          .split(",")
+          .map((e) => e.trim().toLowerCase());
+        const allCc = (originalEmail.cc || "")
+          .split(",")
+          .map((e) => e.trim().toLowerCase());
+        const replyAllList = [originalEmail.sender, ...allTo, ...allCc].filter(
+          (email) => email && email !== currentUserEmail
+        );
+        // Remove duplicates
+        const uniqueReplyAll = [...new Set(replyAllList)];
+        // Set recipients for reply all
+        req.body.to = uniqueReplyAll[0] || "";
+        req.body.cc = uniqueReplyAll.slice(1).join(", ");
+      }
+      if (actionType === "forward") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
 
-  if (!originalEmail) {
-    return res.status(404).json({
-      message: "Original email not found for the given messageId.",
-    });
-  }
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
 
-  inReplyToHeader = null;
-  referencesHeader = null;
+        inReplyToHeader = null;
+        referencesHeader = null;
 
-  finalSubject = originalEmail.subject.startsWith("Fwd:") ? originalEmail.subject : `Fwd: ${originalEmail.subject}`;
-  finalBody = `${text || html}<br><br>---------- Forwarded message ----------<br>
+        finalSubject = originalEmail.subject.startsWith("Fwd:")
+          ? originalEmail.subject
+          : `Fwd: ${originalEmail.subject}`;
+        finalBody = `${
+          text || html
+        }<br><br>---------- Forwarded message ----------<br>
     From: ${originalEmail.senderName || originalEmail.sender}<br>
     Date: ${originalEmail.createdAt}<br>
     Subject: ${originalEmail.subject}<br>
     To: ${originalEmail.recipient}<br>
     ${originalEmail.body}`;
-  // For forward, req.body.to and req.body.cc are set by the user
-}
+        // For forward, req.body.to and req.body.cc are set by the user
+      }
 
       // If a templateID is provided, fetch the template
       if (templateID) {
@@ -1779,16 +1987,15 @@ if (actionType === "forward") {
         references: referencesHeader || undefined,
       };
 
-const baseURL = process.env.LOCALHOST_URL;
+      const baseURL = process.env.LOCALHOST_URL;
 
-  
       let attachments = [];
       if (req.files && req.files.length > 0) {
         attachments = req.files.map((file) => ({
           filename: file.filename,
           originalname: file.originalname,
           path: file.path,
-         // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
+          // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
           size: file.size,
           contentType: file.mimetype,
         }));
@@ -1799,45 +2006,49 @@ const baseURL = process.env.LOCALHOST_URL;
         });
         attachments = oldAttachments.map((att) => ({
           filename: att.filename,
-          originalname:att.originalname || att.filename,
+          originalname: att.originalname || att.filename,
           path: att.filePath || att.path, // use filePath or path
           size: att.size,
           contentType: att.contentType,
         }));
       }
 
-  const finalTo = to || (draftEmail && draftEmail.recipient);
-const finalCc = cc || (draftEmail && draftEmail.cc);
-const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
+      const finalTo = to || (draftEmail && draftEmail.recipient);
+      const finalCc = cc || (draftEmail && draftEmail.cc);
+      const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
 
-if (!finalTo && !finalCc && !finalBccValue) {
-  return res.status(400).json({ message: "At least one recipient (to, cc, bcc) is required." });
-}
-        const emailData = {
-          // messageId: info.messageId,
-          draftId:draftId || null,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          // recipient: to,
-          // cc,
-          // bcc,
-     recipient: finalTo,
-  cc: finalCc,
-  bcc: finalBccValue,
-          subject: finalSubject,
-          body: finalBody,
-          folder: "sent",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-          isDraft: false,
-          attachments
-          // isShared: isShared === true || isShared === "true", // ensure boolean
-        };
+      if (!finalTo && !finalCc && !finalBccValue) {
+        return res
+          .status(400)
+          .json({
+            message: "At least one recipient (to, cc, bcc) is required.",
+          });
+      }
+      const emailData = {
+        // messageId: info.messageId,
+        draftId: draftId || null,
+        inReplyTo: inReplyToHeader || null,
+        references: referencesHeader || null,
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        // recipient: to,
+        // cc,
+        // bcc,
+        recipient: finalTo,
+        cc: finalCc,
+        bcc: finalBccValue,
+        subject: finalSubject,
+        body: finalBody,
+        folder: "sent",
+        createdAt: new Date(),
+        masterUserID,
+        tempMessageId,
+        isDraft: false,
+        attachments,
+        // isShared: isShared === true || isShared === "true", // ensure boolean
+      };
 
-         await publishToQueue("EMAIL_QUEUE", emailData);
+      await publishToQueue("EMAIL_QUEUE", emailData);
       // }
 
       res.status(200).json({
@@ -1987,12 +2198,12 @@ exports.addUserCredential = async (req, res) => {
     isTrackClickEmail,
     blockedEmail, // <-- Add this line
     provider,
-    imapHost,      // <-- Add these lines
+    imapHost, // <-- Add these lines
     imapPort,
     imapTLS,
     smtpHost,
     smtpPort,
-    smtpSecure
+    smtpSecure,
   } = req.body;
 
   try {
@@ -2018,15 +2229,17 @@ exports.addUserCredential = async (req, res) => {
       where: { masterUserID },
     });
 
-
-        const updateData = {};
+    const updateData = {};
     if (email) updateData.email = email;
     if (appPassword) updateData.appPassword = appPassword;
     if (syncStartDate) updateData.syncStartDate = syncStartDate;
     if (syncFolders) updateData.syncFolders = syncFolders;
-    if (syncAllFolders !== undefined) updateData.syncAllFolders = syncAllFolders;
-    if (isTrackOpenEmail !== undefined) updateData.isTrackOpenEmail = isTrackOpenEmail;
-    if (isTrackClickEmail !== undefined) updateData.isTrackClickEmail = isTrackClickEmail;
+    if (syncAllFolders !== undefined)
+      updateData.syncAllFolders = syncAllFolders;
+    if (isTrackOpenEmail !== undefined)
+      updateData.isTrackOpenEmail = isTrackOpenEmail;
+    if (isTrackClickEmail !== undefined)
+      updateData.isTrackClickEmail = isTrackClickEmail;
     if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail;
     if (provider) updateData.provider = provider;
     // Add custom provider fields
@@ -2063,14 +2276,14 @@ exports.addUserCredential = async (req, res) => {
       isTrackOpenEmail: isTrackOpenEmail || true,
       isTrackClickEmail: isTrackClickEmail || true,
       blockedEmail: blockedEmail || null, // <-- Add this line
-        provider: provider || "gmail",
-  // Add these lines for custom provider support
-  imapHost: provider === "custom" ? imapHost : null,
-  imapPort: provider === "custom" ? imapPort : null,
-  imapTLS: provider === "custom" ? imapTLS : null,
-  smtpHost: provider === "custom" ? smtpHost : null,
-  smtpPort: provider === "custom" ? smtpPort : null,
-  smtpSecure: provider === "custom" ? smtpSecure : null,
+      provider: provider || "gmail",
+      // Add these lines for custom provider support
+      imapHost: provider === "custom" ? imapHost : null,
+      imapPort: provider === "custom" ? imapPort : null,
+      imapTLS: provider === "custom" ? imapTLS : null,
+      smtpHost: provider === "custom" ? smtpHost : null,
+      smtpPort: provider === "custom" ? smtpPort : null,
+      smtpSecure: provider === "custom" ? smtpSecure : null,
     });
 
     res.status(201).json({
@@ -2215,13 +2428,15 @@ exports.saveDraft = [
         //   path: file.path,
         // }));
         const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-          const savedAttachments = req.files.map((file) => ({
-    emailID: savedDraft.emailID,
-    filename: file.filename,
-    filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
-    size: file.size,
-    contentType: file.mimetype,
-  }));
+        const savedAttachments = req.files.map((file) => ({
+          emailID: savedDraft.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          size: file.size,
+          contentType: file.mimetype,
+        }));
         await Attachment.bulkCreate(savedAttachments);
       } else if (isUpdate) {
         // If no new attachments, fetch existing ones for response
@@ -2312,8 +2527,6 @@ exports.scheduleEmail = [
         }));
         await Attachment.bulkCreate(savedAttachments);
       }
-
-
 
       res.status(200).json({
         message: "Email scheduled successfully.",
