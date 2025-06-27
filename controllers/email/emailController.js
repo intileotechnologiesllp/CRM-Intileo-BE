@@ -1330,10 +1330,8 @@ const getLinkedEntities = async (email) => {
     // 2. For Persons: Allow multiple persons with same email (different roles/organizations)
     // 3. For Organizations: Derived from persons' organizations
 
-    // Search for leads by explicit linkage first, then by email (limit to 1)
+    // Search for leads ONLY by explicit linkage (no email matching)
     let leads = [];
-
-    // First, check if email has direct leadId reference
     if (email.leadId) {
       leads = await Lead.findAll({
         where: { leadId: email.leadId },
@@ -1348,29 +1346,8 @@ const getLinkedEntities = async (email) => {
       });
     }
 
-    // If no direct linkage found, search by email address (limit to 1 lead)
-    if (leads.length === 0 && uniqueEmails.length > 0) {
-      leads = await Lead.findAll({
-        where: {
-          email: { [Sequelize.Op.in]: uniqueEmails },
-        },
-        include: [
-          {
-            model: MasterUser,
-            as: "Owner",
-            attributes: ["name", "masterUserID"],
-            required: false,
-          },
-        ],
-        limit: 1, // Only get the most recent/first matching lead
-        order: [["createdAt", "DESC"]], // Get the most recent lead if multiple exist
-      });
-    }
-
-    // Search for deals by explicit linkage first, then by email (limit to 1)
+    // Search for deals ONLY by explicit linkage (no email matching)
     let deals = [];
-
-    // First, check if email has direct dealId reference
     if (email.dealId) {
       deals = await Deal.findAll({
         where: { dealId: email.dealId },
@@ -1382,25 +1359,6 @@ const getLinkedEntities = async (email) => {
             required: false,
           },
         ],
-      });
-    }
-
-    // If no direct linkage found, search by email address (limit to 1 deal)
-    if (deals.length === 0 && uniqueEmails.length > 0) {
-      deals = await Deal.findAll({
-        where: {
-          email: { [Sequelize.Op.in]: uniqueEmails },
-        },
-        include: [
-          {
-            model: MasterUser,
-            as: "Owner",
-            attributes: ["name", "masterUserID"],
-            required: false,
-          },
-        ],
-        limit: 1, // Only get the most recent/first matching deal
-        order: [["createdAt", "DESC"]], // Get the most recent deal if multiple exist
       });
     }
 
