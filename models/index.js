@@ -4,6 +4,7 @@ const Person = require("./leads/leadPersonModel");
 const Organization = require("./leads/leadOrganizationModel");
 const MasterUser = require("./master/masterUserModel");
 const Activity = require("./activity/activityModel");
+const Deal = require("./deals/dealsModels");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -30,6 +31,9 @@ Organization.hasMany(Person, {
   as: "LeadPerson",
 });
 Lead.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
+
+// // Deal associations
+// Deal.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
 
 // Activity associations - only define the hasMany side here
 // The belongsTo associations are already defined in activityModel.js
@@ -62,4 +66,5 @@ module.exports = {
   Person,
   Organization,
   Activity,
+  Deal,
 };

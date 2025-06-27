@@ -45,6 +45,9 @@ exports.createLead = async (req, res) => {
     SBUClass,
     numberOfReportsPrepared,
   } = req.body;
+
+  console.log("Request body email ID:", req.body.emailID);
+  console.log("Request body sourceOrgin:", sourceOrgin);
   // --- Add validation here ---
   if (!contactPerson || !organization || !title || !email) {
     return res.status(400).json({
