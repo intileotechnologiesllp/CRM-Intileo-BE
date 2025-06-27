@@ -1512,30 +1512,40 @@ const getAggregatedLinkedEntities = async (emails) => {
     // const seenPersons = new Set();
     // const seenOrganizations = new Set();
 
-    // Track conversation statistics
+    // Track conversation statistics and email-to-name mapping
+    const emailToNameMap = new Map(); // Map email addresses to their display names
+
     emails.forEach((email) => {
-      // Add all email participants to unique participants set
-      if (email.sender)
+      // Add sender with name mapping
+      if (email.sender) {
         aggregatedEntities.conversationStats.uniqueParticipants.add(
           email.sender
         );
-      if (email.recipient) {
-        email.recipient
-          .split(",")
-          .forEach((r) =>
-            aggregatedEntities.conversationStats.uniqueParticipants.add(
-              r.trim()
-            )
-          );
+        // Map sender email to sender name (if available)
+        if (email.senderName) {
+          emailToNameMap.set(email.sender.toLowerCase(), email.senderName);
+        }
       }
-      if (email.cc) {
-        email.cc
-          .split(",")
-          .forEach((r) =>
-            aggregatedEntities.conversationStats.uniqueParticipants.add(
-              r.trim()
-            )
+
+      // Add recipients (note: recipients don't have individual names in most email structures)
+      if (email.recipient) {
+        email.recipient.split(",").forEach((r) => {
+          const cleanEmail = r.trim();
+          aggregatedEntities.conversationStats.uniqueParticipants.add(
+            cleanEmail
           );
+          // Recipients typically don't have individual names in stored email data
+          // so we'll use email as fallback
+        });
+      }
+
+      if (email.cc) {
+        email.cc.split(",").forEach((r) => {
+          const cleanEmail = r.trim();
+          aggregatedEntities.conversationStats.uniqueParticipants.add(
+            cleanEmail
+          );
+        });
       }
 
       // Track date range
@@ -1584,27 +1594,70 @@ const getAggregatedLinkedEntities = async (emails) => {
       order: [["createdAt", "DESC"]],
     });
 
-    // Add all participant persons to the main persons array (with source info)
+    // Create a map of emails that have person records
+    const emailsWithPersonRecords = new Set();
+    const emailToPersonMap = new Map();
+
     allParticipantPersons.forEach((person) => {
-      if (!seenPersons.has(person.personId)) {
-        seenPersons.add(person.personId);
-        aggregatedEntities.persons.push({
-          personId: person.personId,
-          contactPerson: person.contactPerson,
-          email: person.email,
-          phone: person.phone,
-          leadOrganizationId: person.leadOrganizationId,
-          organization: person.LeadOrganization
-            ? person.LeadOrganization.organization
-            : null,
-          createdAt: person.createdAt,
-          sourceEmail: {
-            emailId: null, // Participant from conversation, not specific email
-            messageId: null,
-            subject: "Conversation Participant",
+      emailsWithPersonRecords.add(person.email.toLowerCase());
+      emailToPersonMap.set(person.email.toLowerCase(), person);
+    }); // Add all participant emails to persons array (both existing persons and email-only participants)
+    participantEmails.forEach((email) => {
+      const emailLower = email.toLowerCase();
+
+      if (emailsWithPersonRecords.has(emailLower)) {
+        // Email has a person record in database
+        const person = emailToPersonMap.get(emailLower);
+        if (!seenPersons.has(person.personId)) {
+          seenPersons.add(person.personId);
+          aggregatedEntities.persons.push({
+            personId: person.personId,
+            contactPerson: person.contactPerson, // Keep contactPerson for existing persons
+            senderName: emailToNameMap.get(emailLower) || person.contactPerson, // Add senderName
+            email: person.email,
+            phone: person.phone,
+            leadOrganizationId: person.leadOrganizationId,
+            organization: person.LeadOrganization
+              ? person.LeadOrganization.organization
+              : null,
+            createdAt: person.createdAt,
+            isExistingPerson: true, // Flag: this is an existing person record
+            sourceType: "database", // Source: from person database
+            canCreateContact: false, // Already exists, no need to create
+            sourceEmail: {
+              emailId: null, // Participant from conversation, not specific email
+              messageId: null,
+              subject: "Conversation Participant",
+              createdAt: null,
+            },
+          });
+        }
+      } else {
+        // Email participant without person record
+        const emailOnlyId = `email-only-${emailLower}`;
+        if (!seenPersons.has(emailOnlyId)) {
+          seenPersons.add(emailOnlyId);
+          const displayName = emailToNameMap.get(emailLower) || email; // Use senderName if available, else email
+          aggregatedEntities.persons.push({
+            personId: null, // No person record exists
+            // contactPerson: removed for email-only participants
+            senderName: displayName, // Use senderName from email or email address as fallback
+            email: email,
+            phone: null,
+            leadOrganizationId: null,
+            organization: null,
             createdAt: null,
-          },
-        });
+            isExistingPerson: false, // Flag: this is just an email participant
+            sourceType: "email_participant", // Source: from email conversation
+            canCreateContact: true, // Flag: can create new contact from this
+            sourceEmail: {
+              emailId: null,
+              messageId: null,
+              subject: "Email Participant Only",
+              createdAt: null,
+            },
+          });
+        }
       }
     });
 
@@ -1689,6 +1742,12 @@ const getAggregatedLinkedEntities = async (emails) => {
           aggregatedEntities.persons.push({
             ...person,
             leadOrganizationId: person.leadOrganizationId,
+            senderName:
+              emailToNameMap.get(person.email.toLowerCase()) ||
+              person.contactPerson, // Add senderName
+            isExistingPerson: true, // These are existing person records from database
+            sourceType: "database", // Source: from person database
+            canCreateContact: false, // Already exists, no need to create
             sourceEmail: {
               emailId: email.emailID,
               messageId: email.messageId,
@@ -1717,17 +1776,22 @@ const getAggregatedLinkedEntities = async (emails) => {
     }
 
     // Sort aggregated entities by creation date (most recent first)
+    // Handle null createdAt for email-only participants
     aggregatedEntities.leads.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
     aggregatedEntities.deals.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
-    aggregatedEntities.persons.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
+    aggregatedEntities.persons.sort((a, b) => {
+      // Put existing persons first, then email-only participants
+      if (a.isExistingPerson && !b.isExistingPerson) return -1;
+      if (!a.isExistingPerson && b.isExistingPerson) return 1;
+      // Within same type, sort by creation date
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
     aggregatedEntities.organizations.sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
 
     return aggregatedEntities;
