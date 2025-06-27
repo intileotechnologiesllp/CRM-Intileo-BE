@@ -1486,6 +1486,177 @@ const getLinkedEntities = async (email) => {
   }
 };
 
+// Helper function to aggregate linked entities from all emails in a conversation
+const getAggregatedLinkedEntities = async (emails) => {
+  try {
+    const aggregatedEntities = {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+      conversationStats: {
+        totalEmails: emails.length,
+        uniqueParticipants: new Set(),
+        dateRange: {
+          earliest: null,
+          latest: null,
+        },
+      },
+    };
+
+    // Keep track of unique entities to avoid duplicates
+    const seenLeads = new Set();
+    const seenDeals = new Set();
+    const seenPersons = new Set();
+    const seenOrganizations = new Set();
+
+    // Track conversation statistics
+    emails.forEach((email) => {
+      // Add all email participants to unique participants set
+      if (email.sender)
+        aggregatedEntities.conversationStats.uniqueParticipants.add(
+          email.sender
+        );
+      if (email.recipient) {
+        email.recipient
+          .split(",")
+          .forEach((r) =>
+            aggregatedEntities.conversationStats.uniqueParticipants.add(
+              r.trim()
+            )
+          );
+      }
+      if (email.cc) {
+        email.cc
+          .split(",")
+          .forEach((r) =>
+            aggregatedEntities.conversationStats.uniqueParticipants.add(
+              r.trim()
+            )
+          );
+      }
+
+      // Track date range
+      const emailDate = new Date(email.createdAt);
+      if (
+        !aggregatedEntities.conversationStats.dateRange.earliest ||
+        emailDate < aggregatedEntities.conversationStats.dateRange.earliest
+      ) {
+        aggregatedEntities.conversationStats.dateRange.earliest = emailDate;
+      }
+      if (
+        !aggregatedEntities.conversationStats.dateRange.latest ||
+        emailDate > aggregatedEntities.conversationStats.dateRange.latest
+      ) {
+        aggregatedEntities.conversationStats.dateRange.latest = emailDate;
+      }
+    });
+
+    // Convert Set to Array for response
+    aggregatedEntities.conversationStats.uniqueParticipants = Array.from(
+      aggregatedEntities.conversationStats.uniqueParticipants
+    ).filter(Boolean);
+
+    // Process each email in the conversation
+    for (const email of emails) {
+      const linkedEntities = await getLinkedEntities(email);
+
+      // Aggregate leads (deduplicate by leadId)
+      linkedEntities.leads.forEach((lead) => {
+        if (!seenLeads.has(lead.leadId)) {
+          seenLeads.add(lead.leadId);
+          aggregatedEntities.leads.push({
+            ...lead,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate deals (deduplicate by dealId)
+      linkedEntities.deals.forEach((deal) => {
+        if (!seenDeals.has(deal.dealId)) {
+          seenDeals.add(deal.dealId);
+          aggregatedEntities.deals.push({
+            ...deal,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate persons (deduplicate by personId)
+      linkedEntities.persons.forEach((person) => {
+        if (!seenPersons.has(person.personId)) {
+          seenPersons.add(person.personId);
+          aggregatedEntities.persons.push({
+            ...person,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate organizations (deduplicate by leadOrganizationId)
+      linkedEntities.organizations.forEach((org) => {
+        if (!seenOrganizations.has(org.leadOrganizationId)) {
+          seenOrganizations.add(org.leadOrganizationId);
+          aggregatedEntities.organizations.push({
+            ...org,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+    }
+
+    // Sort aggregated entities by creation date (most recent first)
+    aggregatedEntities.leads.sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+    aggregatedEntities.deals.sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+    aggregatedEntities.persons.sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+    aggregatedEntities.organizations.sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    return aggregatedEntities;
+  } catch (error) {
+    console.error("Error aggregating linked entities:", error);
+    return {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+      conversationStats: {
+        totalEmails: 0,
+        uniqueParticipants: [],
+        dateRange: { earliest: null, latest: null },
+      },
+    };
+  }
+};
+
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
@@ -1640,15 +1811,15 @@ exports.getOneEmail = async (req, res) => {
     const sortedMainEmail = conversation[0];
     const sortedRelatedEmails = conversation.slice(1);
 
-    // Fetch linked leads, deals, and contact persons
-    const linkedEntities = await getLinkedEntities(mainEmail);
+    // Fetch linked entities from ALL emails in the conversation thread
+    const linkedEntities = await getAggregatedLinkedEntities(conversation);
 
     res.status(200).json({
       message: "Email fetched successfully.",
       data: {
         email: sortedMainEmail,
         relatedEmails: sortedRelatedEmails,
-        linkedEntities, // Add linked entities to response
+        linkedEntities, // Add aggregated linked entities to response
       },
     });
   } catch (error) {
