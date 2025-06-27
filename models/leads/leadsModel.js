@@ -5,8 +5,6 @@
 const leadOrganization = require("../../models/leads/leadOrganizationModel");
 const Person = require("../../models/leads/leadPersonModel"); // Import the Person model
 
-
-
 //.........................new changes original.....................................
 
 const { DataTypes } = require("sequelize");
@@ -21,23 +19,23 @@ const Lead = sequelize.define("Lead", {
     primaryKey: true,
     autoIncrement: true,
   },
-    personId: {
+  personId: {
     type: DataTypes.INTEGER,
     references: {
       model: Person,
-      key: "personId"
+      key: "personId",
     },
     allowNull: true,
   },
   leadOrganizationId: {
     type: DataTypes.INTEGER,
     references: {
-      model:"leadOrganizations", // Name of the Organization table
+      model: "leadOrganizations", // Name of the Organization table
       key: "leadOrganizationId",
     },
-     allowNull: true,
-    },
-  
+    allowNull: true,
+  },
+
   // Contact Information
   contactPerson: {
     type: DataTypes.STRING,
@@ -46,6 +44,7 @@ const Lead = sequelize.define("Lead", {
   organization: {
     type: DataTypes.STRING,
     allowNull: true, // Organization name
+    unique: true, // Ensure organization uniqueness at database level
   },
   title: {
     type: DataTypes.STRING,
@@ -84,6 +83,7 @@ const Lead = sequelize.define("Lead", {
   email: {
     type: DataTypes.STRING,
     allowNull: true, // Email address of the person
+    unique: true, // Ensure email uniqueness at database level
     validate: {
       isEmail: true, // Ensure valid email format
     },
@@ -125,23 +125,21 @@ const Lead = sequelize.define("Lead", {
     defaultValue: false, // Default to false (not archived)
   },
   archiveTime: {
-  type: DataTypes.DATE,
-  allowNull: true, // The date/time when the lead was archived
-},
+    type: DataTypes.DATE,
+    allowNull: true, // The date/time when the lead was archived
+  },
   questionShared: {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to false (not shared)
   },
-    ownerId:{
+  ownerId: {
     type: DataTypes.INTEGER,
     allowNull: true, // Owner ID of the lead
   },
-  ownerName:{
+  ownerName: {
     type: DataTypes.STRING,
     allowNull: true, // Owner name of the lead
   },
-
-  
 
   // Timestamps
   createdAt: {
@@ -168,7 +166,7 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.BOOLEAN,
     defaultValue: false, // Default to false (not seen)
   },
-  visibleTo:{
+  visibleTo: {
     type: DataTypes.STRING,
     allowNull: true, // Visibility of the lead (e.g., "Public", "Private")
   },
@@ -177,11 +175,9 @@ const Lead = sequelize.define("Lead", {
     allowNull: true, // Source origin of the lead
   },
   dealId: {
-  type: DataTypes.INTEGER,
-  allowNull: true,
-}
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
 });
-
-
 
 module.exports = Lead;

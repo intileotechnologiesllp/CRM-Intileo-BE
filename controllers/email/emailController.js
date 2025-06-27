@@ -1324,43 +1324,87 @@ const getLinkedEntities = async (email) => {
       return linkedEntities;
     }
 
-    // Search for leads by email or by explicit linkage
-    const leads = await Lead.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { email: { [Sequelize.Op.in]: uniqueEmails } },
-          { leadId: email.leadId }, // If email has direct leadId reference
-        ],
-      },
-      include: [
-        {
-          model: MasterUser,
-          as: "Owner",
-          attributes: ["name", "masterUserID"],
-          required: false,
-        },
-      ],
-    });
+    // LINKING STRATEGY:
+    // 1. For Leads & Deals: Prioritize direct linkage (email.leadId/dealId) over email matching
+    //    - Each email should link to at most ONE lead and ONE deal
+    // 2. For Persons: Allow multiple persons with same email (different roles/organizations)
+    // 3. For Organizations: Derived from persons' organizations
 
-    // Search for deals by email or by explicit linkage
-    const deals = await Deal.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { email: { [Sequelize.Op.in]: uniqueEmails } },
-          { dealId: email.dealId }, // If email has direct dealId reference
-        ],
-      },
-      include: [
-        {
-          model: MasterUser,
-          as: "Owner",
-          attributes: ["name", "masterUserID"],
-          required: false,
-        },
-      ],
-    });
+    // Search for leads by explicit linkage first, then by email (limit to 1)
+    let leads = [];
 
-    // Search for persons by email
+    // First, check if email has direct leadId reference
+    if (email.leadId) {
+      leads = await Lead.findAll({
+        where: { leadId: email.leadId },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+      });
+    }
+
+    // If no direct linkage found, search by email address (limit to 1 lead)
+    if (leads.length === 0 && uniqueEmails.length > 0) {
+      leads = await Lead.findAll({
+        where: {
+          email: { [Sequelize.Op.in]: uniqueEmails },
+        },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+        limit: 1, // Only get the most recent/first matching lead
+        order: [["createdAt", "DESC"]], // Get the most recent lead if multiple exist
+      });
+    }
+
+    // Search for deals by explicit linkage first, then by email (limit to 1)
+    let deals = [];
+
+    // First, check if email has direct dealId reference
+    if (email.dealId) {
+      deals = await Deal.findAll({
+        where: { dealId: email.dealId },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+      });
+    }
+
+    // If no direct linkage found, search by email address (limit to 1 deal)
+    if (deals.length === 0 && uniqueEmails.length > 0) {
+      deals = await Deal.findAll({
+        where: {
+          email: { [Sequelize.Op.in]: uniqueEmails },
+        },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+        limit: 1, // Only get the most recent/first matching deal
+        order: [["createdAt", "DESC"]], // Get the most recent deal if multiple exist
+      });
+    }
+
+    // Search for persons by email (can have multiple persons with same email)
     const persons = await Person.findAll({
       where: {
         email: { [Sequelize.Op.in]: uniqueEmails },
@@ -1372,6 +1416,8 @@ const getLinkedEntities = async (email) => {
           required: false,
         },
       ],
+      limit: 10, // Reasonable limit to prevent performance issues
+      order: [["createdAt", "DESC"]], // Get the most recent persons first
     });
 
     // Search for organizations by finding persons first
