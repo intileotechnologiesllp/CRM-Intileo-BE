@@ -17,6 +17,7 @@ const Lead = require("../../models/leads/leadsModel");
 const Deal = require("../../models/deals/dealsModels");
 const Person = require("../../models/leads/leadPersonModel");
 const Organization = require("../../models/leads/leadOrganizationModel");
+const Activity = require("../../models/activity/activityModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
 const PROVIDER_CONFIG = {
@@ -1392,7 +1393,7 @@ const getLinkedEntities = async (email) => {
       });
     }
 
-    // Format the results
+    // Format the results and fetch activities for persons
     linkedEntities.leads = leads.map((lead) => ({
       leadId: lead.leadId,
       title: lead.title,
@@ -1414,6 +1415,42 @@ const getLinkedEntities = async (email) => {
       createdAt: deal.createdAt,
     }));
 
+    // Get all person IDs for activity lookup
+    const personIds = persons.map((p) => p.personId).filter(Boolean);
+
+    // Fetch activities for all persons at once
+    const activities =
+      personIds.length > 0
+        ? await Activity.findAll({
+            where: {
+              personId: { [Sequelize.Op.in]: personIds },
+            },
+            order: [["createdAt", "DESC"]],
+            limit: 50, // Reasonable limit to prevent too much data
+          })
+        : [];
+
+    // Group activities by personId
+    const activitiesByPersonId = {};
+    activities.forEach((activity) => {
+      if (!activitiesByPersonId[activity.personId]) {
+        activitiesByPersonId[activity.personId] = [];
+      }
+      activitiesByPersonId[activity.personId].push({
+        activityId: activity.activityId,
+        type: activity.type, // Corrected field name from activityType to type
+        subject: activity.subject,
+        description: activity.description,
+        status: activity.status,
+        priority: activity.priority,
+        startDateTime: activity.startDateTime,
+        endDateTime: activity.endDateTime,
+        dueDate: activity.dueDate,
+        isDone: activity.isDone,
+        createdAt: activity.createdAt,
+      });
+    });
+
     linkedEntities.persons = persons.map((person) => ({
       personId: person.personId,
       contactPerson: person.contactPerson,
@@ -1424,6 +1461,8 @@ const getLinkedEntities = async (email) => {
         ? person.LeadOrganization.organization
         : null,
       createdAt: person.createdAt,
+      activities: activitiesByPersonId[person.personId] || [], // Add activities array
+      activityCount: (activitiesByPersonId[person.personId] || []).length, // Add activity count
     }));
 
     linkedEntities.organizations = organizations.map((org) => ({
@@ -1732,6 +1771,54 @@ const getAggregatedLinkedEntities = async (emails) => {
         }
       });
     }
+
+    // Fetch activities for all persons with personId (only for existing persons)
+    const personIds = aggregatedEntities.persons
+      .map((p) => p.personId)
+      .filter(Boolean); // Only get persons that have personId
+
+    const activities =
+      personIds.length > 0
+        ? await Activity.findAll({
+            where: {
+              personId: { [Sequelize.Op.in]: personIds },
+            },
+            order: [["createdAt", "DESC"]],
+            limit: 100, // Reasonable limit to prevent too much data for aggregated view
+          })
+        : [];
+
+    // Group activities by personId
+    const activitiesByPersonId = {};
+    activities.forEach((activity) => {
+      if (!activitiesByPersonId[activity.personId]) {
+        activitiesByPersonId[activity.personId] = [];
+      }
+      activitiesByPersonId[activity.personId].push({
+        activityId: activity.activityId,
+        type: activity.type, // Use 'type' instead of 'activityType' based on model
+        subject: activity.subject,
+        description: activity.description,
+        status: activity.status,
+        priority: activity.priority,
+        startDateTime: activity.startDateTime,
+        endDateTime: activity.endDateTime,
+        dueDate: activity.dueDate,
+        isDone: activity.isDone,
+        createdAt: activity.createdAt,
+      });
+    });
+
+    // Add activities to each person in the aggregated persons array
+    aggregatedEntities.persons = aggregatedEntities.persons.map((person) => ({
+      ...person,
+      activities: person.personId
+        ? activitiesByPersonId[person.personId] || []
+        : [], // Only add activities if personId exists
+      activityCount: person.personId
+        ? (activitiesByPersonId[person.personId] || []).length
+        : 0, // Activity count
+    }));
 
     // Sort aggregated entities by creation date (most recent first)
     // Handle null createdAt for email-only participants
