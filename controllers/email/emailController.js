@@ -422,8 +422,17 @@ exports.fetchInboxEmails = async (req, res) => {
 
         const parsedEmail = await simpleParser(rawBody);
 
+        //..............changes for inReplyTo and references fields................
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
+
         const emailData = {
           messageId: parsedEmail.messageId || null,
+             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+      // references: parsedEmail.headers.get("references") || null,
+      references,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
           senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
           recipient: parsedEmail.to
