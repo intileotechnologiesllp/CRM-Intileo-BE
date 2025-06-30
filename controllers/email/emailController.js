@@ -437,7 +437,7 @@ exports.fetchInboxEmails = async (req, res) => {
             : null,
           masterUserID: masterUserID,
           subject: parsedEmail.subject || null,
-          body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+          body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
           folder: folderType, // Dynamically set the folder type
           createdAt: parsedEmail.date || new Date(),
         };
