@@ -830,6 +830,7 @@ exports.getLeads = async (req, res) => {
       leads: flatLeads, // Return flattened leads with leadDetails merged
       persons,
       organizations,
+      role: req.role, // Include user role in the response
       // leadDetails
     });
   } catch (error) {
