@@ -468,6 +468,38 @@ exports.fetchInboxEmails = async (req, res) => {
             `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
           );
         }
+            // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
+
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
+        // connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
+
+    return {
+      message: "Fetched and saved the most recent email.",
+      email: emailData,
+      relatedEmails,
+    };
       }
     };
     const boxes = await connection.getBoxes();
