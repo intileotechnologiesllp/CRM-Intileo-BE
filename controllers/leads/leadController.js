@@ -820,6 +820,7 @@ exports.getLeads = async (req, res) => {
       leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
       persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
     }));
+console.log(req.role, "role of the user............");
 
     res.status(200).json({
       message: "Leads fetched successfully",
@@ -833,6 +834,7 @@ exports.getLeads = async (req, res) => {
       role: req.role, // Include user role in the response
       // leadDetails
     });
+    
   } catch (error) {
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
