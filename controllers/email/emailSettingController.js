@@ -446,7 +446,7 @@ if (provider === "custom") {
             : null,
           masterUserID: masterUserID,
           subject: parsedEmail.subject || null,
-          body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+          body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
           folder: dbFolderName, // Use mapped folder name
           createdAt: parsedEmail.date || new Date(),
         };
