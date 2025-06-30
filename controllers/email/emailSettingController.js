@@ -109,7 +109,7 @@ exports.createOrUpdateDefaultEmail = async (req, res) => {
       appPassword,
       senderName,
       isDefault,
-      provider // <-- add this line
+      provider, // <-- add this line
     });
 
     res.status(201).json({ message: "Default email created successfully." });
@@ -212,7 +212,9 @@ exports.bulkArchiveEmails = async (req, res) => {
   const { emailIds } = req.body; // Array of email IDs
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+    return res
+      .status(400)
+      .json({ message: "emailIds must be a non-empty array." });
   }
 
   // Update all emails to move them to the archive folder
@@ -257,19 +259,20 @@ exports.queueSyncEmails = async (req, res) => {
     await publishToQueue("SYNC_EMAIL_QUEUE", { masterUserID, syncStartDate });
     res.status(200).json({ message: "Sync job queued successfully." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to queue sync job.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to queue sync job.", error: error.message });
   }
 };
-
 
 exports.fetchSyncEmails = async (req, res) => {
   const { batchSize = 100, page = 1 } = req.query; // Default batchSize to 50 and page to 1
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-const { syncStartDate:inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
+  const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
   try {
-     if (inputSyncStartDate) {
+    if (inputSyncStartDate) {
       await UserCredential.update(
-        { syncStartDate:inputSyncStartDate },
+        { syncStartDate: inputSyncStartDate },
         { where: { masterUserID } }
       );
     }
@@ -331,38 +334,42 @@ const { syncStartDate:inputSyncStartDate } = req.body; // or req.query.syncStart
     //     },
     //   },
     // };
-const provider = userCredential.provider || "gmail"; // default to gmail
+    const provider = userCredential.provider || "gmail"; // default to gmail
 
-let imapConfig;
-if (provider === "custom") {
-  if (!userCredential.imapHost || !userCredential.imapPort) {
-    return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
-  }
-  imapConfig = {
-    imap: {
-      user: userCredential.email,
-      password: userCredential.appPassword,
-      host: userCredential.imapHost,
-      port: userCredential.imapPort,
-      tls: userCredential.imapTLS,
-      authTimeout: 30000,
-      tlsOptions: { rejectUnauthorized: false },
-    },
-  };
-} else {
-  const providerConfig = PROVIDER_CONFIG[provider];
-  imapConfig = {
-    imap: {
-      user: userCredential.email,
-      password: userCredential.appPassword,
-      host: providerConfig.host,
-      port: providerConfig.port,
-      tls: providerConfig.tls,
-      authTimeout: 30000,
-      tlsOptions: { rejectUnauthorized: false },
-    },
-  };
-}
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res
+          .status(400)
+          .json({
+            message: "Custom IMAP settings are missing in user credentials.",
+          });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
 
     const connection = await Imap.connect(imapConfig);
 
@@ -375,7 +382,9 @@ if (provider === "custom") {
     console.log("Valid folders from IMAP server:", validFolders);
 
     // Fetch all folders if syncAllFolders is true
-    let foldersToSync = Array.isArray(syncFolders) ? syncFolders : [syncFolders];
+    let foldersToSync = Array.isArray(syncFolders)
+      ? syncFolders
+      : [syncFolders];
     if (syncAllFolders) {
       console.log("Fetching all folders...");
       foldersToSync = validFolders; // Use all valid folders
@@ -455,7 +464,38 @@ if (provider === "custom") {
         const existingEmail = await Email.findOne({
           where: { messageId: emailData.messageId },
         });
+            // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
 
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
+        // connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
+
+    return {
+      message: "Fetched and saved the most recent email.",
+      email: emailData,
+      relatedEmails,
+    };
         let savedEmail;
         if (!existingEmail) {
           savedEmail = await Email.create(emailData);
@@ -514,7 +554,9 @@ exports.restoreEmails = async (req, res) => {
   const { emailIds } = req.body; // Array of email IDs
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+    return res
+      .status(400)
+      .json({ message: "emailIds must be a non-empty array." });
   }
 
   // Restore all emails in trash to inbox (or originalFolder if you store it)
@@ -523,7 +565,9 @@ exports.restoreEmails = async (req, res) => {
     { where: { emailID: emailIds, masterUserID, folder: "trash" } }
   );
 
-  res.status(200).json({ message: `${updatedCount} email(s) restored from trash.` });
+  res
+    .status(200)
+    .json({ message: `${updatedCount} email(s) restored from trash.` });
 };
 
 exports.permanentlyDeleteEmails = async (req, res) => {
@@ -531,14 +575,18 @@ exports.permanentlyDeleteEmails = async (req, res) => {
   const { emailIds } = req.body;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+    return res
+      .status(400)
+      .json({ message: "emailIds must be a non-empty array." });
   }
 
   const deletedCount = await Email.destroy({
-    where: { emailID: emailIds, masterUserID, folder: "trash" }
+    where: { emailID: emailIds, masterUserID, folder: "trash" },
   });
 
-  res.status(200).json({ message: `${deletedCount} email(s) permanently deleted.` });
+  res
+    .status(200)
+    .json({ message: `${deletedCount} email(s) permanently deleted.` });
 };
 
 exports.markAsUnread = async (req, res) => {
@@ -546,7 +594,9 @@ exports.markAsUnread = async (req, res) => {
   const { emailIds } = req.body;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+    return res
+      .status(400)
+      .json({ message: "emailIds must be a non-empty array." });
   }
 
   const [updatedCount] = await Email.update(
@@ -554,7 +604,9 @@ exports.markAsUnread = async (req, res) => {
     { where: { emailID: emailIds, masterUserID } }
   );
 
-  res.status(200).json({ message: `${updatedCount} email(s) marked as unread.` });
+  res
+    .status(200)
+    .json({ message: `${updatedCount} email(s) marked as unread.` });
 };
 
 exports.updateSignature = async (req, res) => {
@@ -564,18 +616,24 @@ exports.updateSignature = async (req, res) => {
 
   // If an image was uploaded, use its path as the image URL
   if (req.file) {
-    signatureImage = `${process.env.LOCALHOST_URL || "http://localhost:3056"}/uploads/signatures/${req.file.filename}`;
+    signatureImage = `${
+      process.env.LOCALHOST_URL || "http://localhost:3056"
+    }/uploads/signatures/${req.file.filename}`;
   }
 
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
     await userCredential.update({ signature, signatureName, signatureImage });
     res.status(200).json({ message: "Signature updated successfully." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to update signature.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to update signature.", error: error.message });
   }
 };
 
@@ -584,7 +642,9 @@ exports.markAsRead = async (req, res) => {
   const { emailIds } = req.body;
 
   if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({ message: "emailIds must be a non-empty array." });
+    return res
+      .status(400)
+      .json({ message: "emailIds must be a non-empty array." });
   }
 
   const [updatedCount] = await Email.update(
@@ -597,8 +657,8 @@ exports.markAsRead = async (req, res) => {
 
 exports.updateEmailSharing = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { emailId } = req.params;   // Email ID from URL
-  const { isShared } = req.body;    // Boolean value in request body
+  const { emailId } = req.params; // Email ID from URL
+  const { isShared } = req.body; // Boolean value in request body
 
   try {
     const email = await Email.findOne({
@@ -628,14 +688,18 @@ exports.setSmartBcc = async (req, res) => {
   const { smartBcc } = req.body;
 
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
     await userCredential.update({ smartBcc });
     res.status(200).json({ message: "Smart BCC updated successfully." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to update Smart BCC.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to update Smart BCC.", error: error.message });
   }
 };
 exports.updateBlockedAddress = async (req, res) => {
@@ -643,7 +707,9 @@ exports.updateBlockedAddress = async (req, res) => {
   const { blockedEmail } = req.body; // comma-separated string or array
 
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
@@ -655,9 +721,16 @@ exports.updateBlockedAddress = async (req, res) => {
     }
 
     await userCredential.update({ blockedEmail: blockedEmailStr });
-    res.status(200).json({ message: "Blocked address list updated successfully." });
+    res
+      .status(200)
+      .json({ message: "Blocked address list updated successfully." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to update blocked address.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to update blocked address.",
+        error: error.message,
+      });
   }
 };
 exports.removeBlockedAddress = async (req, res) => {
@@ -665,7 +738,9 @@ exports.removeBlockedAddress = async (req, res) => {
   const { emailToRemove } = req.body; // The email address to remove
 
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
@@ -674,33 +749,47 @@ exports.removeBlockedAddress = async (req, res) => {
     let blockedList = [];
     if (Array.isArray(userCredential.blockedEmail)) {
       blockedList = userCredential.blockedEmail;
-    } else if (typeof userCredential.blockedEmail === "string" && userCredential.blockedEmail.length > 0) {
+    } else if (
+      typeof userCredential.blockedEmail === "string" &&
+      userCredential.blockedEmail.length > 0
+    ) {
       // Fallback for legacy comma-separated string
-      blockedList = userCredential.blockedEmail.split(",").map(e => e.trim().toLowerCase()).filter(Boolean);
+      blockedList = userCredential.blockedEmail
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
     }
 
     // Remove the email (case-insensitive, trimmed)
     const updatedList = blockedList
-      .map(e => e.trim().toLowerCase())
-      .filter(email => email !== emailToRemove.trim().toLowerCase());
+      .map((e) => e.trim().toLowerCase())
+      .filter((email) => email !== emailToRemove.trim().toLowerCase());
 
     await userCredential.update({ blockedEmail: updatedList });
 
     res.status(200).json({
-      message: updatedList.length < blockedList.length
-        ? "Blocked address removed successfully."
-        : "Email not found in blocked list.",
-      blockedEmail: updatedList
+      message:
+        updatedList.length < blockedList.length
+          ? "Blocked address removed successfully."
+          : "Email not found in blocked list.",
+      blockedEmail: updatedList,
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to remove blocked address.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to remove blocked address.",
+        error: error.message,
+      });
   }
 };
 exports.getSignature = async (req, res) => {
   const masterUserID = req.adminId;
 
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
@@ -712,13 +801,20 @@ exports.getSignature = async (req, res) => {
       signatureImage: userCredential.signatureImage,
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch signature data.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to fetch signature data.",
+        error: error.message,
+      });
   }
 };
 exports.getBlockedAddress = async (req, res) => {
   const masterUserID = req.adminId;
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
@@ -727,13 +823,20 @@ exports.getBlockedAddress = async (req, res) => {
       blockedEmail: userCredential.blockedEmail,
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch blocked addresses.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to fetch blocked addresses.",
+        error: error.message,
+      });
   }
 };
 exports.getSmartBcc = async (req, res) => {
   const masterUserID = req.adminId;
   try {
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
@@ -742,12 +845,11 @@ exports.getSmartBcc = async (req, res) => {
       smartBcc: userCredential.smartBcc,
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch Smart BCC.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch Smart BCC.", error: error.message });
   }
 };
-
-
-
 
 // GET /api/emails/autocomplete?search=abc&page=1&limit=10
 exports.getEmailAutocomplete = async (req, res) => {
@@ -755,13 +857,16 @@ exports.getEmailAutocomplete = async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    const where = search
-      ? { recipient: { [Op.like]: `%${search}%` } }
-      : {};
+    const where = search ? { recipient: { [Op.like]: `%${search}%` } } : {};
 
     // Find distinct emails for auto-complete
     const { rows, count } = await Email.findAndCountAll({
-      attributes: [[Email.sequelize.fn("DISTINCT", Email.sequelize.col("recipient")), "email"]],
+      attributes: [
+        [
+          Email.sequelize.fn("DISTINCT", Email.sequelize.col("recipient")),
+          "email",
+        ],
+      ],
       where,
       limit: parseInt(limit),
       offset,
@@ -769,7 +874,7 @@ exports.getEmailAutocomplete = async (req, res) => {
     });
 
     // Map to just email strings
-    const emails = rows.map(row => row.get("email"));
+    const emails = rows.map((row) => row.get("email"));
 
     res.status(200).json({
       emails,
@@ -778,7 +883,9 @@ exports.getEmailAutocomplete = async (req, res) => {
       limit: parseInt(limit),
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch emails.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to fetch emails.", error: error.message });
   }
 };
 
@@ -786,7 +893,6 @@ exports.downloadAttachment = async (req, res) => {
   const { emailID, filename } = req.params;
   const masterUserID = req.adminId;
   console.log(emailID, filename, masterUserID);
-  
 
   try {
     // Find the email and attachment metadata
@@ -794,13 +900,17 @@ exports.downloadAttachment = async (req, res) => {
     if (!email) return res.status(404).json({ message: "Email not found." });
 
     const attachmentMeta = await Attachment.findOne({
-      where: { emailID, filename }
+      where: { emailID, filename },
     });
-    if (!attachmentMeta) return res.status(404).json({ message: "Attachment not found." });
+    if (!attachmentMeta)
+      return res.status(404).json({ message: "Attachment not found." });
 
     // Fetch user credentials
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
-    if (!userCredential) return res.status(404).json({ message: "User credentials not found." });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    if (!userCredential)
+      return res.status(404).json({ message: "User credentials not found." });
 
     // Connect to IMAP and fetch the email
     // const imapConfig = {
@@ -814,38 +924,42 @@ exports.downloadAttachment = async (req, res) => {
     //     tlsOptions: { rejectUnauthorized: false },
     //   },
     // };
-const provider = userCredential.provider || "gmail"; // default to gmail
+    const provider = userCredential.provider || "gmail"; // default to gmail
 
-let imapConfig;
-if (provider === "custom") {
-  if (!userCredential.imapHost || !userCredential.imapPort) {
-    return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
-  }
-  imapConfig = {
-    imap: {
-      user: userCredential.email,
-      password: userCredential.appPassword,
-      host: userCredential.imapHost,
-      port: userCredential.imapPort,
-      tls: userCredential.imapTLS,
-      authTimeout: 30000,
-      tlsOptions: { rejectUnauthorized: false },
-    },
-  };
-} else {
-  const providerConfig = PROVIDER_CONFIG[provider];
-  imapConfig = {
-    imap: {
-      user: userCredential.email,
-      password: userCredential.appPassword,
-      host: providerConfig.host,
-      port: providerConfig.port,
-      tls: providerConfig.tls,
-      authTimeout: 30000,
-      tlsOptions: { rejectUnauthorized: false },
-    },
-  };
-}
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res
+          .status(400)
+          .json({
+            message: "Custom IMAP settings are missing in user credentials.",
+          });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
 
     const connection = await Imap.connect(imapConfig);
     await connection.openBox(email.folder);
@@ -865,21 +979,33 @@ if (provider === "custom") {
     const rawBody = rawBodyPart ? rawBodyPart.body : null;
     const parsedEmail = await simpleParser(rawBody);
 
-    const attachment = parsedEmail.attachments.find(att => att.filename === filename);
+    const attachment = parsedEmail.attachments.find(
+      (att) => att.filename === filename
+    );
     if (!attachment) {
       connection.end();
-      return res.status(404).json({ message: "Attachment not found in email." });
+      return res
+        .status(404)
+        .json({ message: "Attachment not found in email." });
     }
 
     // Send the attachment as a download
-    res.setHeader("Content-Disposition", `attachment; filename="${attachment.filename}"`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${attachment.filename}"`
+    );
     res.setHeader("Content-Type", attachment.contentType);
     res.send(attachment.content);
 
     connection.end();
   } catch (error) {
     console.error("Error downloading attachment:", error);
-    res.status(500).json({ message: "Failed to download attachment.", error: error.message });
+    res
+      .status(500)
+      .json({
+        message: "Failed to download attachment.",
+        error: error.message,
+      });
   }
 };
 exports.markAsUnreadSingle = async (req, res) => {
@@ -897,15 +1023,15 @@ exports.markAsUnreadSingle = async (req, res) => {
     );
 
     if (updatedCount === 0) {
-      return res.status(404).json({ message: "Email not found or already unread." });
+      return res
+        .status(404)
+        .json({ message: "Email not found or already unread." });
     }
 
     res.status(200).json({ message: "Email marked as unread." });
   } catch (error) {
-    res.status(500).json({ message: "Failed to mark as unread.", error: error.message });
+    res
+      .status(500)
+      .json({ message: "Failed to mark as unread.", error: error.message });
   }
 };
-
-
-
-
