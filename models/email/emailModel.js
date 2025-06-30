@@ -25,15 +25,15 @@ const Email = sequelize.define("Email", {
     allowNull: true,
   },
   recipient: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT('long'),
     allowNull: true,
   },
   recipientName: {
-    type: DataTypes.STRING, // New field for recipient's name
+    type: DataTypes.TEXT('long'), // New field for recipient's name
     allowNull: true,
   },
   subject: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT('long'),
     allowNull: true,
   },
 body: {
@@ -58,11 +58,11 @@ body: {
     defaultValue: DataTypes.NOW,
   },
   cc: {
-    type: DataTypes.TEXT,
+    type: DataTypes.TEXT('long'),
     allowNull: true,
   },
   bcc: {
-    type: DataTypes.TEXT,
+    type: DataTypes.TEXT('long'),
     allowNull: true,
   },
   references: {
