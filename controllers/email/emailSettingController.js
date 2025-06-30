@@ -439,9 +439,16 @@ exports.fetchSyncEmails = async (req, res) => {
 
         // Map IMAP folder name to database folder name
         const dbFolderName = folderMapping[folderName] || "inbox"; // Default to "inbox" if no mapping exists
+        // Extract inReplyTo and references headers
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
 
         const emailData = {
           messageId: parsedEmail.messageId || null,
+          messageId: parsedEmail.messageId || null,
+             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
           senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
           recipient: parsedEmail.to
