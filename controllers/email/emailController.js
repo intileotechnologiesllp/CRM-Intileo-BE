@@ -2578,6 +2578,25 @@ exports.getUnreadCounts = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
+    // Check if user has credentials in UserCredential model
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(200).json({
+        message: "No email credentials found for this user.",
+        masterUserID,
+        unreadCounts: {
+          inbox: 0,
+          drafts: 0,
+          sent: 0,
+          archive: 0,
+          trash: 0,
+        },
+      });
+    }
+
     // Define all possible folders
     const allFolders = ["inbox", "drafts", "sent", "archive", "trash"];
 
