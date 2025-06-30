@@ -447,8 +447,8 @@ exports.fetchSyncEmails = async (req, res) => {
 
         const emailData = {
           messageId: parsedEmail.messageId || null,
-          messageId: parsedEmail.messageId || null,
              inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+             references,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
           senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
           recipient: parsedEmail.to
