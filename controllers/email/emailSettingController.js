@@ -10,6 +10,7 @@ const Attachment = require("../../models/email/attachmentModel");
 const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
 const multer = require("multer");
 const path = require("path");
+const Sequelize = require("sequelize");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { Op } = require("sequelize");
 const PROVIDER_CONFIG = {
