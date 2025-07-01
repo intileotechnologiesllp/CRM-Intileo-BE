@@ -1,1780 +1,3033 @@
-// const Lead = require("../../models/leads/leadsModel");
-const LeadFilter = require("../../models/leads/leadFiltersModel");
-//const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
-const { Op } = require("sequelize"); // Import Sequelize operators
-const Sequelize = require("sequelize");
-const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
-const PROGRAMS = require("../../utils/programConstants"); // Import program constants
-const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
-const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
-const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
- //const Person = require("../../models/leads/leadPersonModel"); // Import Person model
- //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
-  const { Lead, LeadDetails, Person, Organization } = require("../../models");
-const {convertRelativeDate} = require("../../utils/helper"); // Import the utility to convert relative dates
+const Imap = require("imap-simple");
 const Email = require("../../models/email/emailModel");
-const UserCredential = require("../../models/email/userCredentialModel");
+const { htmlToText } = require("html-to-text");
+const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
-const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
-const Deal = require("../../models/deals/dealsModels"); // Import Deal model
-const Activity = require("../../models/activity/activityModel"); // Import Activity model
-
-const { sendEmail } = require("../../utils/emailSend");
-//.....................changes......original....................
-exports.createLead = async (req, res) => {
-  const {
-    contactPerson,
-    organization,
-    title,
-    valueLabels,
-    expectedCloseDate,
-    sourceChannel,
-    sourceChannelID,
-    serviceType,
-    scopeOfServiceType,
-    phone,
-    email,
-    company,
-    proposalValue,
-    esplProposalNo,
-    projectLocation,
-    organizationCountry,
-    proposalSentDate,
-    status,
-    sourceOrgin,
-    SBUClass,
-    numberOfReportsPrepared
-  } = req.body;
-    // --- Add validation here ---
-  if (!contactPerson || !organization || !title || !email) {
-    return res.status(400).json({ message: "contactPerson, organization, title, and email are required." });
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ message: "Invalid email format." });
-  }
-  if (proposalValue && proposalValue < 0) {
-    return res.status(400).json({ message: "Proposal value must be positive." });
-  }
-  // --- End validation ---
-
-  console.log(req.role, "role of the user............");
-
-  try {
-    // Ensure only admins can create leads
-    // if (req.user.role !== "admin") {
-    //   return res
-    //     .status(403)
-    //     .json({ message: "Access denied. Only admins can create leads." });
-    // }
-
-    // Create the lead with the masterUserID from the authenticated user
-    if (!["admin", "general", "master"].includes(req.role)) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_CREATION", // Mode
-        null, // No user ID for failed sign-in
-        "Access denied. You do not have permission to create leads.", // Error description
-        null
-      );
-      return res.status(403).json({
-        message: "Access denied. You do not have permission to create leads.",
-      });
-    }
-
-        // 1. Find or create Organization
-let orgRecord = await Organization.findOne({ where: { organization} });
-if (!orgRecord) {
-  orgRecord = await Organization.create({ organization, masterUserID: req.adminId });
-}
-console.log("orgRecord after create/find:", orgRecord?.organizationId, orgRecord?.organization);
-
-// Defensive: If orgRecord is still not found, stop!
-if (!orgRecord || !orgRecord.leadOrganizationId) {
-  return res.status(500).json({ message: "Failed to create/find organization." });
-}
-const duplicateByTitle = await Lead.findOne({ where: { title } });
-const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
-
-if (duplicateByTitle || duplicateByContact) {
-  return res.status(409).json({
-    message: "A lead with this title or contact person already exists."
-  });
-}
-    // 2. Find or create Person (linked to organization)
-    let personRecord = await Person.findOne({ where: { email } });
-    if (!personRecord) {
-      personRecord = await Person.create({
-        contactPerson: contactPerson,
-        email,
-        phone,
-        leadOrganizationId: orgRecord.leadOrganizationId,
-        masterUserID: req.adminId
-      });
-    }
-    //     const duplicateLead = await Lead.findOne({
-    //   where: {
-    //     organization,
-    //     contactPerson,
-    //     // email,
-    //     title
-    //   }
-    // });
-    // if (duplicateLead) {
-    //   return res.status(409).json({
-    //     message: "Lead Already Exist."
-    //   });
-    // }
-// const duplicateByOrg = await Lead.findOne({ where: { organization } });
-
-     const owner = await MasterUser.findOne({ where: { masterUserID: req.adminId } });
-    const ownerName = owner ? owner.name : null;
-    const lead = await Lead.create({
-        personId: personRecord.personId,           // <-- Add this
-  leadOrganizationId: orgRecord.leadOrganizationId,
-      contactPerson,
-      organization,
-      title,
-      valueLabels,
-      expectedCloseDate,
-      sourceChannel,
-      sourceChannelID,
-      serviceType,
-      scopeOfServiceType,
-      phone,
-      email,
-      company,
-      proposalValue,
-      esplProposalNo,
-      projectLocation,
-      organizationCountry,
-      proposalSentDate,
-      status,
-      masterUserID: req.adminId,
-      ownerId:req.adminId,// Associate the lead with the authenticated user
-      ownerName,// Store the role of the user as ownerName,
-      sourceOrgin, // Indicate that the lead was created manually
-      SBUClass,
-      numberOfReportsPrepared
-    });
-if (sourceOrgin === 0 && req.body.emailID) {
-  await Email.update(
-    { leadId: lead.leadId },
-    { where: { emailID: req.body.emailID } }
-  );
-}
-    // --- Add this block to link existing emails to the new lead ---
-// await Email.update(
-//   { leadId: lead.leadId },
-//   {
-//     where: {
-//       [Op.or]: [
-//         { sender: lead.email },
-//         { recipient: { [Op.like]: `%${lead.email}%` } }
-//       ]
-//     }
-//   }
-// );
-// --- End block ---
-    await LeadDetails.create({
-      leadId: lead.leadId,
-      responsiblePerson:req.adminId,
-      sourceOrgin:sourceOrgin
-    });
-
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
-      "LEAD_CREATION", // Mode
-      lead.masterUserID, // Created by (Admin ID)
-      lead.leadId, // Record ID (Country ID)
-      null,
-      `Lead is created by  ${req.role}`, // Description
-      null // Changes logged as JSON
-    );
-    res.status(201).json({ message: "Lead created successfully", lead });
-  } catch (error) {
-    console.error("Error creating lead:", error);
-
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_CREATION", // Mode
-      null, // No user ID for failed sign-in
-      "Error creating lead: " + error.message, // Error description
-      null
-    );
-    res.status(500).json(error);
-  }
-};
-
-
-exports.archiveLead = async (req, res) => {
-  const { leadId } = req.params; // Use leadId instead of id
-
-  try {
-    const lead = await Lead.findByPk(leadId); // Find lead by leadId
-    if (!lead) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_ARCHIVE", // Mode
-        req.role, // No user ID for failed sign-in
-        "Lead not found", // Error description
-        req.adminId
-      );
-      return res.status(404).json({ message: "Lead not found" });
-    }
-
-    lead.isArchived = true; // Set the lead as archived
-    lead.archiveTime = new Date(); // Set the archive time to now
-    await lead.save();
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
-      "LEAD_ARCHIVE", // Mode
-      lead.masterUserID, // Admin ID from the authenticated request
-      leadId, // Record ID (Currency ID)
-      req.adminId,
-      `Lead is archived by "${req.role}"`, // Description
-      null
-    );
-    res.status(200).json({ message: "Lead archived successfully", lead });
-  } catch (error) {
-    console.error("Error archiving lead:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_ARCHIVE", // Mode
-      null, // No user ID for failed sign-in
-      "Error archiving lead: " + error.message, // Error description
-      null
-    );
-    res.status(500).json(error);
-  }
-};
-
-exports.unarchiveLead = async (req, res) => {
-  const { leadId } = req.params; // Use leadId instead of id
-
-  try {
-    const lead = await Lead.findByPk(leadId); // Find lead by leadId
-    if (!lead) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_UNARCHIVE", // Mode
-        req.role, // No user ID for failed sign-in
-        "Lead not found", // Error description
-        req.adminId
-      );
-      return res.status(404).json({ message: "Lead not found" });
-    }
-
-    lead.isArchived = false; // Set the lead as unarchived
-    await lead.save();
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
-      "LEAD_UNARCHIVE", // Mode
-      lead.masterUserID, // Admin ID from the authenticated request
-      leadId, // Record ID (Currency ID)
-      req.adminId,
-      `Lead is unarchived by "${req.role}"`, // Description
-      null
-    );
-    res.status(200).json({ message: "Lead unarchived successfully", lead });
-  } catch (error) {
-    console.error("Error unarchiving lead:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UNARCHIVE", // Mode
-      null, // No user ID for failed sign-in
-      "Error unarchiving lead: " + error.message, // Error description
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-
-//...................new code..........................
-exports.getLeads = async (req, res) => {
-  const {
-    isArchived,
-    search,
-    page = 1,
-    limit = 10,
-    sortBy = "createdAt",
-    order = "DESC",
-    masterUserID: queryMasterUserID,
-    filterId
-  } = req.query;
-  console.log(req.role, "role of the user............");
-
-  try {
-        // Determine masterUserID based on role
-
-        const pref = await LeadColumnPreference.findOne();
-
-    let leadAttributes, leadDetailsAttributes;
-if (pref && pref.columns) {
-  // Parse columns if it's a string
-  const columns = typeof pref.columns === "string"
-    ? JSON.parse(pref.columns)
-    : pref.columns;
-
-  const leadFields = Object.keys(Lead.rawAttributes);
-  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-
-  leadAttributes = columns
-    .filter(col => col.check && leadFields.includes(col.key))
-    .map(col => col.key);
-    // Always include leadId
-if (!leadAttributes.includes('leadId')) {
-  leadAttributes.unshift('leadId');
-}
-
-  leadDetailsAttributes = columns
-    .filter(col => col.check && leadDetailsFields.includes(col.key))
-    .map(col => col.key);
-}
-
-    console.log(leadAttributes, "leadAttributes from preferences");
-    
-
-    let whereClause = {};
-    // let include = [
-    //   {
-    //     model: LeadDetails,
-    //     as: "details",
-    //     required: false,
-    //     attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
-      
-    //   },
-    // ];
-    let include = [];
-if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
-  include.push({
-    model: LeadDetails,
-    as: "details",
-    required: false,
-    attributes: leadDetailsAttributes
-  });
-}
-let masterUserID;
-// filepath: [leadController.js](http://_vscodecontentref_/5)
-if (req.role !== "admin") {
-  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-  whereClause[Op.or] = [
-    { masterUserID: userId },
-    { ownerId: userId }
-  ];
-}
-
-    console.log("→ Query params:", req.query);
-    console.log("→ masterUserID resolved:", masterUserID);
-
-//................................................................//filter
-if (filterId) {
-  // Fetch the saved filter
-  const filter = await LeadFilter.findByPk(filterId);
-  if (!filter) {
-    return res.status(404).json({ message: "Filter not found." });
-  }
-  const filterConfig = typeof filter.filterConfig === "string"
-    ? JSON.parse(filter.filterConfig)
-    : filter.filterConfig;
-
-  const { all = [], any = [] } = filterConfig;
-  const leadFields = Object.keys(Lead.rawAttributes);
-  const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-  const personFields = Object.keys(Person.rawAttributes);
-  const organizationFields = Object.keys(Organization.rawAttributes);
-
-  let filterWhere = {};
-  let leadDetailsWhere = {};
-  let personWhere = {};
-  let organizationWhere = {};
-
-  // --- Your new filter logic for all ---
-  if (all.length > 0) {
-    filterWhere[Op.and] = [];
-    leadDetailsWhere[Op.and] = [];
-    personWhere[Op.and] = [];
-    organizationWhere[Op.and] = [];
-    all.forEach(cond => {
-      if (leadFields.includes(cond.field)) {
-        filterWhere[Op.and].push(buildCondition(cond));
-      } else if (leadDetailsFields.includes(cond.field)) {
-        leadDetailsWhere[Op.and].push(buildCondition(cond));
-      } else if (personFields.includes(cond.field)) {
-        personWhere[Op.and].push(buildCondition(cond));
-      } else if (organizationFields.includes(cond.field)) {
-        organizationWhere[Op.and].push(buildCondition(cond));
-      }
-    });
-    if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-    if (leadDetailsWhere[Op.and].length === 0) delete leadDetailsWhere[Op.and];
-    if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
-    if (organizationWhere[Op.and].length === 0) delete organizationWhere[Op.and];
-  }
-
-  // --- Your new filter logic for any ---
-  if (any.length > 0) {
-    filterWhere[Op.or] = [];
-    leadDetailsWhere[Op.or] = [];
-    personWhere[Op.or] = [];
-    organizationWhere[Op.or] = [];
-    any.forEach(cond => {
-      if (leadFields.includes(cond.field)) {
-        filterWhere[Op.or].push(buildCondition(cond));
-      } else if (leadDetailsFields.includes(cond.field)) {
-        leadDetailsWhere[Op.or].push(buildCondition(cond));
-      } else if (personFields.includes(cond.field)) {
-        personWhere[Op.or].push(buildCondition(cond));
-      } else if (organizationFields.includes(cond.field)) {
-        organizationWhere[Op.or].push(buildCondition(cond));
-      }
-    });
-    if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-    if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
-    if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
-    if (organizationWhere[Op.or].length === 0) delete organizationWhere[Op.or];
-  }
-
-  // Merge with archive/masterUserID filters
-  if (isArchived !== undefined) filterWhere.isArchived = isArchived === "true";
-  if (masterUserID) filterWhere.masterUserID = masterUserID;
-// filepath: [leadController.js](http://_vscodecontentref_/6)
-if (req.role !== "admin") {
-  const userId = (queryMasterUserID && queryMasterUserID !== "all") ? queryMasterUserID : req.adminId;
-  filterWhere[Op.or] = [
-    ...(filterWhere[Op.or] || []),
-    { masterUserID: userId },
-    { ownerId: userId }
-  ];
-}
-  whereClause = filterWhere;
-
-      console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
-      console.log("→ Built leadDetailsWhere:", JSON.stringify(leadDetailsWhere));
-
-        if (Object.keys(leadDetailsWhere).length > 0) {
-    include.push({
-      model: LeadDetails,
-      as: "details",
-      where: leadDetailsWhere,
-      required: true
-    });
-  } else {
-    include.push({
-      model: LeadDetails,
-      as: "details",
-      required: false
-    });
-  }
-
-  if (Object.keys(personWhere).length > 0) {
-    include.push({
-      model: Person,
-      as: "LeadPerson",
-      required: true,
-      where: personWhere
-    });
-  } else {
-    include.push({
-      model: Person,
-      as: "LeadPerson",
-      required: false
-    });
-  }
-
-  if (Object.keys(organizationWhere).length > 0) {
-    include.push({
-      model: Organization,
-      as: "LeadOrganization",
-      required: true,
-      where: organizationWhere
-    });
-  } else {
-    include.push({
-      model: Organization,
-      as: "LeadOrganization",
-      required: false
-    });
-  
-        console.log("→ Updated include with LeadDetails where:", JSON.stringify(leadDetailsWhere));
-      }
-    } else {
-      // Standard search/filter logic
-      if (isArchived !== undefined) whereClause.isArchived = isArchived === "true";
-      if (masterUserID) whereClause.masterUserID = masterUserID;
-
-      if (search) {
-        whereClause[Op.or] = [
-          { contactPerson: { [Op.like]: `%${search}%` } },
-          { organization: { [Op.like]: `%${search}%` } },
-          { title: { [Op.like]: `%${search}%` } },
-          { email: { [Op.like]: `%${search}%` } },
-          { phone: { [Op.like]: `%${search}%` } },
-        ];
-        console.log("→ Search applied, whereClause[Op.or]:", whereClause[Op.or]);
-      }
-    }
-
-    // Pagination
-    const offset = (page - 1) * limit;
-    console.log("→ Final whereClause:", JSON.stringify(whereClause));
-    console.log("→ Final include:", JSON.stringify(include));
-    console.log("→ Pagination: limit =", limit, "offset =", offset);
-    console.log("→ Order:", sortBy, order);
-// Always include Person and Organization
-if (!include.some(i => i.as === "LeadPerson")) {
-  include.push({
-    model: Person,
-    as: "LeadPerson",
-    required: false
-  });
-}
-if (!include.some(i => i.as === "LeadOrganization")) {
-  include.push({
-    model: Organization,
-    as: "LeadOrganization",
-    required: false
-  });
-}
-  include.push({
-    model: MasterUser,
-    as: "Owner",
-    attributes: ["name", "masterUserID"],
-    required: false
-  });
-//   if (!leadAttributes.includes('leadOrganizationId')) {
-//   leadAttributes.push('leadOrganizationId');
-// }
-// if (!leadAttributes.includes('personId')) {
-//   leadAttributes.push('personId');
-// }
-whereClause.dealId = null;
-    // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
-    const leads = await Lead.findAndCountAll({
-      where: whereClause,
-      include,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [[sortBy, order.toUpperCase()]],
-      attributes: leadAttributes && leadAttributes.length > 0 ? leadAttributes : undefined
-    });
-
-    console.log("→ Query executed. Total records:", leads.count);
-
-const flatLeads = leads.rows.map(lead => {
-  const leadObj = lead.toJSON();
-  // Overwrite ownerName with the latest Owner.name if present
-  if (leadObj.Owner && leadObj.Owner.name) {
-    leadObj.ownerName = leadObj.Owner.name;
-  }
-  delete leadObj.Owner; // Remove the nested Owner object
-  delete leadObj.LeadPerson;
-  delete leadObj.LeadOrganization;
-  if (leadObj.details) {
-    Object.assign(leadObj, leadObj.details);
-    delete leadObj.details;
-  }
-  return leadObj;
-});
-console.log(leads.rows, "leads rows after flattening");
-
-// let persons, organizations;
-
-// 1. Fetch all persons and organizations (already in your code)
-if (req.role === "admin") {
-  persons = await Person.findAll({ raw: true });
-  organizations = await Organization.findAll({ raw: true });
-} else {
-  organizations = await Organization.findAll({
-    // where: { masterUserID: req.adminId },
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId }
-      ]
-    },
-    raw: true
-  });
-}
-const orgIds = organizations.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      [Op.or]: [
-        { masterUserID: req.adminId },
-        { leadOrganizationId: orgIds }
-      ]
-    },
-    raw: true
-  });
-console.log("flatLeads:", flatLeads);
-
-
-
-// Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
-const orgPersonsMap = {};
-persons.forEach(p => {
-  if (p.leadOrganizationId) {
-    if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
-    orgPersonsMap[p.leadOrganizationId].push({
-      personId: p.personId,
-      contactPerson: p.contactPerson
-    });
-  }
-});
-
-// 2. Get all unique ownerIds from persons and organizations
-const orgOwnerIds = organizations.map(o => o.ownerId).filter(Boolean);
-const personOwnerIds = persons.map(p => p.ownerId).filter(Boolean);
-const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
-
-// 3. Fetch owner names from MasterUser
-const owners = await MasterUser.findAll({
-  where: { masterUserID: ownerIds },
-  attributes: ["masterUserID", "name"],
-  raw: true
-});
-const orgMap = {};
-organizations.forEach(org => {
-  orgMap[org.leadOrganizationId] = org;
-});
-const ownerMap = {};
-owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
-persons = persons.map(p => ({
-  ...p,
-  ownerName: ownerMap[p.ownerId] || null
-}));
-
-organizations = organizations.map(o => ({
-  ...o,
-  ownerName: ownerMap[o.ownerId] || null
-}));
-
-// 4. Count leads for each person and organization
-const personIds = persons.map(p => p.personId);
-
-const leadCounts = await Lead.findAll({
-  attributes: [
-    "personId",
-    "leadOrganizationId",
-    [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
-  ],
-  where: {
-    [Op.or]: [
-      { personId: personIds },
-      { leadOrganizationId: orgIds }
-     // { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
-    ]
+const Template = require("../../models/email/templateModel");
+const { Sequelize } = require("sequelize");
+const nodemailer = require("nodemailer");
+const { saveAttachments } = require("../../services/attachmentService");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const UserCredential = require("../../models/email/userCredentialModel");
+const DefaultEmail = require("../../models/email/defaultEmailModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Lead = require("../../models/leads/leadsModel");
+const Deal = require("../../models/deals/dealsModels");
+const Person = require("../../models/leads/leadPersonModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Activity = require("../../models/activity/activityModel");
+const { publishToQueue } = require("../../services/rabbitmqService");
+const { log } = require("console");
+const PROVIDER_CONFIG = {
+  gmail: {
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
   },
-  group: ["personId", "leadOrganizationId"],
-  raw: true
-});
-
-// Build maps for quick lookup
-const personLeadCountMap = {};
-const orgLeadCountMap = {};
-leadCounts.forEach(lc => {
-  if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
-  if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
-});
-
-persons = persons.map(p => {
-  let ownerName = null;
-  if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
-    const org = orgMap[p.leadOrganizationId];
-    if (org.ownerId && ownerMap[org.ownerId]) {
-      ownerName = ownerMap[org.ownerId];
-      // organization=ownerMap[org.organization]
-    }
-  }
-  return {
-    ...p,
-    ownerName,
-    // organization,
-    leadCount: personLeadCountMap[p.personId] || 0
-  };
-});
-
-organizations = organizations.map(o => ({
-  ...o,
-  ownerName: ownerMap[o.ownerId] || null,
-  leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-  persons: orgPersonsMap[o.leadOrganizationId] || [] // <-- add this line
-}));
-
-    res.status(200).json({
-      message: "Leads fetched successfully",
-      totalRecords: leads.count,
-      totalPages: Math.ceil(leads.count / limit),
-      currentPage: parseInt(page),
-      // leads: leads.rows,
-      leads: flatLeads, // Return flattened leads with leadDetails merged
-        persons,
-  organizations
-  // leadDetails
-    });
-  } catch (error) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_FETCH", // Mode
-      null, // No user ID for failed sign-in
-      "Error fetching leads: " + error.message, // Error description
-      null
-    );
-    console.error("Error fetching leads:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
+  yandex: {
+    host: "imap.yandex.com",
+    port: 993,
+    tls: true,
+  },
+  outlook: {
+    host: "outlook.office365.com",
+    port: 993,
+    tls: true,
+  },
+  yahoo: {
+    host: "imap.mail.yahoo.com",
+    port: 993,
+    tls: true,
+  },
+  // Add more providers as needed
 };
-
-// --- Helper functions (reuse from your prompt) ---
-
-const operatorMap = {
-  "is": "eq",
-  "is not": "ne",
-  "is empty": "is empty",
-  "is not empty": "is not empty",
-  "is exactly or earlier than": "lte",
-  "is earlier than": "lt",
-  "is exactly or later than": "gte",
-  "is later than": "gt"
-  // Add more mappings if needed
+// Add this near PROVIDER_CONFIG
+const PROVIDER_FOLDER_MAP = {
+  gmail: {
+    inbox: "INBOX",
+    drafts: "[Gmail]/Drafts",
+    sent: "[Gmail]/Sent Mail",
+    archive: "[Gmail]/All Mail",
+  },
+  yandex: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive",
+  },
+  outlook: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive",
+  },
+  custom: {
+    inbox: "INBOX",
+    drafts: "Drafts",
+    sent: "Sent",
+    archive: "Archive",
+  },
 };
+// Ensure the upload directory exists
+const uploadDir = path.join(__dirname, "../../uploads/attachments");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+// Configure Multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, "../../uploads/attachments")); // Directory to store attachments
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname); // Generate a unique filename
+  },
+});
 
-function buildCondition(cond) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
+const upload = multer({
+  storage,
+  // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+});
 
-  let operator = cond.operator;
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "is empty") {
-    return { [cond.field]: { [Op.is]: null } };
-  }
-  if (operator === "is not empty") {
-    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle date fields
-  const leadDateFields = Object.entries(Lead.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
-
-const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
-  .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
-  .map(([key]) => key);
-
-const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
-
-  if (allDateFields.includes(cond.field)) {
-    if (cond.useExactDate) {
-      const date = new Date(cond.value);
-      if (isNaN(date.getTime())) return {};
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: date,
-        },
-      };
-    }
-    // Otherwise, use relative date conversion
-    const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = d => d instanceof Date && !isNaN(d.getTime());
-
-    if (dateRange && isValidDate(dateRange.start) && isValidDate(dateRange.end)) {
-      return {
-        [cond.field]: {
-          [Op.between]: [dateRange.start, dateRange.end],
-        },
-      };
-    }
-    if (dateRange && isValidDate(dateRange.start)) {
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: dateRange.start,
-        },
-      };
-    }
-    return {};
-  }
-
-  // Default
-  return {
-    [cond.field]: {
-      [ops[operator] || Op.eq]: cond.value,
+const imapConfig = {
+  imap: {
+    user: process.env.SENDER_EMAIL, // Your email address
+    password: process.env.SENDER_PASSWORD, // Your email password
+    host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+    port: 993, // IMAP port
+    tls: true, // Use TLS
+    authTimeout: 30000,
+    tlsOptions: {
+      rejectUnauthorized: false, // Allow self-signed certificates
     },
-  };
+  },
+};
+const cleanEmailBody = (body) => {
+  // Remove quoted replies (e.g., lines starting with ">")
+  return body
+    .split("\n")
+    .filter((line) => !line.startsWith(">"))
+    .join("\n")
+    .trim();
+};
+
+// Helper function to format date to DD-MMM-YYYY
+const formatDateForIMAP = (date) => {
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const day = date.getDate();
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+function flattenFolders(boxes, prefix = "") {
+  let folders = [];
+  for (const [name, box] of Object.entries(boxes)) {
+    const fullName = prefix ? `${prefix}${name}` : name;
+    folders.push(fullName);
+    if (box.children) {
+      folders = folders.concat(
+        flattenFolders(box.children, `${fullName}${box.delimiter}`)
+      );
+    }
+  }
+  return folders;
 }
 
-
-exports.updateLead = async (req, res) => {
-  const { leadId } = req.params;
-  const updateObj = req.body;
-
-  console.log("Request body:", updateObj);
+exports.queueFetchInboxEmails = async (req, res) => {
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
+  const masterUserID = req.adminId;
+  // const { email, appPassword } = req.body;
+  const email = req.body?.email || req.email;
+  const appPassword = req.body?.appPassword || req.appPassword;
+  const provider = req.body?.provider; // Default to gmail
 
   try {
-    // Get all columns for Lead, LeadDetails, Person, and Organization
-    const leadFields = Object.keys(Lead.rawAttributes);
-    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
-    console.log("Lead fields:", leadFields);
-    console.log("LeadDetails fields:", leadDetailsFields);
-    console.log("Person fields:", personFields);
-    console.log("Organization fields:", organizationFields);
-
-    // Split the update object
-    const leadData = {};
-    const leadDetailsData = {};
-    const personData = {};
-    const organizationData = {};
-
-for (const key in updateObj) {
-  if (leadFields.includes(key)) {
-    leadData[key] = updateObj[key];
-  }
-  if (personFields.includes(key)) {
-    personData[key] = updateObj[key];
-  }
-  if (organizationFields.includes(key)) {
-    organizationData[key] = updateObj[key];
-  }
-  if (leadDetailsFields.includes(key)) {
-    leadDetailsData[key] = updateObj[key];
-  }
-}
-
-    console.log("leadData:", leadData);
-    console.log("leadDetailsData:", leadDetailsData);
-    console.log("personData:", personData);
-    console.log("organizationData:", organizationData);
-
-    // Update Lead
-    const lead = await Lead.findByPk(leadId);
-    console.log("Fetched lead:", lead ? lead.toJSON() : null);
-    if (!lead) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_UPDATE", // Mode
-        req.role, // No user ID for failed sign-in
-        "Lead not found", // Error description
-        req.adminId
-      );
-      return res.status(404).json({ message: "Lead not found" });
+    if (!masterUserID || !email || !appPassword) {
+      return res.status(400).json({ message: "All fields are required." });
     }
+    console.log(req.adminId, "masterUserID");
 
-    let ownerChanged = false;
-    let newOwner = null;
-    let assigner = null;
-    if (
-      updateObj.ownerId &&
-      updateObj.ownerId !== lead.ownerId
-    ) {
-      ownerChanged = true;
-      newOwner = await MasterUser.findByPk(updateObj.ownerId);
-      assigner = await MasterUser.findByPk(req.adminId);
-    }
-
-    // Update or create Organization
-    let orgRecord;
-    if (Object.keys(organizationData).length > 0) {
-      orgRecord = await Organization.findOne({ where: { leadOrganizationId: lead.leadOrganizationId } });
-      console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
-      if (orgRecord) {
-        await orgRecord.update(organizationData);
-        console.log("Organization updated:", orgRecord.toJSON());
-      } else {
-        orgRecord = await Organization.create(organizationData);
-        console.log("Organization created:", orgRecord.toJSON());
-        leadData.leadOrganizationId = orgRecord.leadOrganizationId;
-        await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
-        console.log("Lead updated with new leadOrganizationId:", orgRecord.leadOrganizationId);
-      }
-    }
-
-    // Update or create Person
-    let personRecord;
-    if (Object.keys(personData).length > 0) {
-      personRecord = await Person.findOne({ where: { personId: lead.personId } });
-      console.log("Fetched personRecord:", personRecord ? personRecord.toJSON() : null);
-      if (personRecord) {
-        await personRecord.update(personData);
-        console.log("Person updated:", personRecord.toJSON());
-      } else {
-        if (orgRecord) personData.leadOrganizationId = orgRecord.leadOrganizationId;
-        personRecord = await Person.create(personData);
-        console.log("Person created:", personRecord.toJSON());
-        leadData.personId = personRecord.personId;
-        await lead.update({ personId: personRecord.personId });
-        console.log("Lead updated with new personId:", personRecord.personId);
-      }
-    }
-
-    // Update Lead
-    if (Object.keys(leadData).length > 0) {
-      await lead.update(leadData);
-      console.log("Lead updated:", lead.toJSON());
-    }
-
-        // --- Send email if owner changed ---
-if (
-  ownerChanged &&
-  newOwner &&
-  newOwner.email &&
-  assigner &&
-  assigner.email
-) {
-  await sendEmail(assigner.email, {
-    from: assigner.email,
-    to: newOwner.email,
-    subject: "You have been assigned a new lead",
-    text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`
-  });
-}
-
-
-
-    // Update or create LeadDetails
-    let leadDetails = await LeadDetails.findOne({ where: { leadId } });
-    console.log("Fetched leadDetails:", leadDetails ? leadDetails.toJSON() : null);
-    if (leadDetails) {
-      if (Object.keys(leadDetailsData).length > 0) {
-        await leadDetails.update(leadDetailsData);
-        console.log("LeadDetails updated:", leadDetails.toJSON());
-      }
-    } else if (Object.keys(leadDetailsData).length > 0) {
-      leadDetailsData.leadId = leadId;
-      leadDetails = await LeadDetails.create(leadDetailsData);
-      console.log("LeadDetails created:", leadDetails.toJSON());
-    }
-    // // --- Send email if owner changed ---
-    // if (ownerChanged && newOwner && newOwner.email) {
-    //   // You should have a sendEmail utility function
-    //   await sendEmail(
-    //     newOwner.email,
-    //     "You have been assigned a new lead",
-    //     `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}".\n\nPlease check your CRM dashboard for details.`
-    //   );
-    // }
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
-      "LEAD_UPDATE", // Mode
-      lead.masterUserID, // Admin ID from the authenticated request
-      leadId, // Record ID (Lead ID)
-      req.adminId,
-      `Lead updated by "${req.role}"`, // Description
-      {
-        from: lead.toJSON(),
-        to: { ...leadData, leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : lead.leadOrganizationId, personId: personRecord ? personRecord.personId : lead.personId }
-      } // Changes logged as JSON
-    );
-    res.status(200).json({
-      message: "Lead updated successfully",
-      lead,
-      leadDetails,
-      person: personRecord,
-      organization: orgRecord
+    await publishToQueue("FETCH_INBOX_QUEUE", {
+      masterUserID,
+      email,
+      appPassword,
+      batchSize,
+      page,
+      days,
+      provider,
+      imapHost: req.body.imapHost,
+      imapPort: req.body.imapPort,
+      imapTLS: req.body.imapTLS,
+      smtpHost: req.body.smtpHost,
+      smtpPort: req.body.smtpPort,
+      smtpSecure: req.body.smtpSecure,
     });
+    res.status(200).json({ message: "Inbox fetch job queued successfully." });
   } catch (error) {
-    console.error("Error updating lead:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.deleteLead = async (req, res) => {
-  const { leadId } = req.params; // Use leadId from the request parameters
-
-  try {
-    const lead = await Lead.findByPk(leadId); // Find the lead by leadId
-    if (!lead) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-        "LEAD_DELETE", // Mode
-        req.role, // No user ID for failed sign-in
-        "Lead not found", // Error description
-        req.adminId
-      );
-      return res.status(404).json({ message: "Lead not found" });
-    }
-
-    // Delete the lead
-    await lead.destroy();
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
-      "LEAD_DELETE", // Mode
-      lead.masterUserID, // Admin ID from the authenticated request
-      leadId, // Record ID (Currency ID)
-      req.adminId,
-      `Lead "${lead}" deleted by "${req.role}"`, // Description
-      null // No changes to log for deletion
-    );
-    res.status(200).json({ message: "Lead deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting lead:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_DELETE", // Mode
-      null, // No user ID for failed sign-in
-      "Error deleting lead: " + error.message, // Error description
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({
+      message: "Failed to queue inbox fetch job.",
+      error: error.message,
+    });
   }
 };
 
-exports.updateAllLabels = async (req, res) => {
-  try {
-    const { valueLabels } = req.body; // Get valueLabels from the request body
+// Fetch emails from the inbox in batches
+exports.fetchInboxEmails = async (req, res) => {
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  // const email = req.email; // Get email from the request body
+  // const appPassword = req.body.appPassword;
+  const email = req.body?.email || req.email;
+  const appPassword = req.body?.appPassword || req.appPassword;
+  const provider = req.body?.provider; // Default to gmail
 
+  try {
     // Validate input
-    if (!valueLabels) {
-      return res.status(400).json({ message: "valueLabels is required." });
+    if (!masterUserID || !email || !appPassword || !provider) {
+      return res.status(400).json({ message: "All fields are required." });
     }
 
-    // Update valueLabels for all records
-    const [updatedCount] = await Lead.update(
-      { valueLabels }, // Set the new value for valueLabels
-      { where: {} } // Update all records
-    );
-
-    // Log the update in the audit trail
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UPDATE_ALL_LABELS", // Mode
-      req.adminId, // Admin ID of the user making the update
-      `Updated valueLabels for ${updatedCount} records`, // Description
-      null
-    );
-
-    res.status(200).json({
-      message: `Value labels updated successfully for ${updatedCount} records.`,
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
     });
-  } catch (error) {
-    console.error("Error updating all labels:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-      "LEAD_UPDATE_ALL_LABELS", // Mode
-      null, // No user ID for failed operation
-      "Error updating all labels: " + error.message, // Error description
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-//......................................................
-exports.updateLeadCustomFields = async (req, res) => {
-  const { leadId } = req.params;
-  const { customFields } = req.body;
-
-  if (!customFields || typeof customFields !== "object") {
-    return res.status(400).json({ message: "customFields must be a valid object." });
-  }
-
-  try {
-    const lead = await Lead.findByPk(leadId);
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
-    }
-
-    // Save original customFields for history
-    const originalCustomFields = lead.customFields || {};
-
-    // Update only customFields
-    await lead.update({ customFields });
-
-    // Log the change (optional)
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_UPDATE_CUSTOM_FIELDS",
-      lead.masterUserID,
-      leadId,
-      req.adminId,
-      `Custom fields updated for lead ${leadId} by user ${req.role}`,
-      { from: originalCustomFields, to: customFields }
-    );
-
-    res.status(200).json({ message: "Custom fields updated successfully", customFields: lead.customFields });
-  } catch (error) {
-    console.error("Error updating custom fields:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getNonAdminMasterUserNames = async (req, res) => {
-  try {
-    const { search, userType } = req.query; // Add more filters as needed
-
-    // Build where clause
-    const where = {
-      userType: { [Op.ne]: "admin" }
+    const smtpConfigByProvider = {
+      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
+      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
+      yahoo: {
+        smtpHost: "smtp.mail.yahoo.com",
+        smtpPort: 465,
+        smtpSecure: true,
+      },
+      outlook: {
+        smtpHost: "smtp.office365.com",
+        smtpPort: 587,
+        smtpSecure: false,
+      },
     };
 
-    // Search by name (case-insensitive)
-    if (search) {
-      where.name = { [Op.like]: `%${search}%` };
+    // ...inside exports.fetchInboxEmails = async (req, res) => {
+    // ...existing code...
+
+    // Prepare SMTP config for saving
+    let smtpHost = null,
+      smtpPort = null,
+      smtpSecure = null;
+    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+      const smtpConfig = smtpConfigByProvider[provider];
+      smtpHost = smtpConfig.smtpHost;
+      smtpPort = smtpConfig.smtpPort;
+      smtpSecure = smtpConfig.smtpSecure;
+    } else if (provider === "custom") {
+      smtpHost = req.body.smtpHost;
+      smtpPort = req.body.smtpPort;
+      smtpSecure = req.body.smtpSecure;
     }
-
-    // Optional: filter by userType (e.g., "general", "master")
-    if (userType) {
-      where.userType = userType;
-    }
-
-    const users = await MasterUser.findAll({
-      where,
-      attributes: ["masterUserID", "name", "userType"], // Add more fields if needed
-      order: [["name", "ASC"]]
-    });
-
-    res.status(200).json({ users });
-  } catch (error) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "MASTER_USER_FETCH",
-      req.adminId,
-      `Error fetching master users: ${error.message}`,
-      null
-    );
-    console.error("Error fetching master users:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.getLeadsByMasterUser = async (req, res) => {
-  const { masterUserID, name } = req.body;
-
-  try {
-    let whereClause = {};
-
-    if (masterUserID) {
-      whereClause.masterUserID = masterUserID;
-    } else if (name) {
-      // Find masterUserID by name
-      const user = await MasterUser.findOne({ where: { name } });
-      if (!user) {
-        await logAuditTrail(
-          PROGRAMS.LEAD_MANAGEMENT,
-          "LEAD_FETCH_BY_MASTER_USER",
-          req.adminId,
-          `Master user with name "${name}" not found.`,
-          null
-        );
-        return res.status(404).json({ message: "Master user not found." });
-      }
-      whereClause.masterUserID = user.masterUserID;
+    if (existingCredential) {
+      await existingCredential.update({
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
     } else {
-     await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_FETCH_BY_MASTER_USER",
-      req.adminId,
-      "Lead fetch failed: masterUserID or name is required.",
-      null
-    );
-      
-      return res.status(400).json({ message: "Please provide masterUserID or name." });
-    }
-
-    const leads = await Lead.findAll({ where: whereClause });
-    res.status(200).json({ leads });
-  } catch (error) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_FETCH_BY_MASTER_USER",
-      req.adminId,
-      `Error fetching leads by master user: ${error.message}`,
-      null
-    );
-    console.error("Error fetching leads by master user:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-
-
-exports.getAllLeadDetails = async (req, res) => {
-  const masterUserID = req.adminId;
-  // const { clientEmail } = req.body?.clientEmail;
-  const { leadId } = req.params;
-
-  // if (!clientEmail) {
-  //   return res.status(400).json({ message: "clientEmail is required." });
-  // }
-
-      if (!leadId) {
-        await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_DETAILS_FETCH",
-      masterUserID,
-      "Lead details fetch failed: leadId is required",
-      null
-    );
-    console.error("leadId is required in params.");
-    return res.status(400).json({ message: "leadId is required in params." });
-  }
-
-  try {
-    // Get the user's email address from credentials
-    const lead = await Lead.findByPk(leadId);
-    if (!lead || !lead.email) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT,
-        "LEAD_DETAILS_FETCH",
+      await UserCredential.create({
         masterUserID,
-        "Lead details fetch failed: Lead or lead email not found.",
-        null
-      );
-      return res.status(404).json({ message: "Lead or lead email not found." });
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(`User credentials added for masterUserID: ${masterUserID}`);
     }
-    //     const deal = await Deal.findByPk(dealId);
-    // if (!deal || !deal.email) {
-    //   return res.status(404).json({ message: "Lead or lead email not found." });
-    // }
-    const clientEmail = lead.email;
+    //....................................original code........................................
+    //   if (existingCredential) {
+    //     // Update existing credentials
+    //     // await existingCredential.update({ email, appPassword,provider });
+    //       await existingCredential.update({
+    //   email,
+    //   appPassword,
+    //   provider,
+    //   // Add custom provider fields
+    //   imapHost: provider === "custom" ? req.body.imapHost : null,
+    //   imapPort: provider === "custom" ? req.body.imapPort : null,
+    //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+    // });
+    //     console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    //   } else {
+    //     // Create new credentials
+    //     // await UserCredential.create({
+    //     //   masterUserID,
+    //     //   email,
+    //     //   appPassword,
+    //     //   provider
+    //     // });
+    //     // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    //       // Create new credentials
+    // await UserCredential.create({
+    //   masterUserID,
+    //   email,
+    //   appPassword,
+    //   provider,
+    //   // Add custom provider fields
+    //   imapHost: provider === "custom" ? req.body.imapHost : null,
+    //   imapPort: provider === "custom" ? req.body.imapPort : null,
+    //   imapTLS: provider === "custom" ? req.body.imapTLS : null,
+    //   smtpHost: provider === "custom" ? req.body.smtpHost : null,
+    //   smtpPort: provider === "custom" ? req.body.smtpPort : null,
+    //   smtpSecure: provider === "custom" ? req.body.smtpSecure : null,
+    // });
+    // console.log(`User credentials added for masterUserID: ${masterUserID}`);
+    //   }
 
-    let emails = await Email.findAll({
-  where: {
-    [Op.or]: [
-      { sender: clientEmail },
-      { recipient: { [Op.like]: `%${clientEmail}%` } }
-    ]
-  },
-  include: [{ model: Attachment, as: "attachments" }],
-  order: [["createdAt", "ASC"]]
-});
-    // Filter out emails with "RE:" in subject and no inReplyTo or references
-    emails = emails.filter(email => {
-      const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread = (!email.inReplyTo || email.inReplyTo === "") && (!email.references || email.references === "");
-      return !(hasRE && noThread);
+    //...................orginal code end.......................
+
+    // Fetch emails after saving credentials
+    console.log("Fetching emails for masterUserID:", masterUserID);
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
     });
 
-    // if (!emails.length) {
-    //   return res.status(404).json({ message: "No emails found for this conversation." });
-    // }
-let emailsExist = emails.length > 0;
-if (!emailsExist) {
-  emails = [];
-}
+    if (!userCredential) {
+      console.error(
+        "User credentials not found for masterUserID:",
+        masterUserID
+      );
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    console.log(userCredential.email, "email");
+    console.log(userCredential.appPassword, "appPassword");
 
-    // Gather all thread IDs from these emails
-    const threadIds = [];
-    emails.forEach(email => {
-      if (email.messageId) threadIds.push(email.messageId);
-      if (email.inReplyTo) threadIds.push(email.inReplyTo);
-      if (email.references) threadIds.push(...email.references.split(" "));
-    });
-    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
 
-    // Fetch all related emails in the thread (across all users)
-    let relatedEmails = await Email.findAll({
+    console.log("Connecting to IMAP server...");
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail,
+    //     password: userPassword,
+    //     host: "imap.gmail.com",
+    //     port: 993,
+    //     tls: true,
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false,
+    //     },
+    //   },
+    // };
+    let imapConfig;
+    const providerd = userCredential.provider; // default to gmail
+
+    const providerConfig = PROVIDER_CONFIG[providerd];
+    const folderMap =
+      PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
+    if (providerd === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+
+    const connection = await Imap.connect(imapConfig);
+
+    // Helper function to fetch emails from a specific folder
+    const fetchEmailsFromFolder = async (folderName, folderType) => {
+      console.log(`Opening ${folderType} folder...`);
+      await connection.openBox(folderName);
+
+      console.log(`Fetching emails from ${folderType} folder...`);
+      const sinceDate = formatDateForIMAP(
+        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      );
+      console.log(`Using SINCE date: ${sinceDate}`);
+
+      const searchCriteria = [["SINCE", sinceDate]];
+      // const searchCriteria = ["ALL"];
+      const fetchOptions = {
+        bodies: "",
+        struct: true,
+      };
+
+      const messages = await connection.search(searchCriteria, fetchOptions);
+
+      console.log(`Total emails found in ${folderType}: ${messages.length}`);
+
+      // Pagination logic
+      const startIndex = (page - 1) * batchSize;
+      const endIndex = startIndex + parseInt(batchSize);
+      const batchMessages = messages.slice(startIndex, endIndex);
+
+      for (const message of batchMessages) {
+        const rawBodyPart = message.parts.find((part) => part.which === "");
+        const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+        if (!rawBody) {
+          console.log(`No body found for email in ${folderType}.`);
+          continue;
+        }
+
+        const parsedEmail = await simpleParser(rawBody);
+
+        //..............changes for inReplyTo and references fields................
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
+
+        const emailData = {
+          messageId: parsedEmail.messageId || null,
+             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+      // references: parsedEmail.headers.get("references") || null,
+      references,
+          sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+          senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+          recipient: parsedEmail.to
+            ? parsedEmail.to.value.map((to) => to.address).join(", ")
+            : null,
+          cc: parsedEmail.cc
+            ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+            : null,
+          bcc: parsedEmail.bcc
+            ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+            : null,
+          masterUserID: masterUserID,
+          subject: parsedEmail.subject || null,
+          body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
+          folder: folderType, // Dynamically set the folder type
+          createdAt: parsedEmail.date || new Date(),
+        };
+
+        // Save email to the database
+        const existingEmail = await Email.findOne({
+          where: { messageId: emailData.messageId },
+        });
+
+        let savedEmail;
+        if (!existingEmail) {
+          savedEmail = await Email.create(emailData);
+          console.log(`Recent email saved: ${emailData.messageId}`);
+        } else {
+          console.log(`Recent email already exists: ${emailData.messageId}`);
+          savedEmail = existingEmail;
+        }
+
+        // Save attachments
+        const attachments = [];
+        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+          const savedAttachments = await saveAttachments(
+            parsedEmail.attachments,
+            savedEmail.emailID
+          );
+          attachments.push(...savedAttachments);
+          console.log(
+            `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+          );
+        }
+            // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
       where: {
-        [Op.or]: [
-          { messageId: { [Op.in]: uniqueThreadIds } },
-          { inReplyTo: { [Op.in]: uniqueThreadIds } },
-          {
-            references: {
-              [Op.or]: uniqueThreadIds.map(id => ({
-                [Op.like]: `%${id}%`
-              }))
-            }
-          }
-        ]
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
       },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "DESC"]]
+      order: [["createdAt", "ASC"]], // Sort by date
     });
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
 
-    // Remove duplicates by messageId
-    const seen = new Set();
-    relatedEmails = relatedEmails.filter(email => {
-      if (seen.has(email.messageId)) return false;
-      seen.add(email.messageId);
-      return true;
-    });
-        const notes = await LeadNote.findAll({
-      where: { leadId },
-      order: [["createdAt", "DESC"]],
-    });
-    // Get all unique creator IDs from notes
-    const creatorIds = [...new Set(notes.map(note => note.createdBy))];
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+      }
+    }
+        // connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
 
-    // Fetch all creators in one query
-    const creators = await MasterUser.findAll({
-      where: { masterUserID: creatorIds },
-      attributes: ["masterUserID", "name"]
-    });
-    const creatorMap = {};
-    creators.forEach(user => {
-      creatorMap[user.masterUserID] = user.name;
-    });
+    return {
+      message: "Fetched and saved the most recent email.",
+      email: emailData,
+      relatedEmails,
+    };
+      }
+    };
+    const boxes = await connection.getBoxes();
+    const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
+    const folderTypes = ["inbox", "drafts", "archive", "sent"];
+    for (const type of folderTypes) {
+      const folderName = folderMap[type];
+      if (allFoldersArr.includes(folderName.toLowerCase())) {
+        console.log(`Fetching emails from ${type}...`);
+        await fetchEmailsFromFolder(folderName, type);
+      } else {
+        console.log(
+          `Folder "${folderName}" not found for provider ${provider}. Skipping.`
+        );
+      }
+    }
 
-    // Attach creatorName to each note
-    const notesWithCreator = notes.map(note => {
-      const noteObj = note.toJSON();
-      noteObj.creatorName = creatorMap[note.createdBy] || null;
-      return noteObj;
-    });
-    const leadDetails = await LeadDetails.findOne({ where: { leadId } });
-    const activities = await Activity.findAll({
-      where: { leadId },
-      order: [["startDateTime", "DESC"]]
-    });
+    console.log("Fetching emails from Inbox...");
+    await fetchEmailsFromFolder(folderMap.inbox, "inbox");
+
+    console.log("Fetching emails from Drafts...");
+    await fetchEmailsFromFolder(folderMap.drafts, "drafts");
+
+    console.log("Fetching emails from Archive...");
+    // await fetchEmailsFromFolder(folderMap.archive, "archive");
+    if (allFoldersArr.includes(folderMap.archive.toLowerCase())) {
+      console.log("Fetching emails from Archive...");
+      await fetchEmailsFromFolder(folderMap.archive, "archive");
+    } else {
+      console.log(
+        `Archive folder "${folderMap.archive}" not found for provider ${provider}. Skipping.`
+      );
+    }
+
+    console.log("Fetching emails from Sent...");
+    await fetchEmailsFromFolder(folderMap.sent, "sent");
+
+    connection.end();
+    console.log("IMAP connection closed.");
+
     res.status(200).json({
-      message: "leads data fetched successfully.",
-      lead,
-      leadDetails,
-      notes:notesWithCreator,
-      emails: relatedEmails,
-      activities
-     // emails: emailsExist ? relatedEmails : null // or [] if you prefer
+      message:
+        "Fetched and saved emails from Inbox, Drafts, Archive, and Sent folders.",
     });
   } catch (error) {
-    console.error("Error fetching conversation:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_DETAILS_FETCH",
-      masterUserID,
-      `Lead details fetch failed: ${error.message}`,
-      null
-    );
+    console.error("Error fetching emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
 
-
-
-exports.addLeadNote = async (req, res) => {
-  const {content} = req.body;
-  const { leadId } = req.params;
-  const masterUserID = req.adminId;
-  const createdBy = req.adminId;
-
-  // 100KB = 102400 bytes
-  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_ADD",
-      masterUserID,
-      "Note addition failed: Note is required and must be under 100KB.",
-      null
-    );
-    return res.status(400).json({ message: "Note is required and must be under 100KB." });
-  }
-  if (!leadId) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_ADD",
-      masterUserID,
-      "Note addition failed: leadId is required",
-      null
-    );
-    return res.status(400).json({ message: "leadId is required." });
-  }
-
+// Fetch and store the most recent email
+exports.fetchRecentEmail = async (adminId) => {
   try {
-    const note = await LeadNote.create({
-      leadId,
-      masterUserID,
-      content,
-      createdBy,
+    // Fetch the user's email and app password from the UserCredential model
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID: adminId },
     });
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_ADD",
-      masterUserID,
-      leadId,
-      createdBy,
-      `Note added to lead with ID ${leadId} by user ${req.role}`,
-      { content }
-    );
-    res.status(201).json({ message: "Note added successfully", note });
-  } catch (error) {
-    console.error("Error adding note:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_ADD",
-      masterUserID,
-      `Note addition failed: ${error.message}`,
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.deleteLeadNote = async (req, res) => {
-const { noteId } = req.params;
-  const masterUserID = req.adminId;
 
-  if (!noteId) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_DELETE",
-      masterUserID,
-      "Note deletion failed: noteId is required",
-      null
-    );
-    return res.status(400).json({ message: "noteId is required." });
-  }
-
-  try {
-    const note = await LeadNote.findByPk(noteId);
-    if (!note) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT,
-        "LEAD_NOTE_DELETE",
-        masterUserID,
-        `Note deletion failed: Note with ID ${noteId} not found`,
-        null
-      );
-      return res.status(404).json({ message: "Note not found." });
+    if (!userCredential) {
+      console.error("User credentials not found for adminId:", adminId);
+      return { message: "User credentials not found." };
     }
 
-    // Check if the note belongs to the current user
-    if (note.masterUserID !== masterUserID) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT,
-        "LEAD_NOTE_DELETE",
-        masterUserID,
-        `Note deletion failed: User does not have permission to delete note with ID ${noteId}`,
-        null
-      );
-      return res.status(403).json({ message: "You do not have permission to delete this note." });
-    }
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
 
-    await note.destroy();
-    await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_DELETE",
-      masterUserID,
-      noteId,
-      req.adminId,
-      `Note with ID ${noteId} deleted by user ${req.role}`,
-      null
-    );
-    res.status(200).json({ message: "Note deleted successfully." });
-  } catch (error) {
-    console.error("Error deleting note:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_DELETE",
-      masterUserID,
-      `Note deletion failed: ${error.message}`,
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
-  }
+    console.log("Connecting to IMAP server...");
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail, // Use the email from the database
+    //     password: userPassword, // Use the app password from the database
+    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+    //     port: 993, // IMAP port
+    //     tls: true, // Use TLS
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false, // Allow self-signed certificates
+    //     },
+    //   },
+    // };
+    const provider = userCredential.provider; // default to gmail
 
-};
-exports.updateLeadNote = async (req, res) => {
-  const { noteId } = req.params;
-  const { content } = req.body;
-  const masterUserID = req.adminId;
-
-  // Validate input
-  if (!noteId) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_UPDATE",
-      masterUserID,
-      "Note update failed: noteId is required",
-      null
-    );
-    return res.status(400).json({ message: "noteId is required." });
-  }
-  if (!content || Buffer.byteLength(content, 'utf8') > 102400) {
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_UPDATE",
-      masterUserID,
-      "Note update failed: Note is required and must be under 100KB.",
-      null
-    );
-    return res.status(400).json({ message: "Note is required and must be under 100KB." });
-  }
-
-  try {
-    const note = await LeadNote.findByPk(noteId);
-    if (!note) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT,
-        "LEAD_NOTE_UPDATE",
-        masterUserID,
-        `Note update failed: Note with ID ${noteId} not found`,
-        null
-      );
-      return res.status(404).json({ message: "Note not found." });
-    }
-
-    // Check if the note belongs to the current user
-    if (note.masterUserID !== masterUserID) {
-      await logAuditTrail(
-        PROGRAMS.LEAD_MANAGEMENT,
-        "LEAD_NOTE_UPDATE",
-        masterUserID,
-        `Note update failed: User does not have permission to edit note with ID ${noteId}`,
-        null
-      );
-      return res.status(403).json({ message: "You do not have permission to edit this note." });
-    }
-
-    note.content = content;
-    await note.save();
-await historyLogger(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_UPDATE",
-      masterUserID,
-      noteId,
-      req.adminId,
-      `Note with ID ${noteId} updated by user ${req.role}`,
-      { from: note.content, to: content }
-    );
-    res.status(200).json({ message: "Note updated successfully.", note });
-  } catch (error) {
-    console.error("Error updating note:", error);
-    await logAuditTrail(
-      PROGRAMS.LEAD_MANAGEMENT,
-      "LEAD_NOTE_UPDATE",
-      masterUserID,
-      `Note update failed: ${error.message}`,
-      null
-    );
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getPersons = async (req, res) => {
-  const {
-    search,
-    page = 1,
-    limit = 10,
-    sortBy = "createdAt",
-    order = "DESC",
-    filterId
-  } = req.query;
-
-  console.log(req.role, "Role of the user");
-  
-
-  try {
-    // 1. Build where clauses and includes (reuse your dynamic filter logic)
-    let personWhere = {};
-    let organizationWhere = {};
-    let include = [];
-
-    // --- Dynamic filter logic (reuse from getLeads) ---
-    if (filterId) {
-      const filter = await LeadFilter.findByPk(filterId);
-      if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return {
+          message: "Custom IMAP settings are missing in user credentials.",
+        };
       }
-      const filterConfig = typeof filter.filterConfig === "string"
-        ? JSON.parse(filter.filterConfig)
-        : filter.filterConfig;
-
-      const personFields = Object.keys(Person.rawAttributes);
-      const organizationFields = Object.keys(Organization.rawAttributes);
-
-      // AND conditions
-      if (filterConfig.all && filterConfig.all.length > 0) {
-        personWhere[Op.and] = [];
-        organizationWhere[Op.and] = [];
-        filterConfig.all.forEach(cond => {
-          if (personFields.includes(cond.field)) personWhere[Op.and].push(buildCondition(cond));
-          else if (organizationFields.includes(cond.field)) organizationWhere[Op.and].push(buildCondition(cond));
-        });
-        if (!personWhere[Op.and].length) delete personWhere[Op.and];
-        if (!organizationWhere[Op.and].length) delete organizationWhere[Op.and];
-      }
-      // OR conditions
-      if (filterConfig.any && filterConfig.any.length > 0) {
-        personWhere[Op.or] = [];
-        organizationWhere[Op.or] = [];
-        filterConfig.any.forEach(cond => {
-          if (personFields.includes(cond.field)) personWhere[Op.or].push(buildCondition(cond));
-          else if (organizationFields.includes(cond.field)) organizationWhere[Op.or].push(buildCondition(cond));
-        });
-        if (!personWhere[Op.or].length) delete personWhere[Op.or];
-        if (!organizationWhere[Op.or].length) delete organizationWhere[Op.or];
-      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
     } else {
-      // Only show persons and organizations created by this user
-    if (req.role !== "admin") {
-        personWhere.masterUserID = req.adminId;
-        organizationWhere.masterUserID = req.adminId;
-      }
-
-      // Optional: add search logic
-      if (search) {
-        personWhere[Op.or] = [
-          { contactPerson: { [Op.like]: `%${search}%` } },
-          { email: { [Op.like]: `%${search}%` } },
-          { phone: { [Op.like]: `%${search}%` } }
-        ];
-        organizationWhere[Op.or] = [
-          { organization: { [Op.like]: `%${search}%` } },
-          { address: { [Op.like]: `%${search}%` } }
-        ];
-      }
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
     }
 
+    const connection = await Imap.connect(imapConfig);
 
-    // 2. Search logic
-    if (search) {
-      personWhere[Op.or] = [
-        { contactPerson: { [Op.like]: `%${search}%` } },
-        { email: { [Op.like]: `%${search}%` } },
-        { phone: { [Op.like]: `%${search}%` } }
-      ];
-      organizationWhere[Op.or] = [
-        { organization: { [Op.like]: `%${search}%` } },
-        { address: { [Op.like]: `%${search}%` } }
-      ];
+    console.log("Opening INBOX...");
+    await connection.openBox("INBOX");
+
+    console.log("Fetching the most recent email...");
+
+    // // Fetch all emails, then get the most recent one
+    // const fetchOptions = { bodies: "", struct: true };
+    // const messages = await connection.search(["ALL"], fetchOptions);
+
+    // if (!messages.length) {
+    //   connection.end();
+    //   return { message: "No emails found." };
+    // }
+
+    //...................original code.................
+    const sinceDate = formatDateForIMAP(
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    );
+    console.log(`Using SINCE date: ${sinceDate}`);
+
+    const searchCriteria = [["SINCE", sinceDate]];
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    console.log(`Total emails found: ${messages.length}`);
+
+    if (messages.length === 0) {
+      console.log("No emails found.");
+      return { message: "No emails found." };
     }
 
-    // 3. Fetch all organizations (with pagination)
-let persons, organizationsRaw;
+    // Get the most recent email
+    const recentMessage = messages[messages.length - 1];
+    const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
-if (req.role === "admin") {
-  // 1. Fetch all organizations (with pagination and filters)
-  const orgOffset = (page - 1) * limit;
-  organizationsRaw = await Organization.findAndCountAll({
-    where: organizationWhere,
-    limit: parseInt(limit),
-    offset: parseInt(orgOffset),
-    order: [[sortBy, order.toUpperCase()]],
-    raw: true
-  });
+    if (!rawBody) {
+      console.log("No body found for the most recent email.");
+      return { message: "No body found for the most recent email." };
+    }
 
-  // 2. Fetch all persons for these organizations
-  const orgIds = organizationsRaw.rows.map(o => o.leadOrganizationId);
-  persons = await Person.findAll({
-    where: {
-      ...personWhere,
-      leadOrganizationId: { [Op.in]: orgIds }
-    },
-    raw: true
-  });
-} else {
-// 1. Fetch all persons (filtered)
-persons = await Person.findAll({
-  where: personWhere,
-  raw: true
-});
+    // Parse the raw email body using simpleParser
+    const parsedEmail = await simpleParser(rawBody);
 
-// 2. Get unique orgIds from filtered persons
-const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
-
-// 3. Fetch only organizations for those orgIds (with pagination)
-const orgOffset = (page - 1) * limit;
-organizationsRaw = await Organization.findAndCountAll({
-  where: {
-    ...organizationWhere,
-    leadOrganizationId: { [Op.in]: orgIds }
-  },
-  limit: parseInt(limit),
-  offset: parseInt(orgOffset),
-  order: [[sortBy, order.toUpperCase()]],
-  raw: true
-});
-}
-  // 2. Get unique orgIds from filtered persons
- // const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
-const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
-    // 5. Count leads for each person and organization
-    const personIds = persons.map(p => p.personId);
-    const leadCounts = await Lead.findAll({
-      attributes: [
-        "personId",
-        "leadOrganizationId",
-        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"]
-      ],
-      where: {
-        [Op.or]: [
-          { personId: personIds },
-          { leadOrganizationId: orgIds }
-        ]
-      },
-      group: ["personId", "leadOrganizationId"],
-      raw: true
-    });
-
-    // Build maps for quick lookup
-    const personLeadCountMap = {};
-    const orgLeadCountMap = {};
-    leadCounts.forEach(lc => {
-      if (lc.personId) personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
-      if (lc.leadOrganizationId) orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
-    });
-
-    // 6. Fetch owner names
-    const ownerIds = [
-      ...organizationsRaw.rows.map(o => o.ownerId).filter(Boolean),
-      ...persons.map(p => p.ownerId).filter(Boolean)
+    let blockedList = [];
+    if (userCredential && userCredential.blockedEmail) {
+      blockedList = Array.isArray(userCredential.blockedEmail)
+        ? userCredential.blockedEmail
+            .map((e) => String(e).trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+    }
+    const senderEmail = parsedEmail.from
+      ? parsedEmail.from.value[0].address.toLowerCase()
+      : null;
+    // Sponsored patterns (add more as needed)
+    const sponsoredPatterns = [
+      /no-?reply/i,
+      /mailer-?daemon/i,
+      /demon\.mailer/i,
+      /sponsored/i,
     ];
-    const owners = await MasterUser.findAll({
-      where: { masterUserID: ownerIds },
-      attributes: ["masterUserID", "name"],
-      raw: true
-    });
-    const ownerMap = {};
-    owners.forEach(o => { ownerMap[o.masterUserID] = o.name; });
+    const isSponsored = sponsoredPatterns.some((pattern) =>
+      pattern.test(senderEmail)
+    );
+    if (blockedList.includes(senderEmail) || isSponsored) {
+      console.log(`Blocked email from: ${senderEmail}`);
+      connection.end();
+      return { message: `Blocked email from: ${senderEmail}` };
+    }
 
-    // 7. Attach persons to organizations
-    const orgPersonsMap = {};
-    persons.forEach(p => {
-      if (p.leadOrganizationId) {
-        if (!orgPersonsMap[p.leadOrganizationId]) orgPersonsMap[p.leadOrganizationId] = [];
-        orgPersonsMap[p.leadOrganizationId].push({
-          personId: p.personId,
-          contactPerson: p.contactPerson
-        });
+    const referencesHeader = parsedEmail.headers.get("references");
+    const references = Array.isArray(referencesHeader)
+      ? referencesHeader.join(" ") // Convert array to string
+      : referencesHeader || null;
+    //................................
+
+    const emailData = {
+      messageId: parsedEmail.messageId || null,
+      inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+      // references: parsedEmail.headers.get("references") || null,
+      references,
+      sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+      senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+      recipient: parsedEmail.to
+        ? parsedEmail.to.value.map((to) => to.address).join(", ")
+        : null,
+      cc: parsedEmail.cc
+        ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+        : null,
+      bcc: parsedEmail.bcc
+        ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+        : null,
+      masterUserID: adminId,
+      subject: parsedEmail.subject || null,
+      // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+      body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
+      folder: "inbox", // Add folder field
+      // threadId,
+      createdAt: parsedEmail.date || new Date(),
+    };
+
+    console.log(`Processing recent email: ${emailData.messageId}`);
+    const existingEmail = await Email.findOne({
+      where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
+    });
+
+    let savedEmail;
+    if (!existingEmail) {
+      savedEmail = await Email.create(emailData);
+      console.log(`Recent email saved: ${emailData.messageId}`);
+    } else {
+      console.log(
+        `Recent email already exists in folder ${emailData.folder}: ${emailData.messageId}`
+      );
+      savedEmail = existingEmail;
+    }
+
+    // Save attachments
+    const attachments = [];
+    if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+      const savedAttachments = await saveAttachments(
+        parsedEmail.attachments,
+        savedEmail.emailID
+      );
+      attachments.push(...savedAttachments);
+      console.log(
+        `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+      );
+    }
+
+    // Fetch related emails in the same thread
+    const relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: emailData.inReplyTo }, // Parent email
+          { inReplyTo: emailData.messageId }, // Replies to this email
+          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
+        ],
+      },
+      order: [["createdAt", "ASC"]], // Sort by date
+    });
+    // Save related emails in the database
+    for (const relatedEmail of relatedEmails) {
+      const existingRelatedEmail = await Email.findOne({
+        where: { messageId: relatedEmail.messageId },
+      });
+
+      if (!existingRelatedEmail) {
+        await Email.create(relatedEmail);
+        console.log(`Related email saved: ${relatedEmail.messageId}`);
+      } else {
+        console.log(`Related email already exists: ${relatedEmail.messageId}`);
       }
-    });
+    }
 
-// 8. Format organizations, only include those with at least one person
-const organizations = organizationsRaw.rows
-  .map(o => ({
-    ...o,
-    ownerName: ownerMap[o.ownerId] || null,
-    leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-    persons: orgPersonsMap[o.leadOrganizationId] || []
-  }));
+    connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
 
-// If not admin, filter out organizations without persons
-const finalOrganizations = req.role === "admin"
-  ? organizations
-  : organizations.filter(org => org.persons.length > 0);
+    return {
+      message: "Fetched and saved the most recent email.",
+      email: emailData,
+      relatedEmails,
+    };
+  } catch (error) {
+    console.error("Error fetching recent email:", error);
+    return { message: "Internal server error.", error: error.message };
+  }
+};
 
-    // 9. Format persons
-    persons = persons.map(p => ({
-      ...p,
-      ownerName: ownerMap[p.ownerId] || null,
-      leadCount: personLeadCountMap[p.personId] || 0
-    }));
+// Fetch and store emails from the Drafts folder using batching
+exports.fetchDraftEmails = async (req, res) => {
+  const { batchSize = 50, page = 1 } = req.query;
+
+  try {
+    console.log("Connecting to IMAP server...");
+    const connection = await Imap.connect(imapConfig);
+
+    console.log("Listing available folders...");
+    const boxes = await connection.getBoxes();
+    console.log("Available folders:", boxes);
+
+    console.log("Opening Drafts folder...");
+    await connection.openBox("[Gmail]/Drafts"); // Adjust the folder name based on the output of getBoxes()
+
+    console.log("Fetching emails from Drafts...");
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(["ALL"], fetchOptions);
+
+    console.log(`Total draft emails found: ${messages.length}`);
+
+    if (messages.length === 0) {
+      console.log("No draft emails found.");
+      return res.status(200).json({ message: "No draft emails found." });
+    }
+
+    // Pagination logic
+    const startIndex = (page - 1) * batchSize;
+    const endIndex = startIndex + parseInt(batchSize);
+    const batchMessages = messages.slice(startIndex, endIndex);
+
+    const draftEmails = [];
+
+    for (const message of batchMessages) {
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""), // Prefer plain text, fallback to HTML
+        folder: "drafts",
+        createdAt: parsedEmail.date || new Date(),
+      };
+
+      console.log(`Processing draft email: ${emailData.messageId}`);
+      draftEmails.push(emailData);
+
+      // Save the draft email to the database
+      const existingEmail = await Email.findOne({
+        where: { messageId: emailData.messageId },
+      });
+      if (!existingEmail) {
+        await Email.create(emailData);
+        console.log(`Draft email saved: ${emailData.messageId}`);
+      } else {
+        console.log(`Draft email already exists: ${emailData.messageId}`);
+      }
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
+      }
+    }
+
+    connection.end(); // Close the connection
+    console.log("IMAP connection closed.");
 
     res.status(200).json({
-      message: "Data fetched successfully",
-      totalRecords: organizationsRaw.count,
-      totalPages: Math.ceil(organizationsRaw.count / limit),
+      message: `Fetched and saved ${draftEmails.length} draft emails.`,
       currentPage: parseInt(page),
-      persons,
-      organizations:finalOrganizations
+      totalDrafts: messages.length,
+      drafts: draftEmails,
     });
   } catch (error) {
-    console.error("Error fetching data:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error fetching draft emails:", error);
+    res.status(500).json({ message: "Internal server error." });
   }
 };
 
+// Fetch and store emails from the Archive folder using batching
+exports.fetchArchiveEmails = async (req, res) => {
+  const { batchSize = 50, page = 1, days = 7 } = req.query;
+
+  try {
+    console.log("Connecting to IMAP server...");
+    const connection = await Imap.connect(imapConfig);
+
+    console.log("Opening Archive folder...");
+    await connection.openBox("[Gmail]/All Mail");
+
+    console.log("Fetching emails from the last 7 days...");
+    const sinceDate = formatDateForIMAP(
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    );
+    console.log(`Using SINCE date: ${sinceDate}`);
+
+    const searchCriteria = [["SINCE", sinceDate]];
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    console.log(`Total archive emails found: ${messages.length}`);
+
+    // Pagination logic
+    const startIndex = (page - 1) * batchSize;
+    const endIndex = startIndex + parseInt(batchSize);
+    const batchMessages = messages.slice(startIndex, endIndex);
+
+    if (batchMessages.length === 0) {
+      console.log("No more emails to fetch.");
+      return res.status(200).json({ message: "No more emails to fetch." });
+    }
+
+    const archiveEmails = [];
+
+    for (const message of batchMessages) {
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
+        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
+        subject: parsedEmail.subject || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+        folder: "archive",
+        createdAt: parsedEmail.date || new Date(),
+      };
+
+      console.log(`Processing archive email: ${emailData.messageId}`);
+      archiveEmails.push(emailData);
+
+      const existingEmail = await Email.findOne({
+        where: { messageId: emailData.messageId },
+      });
+      if (!existingEmail) {
+        await Email.create(emailData);
+        console.log(`Archive email saved: ${emailData.messageId}`);
+      } else {
+        console.log(`Archive email already exists: ${emailData.messageId}`);
+      }
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
+      }
+    }
+
+    connection.end();
+    console.log("IMAP connection closed.");
+
+    res.status(200).json({
+      message: `Fetched and saved ${archiveEmails.length} archive emails.`,
+      currentPage: parseInt(page),
+      totalArchives: messages.length,
+    });
+  } catch (error) {
+    console.error("Error fetching archive emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Get emails with pagination, filtering, and searching
+exports.getEmails = async (req, res) => {
+  const {
+    page = 1,
+    pageSize = 100,
+    folder,
+    search,
+    isRead,
+    toMe,
+    hasAttachments,
+    isOpened, // <-- Add this
+    isClicked, // <-- Add this
+    trackedEmails,
+    isShared,
+  } = req.query;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  try {
+    // Check if user has credentials in UserCredential model
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(200).json({
+        message: "No email credentials found for this user.",
+        currentPage: parseInt(page),
+        totalPages: 0,
+        totalEmails: 0,
+        unviewCount: 0,
+        threads: [],
+      });
+    }
+
+    let filters = {
+      masterUserID,
+    };
+    // if (isShared === "true") {
+    //   filters.isShared = true;
+    //   if (folder) filters.folder = folder;
+    // } else {
+    //   filters = {
+    //     [Sequelize.Op.or]: [
+    //       { masterUserID },
+    //       { isShared: true },
+    //     ]
+    //   };
+    //   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
+    // }
+    if (folder) {
+      filters.folder = folder;
+    }
+
+    if (isRead !== undefined) {
+      filters.isRead = isRead === "true";
+    }
+
+    if (toMe === "true") {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+      if (!userCredential) {
+        return res.status(404).json({ message: "User credentials not found." });
+      }
+      const userEmail = userCredential.email;
+      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
+    }
+
+    // Add tracked emails filter
+    // --- Tracked emails filter ---
+    if (trackedEmails === "true") {
+      filters.isOpened = true;
+      filters.isClicked = true;
+    } else {
+      if (isOpened !== undefined) filters.isOpened = isOpened === "true";
+      if (isClicked !== undefined) filters.isClicked = isClicked === "true";
+    }
+
+    // Add hasAttachments filter
+    let includeAttachments = [
+      {
+        model: Attachment,
+        as: "attachments",
+      },
+    ];
+    if (hasAttachments === "true") {
+      includeAttachments = [
+        {
+          model: Attachment,
+          as: "attachments",
+          required: true,
+        },
+      ];
+    }
+
+    // Search by subject, sender, or recipient
+    if (search) {
+      filters[Sequelize.Op.or] = [
+        { subject: { [Sequelize.Op.like]: `%${search}%` } },
+        { sender: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
+        { folder: { [Sequelize.Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // Pagination logic
+    const offset = (page - 1) * pageSize;
+    const limit = parseInt(pageSize);
+
+    // Fetch emails from the database
+    const { count, rows: emails } = await Email.findAndCountAll({
+      where: filters,
+      include: includeAttachments,
+      offset,
+      limit,
+      order: [["createdAt", "DESC"]], // Sort by most recent emails
+    });
+
+    // Add baseURL to attachment paths
+    const baseURL = process.env.LOCALHOST_URL;
+    const emailsWithAttachments = emails.map((email) => {
+      const attachments = email.attachments.map((attachment) => ({
+        ...attachment.toJSON(),
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+      }));
+      return {
+        ...email.toJSON(),
+        attachments,
+      };
+    });
+
+    // Calculate unviewCount for the specified folder or all folders
+    const unviewCount = await Email.count({
+      where: {
+        ...filters,
+        isRead: false, // Count only unread emails
+      },
+    });
+
+    let responseThreads;
+    if (folder === "drafts" || folder === "trash") {
+      // For drafts and trash, group by draftId if available, else by emailID
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+    } else {
+      // For other folders, group by inReplyTo or messageId
+      const threads = {};
+      emails.forEach((email) => {
+        const threadId = email.inReplyTo || email.messageId || email.emailID;
+        if (!threads[threadId]) {
+          threads[threadId] = [];
+        }
+        threads[threadId].push(email);
+      });
+      responseThreads = Object.values(threads);
+    }
+
+    // Return the paginated response with threads and unviewCount
+    res.status(200).json({
+      message: "Emails fetched successfully.",
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(count / pageSize),
+      totalEmails: count,
+      unviewCount, // Include the unviewCount field
+      // threads: Object.values(threads), // Return grouped threads
+      threads: responseThreads, // Return grouped threads
+    });
+  } catch (error) {
+    console.error("Error fetching emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Fetch and store emails from the Sent folder using batching
+exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
+  try {
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID: adminId },
+    });
+
+    if (!userCredential) {
+      console.error("User credentials not found for adminId:", adminId);
+      return { message: "User credentials not found." };
+    }
+
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
+    console.log(userPassword);
+    console.log(userEmail);
+
+    console.log("Connecting to IMAP server...");
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail, // Use the email from the database
+    //     password: userPassword, // Use the app password from the database
+    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
+    //     port: 993, // IMAP port
+    //     tls: true, // Use TLS
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false, // Allow self-signed certificates
+    //     },
+    //   },
+    // };
+    const provider = userCredential.provider; // default to gmail
+
+    const providerConfig = PROVIDER_CONFIG[provider];
+    const imapConfig = {
+      imap: {
+        user: userCredential.email,
+        password: userCredential.appPassword,
+        host: providerConfig.host,
+        port: providerConfig.port,
+        tls: providerConfig.tls,
+        authTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false },
+      },
+    };
+
+    console.log("Connecting to IMAP server...");
+    const connection = await Imap.connect(imapConfig);
+
+    console.log("Opening Sent folder...");
+    await connection.openBox("[Gmail]/Sent Mail");
+
+    console.log("Fetching emails from Sent...");
+    const sinceDate = formatDateForIMAP(
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    );
+    console.log(`Using SINCE date: ${sinceDate}`);
+
+    const searchCriteria = [["SINCE", sinceDate]];
+    const fetchOptions = {
+      bodies: "",
+      struct: true,
+    };
+
+    const messages = await connection.search(searchCriteria, fetchOptions);
+
+    console.log(`Total sent emails found: ${messages.length}`);
+
+    // Pagination logic
+    const startIndex = (page - 1) * batchSize;
+    const endIndex = startIndex + parseInt(batchSize);
+    const batchMessages = messages.slice(startIndex, endIndex);
+
+    if (batchMessages.length === 0) {
+      console.log("No more emails to fetch.");
+      return res.status(200).json({ message: "No more emails to fetch." });
+    }
+
+    const sentEmails = [];
+
+    for (const message of batchMessages) {
+      const rawBodyPart = message.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      if (!rawBody) {
+        console.log("No body found for this email.");
+        continue;
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        inReplyTo: parsedEmail.headers.get("in-reply-to") || null, // Extract inReplyTo header
+        references: parsedEmail.headers.get("references")
+          ? Array.isArray(parsedEmail.headers.get("references"))
+            ? parsedEmail.headers.get("references").join(" ") // Convert array to string
+            : parsedEmail.headers.get("references") // Use string directly
+          : null,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.address).join(", ")
+          : null,
+        cc: parsedEmail.cc
+          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+          : null,
+        bcc: parsedEmail.bcc
+          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+          : null,
+        subject: parsedEmail.subject || null,
+        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+        folder: "sent",
+        createdAt: parsedEmail.date || new Date(),
+        masterUserID: adminId,
+      };
+
+      console.log(`Processing sent email: ${emailData.messageId}`);
+      sentEmails.push(emailData);
+
+      const existingEmail = await Email.findOne({
+        where: { messageId: emailData.messageId, folder: emailData.folder },
+      });
+
+      let savedEmail;
+      if (!existingEmail) {
+        savedEmail = await Email.create(emailData);
+        console.log(`Sent email saved: ${emailData.messageId}`);
+      } else {
+        console.log(`Sent email already exists: ${emailData.messageId}`);
+        savedEmail = existingEmail;
+      }
+
+      // Save attachments using saveAttachments function
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          parsedEmail.attachments,
+          savedEmail.emailID
+        );
+        console.log(
+          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+        );
+      }
+    }
+
+    connection.end();
+    console.log("IMAP connection closed.");
+
+    // res.status(200).json({
+    //   message: `Fetched and saved ${sentEmails.length} sent emails.`,
+    //   currentPage: parseInt(page),
+    //   totalSent: messages.length,
+    // });
+    return {
+      message: `Fetched and saved ${sentEmails.length} sent emails.`,
+    };
+  } catch (error) {
+    console.error("Error fetching sent emails:", error);
+    // res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Helper function to fetch linked entities for an email
+const getLinkedEntities = async (email) => {
+  try {
+    const linkedEntities = {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+    };
+
+    // Extract emails from sender and recipient
+    const emailAddresses = [];
+
+    if (email.sender) emailAddresses.push(email.sender);
+    if (email.recipient) {
+      // Split recipient emails (comma-separated)
+      const recipients = email.recipient.split(",").map((r) => r.trim());
+      emailAddresses.push(...recipients);
+    }
+    if (email.cc) {
+      const ccEmails = email.cc.split(",").map((r) => r.trim());
+      emailAddresses.push(...ccEmails);
+    }
+    if (email.bcc) {
+      const bccEmails = email.bcc.split(",").map((r) => r.trim());
+      emailAddresses.push(...bccEmails);
+    }
+
+    // Remove duplicates and filter out empty values
+    const uniqueEmails = [...new Set(emailAddresses)].filter(Boolean);
+
+    if (uniqueEmails.length === 0) {
+      return linkedEntities;
+    }
+
+    // LINKING STRATEGY:
+    // 1. For Leads & Deals: Prioritize direct linkage (email.leadId/dealId) over email matching
+    //    - Each email should link to at most ONE lead and ONE deal
+    // 2. For Persons: Allow multiple persons with same email (different roles/organizations)
+    // 3. For Organizations: Derived from persons' organizations
+
+    // Search for leads ONLY by explicit linkage (no email matching)
+    let leads = [];
+    if (email.leadId) {
+      leads = await Lead.findAll({
+        where: { leadId: email.leadId },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+      });
+    }
+
+    // Search for deals ONLY by explicit linkage (no email matching)
+    let deals = [];
+    if (email.dealId) {
+      deals = await Deal.findAll({
+        where: { dealId: email.dealId },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+      });
+    }
+
+    // Search for persons by email (can have multiple persons with same email)
+    const persons = await Person.findAll({
+      where: {
+        email: { [Sequelize.Op.in]: uniqueEmails },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        },
+      ],
+      limit: 10, // Reasonable limit to prevent performance issues
+      order: [["createdAt", "DESC"]], // Get the most recent persons first
+    });
+
+    // Search for organizations by finding persons first
+    const personOrgIds = persons
+      .map((p) => p.leadOrganizationId)
+      .filter(Boolean);
+    let organizations = [];
+
+    if (personOrgIds.length > 0) {
+      organizations = await Organization.findAll({
+        where: {
+          leadOrganizationId: { [Sequelize.Op.in]: personOrgIds },
+        },
+      });
+    }
+
+    // Format the results and fetch activities for persons
+    linkedEntities.leads = leads.map((lead) => ({
+      leadId: lead.leadId,
+      title: lead.title,
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      status: lead.status,
+      owner: lead.Owner ? lead.Owner.name : null,
+      createdAt: lead.createdAt,
+    }));
+
+    linkedEntities.deals = deals.map((deal) => ({
+      dealId: deal.dealId,
+      title: deal.title,
+      contactPerson: deal.contactPerson,
+      organization: deal.organization,
+      status: deal.status,
+      value: deal.value,
+      owner: deal.Owner ? deal.Owner.name : null,
+      createdAt: deal.createdAt,
+    }));
+
+    // Get all person IDs for activity lookup
+    const personIds = persons.map((p) => p.personId).filter(Boolean);
+
+    // Fetch activities for all persons at once
+    const activities =
+      personIds.length > 0
+        ? await Activity.findAll({
+            where: {
+              personId: { [Sequelize.Op.in]: personIds },
+            },
+            order: [["createdAt", "DESC"]],
+            limit: 50, // Reasonable limit to prevent too much data
+          })
+        : [];
+
+    // Group activities by personId
+    const activitiesByPersonId = {};
+    activities.forEach((activity) => {
+      if (!activitiesByPersonId[activity.personId]) {
+        activitiesByPersonId[activity.personId] = [];
+      }
+      activitiesByPersonId[activity.personId].push({
+        activityId: activity.activityId,
+        type: activity.type, // Corrected field name from activityType to type
+        subject: activity.subject,
+        description: activity.description,
+        status: activity.status,
+        priority: activity.priority,
+        startDateTime: activity.startDateTime,
+        endDateTime: activity.endDateTime,
+        dueDate: activity.dueDate,
+        isDone: activity.isDone,
+        createdAt: activity.createdAt,
+      });
+    });
+
+    linkedEntities.persons = persons.map((person) => ({
+      personId: person.personId,
+      contactPerson: person.contactPerson,
+      email: person.email,
+      phone: person.phone,
+      leadOrganizationId: person.leadOrganizationId, // Add leadOrganizationId
+      organization: person.LeadOrganization
+        ? person.LeadOrganization.organization
+        : null,
+      createdAt: person.createdAt,
+      activities: activitiesByPersonId[person.personId] || [], // Add activities array
+      activityCount: (activitiesByPersonId[person.personId] || []).length, // Add activity count
+    }));
+
+    linkedEntities.organizations = organizations.map((org) => ({
+      leadOrganizationId: org.leadOrganizationId,
+      organization: org.organization,
+      country: org.organizationCountry,
+      createdAt: org.createdAt,
+    }));
+
+    return linkedEntities;
+  } catch (error) {
+    console.error("Error fetching linked entities:", error);
+    return {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+    };
+  }
+};
+
+// Helper function to aggregate linked entities from all emails in a conversation
+// Enhanced to include detailed participant information for uniqueParticipants
+const getAggregatedLinkedEntities = async (emails) => {
+  try {
+    const aggregatedEntities = {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+      conversationStats: {
+        totalEmails: emails.length,
+        uniqueParticipants: new Set(),
+        dateRange: {
+          earliest: null,
+          latest: null,
+        },
+      },
+    };
+
+    // Keep track of unique entities to avoid duplicates
+    // const seenLeads = new Set();
+    // const seenDeals = new Set();
+    // const seenPersons = new Set();
+    // const seenOrganizations = new Set();
+
+    // Track conversation statistics and email-to-name mapping
+    const emailToNameMap = new Map(); // Map email addresses to their display names
+
+    emails.forEach((email) => {
+      // Add sender with name mapping
+      if (email.sender) {
+        aggregatedEntities.conversationStats.uniqueParticipants.add(
+          email.sender
+        );
+        // Map sender email to sender name (if available)
+        if (email.senderName) {
+          emailToNameMap.set(email.sender.toLowerCase(), email.senderName);
+        }
+      }
+
+      // Add recipients (note: recipients don't have individual names in most email structures)
+      if (email.recipient) {
+        email.recipient.split(",").forEach((r) => {
+          const cleanEmail = r.trim();
+          aggregatedEntities.conversationStats.uniqueParticipants.add(
+            cleanEmail
+          );
+          // Recipients typically don't have individual names in stored email data
+          // so we'll use email as fallback
+        });
+      }
+
+      if (email.cc) {
+        email.cc.split(",").forEach((r) => {
+          const cleanEmail = r.trim();
+          aggregatedEntities.conversationStats.uniqueParticipants.add(
+            cleanEmail
+          );
+        });
+      }
+
+      // Track date range
+      const emailDate = new Date(email.createdAt);
+      if (
+        !aggregatedEntities.conversationStats.dateRange.earliest ||
+        emailDate < aggregatedEntities.conversationStats.dateRange.earliest
+      ) {
+        aggregatedEntities.conversationStats.dateRange.earliest = emailDate;
+      }
+      if (
+        !aggregatedEntities.conversationStats.dateRange.latest ||
+        emailDate > aggregatedEntities.conversationStats.dateRange.latest
+      ) {
+        aggregatedEntities.conversationStats.dateRange.latest = emailDate;
+      }
+    });
+
+    // Convert Set to Array for response
+    aggregatedEntities.conversationStats.uniqueParticipants = Array.from(
+      aggregatedEntities.conversationStats.uniqueParticipants
+    ).filter(Boolean);
+
+    // Keep track of unique entities to avoid duplicates
+    const seenLeads = new Set();
+    const seenDeals = new Set();
+    const seenPersons = new Set(); // This will track all persons from both sources
+    const seenOrganizations = new Set();
+
+    // Fetch detailed participant data for ALL unique participants (conversation + linked entities)
+    const participantEmails =
+      aggregatedEntities.conversationStats.uniqueParticipants;
+
+    // Fetch ALL persons data for unique participants
+    const allParticipantPersons = await Person.findAll({
+      where: {
+        email: { [Sequelize.Op.in]: participantEmails },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Create a map of emails that have person records
+    const emailsWithPersonRecords = new Set();
+    const emailToPersonMap = new Map();
+
+    allParticipantPersons.forEach((person) => {
+      emailsWithPersonRecords.add(person.email.toLowerCase());
+      emailToPersonMap.set(person.email.toLowerCase(), person);
+    }); // Add all participant emails to persons array (both existing persons and email-only participants)
+    participantEmails.forEach((email) => {
+      const emailLower = email.toLowerCase();
+
+      if (emailsWithPersonRecords.has(emailLower)) {
+        // Email has a person record in database
+        const person = emailToPersonMap.get(emailLower);
+        if (!seenPersons.has(person.personId)) {
+          seenPersons.add(person.personId);
+          aggregatedEntities.persons.push({
+            personId: person.personId,
+            contactPerson: person.contactPerson, // Keep contactPerson for existing persons
+            senderName: emailToNameMap.get(emailLower) || person.contactPerson, // Add senderName
+            email: person.email,
+            phone: person.phone,
+            leadOrganizationId: person.leadOrganizationId,
+            organization: person.LeadOrganization
+              ? person.LeadOrganization.organization
+              : null,
+            createdAt: person.createdAt,
+            isExistingPerson: true, // Flag: this is an existing person record
+            sourceType: "database", // Source: from person database
+            canCreateContact: false, // Already exists, no need to create
+            sourceEmail: {
+              emailId: null, // Participant from conversation, not specific email
+              messageId: null,
+              subject: "Conversation Participant",
+              createdAt: null,
+            },
+          });
+        }
+      } else {
+        // Email participant without person record
+        const emailOnlyId = `email-only-${emailLower}`;
+        if (!seenPersons.has(emailOnlyId)) {
+          seenPersons.add(emailOnlyId);
+          const displayName = emailToNameMap.get(emailLower) || email; // Use senderName if available, else email
+          aggregatedEntities.persons.push({
+            personId: null, // No person record exists
+            // contactPerson: removed for email-only participants
+            senderName: displayName, // Use senderName from email or email address as fallback
+            email: email,
+            phone: null,
+            leadOrganizationId: null,
+            organization: null,
+            createdAt: null,
+            isExistingPerson: false, // Flag: this is just an email participant
+            sourceType: "email_participant", // Source: from email conversation
+            canCreateContact: true, // Flag: can create new contact from this
+            sourceEmail: {
+              emailId: null,
+              messageId: null,
+              subject: "Email Participant Only",
+              createdAt: null,
+            },
+          });
+        }
+      }
+    });
+
+    // Fetch organizations related to all persons
+    const allPersonOrgIds = allParticipantPersons
+      .map((p) => p.leadOrganizationId)
+      .filter(Boolean);
+
+    // Add organizations from participants
+    if (allPersonOrgIds.length > 0) {
+      const participantOrganizations = await Organization.findAll({
+        where: {
+          leadOrganizationId: { [Sequelize.Op.in]: allPersonOrgIds },
+        },
+      });
+
+      participantOrganizations.forEach((org) => {
+        if (!seenOrganizations.has(org.leadOrganizationId)) {
+          seenOrganizations.add(org.leadOrganizationId);
+          aggregatedEntities.organizations.push({
+            leadOrganizationId: org.leadOrganizationId,
+            organization: org.organization,
+            country: org.organizationCountry,
+            createdAt: org.createdAt,
+            sourceEmail: {
+              emailId: null,
+              messageId: null,
+              subject: "Conversation Participant Organization",
+              createdAt: null,
+            },
+          });
+        }
+      });
+    }
+
+    // Update conversation stats to only include basic info
+    aggregatedEntities.conversationStats.participantSummary = {
+      totalParticipants: participantEmails.length,
+      emailAddresses: participantEmails,
+    };
+
+    // Process each email in the conversation for additional linked entities
+    for (const email of emails) {
+      const linkedEntities = await getLinkedEntities(email);
+
+      // Aggregate leads (deduplicate by leadId)
+      linkedEntities.leads.forEach((lead) => {
+        if (!seenLeads.has(lead.leadId)) {
+          seenLeads.add(lead.leadId);
+          aggregatedEntities.leads.push({
+            ...lead,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate deals (deduplicate by dealId)
+      linkedEntities.deals.forEach((deal) => {
+        if (!seenDeals.has(deal.dealId)) {
+          seenDeals.add(deal.dealId);
+          aggregatedEntities.deals.push({
+            ...deal,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate additional persons from linked entities (avoid duplicates)
+      linkedEntities.persons.forEach((person) => {
+        if (!seenPersons.has(person.personId)) {
+          seenPersons.add(person.personId);
+          aggregatedEntities.persons.push({
+            ...person,
+            leadOrganizationId: person.leadOrganizationId,
+            senderName:
+              emailToNameMap.get(person.email.toLowerCase()) ||
+              person.contactPerson, // Add senderName
+            isExistingPerson: true, // These are existing person records from database
+            sourceType: "database", // Source: from person database
+            canCreateContact: false, // Already exists, no need to create
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate additional organizations from linked entities (avoid duplicates)
+      linkedEntities.organizations.forEach((org) => {
+        if (!seenOrganizations.has(org.leadOrganizationId)) {
+          seenOrganizations.add(org.leadOrganizationId);
+          aggregatedEntities.organizations.push({
+            ...org,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+    }
+
+    // Fetch activities for all persons with personId (only for existing persons)
+    const personIds = aggregatedEntities.persons
+      .map((p) => p.personId)
+      .filter(Boolean); // Only get persons that have personId
+
+    const activities =
+      personIds.length > 0
+        ? await Activity.findAll({
+            where: {
+              personId: { [Sequelize.Op.in]: personIds },
+            },
+            order: [["createdAt", "DESC"]],
+            limit: 100, // Reasonable limit to prevent too much data for aggregated view
+          })
+        : [];
+
+    // Group activities by personId
+    const activitiesByPersonId = {};
+    activities.forEach((activity) => {
+      if (!activitiesByPersonId[activity.personId]) {
+        activitiesByPersonId[activity.personId] = [];
+      }
+      activitiesByPersonId[activity.personId].push({
+        activityId: activity.activityId,
+        type: activity.type, // Use 'type' instead of 'activityType' based on model
+        subject: activity.subject,
+        description: activity.description,
+        status: activity.status,
+        priority: activity.priority,
+        startDateTime: activity.startDateTime,
+        endDateTime: activity.endDateTime,
+        dueDate: activity.dueDate,
+        isDone: activity.isDone,
+        createdAt: activity.createdAt,
+      });
+    });
+
+    // Add activities to each person in the aggregated persons array
+    aggregatedEntities.persons = aggregatedEntities.persons.map((person) => ({
+      ...person,
+      activities: person.personId
+        ? activitiesByPersonId[person.personId] || []
+        : [], // Only add activities if personId exists
+      activityCount: person.personId
+        ? (activitiesByPersonId[person.personId] || []).length
+        : 0, // Activity count
+    }));
+
+    // Sort aggregated entities by creation date (most recent first)
+    // Handle null createdAt for email-only participants
+    aggregatedEntities.leads.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    aggregatedEntities.deals.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    aggregatedEntities.persons.sort((a, b) => {
+      // Put existing persons first, then email-only participants
+      if (a.isExistingPerson && !b.isExistingPerson) return -1;
+      if (!a.isExistingPerson && b.isExistingPerson) return 1;
+      // Within same type, sort by creation date
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+    aggregatedEntities.organizations.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+
+    return aggregatedEntities;
+  } catch (error) {
+    console.error("Error aggregating linked entities:", error);
+    return {
+      leads: [],
+      deals: [],
+      persons: [],
+      organizations: [],
+      conversationStats: {
+        totalEmails: 0,
+        uniqueParticipants: [],
+        participantDetails: {
+          persons: [],
+          organizations: [],
+          emailAddresses: [],
+        },
+        dateRange: { earliest: null, latest: null },
+      },
+    };
+  }
+};
+
+exports.getOneEmail = async (req, res) => {
+  const { emailId } = req.params;
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  try {
+    // Fetch the main email by emailId, including attachments
+    const mainEmail = await Email.findOne({
+      where: { emailID: emailId },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
+    });
+
+    if (!mainEmail) {
+      return res.status(404).json({ message: "Email not found." });
+    }
+
+    // Mark as read if not already
+    if (!mainEmail.isRead) {
+      await mainEmail.update({ isRead: true });
+    }
+
+    // Clean the body of the main email
+    mainEmail.body = cleanEmailBody(mainEmail.body);
+
+    // Add baseURL to attachment paths
+    const baseURL = process.env.LOCALHOST_URL;
+    mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
+      ...attachment,
+      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+    }));
+
+    // If this is a draft or trash, do NOT fetch related emails but still get linked entities
+    if (mainEmail.folder === "drafts") {
+      const linkedEntities = await getLinkedEntities(mainEmail);
+      return res.status(200).json({
+        message: "Draft email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+          linkedEntities,
+        },
+      });
+    }
+    if (mainEmail.folder === "trash") {
+      const linkedEntities = await getLinkedEntities(mainEmail);
+      return res.status(200).json({
+        message: "trash email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+          linkedEntities,
+        },
+      });
+    }
+
+    // Gather all thread IDs (messageId, inReplyTo, references)
+    const threadIds = [
+      mainEmail.messageId,
+      mainEmail.inReplyTo,
+      ...(mainEmail.references ? mainEmail.references.split(" ") : []),
+    ].filter(Boolean);
+
+    // Fetch all related emails in the thread (across all users)
+    let relatedEmails = await Email.findAll({
+      where: {
+        [Sequelize.Op.or]: [
+          { messageId: { [Sequelize.Op.in]: threadIds } },
+          { inReplyTo: { [Sequelize.Op.in]: threadIds } },
+          {
+            references: {
+              [Sequelize.Op.or]: threadIds.map((id) => ({
+                [Sequelize.Op.like]: `%${id}%`,
+              })),
+            },
+          },
+        ],
+        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+      },
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
+      order: [["createdAt", "ASC"]],
+    });
+    // Remove the main email from relatedEmails
+    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
+    // Remove the main email from relatedEmails (by messageId)
+
+    relatedEmails = relatedEmails.filter(
+      (email) => email.messageId !== mainEmail.messageId
+    );
+
+    // Deduplicate relatedEmails by messageId (keep the first occurrence)
+    // const seen = new Set();
+    // relatedEmails = relatedEmails.filter(email => {
+    //   if (seen.has(email.messageId)) return false;
+    //   seen.add(email.messageId);
+    //   return true;
+    // });
+    let allEmails = [mainEmail, ...relatedEmails];
+
+    //......changes
+    const seen = new Set();
+    allEmails = allEmails.filter((email) => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+    const emailMap = {};
+    allEmails.forEach((email) => {
+      emailMap[email.messageId] = email;
+    });
+    const conversation = [];
+    let current = allEmails.find(
+      (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
+    );
+    while (current) {
+      conversation.push(current);
+      // Find the next email that replies to the current one
+      current = allEmails.find(
+        (email) =>
+          email.inReplyTo === conversation[conversation.length - 1].messageId
+      );
+    }
+
+    // // If some emails are not in the chain (e.g., forwards), add them by date
+    const remaining = allEmails.filter(
+      (email) => !conversation.includes(email)
+    );
+    remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    conversation.push(...remaining);
+
+    // // The first is the main email, the rest are related
+    // const sortedMainEmail = conversation[0];
+    // const sortedRelatedEmails = conversation.slice(1);
+
+    // Clean the body and attachment paths for related emails
+    relatedEmails.forEach((email) => {
+      email.body = cleanEmailBody(email.body);
+      email.attachments = email.attachments.map((attachment) => ({
+        ...attachment,
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+      }));
+    });
+
+    const sortedMainEmail = conversation[0];
+    const sortedRelatedEmails = conversation.slice(1);
+
+    // Fetch linked entities from ALL emails in the conversation thread
+    const linkedEntities = await getAggregatedLinkedEntities(conversation);
+
+    res.status(200).json({
+      message: "Email fetched successfully.",
+      data: {
+        email: sortedMainEmail,
+        relatedEmails: sortedRelatedEmails,
+        linkedEntities, // Add aggregated linked entities to response
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching email:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+const dynamicUpload = require("../../middlewares/dynamicUpload");
+const { threadId } = require("worker_threads");
+exports.composeEmail = [
+  // upload.array("attachments"), // Use Multer to handle multiple file uploads
+  dynamicUpload,
+  async (req, res) => {
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      text,
+      html,
+      templateID,
+      actionType,
+      replyToMessageId,
+      isDraft,
+      draftId,
+      // isShared
+    } = req.body;
+    const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+    try {
+      // Check if a default email is set in the DefaultEmail table
+      const defaultEmail = await DefaultEmail.findOne({
+        where: { masterUserID, isDefault: true },
+      });
+
+      let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+
+      if (defaultEmail) {
+        // Use the default email account
+        SENDER_EMAIL = defaultEmail.email;
+        SENDER_PASSWORD = defaultEmail.appPassword;
+
+        // If senderName is not provided in DefaultEmail, fetch it from MasterUser
+        if (defaultEmail.senderName) {
+          SENDER_NAME = defaultEmail.senderName;
+        } else {
+          const masterUser = await MasterUser.findOne({
+            where: { masterUserID },
+          });
+
+          if (!masterUser) {
+            return res.status(404).json({
+              message: "Master user not found for the given user.",
+            });
+          }
+
+          SENDER_NAME = masterUser.name; // Use the name from MasterUser
+        }
+      } else {
+        // Fallback to UserCredential if no default email is set
+        const userCredential = await UserCredential.findOne({
+          where: { masterUserID },
+        });
+
+        if (!userCredential) {
+          return res.status(404).json({
+            message: "User credentials not found for the given user.",
+          });
+        }
+        // Add Smart BCC if set and not already in bcc
+        // let bccList = [];
+        // if (bcc) {
+        //   bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
+        // }
+        // if (userCredential.smartBcc) {
+        //   const smartBccEmail = userCredential.smartBcc.trim();
+        //   if (!bccList.includes(smartBccEmail)) {
+        //     bccList.push(smartBccEmail);
+        //   }
+        // }
+        // const finalBcc = bccList.join(", ");
+
+        SENDER_EMAIL = userCredential.email;
+        SENDER_PASSWORD = userCredential.appPassword;
+
+        // Fetch senderName from MasterUser
+        const masterUser = await MasterUser.findOne({
+          where: { masterUserID },
+        });
+
+        if (!masterUser) {
+          return res.status(404).json({
+            message: "Master user not found for the given user.",
+          });
+        }
+
+        SENDER_NAME = masterUser.name; // Use the name from MasterUser
+      }
+      // --- Smart BCC logic: always after sender is set ---
+      const userCredentialForBcc = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+
+      let bccList = [];
+      if (bcc) {
+        bccList = bcc
+          .split(",")
+          .map((e) => e.trim())
+          .filter(Boolean);
+      }
+      if (userCredentialForBcc && userCredentialForBcc.smartBcc) {
+        const smartBccEmail = userCredentialForBcc.smartBcc.trim();
+        if (!bccList.includes(smartBccEmail)) {
+          bccList.push(smartBccEmail);
+        }
+      }
+      const finalBcc = bccList.join(", ");
+
+      let finalSubject = subject;
+      let finalBody = text || html;
+      let inReplyToHeader = null;
+      let referencesHeader = null;
+      let draftEmail;
+      // If draftId is present, fetch the draft and use its data as defaults
+      if (draftId) {
+        draftEmail = await Email.findOne({
+          where: { draftId, masterUserID, folder: "drafts" },
+        });
+        if (!draftEmail) {
+          return res.status(404).json({ message: "Draft not found." });
+        }
+        // Use draft's data as defaults, allow override by request
+        finalSubject = subject || draftEmail.subject;
+        finalBody = text || html || draftEmail.body;
+      }
+      // Handle reply action
+      if (actionType === "reply") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
+
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
+
+        inReplyToHeader = originalEmail.messageId;
+        referencesHeader = originalEmail.references
+          ? `${originalEmail.references} ${originalEmail.messageId}`
+          : originalEmail.messageId;
+
+        finalSubject = originalEmail.subject.startsWith("Re:")
+          ? originalEmail.subject
+          : `Re: ${originalEmail.subject}`;
+        finalBody = `${text || html}`;
+        req.body.to = originalEmail.sender;
+        req.body.cc = "";
+      }
+      if (actionType === "replyAll") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
+
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
+
+        inReplyToHeader = originalEmail.messageId;
+        referencesHeader = originalEmail.references
+          ? `${originalEmail.references} ${originalEmail.messageId}`
+          : originalEmail.messageId;
+
+        finalSubject = originalEmail.subject.startsWith("Re:")
+          ? originalEmail.subject
+          : `Re: ${originalEmail.subject}`;
+        finalBody = `${text || html}`;
+
+        // Build recipients: all original To and CC, plus sender, except yourself
+        const currentUserEmail = SENDER_EMAIL.toLowerCase();
+        const allTo = (originalEmail.recipient || "")
+          .split(",")
+          .map((e) => e.trim().toLowerCase());
+        const allCc = (originalEmail.cc || "")
+          .split(",")
+          .map((e) => e.trim().toLowerCase());
+        const replyAllList = [originalEmail.sender, ...allTo, ...allCc].filter(
+          (email) => email && email !== currentUserEmail
+        );
+        // Remove duplicates
+        const uniqueReplyAll = [...new Set(replyAllList)];
+        // Set recipients for reply all
+        req.body.to = uniqueReplyAll[0] || "";
+        req.body.cc = uniqueReplyAll.slice(1).join(", ");
+      }
+      if (actionType === "forward") {
+        const originalEmail = await Email.findOne({
+          where: { messageId: replyToMessageId },
+        });
+
+        if (!originalEmail) {
+          return res.status(404).json({
+            message: "Original email not found for the given messageId.",
+          });
+        }
+
+        inReplyToHeader = null;
+        referencesHeader = null;
+
+        finalSubject = originalEmail.subject.startsWith("Fwd:")
+          ? originalEmail.subject
+          : `Fwd: ${originalEmail.subject}`;
+        finalBody = `${
+          text || html
+        }<br><br>---------- Forwarded message ----------<br>
+    From: ${originalEmail.senderName || originalEmail.sender}<br>
+    Date: ${originalEmail.createdAt}<br>
+    Subject: ${originalEmail.subject}<br>
+    To: ${originalEmail.recipient}<br>
+    ${originalEmail.body}`;
+        // For forward, req.body.to and req.body.cc are set by the user
+      }
+
+      // If a templateID is provided, fetch the template
+      if (templateID) {
+        const template = await Template.findOne({
+          where: { templateID },
+        });
+
+        if (!template) {
+          return res.status(404).json({ message: "Template not found." });
+        }
+
+        finalSubject = template.subject;
+        finalBody = template.content;
+      }
+
+      // Fetch user credentials to check tracking settings
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+
+      if (!userCredential) {
+        return res.status(404).json({
+          message: "User credentials not found for the given user.",
+        });
+      }
+
+      const isTrackOpenEmail = userCredential.isTrackOpenEmail || false;
+      const isTrackClickEmail = userCredential.isTrackClickEmail || false;
+
+      // Add tracking pixel for email open tracking
+      const generateTrackingPixel = (messageId) => {
+        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
+        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;"alt="" />`;
+      };
+
+      // Add tracking links for click tracking
+      const generateRedirectLink = (originalUrl, messageId) => {
+        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
+        return `${baseURL}/track/click?tempMessageId=${messageId}&url=${encodeURIComponent(
+          originalUrl
+        )}`;
+      };
+
+      const replaceLinksWithTracking = (body, messageId) => {
+        return body.replace(
+          /href="([^"]*)"/g,
+          (match, url) => `href="${generateRedirectLink(url, messageId)}"`
+        );
+      };
+      let signatureBlock = "";
+      if (userCredential.signatureName) {
+        signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+      }
+      if (userCredential.signature) {
+        signatureBlock += `${userCredential.signature}<br>`;
+      }
+      if (userCredential.signatureImage) {
+        signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+      }
+      finalBody += `<br><br>${signatureBlock}`;
+      // Generate a temporary messageId for tracking
+      const tempMessageId = `temp-${Date.now()}`;
+
+      // Conditionally add tracking pixel and replace links in the email body
+      if (isTrackOpenEmail) {
+        finalBody += `<br>${generateTrackingPixel(tempMessageId)}`;
+      }
+
+      if (isTrackClickEmail) {
+        finalBody = replaceLinksWithTracking(finalBody, tempMessageId);
+      }
+
+      // Prepare attachments for nodemailer
+      const formattedAttachments =
+        req.files && req.files.length > 0
+          ? req.files.map((file) => ({
+              filename: file.originalname,
+              path: file.path,
+            }))
+          : [];
+      //Check if scheduledAt is provided for scheduling
+      if (req.body.scheduledAt) {
+        const parsedDate = new Date(req.body.scheduledAt);
+        if (isNaN(parsedDate.getTime())) {
+          return res
+            .status(400)
+            .json({ message: "Invalid scheduledAt date format." });
+        }
+        // Save to outbox for later sending
+        const emailData = {
+          messageId: null,
+          inReplyTo: inReplyToHeader || null,
+          references: referencesHeader || null,
+          sender: SENDER_EMAIL,
+          senderName: SENDER_NAME,
+          recipient: to,
+          cc,
+          bcc,
+          subject: finalSubject,
+          body: finalBody,
+          folder: "outbox",
+          createdAt: new Date(),
+          masterUserID,
+          tempMessageId,
+          isDraft: false,
+          scheduledAt: parsedDate,
+        };
+        const savedEmail = await Email.create(emailData);
+
+        // Save attachments in the database
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+        const savedAttachments = req.files.map((file) => ({
+          emailID: savedEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          size: file.size,
+          contentType: file.mimetype,
+        }));
+        if (savedAttachments.length > 0) {
+          await Attachment.bulkCreate(savedAttachments);
+        }
+
+        return res.status(200).json({
+          message: "Email scheduled and saved to outbox successfully.",
+          scheduledAt: emailData.scheduledAt,
+          emailID: savedEmail.emailID,
+        });
+      }
+
+      // Create a transporter using the selected email credentials
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: SENDER_EMAIL,
+          pass: SENDER_PASSWORD,
+        },
+      });
+      // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
+
+      // Define the email options
+      const mailOptions = {
+        from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+        to: to || (draftEmail && draftEmail.recipient),
+        cc: cc || (draftEmail && draftEmail.cc),
+        bcc: finalBcc || bcc || (draftEmail && draftEmail.bcc),
+        subject: finalSubject,
+        text: htmlToText(finalBody),
+        html: finalBody,
+        attachments:
+          formattedAttachments.length > 0 ? formattedAttachments : undefined,
+        inReplyTo: inReplyToHeader || undefined,
+        references: referencesHeader || undefined,
+      };
+
+      const baseURL = process.env.LOCALHOST_URL;
+
+      let attachments = [];
+      if (req.files && req.files.length > 0) {
+        attachments = req.files.map((file) => ({
+          filename: file.filename,
+          originalname: file.originalname,
+          path: file.path,
+          // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
+          size: file.size,
+          contentType: file.mimetype,
+        }));
+      } else if (draftId && draftEmail) {
+        // If no new files uploaded, fetch existing attachments from the draft
+        const oldAttachments = await Attachment.findAll({
+          where: { emailID: draftEmail.emailID },
+        });
+        attachments = oldAttachments.map((att) => ({
+          filename: att.filename,
+          originalname: att.originalname || att.filename,
+          path: att.filePath || att.path, // use filePath or path
+          size: att.size,
+          contentType: att.contentType,
+        }));
+      }
+
+      const finalTo = to || (draftEmail && draftEmail.recipient);
+      const finalCc = cc || (draftEmail && draftEmail.cc);
+      const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
+
+      if (!finalTo && !finalCc && !finalBccValue) {
+        return res.status(400).json({
+          message: "At least one recipient (to, cc, bcc) is required.",
+        });
+      }
+      const emailData = {
+        // messageId: info.messageId,
+        draftId: draftId || null,
+        inReplyTo: inReplyToHeader || null,
+        references: referencesHeader || null,
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        // recipient: to,
+        // cc,
+        // bcc,
+        recipient: finalTo,
+        cc: finalCc,
+        bcc: finalBccValue,
+        subject: finalSubject,
+        body: finalBody,
+        folder: "sent",
+        createdAt: new Date(),
+        masterUserID,
+        tempMessageId,
+        isDraft: false,
+        attachments,
+        // isShared: isShared === true || isShared === "true", // ensure boolean
+      };
+
+      await publishToQueue("EMAIL_QUEUE", emailData);
+      // }
+
+      res.status(200).json({
+        message: "Email sent and saved successfully.",
+        // messageId: info.messageId,
+        // attachments: attachmentLinks,
+      });
+    } catch (error) {
+      console.error("Error sending email:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to send email.", error: error.message });
+    }
+  },
+];
+
+exports.createTemplate = async (req, res) => {
+  const { name, subject, content, isShared } = req.body; // Changed `body` to `content`
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+  try {
+    // Save the template in the database
+    const templateData = {
+      name,
+      subject,
+      content, // Use `content` instead of `body`
+      isShared: isShared || false, // Default to false if not provided
+      masterUserID, // Associate the template with the user
+    };
+
+    const savedTemplate = await Template.create(templateData);
+    console.log("Template created successfully:", savedTemplate);
+
+    res.status(200).json({
+      message: "Template created successfully.",
+      template: savedTemplate,
+    });
+  } catch (error) {
+    console.error("Error creating template:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to create template.", error: error.message });
+  }
+};
+
+exports.getTemplates = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+  try {
+    // Fetch templates for the specific user
+    const templates = await Template.findAll({
+      where: { masterUserID }, // Filter by masterUserID
+    });
+
+    res.status(200).json({
+      message: "Templates fetched successfully.",
+      templates,
+    });
+  } catch (error) {
+    console.error("Error fetching templates:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch templates.", error: error.message });
+  }
+};
+
+exports.getTemplateById = async (req, res) => {
+  const { templateID } = req.params;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+  try {
+    // Fetch the template for the specific user and templateID
+    const template = await Template.findOne({
+      where: {
+        templateID,
+        masterUserID, // Ensure the template belongs to the specific user
+      },
+    });
+
+    if (!template) {
+      return res.status(404).json({ message: "Template not found." });
+    }
+
+    res.status(200).json({
+      message: "Template fetched successfully.",
+      template,
+    });
+  } catch (error) {
+    console.error("Error fetching template:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch template.", error: error.message });
+  }
+};
+exports.getUnreadCounts = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  try {
+    // Check if user has credentials in UserCredential model
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(200).json({
+        message: "No email credentials found for this user.",
+        masterUserID,
+        unreadCounts: {
+          inbox: 0,
+          drafts: 0,
+          sent: 0,
+          archive: 0,
+          trash: 0,
+        },
+      });
+    }
+
+    // Define all possible folders
+    const allFolders = ["inbox", "drafts", "sent", "archive", "trash"];
+
+    // Fetch the count of unread emails grouped by folder for the specific user
+    const unreadCounts = await Email.findAll({
+      attributes: [
+        "folder", // Group by folder
+        [Sequelize.fn("COUNT", Sequelize.col("emailID")), "unreadCount"], // Count unread emails
+      ],
+      where: {
+        isRead: false, // Only fetch unread emails
+        masterUserID, // Filter by the specific user's masterUserID
+      },
+      group: ["folder"], // Group by folder
+    });
+
+    // Convert the result into a dictionary with folder names as keys
+    const counts = unreadCounts.reduce((acc, item) => {
+      acc[item.folder] = parseInt(item.dataValues.unreadCount, 10);
+      return acc;
+    }, {});
+
+    // Ensure all folders are included in the response, even if they have zero unread emails
+    const response = allFolders.reduce((acc, folder) => {
+      acc[folder] = counts[folder] || 0; // Default to 0 if the folder is not in the result
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      message: "Unread counts fetched successfully.",
+      masterUserID, // Include the user's masterUserID in the response
+      unreadCounts: response,
+    });
+  } catch (error) {
+    console.error("Error fetching unread counts:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.addUserCredential = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const {
+    email,
+    appPassword,
+    syncStartDate,
+    syncFolders,
+    syncAllFolders,
+    isTrackOpenEmail,
+    isTrackClickEmail,
+    blockedEmail, // <-- Add this line
+    provider,
+    imapHost, // <-- Add these lines
+    imapPort,
+    imapTLS,
+    smtpHost,
+    smtpPort,
+    smtpSecure,
+  } = req.body;
+
+  try {
+    // Validate syncStartDate (ensure it's a valid ISO date string)
+    if (syncStartDate) {
+      const parsedDate = new Date(syncStartDate);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({
+          message: "Invalid syncStartDate format. Expected an ISO date string.",
+        });
+      }
+    }
+
+    // Validate syncFolders (optional validation to ensure it's an array)
+    if (syncFolders && !Array.isArray(syncFolders)) {
+      return res.status(400).json({
+        message: "Invalid syncFolders. It must be an array of folder names.",
+      });
+    }
+
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    const updateData = {};
+    if (email) updateData.email = email;
+    if (appPassword) updateData.appPassword = appPassword;
+    if (syncStartDate) updateData.syncStartDate = syncStartDate;
+    if (syncFolders) updateData.syncFolders = syncFolders;
+    if (syncAllFolders !== undefined)
+      updateData.syncAllFolders = syncAllFolders;
+    if (isTrackOpenEmail !== undefined)
+      updateData.isTrackOpenEmail = isTrackOpenEmail;
+    if (isTrackClickEmail !== undefined)
+      updateData.isTrackClickEmail = isTrackClickEmail;
+    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail;
+    if (provider) updateData.provider = provider;
+    // Add custom provider fields
+    if (provider === "custom") {
+      if (imapHost) updateData.imapHost = imapHost;
+      if (imapPort) updateData.imapPort = imapPort;
+      if (imapTLS !== undefined) updateData.imapTLS = imapTLS;
+      if (smtpHost) updateData.smtpHost = smtpHost;
+      if (smtpPort) updateData.smtpPort = smtpPort;
+      if (smtpSecure !== undefined) updateData.smtpSecure = smtpSecure;
+    }
+
+    if (existingCredential) {
+      // Update existing credentials
+      await existingCredential.update(updateData);
+      return res.status(200).json({
+        message: "User credentials updated successfully.",
+        updatedFields: updateData,
+      });
+    }
+
+    // Create new credentials
+    const newCredential = await UserCredential.create({
+      masterUserID,
+      email: email || null,
+      appPassword: appPassword || null,
+      syncStartDate: syncStartDate || new Date().toISOString(),
+      syncFolders: syncFolders || [
+        "INBOX",
+        "[Gmail]/Sent Mail",
+        "[Gmail]/Drafts",
+      ],
+      syncAllFolders: syncAllFolders || false,
+      isTrackOpenEmail: isTrackOpenEmail || true,
+      isTrackClickEmail: isTrackClickEmail || true,
+      blockedEmail: blockedEmail || null, // <-- Add this line
+      provider: provider || "gmail",
+      // Add these lines for custom provider support
+      imapHost: provider === "custom" ? imapHost : null,
+      imapPort: provider === "custom" ? imapPort : null,
+      imapTLS: provider === "custom" ? imapTLS : null,
+      smtpHost: provider === "custom" ? smtpHost : null,
+      smtpPort: provider === "custom" ? smtpPort : null,
+      smtpSecure: provider === "custom" ? smtpSecure : null,
+    });
+
+    res.status(201).json({
+      message: "User credentials added successfully.",
+      credential: newCredential,
+    });
+  } catch (error) {
+    console.error("Error adding or updating user credentials:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.getUserCredential = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
+
+  try {
+    // Fetch the user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    res.status(200).json({
+      message: "User credentials fetched successfully.",
+      credential: userCredential, // Return all fields
+    });
+  } catch (error) {
+    console.error("Error fetching user credentials:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+exports.deleteEmail = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+    const { emailId } = req.params; // Get the email ID from the request parameters
+
+    const email = await Email.findOne({
+      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
+    });
+    if (!email) {
+      return res.status(404).json({ message: "Email not found." });
+    } else {
+      // Move the email to the trash folder
+      await email.update({ folder: "trash" });
+      console.log(`Email moved to trash: ${email.messageId}`);
+      res.status(200).json({
+        message: "Email moved to trash successfully.",
+      });
+    }
+  } catch (error) {
+    console.error("Error deleting email:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.deletebulkEmails = async (req, res) => {
+  try {
+    const masterUserID = req.adminId;
+    const { emailIds } = req.body; // Expecting an array of email IDs
+
+    if (!Array.isArray(emailIds) || emailIds.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "emailIds must be a non-empty array." });
+    }
+
+    // Update all emails to move them to the trash folder
+    const [updatedCount] = await Email.update(
+      { folder: "trash" },
+      { where: { emailID: emailIds, masterUserID } }
+    );
+
+    res.status(200).json({
+      message: `${updatedCount} email(s) moved to trash successfully.`,
+    });
+  } catch (error) {
+    console.error("Error deleting emails:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.saveDraft = [
+  // upload.array("attachments"), // Use Multer to handle multiple file uploads
+  dynamicUpload,
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html, draftId } = req.body;
+    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+    try {
+      let savedDraft;
+      let isUpdate = false;
+
+      if (draftId) {
+        // Try to find the existing draft
+        savedDraft = await Email.findOne({
+          where: { draftId, masterUserID, folder: "drafts" },
+        });
+
+        if (savedDraft) {
+          // Update the existing draft
+          await savedDraft.update({
+            recipient: to || null,
+            cc: cc || null,
+            bcc: bcc || null,
+            subject: subject || null,
+            body: text || html || null,
+          });
+          isUpdate = true;
+        }
+      }
+
+      if (!savedDraft) {
+        // Create a new draft if not updating
+        savedDraft = await Email.create({
+          messageId: null,
+          sender: null,
+          senderName: null,
+          recipient: to || null,
+          cc: cc || null,
+          bcc: bcc || null,
+          subject: subject || null,
+          body: text || html || null,
+          folder: "drafts",
+          masterUserID,
+          draftId: draftId || null,
+        });
+      }
+
+      // Handle attachments
+      let savedAttachments = [];
+      if (req.files && req.files.length > 0) {
+        if (isUpdate) {
+          // Remove old attachments if updating
+          await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
+        }
+        // savedAttachments = req.files.map((file) => ({
+        //   emailID: savedDraft.emailID,
+        //   filename: file.originalname,
+        //   path: file.path,
+        // }));
+        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+        const savedAttachments = req.files.map((file) => ({
+          emailID: savedDraft.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          size: file.size,
+          contentType: file.mimetype,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+      } else if (isUpdate) {
+        // If no new attachments, fetch existing ones for response
+        savedAttachments = await Attachment.findAll({
+          where: { emailID: savedDraft.emailID },
+        });
+      }
+
+      // Generate public URLs for attachments
+      const attachmentLinks = savedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+      }));
+
+      res.status(200).json({
+        message: isUpdate
+          ? "Draft updated successfully."
+          : "Draft saved successfully.",
+        draft: savedDraft,
+        attachments: attachmentLinks,
+      });
+    } catch (error) {
+      console.error("Error saving draft:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to save draft.", error: error.message });
+    }
+  },
+];
+
+exports.scheduleEmail = [
+  // upload.array("attachments"),
+  dynamicUpload,
+  async (req, res) => {
+    const { to, cc, bcc, subject, text, html, scheduledAt } = req.body;
+    const masterUserID = req.adminId;
+
+    try {
+      // Fetch sender email and name (prefer DefaultEmail, fallback to UserCredential)
+      let SENDER_EMAIL, SENDER_NAME;
+
+      const defaultEmail = await DefaultEmail.findOne({
+        where: { masterUserID, isDefault: true },
+      });
+
+      if (defaultEmail) {
+        SENDER_EMAIL = defaultEmail.email;
+        SENDER_NAME = defaultEmail.senderName;
+        if (!SENDER_NAME) {
+          const masterUser = await MasterUser.findOne({
+            where: { masterUserID },
+          });
+          SENDER_NAME = masterUser ? masterUser.name : null;
+        }
+      } else {
+        const userCredential = await UserCredential.findOne({
+          where: { masterUserID },
+        });
+        SENDER_EMAIL = userCredential ? userCredential.email : null;
+        const masterUser = await MasterUser.findOne({
+          where: { masterUserID },
+        });
+        SENDER_NAME = masterUser ? masterUser.name : null;
+      }
+
+      // Prepare email data for scheduling
+      const emailData = {
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        recipient: to,
+        cc,
+        bcc,
+        subject,
+        body: text || html,
+        folder: "outbox",
+        masterUserID,
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+        isDraft: false,
+      };
+      const scheduledEmail = await Email.create(emailData);
+
+      // Save attachments if any
+      if (req.files && req.files.length > 0) {
+        const savedAttachments = req.files.map((file) => ({
+          emailID: scheduledEmail.emailID,
+          filename: file.originalname,
+          path: file.path,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+      }
+
+      res.status(200).json({
+        message: "Email scheduled successfully.",
+        // email: fullEmail,
+      });
+    } catch (error) {
+      console.error("Error scheduling email:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to schedule email.", error: error.message });
+    }
+  },
+];

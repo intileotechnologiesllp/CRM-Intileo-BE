@@ -423,16 +423,15 @@ exports.fetchInboxEmails = async (req, res) => {
         const parsedEmail = await simpleParser(rawBody);
 
         //..............changes for inReplyTo and references fields................
-    const referencesHeader = parsedEmail.headers.get("references");
-    const references = Array.isArray(referencesHeader)
-      ? referencesHeader.join(" ") // Convert array to string
-      : referencesHeader || null;
+        const referencesHeader = parsedEmail.headers.get("references");
+        const references = Array.isArray(referencesHeader)
+          ? referencesHeader.join(" ") // Convert array to string
+          : referencesHeader || null;
 
         const emailData = {
           messageId: parsedEmail.messageId || null,
-             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-      // references: parsedEmail.headers.get("references") || null,
-      references,
+          inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+          references,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
           senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
           recipient: parsedEmail.to
@@ -477,38 +476,35 @@ exports.fetchInboxEmails = async (req, res) => {
             `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
           );
         }
-            // Fetch related emails in the same thread
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: emailData.inReplyTo }, // Parent email
-          { inReplyTo: emailData.messageId }, // Replies to this email
-          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
-        ],
-      },
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
-    // Save related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
 
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
-        // connection.end(); // Close the connection
-    console.log("IMAP connection closed.");
+        // Fetch related emails in the same thread (like fetchRecentEmail)
+        const relatedEmails = await Email.findAll({
+          where: {
+            [Sequelize.Op.or]: [
+              { messageId: emailData.inReplyTo }, // Parent email
+              { inReplyTo: emailData.messageId }, // Replies to this email
+              {
+                references: { [Sequelize.Op.like]: `%${emailData.messageId}%` },
+              }, // Emails in the same thread
+            ],
+          },
+          order: [["createdAt", "ASC"]], // Sort by date
+        });
+        // Save related emails in the database
+        for (const relatedEmail of relatedEmails) {
+          const existingRelatedEmail = await Email.findOne({
+            where: { messageId: relatedEmail.messageId },
+          });
 
-    return {
-      message: "Fetched and saved the most recent email.",
-      email: emailData,
-      relatedEmails,
-    };
+          if (!existingRelatedEmail) {
+            await Email.create(relatedEmail);
+            console.log(`Related email saved: ${relatedEmail.messageId}`);
+          } else {
+            console.log(
+              `Related email already exists: ${relatedEmail.messageId}`
+            );
+          }
+        }
       }
     };
     const boxes = await connection.getBoxes();
@@ -710,7 +706,6 @@ exports.fetchRecentEmail = async (adminId) => {
     const emailData = {
       messageId: parsedEmail.messageId || null,
       inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-      // references: parsedEmail.headers.get("references") || null,
       references,
       sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
       senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
@@ -2480,7 +2475,7 @@ exports.composeEmail = [
         });
         attachments = oldAttachments.map((att) => ({
           filename: att.filename,
-          originalname: att.originalname || att.filename,
+          originalname: att.filename,
           path: att.filePath || att.path, // use filePath or path
           size: att.size,
           contentType: att.contentType,
