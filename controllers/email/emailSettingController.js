@@ -892,7 +892,7 @@ exports.downloadAttachment = async (req, res) => {
 
   try {
     // Find the email and attachment metadata
-    const email = await Email.findOne({ where: { emailID, masterUserID } });
+    const email = await Email.findOne({ where: { emailID} });
     if (!email) return res.status(404).json({ message: "Email not found." });
 
     const attachmentMeta = await Attachment.findOne({
