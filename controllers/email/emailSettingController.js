@@ -254,20 +254,102 @@ const folderMapping = {
 
 exports.queueSyncEmails = async (req, res) => {
   const masterUserID = req.adminId;
-  const { syncStartDate } = req.body;
+  const { syncStartDate, batchSize = 100 } = req.body;
 
   try {
-    await publishToQueue("SYNC_EMAIL_QUEUE", { masterUserID, syncStartDate });
-    res.status(200).json({ message: "Sync job queued successfully." });
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
+    const provider = userCredential.provider || "gmail";
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+    // Connect to IMAP and open INBOX (or use syncFolders if you want all folders)
+    const connection = await Imap.connect(imapConfig);
+    await connection.openBox("INBOX");
+    // Calculate sinceDate for IMAP search
+    let sinceDate;
+    if (syncStartDate && typeof syncStartDate === "string" && syncStartDate.includes("T")) {
+      sinceDate = new Date(syncStartDate);
+    } else if (syncStartDate && syncStartDate.includes("days ago")) {
+      const days = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subDays(new Date(), days);
+    } else if (syncStartDate && syncStartDate.includes("month")) {
+      const months = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subMonths(new Date(), months);
+    } else if (syncStartDate && syncStartDate.includes("year")) {
+      const years = parseInt(syncStartDate.split(" ")[0], 10);
+      sinceDate = subYears(new Date(), years);
+    } else {
+      sinceDate = subDays(new Date(), 3); // Default to 3 days ago
+    }
+    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy");
+    // Search for all UIDs in the date range
+    const searchCriteria = [["SINCE", formattedSinceDate]];
+    const fetchOptions = { bodies: [], struct: true };
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    const uids = messages.map((msg) => msg.attributes.uid);
+    await connection.end();
+    // Batching
+    const totalEmails = uids.length;
+    const numBatches = Math.ceil(totalEmails / batchSize);
+    if (numBatches === 0) {
+      return res.status(200).json({ message: "No emails to sync." });
+    }
+    for (let i = 0; i < numBatches; i++) {
+      const startIdx = i * batchSize;
+      const endIdx = Math.min(startIdx + parseInt(batchSize), totalEmails);
+      const batchUIDs = uids.slice(startIdx, endIdx);
+      if (batchUIDs.length === 0) continue;
+      const startUID = batchUIDs[0];
+      const endUID = batchUIDs[batchUIDs.length - 1];
+      await publishToQueue("SYNC_EMAIL_QUEUE", {
+        masterUserID,
+        syncStartDate,
+        batchSize,
+        startUID,
+        endUID,
+      });
+    }
+    res.status(200).json({ message: `Sync jobs queued: ${numBatches} batches for ${totalEmails} emails.` });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to queue sync job.", error: error.message });
+    res.status(500).json({ message: "Failed to queue sync job.", error: error.message });
   }
 };
 
 exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 100, page = 1 } = req.query; // Default batchSize to 50 and page to 1
+  const { batchSize = 100, page = 1, startUID, endUID } = req.query; // Accept startUID and endUID for batching
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
   try {
@@ -281,20 +363,16 @@ exports.fetchSyncEmails = async (req, res) => {
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
-
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
-
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
     const syncStartDate = userCredential.syncStartDate || "3 days ago"; // Default to "3 days ago" if invalid
     const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to "INBOX"
     const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
-
     // Parse and calculate the `sinceDate` based on syncStartDate
     let sinceDate;
-
     if (typeof syncStartDate === "string" && syncStartDate.includes("T")) {
       // If syncStartDate is an ISO date string
       sinceDate = new Date(syncStartDate);
@@ -310,33 +388,15 @@ exports.fetchSyncEmails = async (req, res) => {
     } else {
       return res.status(400).json({ message: "Invalid syncStartDate format." });
     }
-
     // Validate sinceDate
     if (isNaN(sinceDate.getTime())) {
       throw new Error("Invalid sinceDate calculated from syncStartDate.");
     }
-
     const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
     const humanReadableSinceDate = `${format(sinceDate, "MMMM dd, yyyy")}`;
-
     console.log(`Fetching emails since ${humanReadableSinceDate}`);
-
     // Connect to IMAP server
-    // const imapConfig = {
-    //   imap: {
-    //     user: userEmail,
-    //     password: userPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 30000,
-    //     tlsOptions: {
-    //       rejectUnauthorized: false,
-    //     },
-    //   },
-    // };
     const provider = userCredential.provider || "gmail"; // default to gmail
-
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
@@ -369,17 +429,13 @@ exports.fetchSyncEmails = async (req, res) => {
         },
       };
     }
-
     const connection = await Imap.connect(imapConfig);
-
     // Fetch all folders from the IMAP server
     const mailboxes = await connection.getBoxes();
     console.log("All folders from IMAP server:", mailboxes);
-
     // Extract all valid folder names, including nested folders
     const validFolders = extractFolders(mailboxes);
     console.log("Valid folders from IMAP server:", validFolders);
-
     // Fetch all folders if syncAllFolders is true
     let foldersToSync = Array.isArray(syncFolders)
       ? syncFolders
@@ -393,49 +449,39 @@ exports.fetchSyncEmails = async (req, res) => {
         validFolders.includes(folder)
       );
     }
-
     // Debugging logs
     console.log("User-specified folders to sync:", syncFolders);
     console.log("Filtered folders to sync:", foldersToSync);
-
     if (foldersToSync.length === 0) {
       return res.status(400).json({ message: "No valid folders to sync." });
     }
-
     console.log("Valid folders to sync:", foldersToSync);
-
     // Helper function to fetch emails from a specific folder
     const fetchEmailsFromFolder = async (folderName) => {
       console.log(`Opening folder: ${folderName}...`);
       await connection.openBox(folderName);
-
-      console.log(`Fetching emails from folder: ${folderName}...`);
-      const searchCriteria = [["SINCE", formattedSinceDate]];
+      let searchCriteria;
+      if (startUID && endUID) {
+        // Use UID range for this batch
+        searchCriteria = [["UID", `${startUID}:${endUID}`]];
+      } else {
+        searchCriteria = [["SINCE", formattedSinceDate]];
+      }
       const fetchOptions = {
         bodies: "",
         struct: true,
       };
-
       const messages = await connection.search(searchCriteria, fetchOptions);
-
       console.log(`Total emails found in ${folderName}: ${messages.length}`);
-
-      // Paginate emails based on batchSize and page
-      const startIndex = (page - 1) * batchSize;
-      const endIndex = startIndex + parseInt(batchSize, 10);
-      const paginatedMessages = messages.slice(startIndex, endIndex);
-
-      for (const message of paginatedMessages) {
+      // No need for further pagination here, as batching is handled by UID range
+      for (const message of messages) {
         const rawBodyPart = message.parts.find((part) => part.which === "");
         const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
         if (!rawBody) {
           console.log(`No body found for email in folder: ${folderName}.`);
           continue;
         }
-
         const parsedEmail = await simpleParser(rawBody);
-
         // Map IMAP folder name to database folder name
         const dbFolderName = folderMapping[folderName] || "inbox"; // Default to "inbox" if no mapping exists
         // Extract inReplyTo and references headers
@@ -443,7 +489,6 @@ exports.fetchSyncEmails = async (req, res) => {
         const references = Array.isArray(referencesHeader)
           ? referencesHeader.join(" ") // Convert array to string
           : referencesHeader || null;
-
         const emailData = {
           messageId: parsedEmail.messageId || null,
           inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
@@ -465,12 +510,10 @@ exports.fetchSyncEmails = async (req, res) => {
           folder: dbFolderName, // Use mapped folder name
           createdAt: parsedEmail.date || new Date(),
         };
-
         // Save email to the database
         const existingEmail = await Email.findOne({
           where: { messageId: emailData.messageId },
         });
-
         let savedEmail;
         if (!existingEmail) {
           savedEmail = await Email.create(emailData);
@@ -479,7 +522,6 @@ exports.fetchSyncEmails = async (req, res) => {
           console.log(`Email already exists: ${emailData.messageId}`);
           savedEmail = existingEmail;
         }
-
         // Fetch related emails in the same thread (like fetchRecentEmail)
         const relatedEmails = await Email.findAll({
           where: {
@@ -498,7 +540,6 @@ exports.fetchSyncEmails = async (req, res) => {
           const existingRelatedEmail = await Email.findOne({
             where: { messageId: relatedEmail.messageId },
           });
-
           if (!existingRelatedEmail) {
             await Email.create(relatedEmail);
             console.log(`Related email saved: ${relatedEmail.messageId}`);
@@ -510,20 +551,19 @@ exports.fetchSyncEmails = async (req, res) => {
         }
       }
     };
-
     // Fetch emails from specified folders
     for (const folder of foldersToSync) {
       await fetchEmailsFromFolder(folder);
     }
-
     connection.end();
     console.log("IMAP connection closed.");
-
     res.status(200).json({
       message: "Fetched and saved emails from specified folders.",
       sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
       batchSize: parseInt(batchSize, 10),
       page: parseInt(page, 10),
+      startUID,
+      endUID,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
@@ -892,7 +932,7 @@ exports.downloadAttachment = async (req, res) => {
 
   try {
     // Find the email and attachment metadata
-    const email = await Email.findOne({ where: { emailID} });
+    const email = await Email.findOne({ where: { emailID } });
     if (!email) return res.status(404).json({ message: "Email not found." });
 
     const attachmentMeta = await Attachment.findOne({
@@ -909,17 +949,6 @@ exports.downloadAttachment = async (req, res) => {
       return res.status(404).json({ message: "User credentials not found." });
 
     // Connect to IMAP and fetch the email
-    // const imapConfig = {
-    //   imap: {
-    //     user: userCredential.email,
-    //     password: userCredential.appPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 30000,
-    //     tlsOptions: { rejectUnauthorized: false },
-    //   },
-    // };
     const provider = userCredential.provider || "gmail"; // default to gmail
 
     let imapConfig;
@@ -942,6 +971,7 @@ exports.downloadAttachment = async (req, res) => {
       };
     } else {
       const providerConfig = PROVIDER_CONFIG[provider];
+      console.log("Using provider config:", providerConfig.host, providerConfig.port, providerConfig.tls);
       imapConfig = {
         imap: {
           user: userCredential.email,
@@ -958,32 +988,106 @@ exports.downloadAttachment = async (req, res) => {
     const connection = await Imap.connect(imapConfig);
     await connection.openBox(email.folder);
 
-    // Search for the email by messageId
-    const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
-    const fetchOptions = { bodies: "", struct: true };
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    if (!messages.length) {
-      connection.end();
-      return res.status(404).json({ message: "Email not found on server." });
-    }
-
-    // Parse the email and find the attachment
-    const rawBodyPart = messages[0].parts.find((part) => part.which === "");
-    const rawBody = rawBodyPart ? rawBodyPart.body : null;
-    const parsedEmail = await simpleParser(rawBody);
-
-    const attachment = parsedEmail.attachments.find(
-      (att) => att.filename === filename
+    // Debug logging
+    console.log(
+      `Searching for messageId: ${email.messageId} in folder: ${email.folder}`
     );
-    if (!attachment) {
-      connection.end();
-      return res
-        .status(404)
-        .json({ message: "Attachment not found in email." });
+
+    // Search for the email by messageId
+    let messages = [];
+    try {
+      const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
+      const fetchOptions = { bodies: "", struct: true };
+      messages = await connection.search(searchCriteria, fetchOptions);
+      console.log(
+        `IMAP search by messageId found ${messages.length} messages.`
+      );
+    } catch (err) {
+      console.error("IMAP search by messageId failed:", err);
     }
 
-    // Send the attachment as a download
+    // Fallback: if not found, try to fetch the most recent email in the folder
+    if (!messages || !messages.length) {
+      console.warn(
+        "Primary search failed, trying fallback: most recent email in folder"
+      );
+      try {
+        const fetchOptions = { bodies: "", struct: true };
+        const allMessages = await connection.search(["ALL"], fetchOptions);
+        if (allMessages && allMessages.length > 0) {
+          // Sort by UID descending (most recent first)
+          allMessages.sort((a, b) => b.attributes.uid - a.attributes.uid);
+          messages = [allMessages[0]];
+          console.log("Fallback: using most recent email in folder.");
+        }
+      } catch (fallbackErr) {
+        console.error("Fallback search failed:", fallbackErr);
+      }
+    }
+
+    // Deep fallback: scan all emails in the folder for the attachment filename
+    let foundAttachment = null;
+    let foundMessage = null;
+    if (!messages || !messages.length) {
+      console.warn(
+        "Fallback failed, trying deep fallback: scan all emails in folder for attachment filename"
+      );
+      try {
+        const fetchOptions = { bodies: "", struct: true };
+        const allMessages = await connection.search(["ALL"], fetchOptions);
+        if (allMessages && allMessages.length > 0) {
+          for (const msg of allMessages) {
+            const rawBodyPart = msg.parts.find((part) => part.which === "");
+            const rawBody = rawBodyPart ? rawBodyPart.body : null;
+            if (!rawBody) continue;
+            const parsedEmail = await simpleParser(rawBody);
+            const att = parsedEmail.attachments.find(
+              (a) => a.filename === filename
+            );
+            if (att) {
+              foundAttachment = att;
+              foundMessage = msg;
+              console.log(
+                `Deep fallback: found attachment in message UID ${msg.attributes.uid}`
+              );
+              break;
+            }
+          }
+        }
+      } catch (deepErr) {
+        console.error("Deep fallback search failed:", deepErr);
+      }
+      if (!foundAttachment) {
+        connection.end();
+        return res
+          .status(404)
+          .json({
+            message:
+              "Attachment not found in any email in folder (deep fallback).",
+          });
+      }
+    }
+
+    // Parse the email and find the attachment (normal or fallback)
+    let attachment;
+    if (foundAttachment) {
+      attachment = foundAttachment;
+    } else {
+      const rawBodyPart = messages[0].parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+      const parsedEmail = await simpleParser(rawBody);
+      attachment = parsedEmail.attachments.find(
+        (att) => att.filename === filename
+      );
+      if (!attachment) {
+        connection.end();
+        return res
+          .status(404)
+          .json({ message: "Attachment not found in email (after fallback)." });
+      }
+    }
+
+    // Send the attachment as a download (in-memory, not saved to disk)
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${attachment.filename}"`

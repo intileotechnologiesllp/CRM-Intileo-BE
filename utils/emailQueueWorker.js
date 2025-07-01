@@ -721,12 +721,17 @@ async function startSyncEmailWorker() {
     "SYNC_EMAIL_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const { masterUserID, syncStartDate } = JSON.parse(msg.content.toString());
+        // Expect startUID and endUID in the message for batching
+        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
-            // Call fetchSyncEmails logic directly, but mock req/res
+            // Pass startUID and endUID to fetchSyncEmails for batch processing
             await fetchSyncEmails(
-              { adminId: masterUserID, body: { syncStartDate }, query: {} },
+              {
+                adminId: masterUserID,
+                body: { syncStartDate, startUID, endUID },
+                query: {}
+              },
               { status: () => ({ json: () => {} }) }
             );
             channel.ack(msg);
@@ -735,7 +740,7 @@ async function startSyncEmailWorker() {
             channel.nack(msg, false, false);
           }
         });
-              }
+      }
     },
     { noAck: false }
   );
@@ -785,6 +790,5 @@ startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 startWorker().catch(console.error);
 startScheduledEmailWorker().catch(console.error);
-
 
 

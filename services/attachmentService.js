@@ -22,7 +22,7 @@ const saveAttachments = async (attachments, emailID) => {
 
       if (!existingAttachment) {
         // Save the attachment to the file system
-        const filePath = await saveAttachmentToFile(attachment, emailID);
+        // const filePath = await saveAttachmentToFile(attachment, emailID);
 
         // Prepare attachment data
         const attachmentData = {
@@ -30,7 +30,7 @@ const saveAttachments = async (attachments, emailID) => {
           filename: attachment.filename,
           contentType: attachment.contentType,
           size: attachment.size,
-          filePath,
+          // filePath,
         };
 
         //   const meta = await saveAttachmentToFile(attachment, emailID);
