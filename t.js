@@ -340,11 +340,9 @@ exports.fetchSyncEmails = async (req, res) => {
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res
-          .status(400)
-          .json({
-            message: "Custom IMAP settings are missing in user credentials.",
-          });
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
       }
       imapConfig = {
         imap: {
@@ -441,15 +439,15 @@ exports.fetchSyncEmails = async (req, res) => {
         // Map IMAP folder name to database folder name
         const dbFolderName = folderMapping[folderName] || "inbox"; // Default to "inbox" if no mapping exists
         // Extract inReplyTo and references headers
-    const referencesHeader = parsedEmail.headers.get("references");
-    const references = Array.isArray(referencesHeader)
-      ? referencesHeader.join(" ") // Convert array to string
-      : referencesHeader || null;
+        const referencesHeader = parsedEmail.headers.get("references");
+        const references = Array.isArray(referencesHeader)
+          ? referencesHeader.join(" ") // Convert array to string
+          : referencesHeader || null;
 
         const emailData = {
           messageId: parsedEmail.messageId || null,
-             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-             references,
+          inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+          references,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
           senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
           recipient: parsedEmail.to
@@ -472,38 +470,7 @@ exports.fetchSyncEmails = async (req, res) => {
         const existingEmail = await Email.findOne({
           where: { messageId: emailData.messageId },
         });
-            // Fetch related emails in the same thread
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: emailData.inReplyTo }, // Parent email
-          { inReplyTo: emailData.messageId }, // Replies to this email
-          { references: { [Sequelize.Op.like]: `%${emailData.messageId}%` } }, // Emails in the same thread
-        ],
-      },
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
-    // Save related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
-      });
 
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
-      }
-    }
-        // connection.end(); // Close the connection
-    console.log("IMAP connection closed.");
-
-    return {
-      message: "Fetched and saved the most recent email.",
-      email: emailData,
-      relatedEmails,
-    };
         let savedEmail;
         if (!existingEmail) {
           savedEmail = await Email.create(emailData);
@@ -511,6 +478,35 @@ exports.fetchSyncEmails = async (req, res) => {
         } else {
           console.log(`Email already exists: ${emailData.messageId}`);
           savedEmail = existingEmail;
+        }
+
+        // Fetch related emails in the same thread (like fetchRecentEmail)
+        const relatedEmails = await Email.findAll({
+          where: {
+            [Sequelize.Op.or]: [
+              { messageId: emailData.inReplyTo }, // Parent email
+              { inReplyTo: emailData.messageId }, // Replies to this email
+              {
+                references: { [Sequelize.Op.like]: `%${emailData.messageId}%` },
+              }, // Emails in the same thread
+            ],
+          },
+          order: [["createdAt", "ASC"]], // Sort by date
+        });
+        // Save related emails in the database
+        for (const relatedEmail of relatedEmails) {
+          const existingRelatedEmail = await Email.findOne({
+            where: { messageId: relatedEmail.messageId },
+          });
+
+          if (!existingRelatedEmail) {
+            await Email.create(relatedEmail);
+            console.log(`Related email saved: ${relatedEmail.messageId}`);
+          } else {
+            console.log(
+              `Related email already exists: ${relatedEmail.messageId}`
+            );
+          }
         }
       }
     };
@@ -733,12 +729,10 @@ exports.updateBlockedAddress = async (req, res) => {
       .status(200)
       .json({ message: "Blocked address list updated successfully." });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Failed to update blocked address.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to update blocked address.",
+      error: error.message,
+    });
   }
 };
 exports.removeBlockedAddress = async (req, res) => {
@@ -783,12 +777,10 @@ exports.removeBlockedAddress = async (req, res) => {
       blockedEmail: updatedList,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Failed to remove blocked address.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to remove blocked address.",
+      error: error.message,
+    });
   }
 };
 exports.getSignature = async (req, res) => {
@@ -809,12 +801,10 @@ exports.getSignature = async (req, res) => {
       signatureImage: userCredential.signatureImage,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Failed to fetch signature data.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to fetch signature data.",
+      error: error.message,
+    });
   }
 };
 exports.getBlockedAddress = async (req, res) => {
@@ -831,12 +821,10 @@ exports.getBlockedAddress = async (req, res) => {
       blockedEmail: userCredential.blockedEmail,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        message: "Failed to fetch blocked addresses.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to fetch blocked addresses.",
+      error: error.message,
+    });
   }
 };
 exports.getSmartBcc = async (req, res) => {
@@ -904,7 +892,7 @@ exports.downloadAttachment = async (req, res) => {
 
   try {
     // Find the email and attachment metadata
-    const email = await Email.findOne({ where: { emailID, masterUserID } });
+    const email = await Email.findOne({ where: { emailID} });
     if (!email) return res.status(404).json({ message: "Email not found." });
 
     const attachmentMeta = await Attachment.findOne({
@@ -937,11 +925,9 @@ exports.downloadAttachment = async (req, res) => {
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res
-          .status(400)
-          .json({
-            message: "Custom IMAP settings are missing in user credentials.",
-          });
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
       }
       imapConfig = {
         imap: {
@@ -1008,12 +994,10 @@ exports.downloadAttachment = async (req, res) => {
     connection.end();
   } catch (error) {
     console.error("Error downloading attachment:", error);
-    res
-      .status(500)
-      .json({
-        message: "Failed to download attachment.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to download attachment.",
+      error: error.message,
+    });
   }
 };
 exports.markAsUnreadSingle = async (req, res) => {
