@@ -341,7 +341,8 @@ exports.fetchInboxEmails = async (req, res) => {
       });
       console.log(`User credentials updated for masterUserID: ${masterUserID}`);
     } else {
-      await UserCredential.create({
+      // Use upsert to avoid duplicate entry errors
+      await UserCredential.upsert({
         masterUserID,
         email,
         appPassword,
@@ -353,7 +354,7 @@ exports.fetchInboxEmails = async (req, res) => {
         smtpPort,
         smtpSecure,
       });
-      console.log(`User credentials added for masterUserID: ${masterUserID}`);
+      console.log(`User credentials upserted for masterUserID: ${masterUserID}`);
     }
 
     // Fetch emails after saving credentials
