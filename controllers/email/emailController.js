@@ -452,7 +452,9 @@ exports.fetchInboxEmails = async (req, res) => {
             inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
             references,
             sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-            senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+            senderName: parsedEmail.from
+              ? parsedEmail.from.value[0].name
+              : null,
             recipient: parsedEmail.to
               ? parsedEmail.to.value.map((to) => to.address).join(", ")
               : null,
@@ -503,7 +505,9 @@ exports.fetchInboxEmails = async (req, res) => {
                 { messageId: emailData.inReplyTo }, // Parent email
                 { inReplyTo: emailData.messageId }, // Replies to this email
                 {
-                  references: { [Sequelize.Op.like]: `%${emailData.messageId}%` },
+                  references: {
+                    [Sequelize.Op.like]: `%${emailData.messageId}%`,
+                  },
                 }, // Emails in the same thread
               ],
             },
@@ -579,7 +583,11 @@ exports.fetchInboxEmails = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   } finally {
     // Safe connection close
-    if (connection && connection.imap && connection.imap.state !== "disconnected") {
+    if (
+      connection &&
+      connection.imap &&
+      connection.imap.state !== "disconnected"
+    ) {
       try {
         connection.end();
       } catch (closeErr) {
@@ -1154,6 +1162,7 @@ exports.getEmails = async (req, res) => {
       offset,
       limit,
       order: [["createdAt", "DESC"]], // Sort by most recent emails
+      distinct: true, // <-- This ensures correct counting!
     });
 
     // Add baseURL to attachment paths
@@ -3065,3 +3074,32 @@ exports.scheduleEmail = [
     }
   },
 ];
+
+// Delete all emails and attachments for a given masterUserID
+exports.deleteAllEmailsForUser = async (req, res) => {
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  try {
+    // Find all emails for the user
+    const emails = await Email.findAll({ where: { masterUserID } });
+    const emailIDs = emails.map((e) => e.emailID);
+
+    // Delete all attachments for these emails
+    await Attachment.destroy({ where: { emailID: emailIDs } });
+    // Delete all emails for the user
+    await Email.destroy({ where: { masterUserID } });
+
+    res
+      .status(200)
+      .json({
+        message: `All emails and attachments deleted for user ${masterUserID}.`,
+      });
+  } catch (error) {
+    console.error("Error deleting all emails and attachments:", error);
+    res
+      .status(500)
+      .json({
+        message: "Failed to delete all emails and attachments.",
+        error: error.message,
+      });
+  }
+};

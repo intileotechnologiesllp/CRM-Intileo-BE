@@ -21,6 +21,7 @@ router.get("/delete-email/:emailId", verifyToken,emailController.deleteEmail);
 router.post("/delete-emails", verifyToken,emailController.deletebulkEmails);
 router.post("/save-draft", verifyToken,emailController.saveDraft);
 router.post("/schedule-email", verifyToken,emailController.scheduleEmail);
+router.get("/delete-all-emails", verifyToken,emailController.deleteAllEmailsForUser);
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 
 
