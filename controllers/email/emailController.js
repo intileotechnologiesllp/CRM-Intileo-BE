@@ -3101,28 +3101,33 @@ exports.scheduleEmail = [
 // Delete all emails and attachments for a given masterUserID
 exports.deleteAllEmailsForUser = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const BATCH_SIZE = 1000;
+  let totalDeleted = 0;
   try {
-    // Find all emails for the user
-    const emails = await Email.findAll({ where: { masterUserID } });
-    const emailIDs = emails.map((e) => e.emailID);
-
-    // Delete all attachments for these emails
-    await Attachment.destroy({ where: { emailID: emailIDs } });
-    // Delete all emails for the user
-    await Email.destroy({ where: { masterUserID } });
-
-    res
-      .status(200)
-      .json({
-        message: `All emails and attachments deleted for user ${masterUserID}.`,
+    while (true) {
+      // Fetch a batch of email IDs for the user
+      const emails = await Email.findAll({
+        where: { masterUserID },
+        attributes: ['emailID'],
+        limit: BATCH_SIZE,
       });
+      if (emails.length === 0) break;
+      const emailIDs = emails.map((e) => e.emailID);
+      // Delete all attachments for these emails
+      await Attachment.destroy({ where: { emailID: emailIDs } });
+      // Delete all emails for the user in this batch
+      await Email.destroy({ where: { emailID: emailIDs } });
+      totalDeleted += emails.length;
+      if (emails.length < BATCH_SIZE) break;
+    }
+    res.status(200).json({
+      message: `All emails and attachments deleted for user ${masterUserID}. Total deleted: ${totalDeleted}`,
+    });
   } catch (error) {
     console.error("Error deleting all emails and attachments:", error);
-    res
-      .status(500)
-      .json({
-        message: "Failed to delete all emails and attachments.",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to delete all emails and attachments.",
+      error: error.message,
+    });
   }
 };
