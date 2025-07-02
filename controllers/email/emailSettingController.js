@@ -381,6 +381,38 @@ exports.queueSyncEmails = async (req, res) => {
   }
 };
 
+// Helper function to recursively fetch all emails in a thread
+async function getFullThread(messageId, EmailModel, collected = new Set()) {
+  if (!messageId || collected.has(messageId)) return [];
+  collected.add(messageId);
+  const emails = await EmailModel.findAll({
+    where: {
+      [Sequelize.Op.or]: [
+        { messageId },
+        { inReplyTo: messageId },
+        { references: { [Sequelize.Op.like]: `%${messageId}%` } },
+      ],
+    },
+  });
+  let thread = [...emails];
+  for (const email of emails) {
+    if (email.inReplyTo && !collected.has(email.inReplyTo)) {
+      thread = thread.concat(
+        await getFullThread(email.inReplyTo, EmailModel, collected)
+      );
+    }
+    if (email.references) {
+      const refs = email.references.split(" ");
+      for (const ref of refs) {
+        if (ref && !collected.has(ref)) {
+          thread = thread.concat(await getFullThread(ref, EmailModel, collected));
+        }
+      }
+    }
+  }
+  return thread;
+}
+
 exports.fetchSyncEmails = async (req, res) => {
   const { batchSize = 100, page = 1, startUID, endUID } = req.query; // Accept startUID and endUID for batching
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
@@ -584,34 +616,23 @@ exports.fetchSyncEmails = async (req, res) => {
           );
           savedEmail = existingEmail;
         }
-        // Fetch related emails in the same thread (like fetchRecentEmail)
-        const relatedEmails = await Email.findAll({
-          where: {
-            [Sequelize.Op.or]: [
-              { messageId: emailData.inReplyTo }, // Parent email
-              { inReplyTo: emailData.messageId }, // Replies to this email
-              {
-                references: { [Sequelize.Op.like]: `%${emailData.messageId}%` },
-              }, // Emails in the same thread
-            ],
-          },
-          order: [["createdAt", "ASC"]], // Sort by date
-        });
-        // Save related emails in the database
-        for (const relatedEmail of relatedEmails) {
-          const existingRelatedEmail = await Email.findOne({
-            where: { messageId: relatedEmail.messageId },
-          });
-          if (!existingRelatedEmail) {
-            await Email.create(relatedEmail);
-            console.debug(
-              `[fetchSyncEmails] Related email saved: ${relatedEmail.messageId}`
-            );
-          } else {
-            console.debug(
-              `[fetchSyncEmails] Related email already exists: ${relatedEmail.messageId}`
-            );
+        // Fetch the full thread recursively
+        if (emailData.messageId) {
+          const fullThread = await getFullThread(emailData.messageId, Email);
+          // Remove duplicates by messageId
+          const uniqueThread = [];
+          const seen = new Set();
+          for (const em of fullThread) {
+            if (!seen.has(em.messageId)) {
+              uniqueThread.push(em);
+              seen.add(em.messageId);
+            }
           }
+          // Sort by createdAt (oldest first)
+          uniqueThread.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          // Optionally, you can log the thread for debugging
+          console.debug(`Full thread for messageId ${emailData.messageId}:`, uniqueThread.map(e => e.messageId));
+          // You can now use uniqueThread as the full conversation
         }
       }
     };
