@@ -257,9 +257,17 @@ exports.queueSyncEmails = async (req, res) => {
   const { syncStartDate, batchSize = 100 } = req.body;
 
   try {
+    console.debug(
+      `[queueSyncEmails] masterUserID: ${masterUserID}, syncStartDate: ${syncStartDate}, batchSize: ${batchSize}`
+    );
     // Fetch user credentials
-    const userCredential = await UserCredential.findOne({ where: { masterUserID } });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
     if (!userCredential) {
+      console.debug(
+        `[queueSyncEmails] No user credentials found for masterUserID: ${masterUserID}`
+      );
       return res.status(404).json({ message: "User credentials not found." });
     }
     const userEmail = userCredential.email;
@@ -268,7 +276,12 @@ exports.queueSyncEmails = async (req, res) => {
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({ message: "Custom IMAP settings are missing in user credentials." });
+        console.debug(
+          `[queueSyncEmails] Custom IMAP settings missing for masterUserID: ${masterUserID}`
+        );
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
       }
       imapConfig = {
         imap: {
@@ -296,11 +309,18 @@ exports.queueSyncEmails = async (req, res) => {
       };
     }
     // Connect to IMAP and open INBOX (or use syncFolders if you want all folders)
+    console.debug(
+      `[queueSyncEmails] Connecting to IMAP for user: ${userEmail}`
+    );
     const connection = await Imap.connect(imapConfig);
     await connection.openBox("INBOX");
     // Calculate sinceDate for IMAP search
     let sinceDate;
-    if (syncStartDate && typeof syncStartDate === "string" && syncStartDate.includes("T")) {
+    if (
+      syncStartDate &&
+      typeof syncStartDate === "string" &&
+      syncStartDate.includes("T")
+    ) {
       sinceDate = new Date(syncStartDate);
     } else if (syncStartDate && syncStartDate.includes("days ago")) {
       const days = parseInt(syncStartDate.split(" ")[0], 10);
@@ -315,16 +335,19 @@ exports.queueSyncEmails = async (req, res) => {
       sinceDate = subDays(new Date(), 3); // Default to 3 days ago
     }
     const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy");
+    console.debug(`[queueSyncEmails] IMAP search since: ${formattedSinceDate}`);
     // Search for all UIDs in the date range
     const searchCriteria = [["SINCE", formattedSinceDate]];
     const fetchOptions = { bodies: [], struct: true };
     const messages = await connection.search(searchCriteria, fetchOptions);
     const uids = messages.map((msg) => msg.attributes.uid);
+    console.debug(`[queueSyncEmails] Found ${uids.length} UIDs to sync.`);
     await connection.end();
     // Batching
     const totalEmails = uids.length;
     const numBatches = Math.ceil(totalEmails / batchSize);
     if (numBatches === 0) {
+      console.debug(`[queueSyncEmails] No emails to sync.`);
       return res.status(200).json({ message: "No emails to sync." });
     }
     for (let i = 0; i < numBatches; i++) {
@@ -334,6 +357,11 @@ exports.queueSyncEmails = async (req, res) => {
       if (batchUIDs.length === 0) continue;
       const startUID = batchUIDs[0];
       const endUID = batchUIDs[batchUIDs.length - 1];
+      console.debug(
+        `[queueSyncEmails] Queueing batch ${
+          i + 1
+        }/${numBatches}: startUID=${startUID}, endUID=${endUID}`
+      );
       await publishToQueue("SYNC_EMAIL_QUEUE", {
         masterUserID,
         syncStartDate,
@@ -342,9 +370,14 @@ exports.queueSyncEmails = async (req, res) => {
         endUID,
       });
     }
-    res.status(200).json({ message: `Sync jobs queued: ${numBatches} batches for ${totalEmails} emails.` });
+    res.status(200).json({
+      message: `Sync jobs queued: ${numBatches} batches for ${totalEmails} emails.`,
+    });
   } catch (error) {
-    res.status(500).json({ message: "Failed to queue sync job.", error: error.message });
+    console.error("[queueSyncEmails] Failed to queue sync job:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to queue sync job.", error: error.message });
   }
 };
 
@@ -353,6 +386,9 @@ exports.fetchSyncEmails = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
   try {
+    console.debug(
+      `[fetchSyncEmails] masterUserID: ${masterUserID}, batchSize: ${batchSize}, page: ${page}, startUID: ${startUID}, endUID: ${endUID}`
+    );
     if (inputSyncStartDate) {
       await UserCredential.update(
         { syncStartDate: inputSyncStartDate },
@@ -364,6 +400,9 @@ exports.fetchSyncEmails = async (req, res) => {
       where: { masterUserID },
     });
     if (!userCredential) {
+      console.debug(
+        `[fetchSyncEmails] No user credentials found for masterUserID: ${masterUserID}`
+      );
       return res.status(404).json({ message: "User credentials not found." });
     }
     const userEmail = userCredential.email;
@@ -394,12 +433,17 @@ exports.fetchSyncEmails = async (req, res) => {
     }
     const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
     const humanReadableSinceDate = `${format(sinceDate, "MMMM dd, yyyy")}`;
-    console.log(`Fetching emails since ${humanReadableSinceDate}`);
+    console.debug(
+      `[fetchSyncEmails] Fetching emails since ${humanReadableSinceDate}`
+    );
     // Connect to IMAP server
     const provider = userCredential.provider || "gmail"; // default to gmail
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
+        console.debug(
+          `[fetchSyncEmails] Custom IMAP settings missing for masterUserID: ${masterUserID}`
+        );
         return res.status(400).json({
           message: "Custom IMAP settings are missing in user credentials.",
         });
@@ -429,19 +473,25 @@ exports.fetchSyncEmails = async (req, res) => {
         },
       };
     }
+    console.debug(
+      `[fetchSyncEmails] Connecting to IMAP for user: ${userEmail}`
+    );
     const connection = await Imap.connect(imapConfig);
     // Fetch all folders from the IMAP server
     const mailboxes = await connection.getBoxes();
-    console.log("All folders from IMAP server:", mailboxes);
+    console.debug("[fetchSyncEmails] All folders from IMAP server:", mailboxes);
     // Extract all valid folder names, including nested folders
     const validFolders = extractFolders(mailboxes);
-    console.log("Valid folders from IMAP server:", validFolders);
+    console.debug(
+      "[fetchSyncEmails] Valid folders from IMAP server:",
+      validFolders
+    );
     // Fetch all folders if syncAllFolders is true
     let foldersToSync = Array.isArray(syncFolders)
       ? syncFolders
       : [syncFolders];
     if (syncAllFolders) {
-      console.log("Fetching all folders...");
+      console.debug("[fetchSyncEmails] Fetching all folders...");
       foldersToSync = validFolders; // Use all valid folders
     } else {
       // Filter user-specified folders to include only valid folders
@@ -450,15 +500,19 @@ exports.fetchSyncEmails = async (req, res) => {
       );
     }
     // Debugging logs
-    console.log("User-specified folders to sync:", syncFolders);
-    console.log("Filtered folders to sync:", foldersToSync);
+    console.debug(
+      "[fetchSyncEmails] User-specified folders to sync:",
+      syncFolders
+    );
+    console.debug("[fetchSyncEmails] Filtered folders to sync:", foldersToSync);
     if (foldersToSync.length === 0) {
+      console.debug("[fetchSyncEmails] No valid folders to sync.");
       return res.status(400).json({ message: "No valid folders to sync." });
     }
-    console.log("Valid folders to sync:", foldersToSync);
+    console.debug("[fetchSyncEmails] Valid folders to sync:", foldersToSync);
     // Helper function to fetch emails from a specific folder
     const fetchEmailsFromFolder = async (folderName) => {
-      console.log(`Opening folder: ${folderName}...`);
+      console.debug(`[fetchSyncEmails] Opening folder: ${folderName}...`);
       await connection.openBox(folderName);
       let searchCriteria;
       if (startUID && endUID) {
@@ -472,13 +526,17 @@ exports.fetchSyncEmails = async (req, res) => {
         struct: true,
       };
       const messages = await connection.search(searchCriteria, fetchOptions);
-      console.log(`Total emails found in ${folderName}: ${messages.length}`);
+      console.debug(
+        `[fetchSyncEmails] Total emails found in ${folderName}: ${messages.length}`
+      );
       // No need for further pagination here, as batching is handled by UID range
       for (const message of messages) {
         const rawBodyPart = message.parts.find((part) => part.which === "");
         const rawBody = rawBodyPart ? rawBodyPart.body : null;
         if (!rawBody) {
-          console.log(`No body found for email in folder: ${folderName}.`);
+          console.debug(
+            `[fetchSyncEmails] No body found for email in folder: ${folderName}.`
+          );
           continue;
         }
         const parsedEmail = await simpleParser(rawBody);
@@ -517,9 +575,13 @@ exports.fetchSyncEmails = async (req, res) => {
         let savedEmail;
         if (!existingEmail) {
           savedEmail = await Email.create(emailData);
-          console.log(`Email saved: ${emailData.messageId}`);
+          console.debug(
+            `[fetchSyncEmails] Email saved: ${emailData.messageId}`
+          );
         } else {
-          console.log(`Email already exists: ${emailData.messageId}`);
+          console.debug(
+            `[fetchSyncEmails] Email already exists: ${emailData.messageId}`
+          );
           savedEmail = existingEmail;
         }
         // Fetch related emails in the same thread (like fetchRecentEmail)
@@ -542,10 +604,12 @@ exports.fetchSyncEmails = async (req, res) => {
           });
           if (!existingRelatedEmail) {
             await Email.create(relatedEmail);
-            console.log(`Related email saved: ${relatedEmail.messageId}`);
+            console.debug(
+              `[fetchSyncEmails] Related email saved: ${relatedEmail.messageId}`
+            );
           } else {
-            console.log(
-              `Related email already exists: ${relatedEmail.messageId}`
+            console.debug(
+              `[fetchSyncEmails] Related email already exists: ${relatedEmail.messageId}`
             );
           }
         }
@@ -556,7 +620,7 @@ exports.fetchSyncEmails = async (req, res) => {
       await fetchEmailsFromFolder(folder);
     }
     connection.end();
-    console.log("IMAP connection closed.");
+    console.debug("[fetchSyncEmails] IMAP connection closed.");
     res.status(200).json({
       message: "Fetched and saved emails from specified folders.",
       sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
@@ -566,7 +630,7 @@ exports.fetchSyncEmails = async (req, res) => {
       endUID,
     });
   } catch (error) {
-    console.error("Error fetching emails:", error);
+    console.error("[fetchSyncEmails] Error fetching emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
 };
@@ -651,6 +715,34 @@ exports.markAsUnread = async (req, res) => {
   res
     .status(200)
     .json({ message: `${updatedCount} email(s) marked as unread.` });
+};
+
+exports.markAsUnreadSingle = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { emailID } = req.params;
+
+  if (!emailID) {
+    return res.status(400).json({ message: "emailID is required." });
+  }
+
+  try {
+    const [updatedCount] = await Email.update(
+      { isRead: false },
+      { where: { emailID, masterUserID } }
+    );
+
+    if (updatedCount === 0) {
+      return res
+        .status(404)
+        .json({ message: "Email not found or already unread." });
+    }
+
+    res.status(200).json({ message: "Email marked as unread." });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Failed to mark as unread.", error: error.message });
+  }
 };
 
 exports.updateSignature = async (req, res) => {
@@ -928,25 +1020,66 @@ exports.getEmailAutocomplete = async (req, res) => {
 exports.downloadAttachment = async (req, res) => {
   const { emailID, filename } = req.params;
   const masterUserID = req.adminId;
-  console.log(emailID, filename, masterUserID);
+  console.debug(
+    `[downloadAttachment] emailID: ${emailID}, filename: ${filename}, masterUserID: ${masterUserID}`
+  );
+
+  // Provider-specific folder mapping
+  const PROVIDER_FOLDER_MAP = {
+    gmail: {
+      inbox: "INBOX",
+      drafts: "[Gmail]/Drafts",
+      sent: "[Gmail]/Sent Mail",
+      archive: "[Gmail]/All Mail",
+    },
+    yandex: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+    outlook: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+    custom: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+  };
 
   try {
     // Find the email and attachment metadata
     const email = await Email.findOne({ where: { emailID } });
-    if (!email) return res.status(404).json({ message: "Email not found." });
+    if (!email) {
+      console.debug(`[downloadAttachment] Email not found: ${emailID}`);
+      return res.status(404).json({ message: "Email not found." });
+    }
 
     const attachmentMeta = await Attachment.findOne({
       where: { emailID, filename },
     });
-    if (!attachmentMeta)
+    if (!attachmentMeta) {
+      console.debug(
+        `[downloadAttachment] Attachment not found: ${filename} for emailID: ${emailID}`
+      );
       return res.status(404).json({ message: "Attachment not found." });
+    }
 
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
-    if (!userCredential)
+    if (!userCredential) {
+      console.debug(
+        `[downloadAttachment] User credentials not found for masterUserID: ${masterUserID}`
+      );
       return res.status(404).json({ message: "User credentials not found." });
+    }
 
     // Connect to IMAP and fetch the email
     const provider = userCredential.provider || "gmail"; // default to gmail
@@ -954,6 +1087,9 @@ exports.downloadAttachment = async (req, res) => {
     let imapConfig;
     if (provider === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
+        console.debug(
+          `[downloadAttachment] Custom IMAP settings missing for masterUserID: ${masterUserID}`
+        );
         return res.status(400).json({
           message: "Custom IMAP settings are missing in user credentials.",
         });
@@ -971,7 +1107,9 @@ exports.downloadAttachment = async (req, res) => {
       };
     } else {
       const providerConfig = PROVIDER_CONFIG[provider];
-      console.log("Using provider config:", providerConfig.host, providerConfig.port, providerConfig.tls);
+      console.debug(
+        `[downloadAttachment] Using provider config: host=${providerConfig.host}, port=${providerConfig.port}, tls=${providerConfig.tls}`
+      );
       imapConfig = {
         imap: {
           user: userCredential.email,
@@ -985,86 +1123,91 @@ exports.downloadAttachment = async (req, res) => {
       };
     }
 
+    // Map internal folder name to provider-specific IMAP folder name
+    let imapFolder = email.folder;
+    if (
+      PROVIDER_FOLDER_MAP[provider] &&
+      PROVIDER_FOLDER_MAP[provider][email.folder]
+    ) {
+      imapFolder = PROVIDER_FOLDER_MAP[provider][email.folder];
+    }
+
     const connection = await Imap.connect(imapConfig);
-    await connection.openBox(email.folder);
+    await connection.openBox(imapFolder);
 
     // Debug logging
-    console.log(
-      `Searching for messageId: ${email.messageId} in folder: ${email.folder}`
+    console.debug(
+      `[downloadAttachment] Searching for messageId: ${email.messageId} in folder: ${imapFolder}`
     );
 
     // Search for the email by messageId
     let messages = [];
+    let messageIdSearchFailed = false;
     try {
       const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
       const fetchOptions = { bodies: "", struct: true };
       messages = await connection.search(searchCriteria, fetchOptions);
-      console.log(
-        `IMAP search by messageId found ${messages.length} messages.`
+      console.debug(
+        `[downloadAttachment] IMAP search by messageId found ${messages.length} messages.`
       );
     } catch (err) {
-      console.error("IMAP search by messageId failed:", err);
-    }
-
-    // Fallback: if not found, try to fetch the most recent email in the folder
-    if (!messages || !messages.length) {
-      console.warn(
-        "Primary search failed, trying fallback: most recent email in folder"
+      console.error(
+        "[downloadAttachment] IMAP search by messageId failed:",
+        err
       );
-      try {
-        const fetchOptions = { bodies: "", struct: true };
-        const allMessages = await connection.search(["ALL"], fetchOptions);
-        if (allMessages && allMessages.length > 0) {
-          // Sort by UID descending (most recent first)
-          allMessages.sort((a, b) => b.attributes.uid - a.attributes.uid);
-          messages = [allMessages[0]];
-          console.log("Fallback: using most recent email in folder.");
-        }
-      } catch (fallbackErr) {
-        console.error("Fallback search failed:", fallbackErr);
-      }
+      messageIdSearchFailed = true;
     }
 
-    // Deep fallback: scan all emails in the folder for the attachment filename
+    // Always perform a deep scan if messageId search fails or returns no results
     let foundAttachment = null;
     let foundMessage = null;
-    if (!messages || !messages.length) {
+    let deepScanLog = [];
+    if (messageIdSearchFailed || !messages || !messages.length) {
       console.warn(
-        "Fallback failed, trying deep fallback: scan all emails in folder for attachment filename"
+        "[downloadAttachment] MessageId search failed or returned no results, performing deep scan of all emails in folder."
       );
       try {
         const fetchOptions = { bodies: "", struct: true };
         const allMessages = await connection.search(["ALL"], fetchOptions);
-        if (allMessages && allMessages.length > 0) {
-          for (const msg of allMessages) {
-            const rawBodyPart = msg.parts.find((part) => part.which === "");
-            const rawBody = rawBodyPart ? rawBodyPart.body : null;
-            if (!rawBody) continue;
-            const parsedEmail = await simpleParser(rawBody);
-            const att = parsedEmail.attachments.find(
-              (a) => a.filename === filename
+        console.debug(`[downloadAttachment] Deep scan: total messages in folder: ${allMessages.length}`);
+        for (const msg of allMessages) {
+          const rawBodyPart = msg.parts.find((part) => part.which === "");
+          const rawBody = rawBodyPart ? rawBodyPart.body : null;
+          if (!rawBody) continue;
+          const parsedEmail = await simpleParser(rawBody);
+          // Log messageId and all attachment filenames for diagnostics
+          const msgId = parsedEmail.messageId || null;
+          const attNames = (parsedEmail.attachments || []).map(a => a.filename);
+          deepScanLog.push({ uid: msg.attributes.uid, messageId: msgId, attachments: attNames });
+          if (attNames.includes(filename)) {
+            foundAttachment = parsedEmail.attachments.find(a => a.filename === filename);
+            foundMessage = msg;
+            console.debug(
+              `[downloadAttachment] Deep scan: found attachment in message UID ${msg.attributes.uid}`
             );
-            if (att) {
-              foundAttachment = att;
-              foundMessage = msg;
-              console.log(
-                `Deep fallback: found attachment in message UID ${msg.attributes.uid}`
-              );
-              break;
-            }
+            break;
           }
         }
-      } catch (deepErr) {
-        console.error("Deep fallback search failed:", deepErr);
-      }
-      if (!foundAttachment) {
-        connection.end();
-        return res
-          .status(404)
-          .json({
+        // Log all messageIds and attachment filenames found during the deep scan
+        console.debug("[downloadAttachment] Deep scan log:", JSON.stringify(deepScanLog, null, 2));
+        if (!foundAttachment) {
+          connection.end();
+          return res.status(404).json({
             message:
-              "Attachment not found in any email in folder (deep fallback).",
+              "Attachment not found in any email in folder (deep scan).",
+            deepScanLog,
           });
+        }
+      } catch (deepErr) {
+        console.error(
+          "[downloadAttachment] Deep scan failed:",
+          deepErr
+        );
+        connection.end();
+        return res.status(500).json({
+          message: "Deep scan failed.",
+          error: deepErr.message,
+        });
       }
     }
 
@@ -1081,9 +1224,12 @@ exports.downloadAttachment = async (req, res) => {
       );
       if (!attachment) {
         connection.end();
+        console.debug(
+          `[downloadAttachment] Attachment not found in email (after messageId search): ${filename}`
+        );
         return res
           .status(404)
-          .json({ message: "Attachment not found in email (after fallback)." });
+          .json({ message: "Attachment not found in email (after messageId search)." });
       }
     }
 
@@ -1096,38 +1242,244 @@ exports.downloadAttachment = async (req, res) => {
     res.send(attachment.content);
 
     connection.end();
+    console.debug(
+      `[downloadAttachment] Attachment sent: ${attachment.filename}`
+    );
   } catch (error) {
-    console.error("Error downloading attachment:", error);
+    console.error("[downloadAttachment] Error downloading attachment:", error);
     res.status(500).json({
       message: "Failed to download attachment.",
       error: error.message,
     });
   }
 };
-exports.markAsUnreadSingle = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailID } = req.params;
 
-  if (!emailID) {
-    return res.status(400).json({ message: "emailID is required." });
-  }
+// Diagnostic endpoint for attachment download issues
+exports.diagnoseAttachment = async (req, res) => {
+  // Use query parameters for GET endpoint
+  const { emailID, filename } = req.query;
+  const masterUserID = req.adminId;
+  const diagnostics = [];
+  diagnostics.push({ step: "start", emailID, filename, masterUserID });
+
+  // Provider-specific folder mapping
+  const PROVIDER_FOLDER_MAP = {
+    gmail: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+    yandex: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+    outlook: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+    custom: {
+      inbox: "INBOX",
+      drafts: "Drafts",
+      sent: "Sent",
+      archive: "Archive",
+    },
+  };
 
   try {
-    const [updatedCount] = await Email.update(
-      { isRead: false },
-      { where: { emailID, masterUserID } }
-    );
-
-    if (updatedCount === 0) {
+    const email = await Email.findOne({ where: { emailID } });
+    if (!email) {
+      diagnostics.push({ step: "email_not_found", emailID });
+      return res.status(404).json({ diagnostics, message: "Email not found." });
+    }
+    diagnostics.push({
+      step: "email_found",
+      folder: email.folder,
+      messageId: email.messageId,
+    });
+    const attachmentMeta = await Attachment.findOne({
+      where: { emailID, filename },
+    });
+    if (!attachmentMeta) {
+      diagnostics.push({ step: "attachment_not_found_in_db", filename });
       return res
         .status(404)
-        .json({ message: "Email not found or already unread." });
+        .json({ diagnostics, message: "Attachment not found." });
     }
-
-    res.status(200).json({ message: "Email marked as unread." });
-  } catch (error) {
+    diagnostics.push({ step: "attachment_meta_found" });
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    if (!userCredential) {
+      diagnostics.push({ step: "user_credential_not_found", masterUserID });
+      return res
+        .status(404)
+        .json({ diagnostics, message: "User credentials not found." });
+    }
+    diagnostics.push({
+      step: "user_credential_found",
+      provider: userCredential.provider,
+    });
+    const provider = userCredential.provider || "gmail";
+    let imapConfig;
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        diagnostics.push({ step: "custom_imap_settings_missing" });
+        return res.status(400).json({
+          diagnostics,
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      diagnostics.push({ step: "provider_config", providerConfig });
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+    // Map internal folder name to provider-specific IMAP folder name
+    let imapFolder = email.folder;
+    if (
+      PROVIDER_FOLDER_MAP[provider] &&
+      PROVIDER_FOLDER_MAP[provider][email.folder]
+    ) {
+      imapFolder = PROVIDER_FOLDER_MAP[provider][email.folder];
+    }
+    const connection = await Imap.connect(imapConfig);
+    await connection.openBox(imapFolder);
+    diagnostics.push({ step: "opened_folder", folder: imapFolder });
+    let messages = [];
+    let messageIdSearchFailed = false;
+    try {
+      const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
+      const fetchOptions = { bodies: "", struct: true };
+      messages = await connection.search(searchCriteria, fetchOptions);
+      diagnostics.push({
+        step: "imap_search_by_messageid",
+        found: messages.length,
+      });
+    } catch (err) {
+      diagnostics.push({
+        step: "imap_search_by_messageid_failed",
+        error: err.message,
+      });
+      messageIdSearchFailed = true;
+    }
+    // Always perform a deep scan if messageId search fails (or returns 0)
+    if (messageIdSearchFailed || !messages || !messages.length) {
+      diagnostics.push({ step: "deep_scan_triggered" });
+      try {
+        const fetchOptions = { bodies: "", struct: true };
+        const allMessages = await connection.search(["ALL"], fetchOptions);
+        diagnostics.push({ step: "deep_scan_total_messages", count: allMessages.length });
+        let foundAttachment = null;
+        let foundMessage = null;
+        const deepScanLog = [];
+        for (const msg of allMessages) {
+          const rawBodyPart = msg.parts.find((part) => part.which === "");
+          const rawBody = rawBodyPart ? rawBodyPart.body : null;
+          if (!rawBody) continue;
+          const parsedEmail = await simpleParser(rawBody);
+          // Log messageId and all attachment filenames for diagnostics
+          const msgId = parsedEmail.messageId || null;
+          const attNames = (parsedEmail.attachments || []).map(a => a.filename);
+          deepScanLog.push({ uid: msg.attributes.uid, messageId: msgId, attachments: attNames });
+          if (attNames.includes(filename)) {
+            foundAttachment = parsedEmail.attachments.find(a => a.filename === filename);
+            foundMessage = msg;
+            diagnostics.push({
+              step: "deep_fallback_found",
+              uid: msg.attributes.uid,
+              messageId: msgId,
+              attachments: attNames,
+            });
+            break;
+          }
+        }
+        diagnostics.push({ step: "deep_scan_log", scanned: deepScanLog });
+        if (!foundAttachment) {
+          connection.end();
+          diagnostics.push({ step: "deep_fallback_not_found" });
+          return res.status(404).json({
+            diagnostics,
+            message:
+              "Attachment not found in any email in folder (deep fallback).",
+          });
+        }
+        connection.end();
+        diagnostics.push({ step: "imap_connection_closed" });
+        return res.status(200).json({
+          diagnostics,
+          message: "Attachment found in deep scan.",
+          filename: foundAttachment.filename,
+        });
+      } catch (deepErr) {
+        diagnostics.push({
+          step: "deep_fallback_failed",
+          error: deepErr.message,
+        });
+        connection.end();
+        return res.status(500).json({
+          diagnostics,
+          message: "Deep scan failed.",
+          error: deepErr.message,
+        });
+      }
+    }
+    // If messageId search succeeded, check for attachment in that message
+    let attachment;
+    const rawBodyPart = messages[0].parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+    const parsedEmail = await simpleParser(rawBody);
+    attachment = parsedEmail.attachments.find(
+      (att) => att.filename === filename
+    );
+    if (!attachment) {
+      connection.end();
+      diagnostics.push({ step: "attachment_not_found_after_messageid_search" });
+      return res.status(404).json({
+        diagnostics,
+        message: "Attachment not found in email (after messageId search).",
+      });
+    }
+    diagnostics.push({
+      step: "attachment_found",
+      filename: attachment.filename,
+    });
+    connection.end();
+    diagnostics.push({ step: "imap_connection_closed" });
     res
-      .status(500)
-      .json({ message: "Failed to mark as unread.", error: error.message });
+      .status(200)
+      .json({ diagnostics, message: "Attachment diagnostics complete." });
+  } catch (error) {
+    diagnostics.push({ step: "error", error: error.message });
+    res.status(500).json({
+      diagnostics,
+      message: "Failed to diagnose attachment.",
+      error: error.message,
+    });
   }
 };
