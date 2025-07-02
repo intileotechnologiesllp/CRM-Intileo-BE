@@ -342,7 +342,7 @@ exports.fetchInboxEmails = async (req, res) => {
       console.log(`User credentials updated for masterUserID: ${masterUserID}`);
     } else {
       // Use upsert to avoid duplicate entry errors
-      await UserCredential.upsert({
+      await UserCredential.create({
         masterUserID,
         email,
         appPassword,
