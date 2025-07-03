@@ -1974,55 +1974,39 @@ const getAggregatedLinkedEntities = async (emails) => {
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const masterUserID = req.adminId;
+  const baseURL = process.env.LOCALHOST_URL;
+  const includeConversation = req.query.includeConversation === "true";
 
   try {
-    // Fetch the main email by emailId, including attachments
+    // Measure heap before
+    const usedBefore = process.memoryUsage().heapUsed;
+
+    // Fetch main email
     const mainEmail = await Email.findOne({
       where: { emailID: emailId },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-        },
-      ],
+      include: [{ model: Attachment, as: "attachments" }],
     });
 
-    if (!mainEmail) {
-      return res.status(404).json({ message: "Email not found." });
-    }
+    if (!mainEmail) return res.status(404).json({ message: "Email not found." });
 
     // Mark as read if not already
-    if (!mainEmail.isRead) {
-      await mainEmail.update({ isRead: true });
-    }
+    if (!mainEmail.isRead) await mainEmail.update({ isRead: true });
 
-    // Clean the body of the main email
+    // Clean body
     mainEmail.body = cleanEmailBody(mainEmail.body);
 
-    // Add baseURL to attachment paths
-    const baseURL = process.env.LOCALHOST_URL;
-    mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
-      ...attachment,
-      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+    // Attachments path cleanup
+    mainEmail.attachments = mainEmail.attachments.map(att => ({
+      filename: att.filename,
+      path: `${baseURL}/uploads/attachments/${att.filename}`,
     }));
 
-    // If this is a draft or trash, do NOT fetch related emails but still get linked entities
-    if (mainEmail.folder === "drafts") {
+    // Check for drafts or trash
+    if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
       const linkedEntities = await getLinkedEntities(mainEmail);
       return res.status(200).json({
-        message: "Draft email fetched successfully.",
-        data: {
-          email: mainEmail,
-          relatedEmails: [],
-          linkedEntities,
-        },
-      });
-    }
-    if (mainEmail.folder === "trash") {
-      const linkedEntities = await getLinkedEntities(mainEmail);
-      return res.status(200).json({
-        message: "trash email fetched successfully.",
+        message: `${mainEmail.folder} email fetched successfully.`,
         data: {
           email: mainEmail,
           relatedEmails: [],
@@ -2031,14 +2015,14 @@ exports.getOneEmail = async (req, res) => {
       });
     }
 
-    // Gather all thread IDs (messageId, inReplyTo, and references)
+    // Get thread IDs
     const threadIds = [
       mainEmail.messageId,
       mainEmail.inReplyTo,
       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
     ].filter(Boolean);
 
-    // Fetch all related emails in the thread (across all users)
+    // Fetch related emails with pagination (limit to 50 for performance)
     let relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
@@ -2054,118 +2038,91 @@ exports.getOneEmail = async (req, res) => {
         ],
         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
       },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-          attributes: ["attachmentID", "filename", "size"], // Only metadata
-        },
-      ],
+      include: [{ model: Attachment, as: "attachments" }],
       order: [["createdAt", "ASC"]],
-      limit: 50, // Limit to prevent OOM
-      attributes: [
-        "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "body", "folder", "createdAt", "isRead", "isOpened", "isClicked", "leadId", "dealId"
-      ],
+      limit: 50, // Adjust as needed
     });
-    // Remove the main email from relatedEmails
-    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
-    // Remove the main email from relatedEmails (by messageId)
 
+    // Remove duplicate
     relatedEmails = relatedEmails.filter(
       (email) => email.messageId !== mainEmail.messageId
     );
 
-    // Deduplicate relatedEmails by messageId (keep the first occurrence)
-    // const seen = new Set();
-    // relatedEmails = relatedEmails.filter(email => {
-    //   if (seen.has(email.messageId)) return false;
-    //   seen.add(email.messageId);
-    //   return true;
-    // });
-    let allEmails = [mainEmail, ...relatedEmails];
-
-    //......changes
-    const seen = new Set();
-    allEmails = allEmails.filter((email) => {
-      if (seen.has(email.messageId)) return false;
-      seen.add(email.messageId);
-      return true;
-    });
-    const emailMap = {};
-    allEmails.forEach((email) => {
-      emailMap[email.messageId] = email;
-    });
-    const conversation = [];
-    let current = allEmails.find(
-      (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
-    );
-    while (current) {
-      conversation.push(current);
-      // Find the next email that replies to the current one
-      current = allEmails.find(
-        (email) =>
-          email.inReplyTo === conversation[conversation.length - 1].messageId
-      );
-    }
-
-    // // If some emails are not in the chain (e.g., forwards), add them by date
-    const remaining = allEmails.filter(
-      (email) => !conversation.includes(email)
-    );
-    remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    conversation.push(...remaining);
-
-    // // The first is the main email, the rest are related
-    // const sortedMainEmail = conversation[0];
-    // const sortedRelatedEmails = conversation.slice(1);
-
-    // Clean the body and attachment paths for related emails
+    // Clean bodies and attachments
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
-      email.attachments = email.attachments.map((attachment) => ({
-        ...attachment,
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+      email.attachments = email.attachments.map(att => ({
+        filename: att.filename,
+        path: `${baseURL}/uploads/attachments/${att.filename}`,
       }));
     });
 
-    const sortedMainEmail = conversation[0];
-    const sortedRelatedEmails = conversation.slice(1);
+    let sortedMainEmail = mainEmail;
+    let sortedRelatedEmails = relatedEmails;
 
-    // Fetch linked entities from ALL emails in the conversation thread
-    const linkedEntities = await getAggregatedLinkedEntities(conversation);
+    // Only build conversation if requested
+    if (includeConversation) {
+      let allEmails = [mainEmail, ...relatedEmails];
 
-    // Safeguard: If response is too large, return error
-    const estimatedResponseSize = JSON.stringify({
-      email: sortedMainEmail,
-      relatedEmails: sortedRelatedEmails,
-      linkedEntities,
-    }).length;
-    const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
-    if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
-      return res.status(413).json({
-        message: "Response too large. Please reduce thread size or contact support.",
-        data: {
-          email: sortedMainEmail,
-          relatedEmails: [],
-          linkedEntities: {},
-        },
+      // Deduplicate by messageId
+      const seen = new Set();
+      allEmails = allEmails.filter((email) => {
+        if (seen.has(email.messageId)) return false;
+        seen.add(email.messageId);
+        return true;
       });
+
+      // Build message tree order
+      const emailMap = {};
+      allEmails.forEach(email => {
+        emailMap[email.messageId] = email;
+      });
+
+      const conversation = [];
+      let current = allEmails.find(
+        (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
+      );
+
+      while (current) {
+        conversation.push(current);
+        current = allEmails.find(
+          (email) => email.inReplyTo === conversation[conversation.length - 1].messageId
+        );
+      }
+
+      // Add leftovers
+      const remaining = allEmails.filter((email) => !conversation.includes(email));
+      remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      conversation.push(...remaining);
+
+      sortedMainEmail = conversation[0];
+      sortedRelatedEmails = conversation.slice(1);
     }
 
-    res.status(200).json({
+    // Fetch linked entities from entire conversation
+    const linkedEntities = await getAggregatedLinkedEntities([
+      sortedMainEmail,
+      ...sortedRelatedEmails,
+    ]);
+
+    // Heap log
+    const usedAfter = process.memoryUsage().heapUsed;
+    console.log(`[MEMORY] Heap used: ${(usedAfter - usedBefore) / 1024 / 1024} MB for emailId ${emailId}`);
+
+    return res.status(200).json({
       message: "Email fetched successfully.",
       data: {
         email: sortedMainEmail,
         relatedEmails: sortedRelatedEmails,
-        linkedEntities, // Add aggregated linked entities to response
+        linkedEntities,
       },
     });
   } catch (error) {
     console.error("Error fetching email:", error);
-
-    res.status(500).json({ message: "Internal server error." });
+    return res.status(500).json({ message: "Internal server error." });
   }
 };
+
 const dynamicUpload = require("../../middlewares/dynamicUpload");
 const { threadId } = require("worker_threads");
 exports.composeEmail = [
