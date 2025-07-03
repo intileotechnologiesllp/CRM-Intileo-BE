@@ -1092,7 +1092,7 @@ exports.fetchArchiveEmails = async (req, res) => {
 exports.getEmails = async (req, res) => {
   const {
     page = 1,
-    pageSize = 100,
+    pageSize = 10,
     folder,
     search,
     isRead,
