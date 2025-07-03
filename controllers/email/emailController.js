@@ -293,7 +293,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
 exports.fetchInboxEmails = async (req, res) => {
   // Enforce max batch size
   let { batchSize = 50, page = 1, days = 7, startUID, endUID } = req.query;
-  batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
+  // batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
 
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
