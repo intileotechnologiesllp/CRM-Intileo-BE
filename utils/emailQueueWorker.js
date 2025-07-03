@@ -761,7 +761,7 @@ async function startFetchInboxWorker() {
         const { masterUserID, email, appPassword, batchSize, page, days,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
-            console.log(`[FETCH_INBOX_QUEUE] Fetching for user: ${email}`);
+            console.log("Starting fetchInboxEmails");
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
@@ -772,6 +772,7 @@ async function startFetchInboxWorker() {
               },
               { status: () => ({ json: () => {} }) }
             );
+            console.log("Finished fetchInboxEmails");
             channel.ack(msg);
           } catch (err) {
             console.error("Failed to fetch inbox emails:", err);
