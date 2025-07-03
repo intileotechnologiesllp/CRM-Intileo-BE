@@ -2058,9 +2058,14 @@ exports.getOneEmail = async (req, res) => {
         {
           model: Attachment,
           as: "attachments",
+          attributes: ["attachmentID", "filename", "size"], // Only metadata
         },
       ],
       order: [["createdAt", "ASC"]],
+      limit: 50, // Limit to prevent OOM
+      attributes: [
+        "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "body", "folder", "createdAt", "isRead", "isOpened", "isClicked", "leadId", "dealId"
+      ],
     });
     // Remove the main email from relatedEmails
     //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
@@ -2128,6 +2133,24 @@ exports.getOneEmail = async (req, res) => {
 
     // Fetch linked entities from ALL emails in the conversation thread
     const linkedEntities = await getAggregatedLinkedEntities(conversation);
+
+    // Safeguard: If response is too large, return error
+    const estimatedResponseSize = JSON.stringify({
+      email: sortedMainEmail,
+      relatedEmails: sortedRelatedEmails,
+      linkedEntities,
+    }).length;
+    const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
+    if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
+      return res.status(413).json({
+        message: "Response too large. Please reduce thread size or contact support.",
+        data: {
+          email: sortedMainEmail,
+          relatedEmails: [],
+          linkedEntities: {},
+        },
+      });
+    }
 
     res.status(200).json({
       message: "Email fetched successfully.",
