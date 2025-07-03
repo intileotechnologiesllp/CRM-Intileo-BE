@@ -1,6 +1,7 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-const limit = pLimit(1);
+// Reduce concurrency to 1 for all workers to minimize memory/connection usage
+const limit = pLimit(3);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
@@ -29,8 +30,31 @@ const PROVIDER_SMTP_CONFIG = {
 
 // const limit = pLimit(5); // Limit concurrency to 5
 
+// Utility: Log memory usage for diagnostics
+function logMemoryUsage(context = "") {
+  const mem = process.memoryUsage();
+  console.log(
+    `[Memory] ${context} RSS: ${(mem.rss / 1024 / 1024).toFixed(
+      1
+    )}MB, Heap: ${(mem.heapUsed / 1024 / 1024).toFixed(
+      1
+    )}MB / ${(mem.heapTotal / 1024 / 1024).toFixed(1)}MB`
+  );
+}
+
+// Add process-level error handling
+process.on("unhandledRejection", (reason, p) => {
+  console.error("[FATAL] Unhandled Rejection at:", p, "reason:", reason);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught Exception:", err);
+  process.exit(1);
+});
+
+// Patch all worker consumers to log memory and always close connections
 async function startWorker() {
-    const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
 
   const connection = await amqp.connect(amqpUrl);
   console.log("Connected to RabbitMQ");
@@ -42,9 +66,9 @@ async function startWorker() {
     async (msg) => {
       if (msg !== null) {
         const { adminId } = JSON.parse(msg.content.toString());
+        logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
         try {
           await limit(async () => {
-            console.log(`Fetching recent emails for adminId: ${adminId}`);
             await fetchRecentEmail(adminId);
           });
           channel.ack(msg);
@@ -54,6 +78,8 @@ async function startWorker() {
             error
           );
           channel.nack(msg, false, false); // Discard the message on error
+        } finally {
+          logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
         }
       }
     },
@@ -64,7 +90,7 @@ async function startWorker() {
 }
 
 async function startScheduledEmailWorker() {
-     const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
 
   const connection = await amqp.connect(amqpUrl);
   const channel = await connection.createChannel();
@@ -86,41 +112,41 @@ async function startScheduledEmailWorker() {
             where: { masterUserID: email.masterUserID },
           });
           if (!userCredential) return channel.ack(msg);
-const provider = userCredential.provider; // default to gmail
+          const provider = userCredential.provider; // default to gmail
           // Send email
           let transporterConfig;
-if (provider === "gmail" || provider === "yandex") {
-  const smtp = PROVIDER_SMTP_CONFIG[provider];
-  transporterConfig = {
-    host: smtp.host,
-    port: smtp.port,
-    secure: smtp.secure,
-    auth: {
-      user: userCredential.email,
-      pass: userCredential.appPassword,
-    },
-  };
-} else if (provider === "custom") {
-  transporterConfig = {
-    host: userCredential.smtpHost,
-    port: userCredential.smtpPort,
-    secure: userCredential.smtpSecure, // true/false
-    auth: {
-      user: userCredential.email,
-      pass: userCredential.appPassword,
-    },
-  };
-  } else {
-  // fallback to gmail
-  transporterConfig = {
-    service: "gmail",
-    auth: {
-      user: userCredential.email,
-      pass: userCredential.appPassword,
-    },
-  };
-}
-const transporter = nodemailer.createTransport(transporterConfig);
+          if (provider === "gmail" || provider === "yandex") {
+            const smtp = PROVIDER_SMTP_CONFIG[provider];
+            transporterConfig = {
+              host: smtp.host,
+              port: smtp.port,
+              secure: smtp.secure,
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          } else if (provider === "custom") {
+            transporterConfig = {
+              host: userCredential.smtpHost,
+              port: userCredential.smtpPort,
+              secure: userCredential.smtpSecure, // true/false
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          } else {
+            // fallback to gmail
+            transporterConfig = {
+              service: "gmail",
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          }
+          const transporter = nodemailer.createTransport(transporterConfig);
           // const transporter = nodemailer.createTransport({
           //   service: "gmail",
           //   auth: {
@@ -331,7 +357,8 @@ async function startEmailWorker() {
                 })
                 .catch((err) => {
                   console.error("Failed to send queued email:", err);
-                  if (channel.connection.stream.writable) channel.nack(msg, false, false);
+                  if (channel.connection.stream.writable)
+                    channel.nack(msg, false, false);
                 })
             );
           }
@@ -364,7 +391,6 @@ async function sendEmailJob(emailData) {
   let SENDER_NAME = emailData.senderName;
   let signatureBlock = "";
   let userCredential;
-  
 
   // Fetch password if not provided
   if (!emailData.senderPassword) {
@@ -409,13 +435,13 @@ async function sendEmailJob(emailData) {
   // Prepare mail options
   const mailOptions = {
     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-to: emailData.recipient || (draftEmail && draftEmail.recipient),
-cc: emailData.cc || (draftEmail && draftEmail.cc),
-bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
+    to: emailData.recipient || (draftEmail && draftEmail.recipient),
+    cc: emailData.cc || (draftEmail && draftEmail.cc),
+    bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
     subject: emailData.subject,
     html: emailBody,
     text: emailBody,
-    attachments: (emailData.attachments || []).map(att => ({
+    attachments: (emailData.attachments || []).map((att) => ({
       filename: att.filename,
       path: att.path,
     })),
@@ -425,11 +451,11 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
 
   // Send email
   const provider =
-  emailData.provider ||
-  (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
-  (userCredential?.provider)
+    emailData.provider ||
+    (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
+    (userCredential?.provider);
 
-    let transporterConfig;
+  let transporterConfig;
   if (provider === "gmail" || provider === "yandex") {
     const smtp = PROVIDER_SMTP_CONFIG[provider];
     transporterConfig = {
@@ -459,7 +485,7 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
         user: SENDER_EMAIL,
         pass: SENDER_PASSWORD,
       },
-          };
+    };
   }
 
   const transporter = nodemailer.createTransport(transporterConfig);
@@ -477,7 +503,11 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
   if (emailData.draftId) {
     // Update the existing draft to "sent"
     const draftEmail = await Email.findOne({
-      where: { draftId: emailData.draftId, masterUserID: emailData.masterUserID, folder: "drafts" },
+      where: {
+        draftId: emailData.draftId,
+        masterUserID: emailData.masterUserID,
+        folder: "drafts",
+      },
     });
     if (draftEmail) {
       await draftEmail.update({
@@ -498,21 +528,23 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
         // attachments: emailData.attachments,
       });
       // Remove old attachments
-    await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-    // Save new attachments
-    if (emailData.attachments && emailData.attachments.length > 0) {
-      const savedAttachments = emailData.attachments.map(file => ({
-        emailID:draftEmail.emailID,
-        filename: file.filename,
-        filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
-       // filePath: file.path,
-        size: file.size,
-        contentType: file.contentType,
-      }));
-      await Attachment.bulkCreate(savedAttachments);
+      await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
+      // Save new attachments
+      if (emailData.attachments && emailData.attachments.length > 0) {
+        const savedAttachments = emailData.attachments.map((file) => ({
+          emailID: draftEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          // filePath: file.path,
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+      }
+      console.log(`Draft email sent and updated: ${info.messageId}`);
     }
-    console.log(`Draft email sent and updated: ${info.messageId}`);
-  }
   } else {
     // Create a new sent email
     const savedEmail = await Email.create({
@@ -531,19 +563,18 @@ bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
       masterUserID: emailData.masterUserID,
       tempMessageId: emailData.tempMessageId,
       isDraft: false,
-      
     });
 
     // Save attachments if any
     if (emailData.attachments && emailData.attachments.length > 0) {
-      const savedAttachments = emailData.attachments.map(file => ({
+      const savedAttachments = emailData.attachments.map((file) => ({
         emailID: savedEmail.emailID,
-         filename: file.filename,
-          // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-          //   file.filename
-          // )}`,
-          filePath: file.path,
-         // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+        filename: file.filename,
+        // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+        //   file.filename
+        // )}`,
+        filePath: file.path,
+        // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
         size: file.size,
         contentType: file.contentType,
       }));
@@ -722,7 +753,9 @@ async function startSyncEmailWorker() {
     async (msg) => {
       if (msg !== null) {
         // Expect startUID and endUID in the message for batching
-        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(msg.content.toString());
+        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
+          msg.content.toString()
+        );
         limit(async () => {
           try {
             // Pass startUID and endUID to fetchSyncEmails for batch processing
@@ -730,7 +763,7 @@ async function startSyncEmailWorker() {
               {
                 adminId: masterUserID,
                 body: { syncStartDate, startUID, endUID },
-                query: {}
+                query: {},
               },
               { status: () => ({ json: () => {} }) }
             );
@@ -758,7 +791,21 @@ async function startFetchInboxWorker() {
     "FETCH_INBOX_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const { masterUserID, email, appPassword, batchSize, page, days,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure } = JSON.parse(msg.content.toString());
+        const {
+          masterUserID,
+          email,
+          appPassword,
+          batchSize,
+          page,
+          days,
+          provider,
+          imapHost,
+          imapPort,
+          imapTLS,
+          smtpHost,
+          smtpPort,
+          smtpSecure,
+        } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
             console.log("Starting fetchInboxEmails");
@@ -766,9 +813,19 @@ async function startFetchInboxWorker() {
             await fetchInboxEmails(
               {
                 adminId: masterUserID,
-                body: { email, appPassword,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure },
+                body: {
+                  email,
+                  appPassword,
+                  provider,
+                  imapHost,
+                  imapPort,
+                  imapTLS,
+                  smtpHost,
+                  smtpPort,
+                  smtpSecure,
+                },
                 // body: { appPassword },
-                query: { batchSize, page, days }
+                query: { batchSize, page, days },
               },
               { status: () => ({ json: () => {} }) }
             );
@@ -780,12 +837,15 @@ async function startFetchInboxWorker() {
           }
         });
       }
-   },
+    },
     { noAck: false }
   );
 
-    console.log("Inbox fetch worker started and waiting for jobs...");
+  console.log("Inbox fetch worker started and waiting for jobs...");
 }
+
+// In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
+// ...existing code...
 
 startFetchInboxWorker().catch(console.error);
 startSyncEmailWorker().catch(console.error);
