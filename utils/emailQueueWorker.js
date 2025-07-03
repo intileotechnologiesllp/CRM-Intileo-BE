@@ -1,6 +1,6 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-const limit = pLimit(5);
+const limit = pLimit(10);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
@@ -761,6 +761,7 @@ async function startFetchInboxWorker() {
         const { masterUserID, email, appPassword, batchSize, page, days,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
+            console.log(`[FETCH_INBOX_QUEUE] Fetching for user: ${email}`);
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
