@@ -3197,3 +3197,37 @@ exports.deleteAllEmailsForUser = async (req, res) => {
     });
   }
 };
+
+const ICON_EXTENSIONS = [
+  ".ico",
+  ".png",
+  ".svg",
+  ".gif",
+  ".jpg",
+  ".jpeg",
+  ".bmp",
+  ".webp",
+  ".tiff",
+  ".svgz",
+  ".apng",
+  ".cur",
+  ".icns",
+];
+const ICON_MIMETYPES = [
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/png",
+  "image/svg+xml",
+  "image/gif",
+  "image/jpeg",
+  "image/bmp",
+  "image/webp",
+  "image/tiff",
+  "image/svg+xml",
+  "image/apng",
+];
+function isIconAttachment(attachment) {
+  const ext = path.extname(attachment.filename || "").toLowerCase();
+  const mimetype = (attachment.contentType || "").toLowerCase();
+  return ICON_EXTENSIONS.includes(ext) || ICON_MIMETYPES.includes(mimetype);
+}
