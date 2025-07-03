@@ -286,7 +286,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
 // Fetch emails from the inbox in batches
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
-  const { batchSize = 50, page = 1, days = 7, startUID, endUID } = req.query;
+  // Enforce max batch size
+  let { batchSize = 50, page = 1, days = 7, startUID, endUID } = req.query;
+  batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
+
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
@@ -628,7 +631,10 @@ exports.fetchInboxEmails = async (req, res) => {
 };
 
 // Fetch and store the most recent email
-exports.fetchRecentEmail = async (adminId) => {
+exports.fetchRecentEmail = async (adminId, options = {}) => {
+  // Enforce max batch size if options.batchSize is provided (for worker safety)
+  const batchSize = Math.min(Number(options.batchSize) || 10, MAX_BATCH_SIZE);
+
   try {
     // Fetch the user's email and app password from the UserCredential model
     const userCredential = await UserCredential.findOne({
