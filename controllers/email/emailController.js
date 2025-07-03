@@ -574,6 +574,52 @@ exports.fetchInboxEmails = async (req, res) => {
               `Full thread for messageId ${emailData.messageId}:`,
               uniqueThread.map((e) => e.messageId)
             );
+            // --- NEW: Save non-icon/image attachments for thread emails ---
+            for (const threadEmail of uniqueThread) {
+              // Skip the main email (already processed above)
+              if (threadEmail.messageId === emailData.messageId) continue;
+              // Check if attachments already exist for this email
+              const existingAttachments = await Attachment.findAll({
+                where: { emailID: threadEmail.emailID },
+              });
+              if (existingAttachments && existingAttachments.length > 0) {
+                continue; // Attachments already saved
+              }
+              // If not, try to fetch and save attachments
+              // You may need to fetch the raw email again to get attachments
+              try {
+                const threadMsg = messages.find(
+                  (msg) => {
+                    const part = msg.parts.find((p) => p.which === "");
+                    if (!part) return false;
+                    return part.body && part.body.includes(threadEmail.messageId);
+                  }
+                );
+                if (!threadMsg) continue;
+                const threadRawBodyPart = threadMsg.parts.find((part) => part.which === "");
+                const threadRawBody = threadRawBodyPart ? threadRawBodyPart.body : null;
+                if (!threadRawBody) continue;
+                const threadParsedEmail = await simpleParser(threadRawBody);
+                if (threadParsedEmail.attachments && threadParsedEmail.attachments.length > 0) {
+                  const filteredThreadAttachments = threadParsedEmail.attachments.filter(
+                    (att) => !isIconAttachment(att)
+                  );
+                  if (filteredThreadAttachments.length > 0) {
+                    await saveAttachments(filteredThreadAttachments, threadEmail.emailID);
+                    console.log(
+                      `Saved ${filteredThreadAttachments.length} attachments for thread email: ${threadEmail.messageId}`
+                    );
+                  } else {
+                    console.log(
+                      `No non-icon/image attachments to save for thread email: ${threadEmail.messageId}`
+                    );
+                  }
+                }
+              } catch (threadAttErr) {
+                console.error(`Error saving attachments for thread email ${threadEmail.messageId}:`, threadAttErr);
+              }
+            }
+            // --- END NEW ---
             // You can now use uniqueThread as the full conversation
           }
         }
