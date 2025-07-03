@@ -43,6 +43,10 @@ const PROVIDER_CONFIG = {
   },
   // Add more providers as needed
 };
+
+// Maximum batch size for all email fetch operations
+const MAX_BATCH_SIZE = 20;
+
 // Add this near PROVIDER_CONFIG
 const PROVIDER_FOLDER_MAP = {
   gmail: {
