@@ -65,11 +65,17 @@ async function startWorker() {
     QUEUE_NAME,
     async (msg) => {
       if (msg !== null) {
+        // Enforce small batch size and log memory for fetchRecentEmail
         const { adminId } = JSON.parse(msg.content.toString());
         logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
         try {
           await limit(async () => {
-            await fetchRecentEmail(adminId);
+            // If fetchRecentEmail supports batchSize, pass it as 10
+            if (typeof fetchRecentEmail === 'function' && fetchRecentEmail.length >= 2) {
+              await fetchRecentEmail(adminId, { batchSize: 10 });
+            } else {
+              await fetchRecentEmail(adminId);
+            }
           });
           channel.ack(msg);
         } catch (error) {
