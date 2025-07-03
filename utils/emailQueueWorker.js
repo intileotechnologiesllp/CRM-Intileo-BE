@@ -1,7 +1,7 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
 // Reduce concurrency to 1 for all workers to minimize memory/connection usage
-const limit = pLimit(1);
+const limit = pLimit(5);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
