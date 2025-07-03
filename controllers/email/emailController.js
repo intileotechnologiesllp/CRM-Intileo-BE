@@ -532,14 +532,24 @@ exports.fetchInboxEmails = async (req, res) => {
           // Save attachments
           const attachments = [];
           if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-            const savedAttachments = await saveAttachments(
-              parsedEmail.attachments,
-              savedEmail.emailID
+            // Filter out icon/image attachments
+            const filteredAttachments = parsedEmail.attachments.filter(
+              (att) => !isIconAttachment(att)
             );
-            attachments.push(...savedAttachments);
-            console.log(
-              `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-            );
+            if (filteredAttachments.length > 0) {
+              const savedAttachments = await saveAttachments(
+                filteredAttachments,
+                savedEmail.emailID
+              );
+              attachments.push(...savedAttachments);
+              console.log(
+                `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+              );
+            } else {
+              console.log(
+                `No non-icon/image attachments to save for email: ${emailData.messageId}`
+              );
+            }
           }
 
           // Fetch the full thread recursively
@@ -828,14 +838,24 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     // Save attachments
     const attachments = [];
     if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      const savedAttachments = await saveAttachments(
-        parsedEmail.attachments,
-        savedEmail.emailID
+      // Filter out icon/image attachments
+      const filteredAttachments = parsedEmail.attachments.filter(
+        (att) => !isIconAttachment(att)
       );
-      attachments.push(...savedAttachments);
-      console.log(
-        `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-      );
+      if (filteredAttachments.length > 0) {
+        const savedAttachments = await saveAttachments(
+          filteredAttachments,
+          savedEmail.emailID
+        );
+        attachments.push(...savedAttachments);
+        console.log(
+          `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+        );
+      } else {
+        console.log(
+          `No non-icon/image attachments to save for email: ${emailData.messageId}`
+        );
+      }
     }
 
     // Fetch related emails in the same thread
@@ -1162,7 +1182,23 @@ exports.getEmails = async (req, res) => {
     const limit = pageSize;
     // Only select essential fields
     const essentialFields = [
-      "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "folder", "createdAt", "isRead", "isOpened", "isClicked", "leadId", "dealId"
+      "emailID",
+      "messageId",
+      "inReplyTo",
+      "references",
+      "sender",
+      "senderName",
+      "recipient",
+      "cc",
+      "bcc",
+      "subject",
+      "folder",
+      "createdAt",
+      "isRead",
+      "isOpened",
+      "isClicked",
+      "leadId",
+      "dealId",
     ];
     const { count, rows: emails } = await Email.findAndCountAll({
       where: filters,
@@ -1216,7 +1252,8 @@ exports.getEmails = async (req, res) => {
     const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
     if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
       return res.status(413).json({
-        message: "Response too large. Please reduce pageSize or apply more filters.",
+        message:
+          "Response too large. Please reduce pageSize or apply more filters.",
         currentPage: parseInt(page),
         totalPages: Math.ceil(count / pageSize),
         totalEmails: count,
@@ -1974,39 +2011,55 @@ const getAggregatedLinkedEntities = async (emails) => {
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
-  const masterUserID = req.adminId;
-  const baseURL = process.env.LOCALHOST_URL;
-  const includeConversation = req.query.includeConversation === "true";
+  const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
   try {
-    // Measure heap before
-    const usedBefore = process.memoryUsage().heapUsed;
-
-    // Fetch main email
+    // Fetch the main email by emailId, including attachments
     const mainEmail = await Email.findOne({
       where: { emailID: emailId },
-      include: [{ model: Attachment, as: "attachments" }],
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+        },
+      ],
     });
 
-    if (!mainEmail) return res.status(404).json({ message: "Email not found." });
+    if (!mainEmail) {
+      return res.status(404).json({ message: "Email not found." });
+    }
 
     // Mark as read if not already
-    if (!mainEmail.isRead) await mainEmail.update({ isRead: true });
+    if (!mainEmail.isRead) {
+      await mainEmail.update({ isRead: true });
+    }
 
-    // Clean body
+    // Clean the body of the main email
     mainEmail.body = cleanEmailBody(mainEmail.body);
 
-    // Attachments path cleanup
-    mainEmail.attachments = mainEmail.attachments.map(att => ({
-      filename: att.filename,
-      path: `${baseURL}/uploads/attachments/${att.filename}`,
+    // Add baseURL to attachment paths
+    const baseURL = process.env.LOCALHOST_URL;
+    mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
+      ...attachment,
+      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
     }));
 
-    // Check for drafts or trash
-    if (mainEmail.folder === "drafts" || mainEmail.folder === "trash") {
+    // If this is a draft or trash, do NOT fetch related emails but still get linked entities
+    if (mainEmail.folder === "drafts") {
       const linkedEntities = await getLinkedEntities(mainEmail);
       return res.status(200).json({
-        message: `${mainEmail.folder} email fetched successfully.`,
+        message: "Draft email fetched successfully.",
+        data: {
+          email: mainEmail,
+          relatedEmails: [],
+          linkedEntities,
+        },
+      });
+    }
+    if (mainEmail.folder === "trash") {
+      const linkedEntities = await getLinkedEntities(mainEmail);
+      return res.status(200).json({
+        message: "trash email fetched successfully.",
         data: {
           email: mainEmail,
           relatedEmails: [],
@@ -2015,14 +2068,14 @@ exports.getOneEmail = async (req, res) => {
       });
     }
 
-    // Get thread IDs
+    // Gather all thread IDs (messageId, inReplyTo, and references)
     const threadIds = [
       mainEmail.messageId,
       mainEmail.inReplyTo,
       ...(mainEmail.references ? mainEmail.references.split(" ") : []),
     ].filter(Boolean);
 
-    // Fetch related emails with pagination (limit to 50 for performance)
+    // Fetch all related emails in the thread (across all users)
     let relatedEmails = await Email.findAll({
       where: {
         [Sequelize.Op.or]: [
@@ -2038,88 +2091,132 @@ exports.getOneEmail = async (req, res) => {
         ],
         folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
       },
-      include: [{ model: Attachment, as: "attachments" }],
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size"], // Only metadata
+        },
+      ],
       order: [["createdAt", "ASC"]],
-      limit: 50, // Adjust as needed
+      limit: 50, // Limit to prevent huge responses
+      attributes: [
+        "emailID",
+        "messageId",
+        "inReplyTo",
+        "references",
+        "sender",
+        "senderName",
+        "recipient",
+        "cc",
+        "bcc",
+        "subject",
+        "body",
+        "folder",
+        "createdAt",
+        "isRead",
+        "isOpened",
+        "isClicked",
+        "leadId",
+        "dealId",
+      ],
     });
+    // Remove the main email from relatedEmails
+    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
+    // Remove the main email from relatedEmails (by messageId)
 
-    // Remove duplicate
     relatedEmails = relatedEmails.filter(
       (email) => email.messageId !== mainEmail.messageId
     );
 
-    // Clean bodies and attachments
+    // Deduplicate relatedEmails by messageId (keep the first occurrence)
+    // const seen = new Set();
+    // relatedEmails = relatedEmails.filter(email => {
+    //   if (seen.has(email.messageId)) return false;
+    //   seen.add(email.messageId);
+    //   return true;
+    // });
+    let allEmails = [mainEmail, ...relatedEmails];
+
+    //......changes
+    const seen = new Set();
+    allEmails = allEmails.filter((email) => {
+      if (seen.has(email.messageId)) return false;
+      seen.add(email.messageId);
+      return true;
+    });
+    const emailMap = {};
+    allEmails.forEach((email) => {
+      emailMap[email.messageId] = email;
+    });
+    const conversation = [];
+    let current = allEmails.find(
+      (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
+    );
+    while (current) {
+      conversation.push(current);
+      // Find the next email that replies to the current one
+      current = allEmails.find(
+        (email) =>
+          email.inReplyTo === conversation[conversation.length - 1].messageId
+      );
+    }
+
+    // // If some emails are not in the chain (e.g., forwards), add them by date
+    const remaining = allEmails.filter(
+      (email) => !conversation.includes(email)
+    );
+    remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    conversation.push(...remaining);
+
+    // // The first is the main email, the rest are related
+    // const sortedMainEmail = conversation[0];
+    // const sortedRelatedEmails = conversation.slice(1);
+
+    // Clean the body and attachment paths for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
-      email.attachments = email.attachments.map(att => ({
-        filename: att.filename,
-        path: `${baseURL}/uploads/attachments/${att.filename}`,
+      email.attachments = email.attachments.map((attachment) => ({
+        ...attachment,
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
       }));
     });
 
-    let sortedMainEmail = mainEmail;
-    let sortedRelatedEmails = relatedEmails;
-
-    // Only build conversation if requested
-    if (includeConversation) {
-      let allEmails = [mainEmail, ...relatedEmails];
-
-      // Deduplicate by messageId
-      const seen = new Set();
-      allEmails = allEmails.filter((email) => {
-        if (seen.has(email.messageId)) return false;
-        seen.add(email.messageId);
-        return true;
+    const sortedMainEmail = conversation[0];
+    const sortedRelatedEmails = conversation.slice(1);
+    // Safeguard: If response is too large, return error
+    const estimatedResponseSize = JSON.stringify({
+      email: sortedMainEmail,
+      relatedEmails: sortedRelatedEmails,
+      linkedEntities,
+    }).length;
+    const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
+    if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
+      return res.status(413).json({
+        message:
+          "Response too large. Please reduce thread size or contact support.",
+        data: {
+          email: sortedMainEmail,
+          relatedEmails: [],
+          linkedEntities: {},
+        },
       });
-
-      // Build message tree order
-      const emailMap = {};
-      allEmails.forEach(email => {
-        emailMap[email.messageId] = email;
-      });
-
-      const conversation = [];
-      let current = allEmails.find(
-        (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
-      );
-
-      while (current) {
-        conversation.push(current);
-        current = allEmails.find(
-          (email) => email.inReplyTo === conversation[conversation.length - 1].messageId
-        );
-      }
-
-      // Add leftovers
-      const remaining = allEmails.filter((email) => !conversation.includes(email));
-      remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-      conversation.push(...remaining);
-
-      sortedMainEmail = conversation[0];
-      sortedRelatedEmails = conversation.slice(1);
     }
 
-    // Fetch linked entities from entire conversation
-    const linkedEntities = await getAggregatedLinkedEntities([
-      sortedMainEmail,
-      ...sortedRelatedEmails,
-    ]);
+    // Fetch linked entities from ALL emails in the conversation thread
+    const linkedEntities = await getAggregatedLinkedEntities(conversation);
 
-    // Heap log
-    const usedAfter = process.memoryUsage().heapUsed;
-    console.log(`[MEMORY] Heap used: ${(usedAfter - usedBefore) / 1024 / 1024} MB for emailId ${emailId}`);
-
-    return res.status(200).json({
+    res.status(200).json({
       message: "Email fetched successfully.",
       data: {
         email: sortedMainEmail,
         relatedEmails: sortedRelatedEmails,
-        linkedEntities,
+        linkedEntities, // Add aggregated linked entities to response
       },
     });
   } catch (error) {
     console.error("Error fetching email:", error);
-    return res.status(500).json({ message: "Internal server error." });
+    res.status(500).json({ message: "Internal server error." });
   }
 };
 
