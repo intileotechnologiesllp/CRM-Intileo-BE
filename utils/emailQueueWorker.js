@@ -813,7 +813,7 @@ async function startFetchInboxWorker() {
           smtpPort,
           smtpSecure,
         } = JSON.parse(msg.content.toString());
-        batchSize = 10; // Enforce small batch size
+        // batchSize = 10; // Enforce small batch size
         limit(async () => {
           try {
             // Log memory usage before fetch
