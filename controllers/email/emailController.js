@@ -164,13 +164,17 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
   let thread = [...emails];
   for (const email of emails) {
     if (email.inReplyTo && !collected.has(email.inReplyTo)) {
-      thread = thread.concat(await getFullThread(email.inReplyTo, EmailModel, collected));
+      thread = thread.concat(
+        await getFullThread(email.inReplyTo, EmailModel, collected)
+      );
     }
     if (email.references) {
-      const refs = email.references.split(' ');
+      const refs = email.references.split(" ");
       for (const ref of refs) {
         if (ref && !collected.has(ref)) {
-          thread = thread.concat(await getFullThread(ref, EmailModel, collected));
+          thread = thread.concat(
+            await getFullThread(ref, EmailModel, collected)
+          );
         }
       }
     }
@@ -354,7 +358,9 @@ exports.fetchInboxEmails = async (req, res) => {
         smtpPort,
         smtpSecure,
       });
-      console.log(`User credentials upserted for masterUserID: ${masterUserID}`);
+      console.log(
+        `User credentials upserted for masterUserID: ${masterUserID}`
+      );
     }
 
     // Fetch emails after saving credentials
@@ -542,9 +548,14 @@ exports.fetchInboxEmails = async (req, res) => {
               }
             }
             // Sort by createdAt (oldest first)
-            uniqueThread.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            uniqueThread.sort(
+              (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+            );
             // Optionally, you can log the thread for debugging
-            console.log(`Full thread for messageId ${emailData.messageId}:`, uniqueThread.map(e => e.messageId));
+            console.log(
+              `Full thread for messageId ${emailData.messageId}:`,
+              uniqueThread.map((e) => e.messageId)
+            );
             // You can now use uniqueThread as the full conversation
           }
         }
@@ -3108,7 +3119,7 @@ exports.deleteAllEmailsForUser = async (req, res) => {
       // Fetch a batch of email IDs for the user
       const emails = await Email.findAll({
         where: { masterUserID },
-        attributes: ['emailID'],
+        attributes: ["emailID"],
         limit: BATCH_SIZE,
       });
       if (emails.length === 0) break;
