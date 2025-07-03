@@ -1090,7 +1090,7 @@ exports.fetchArchiveEmails = async (req, res) => {
 
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const {
+  let {
     page = 1,
     pageSize = 10,
     folder,
@@ -1098,19 +1098,22 @@ exports.getEmails = async (req, res) => {
     isRead,
     toMe,
     hasAttachments,
-    isOpened, // <-- Add this
-    isClicked, // <-- Add this
+    isOpened,
+    isClicked,
     trackedEmails,
     isShared,
   } = req.query;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  const masterUserID = req.adminId;
+
+  // Enforce strict maximum page size
+  const MAX_SAFE_PAGE_SIZE = 50;
+  pageSize = Math.min(Number(pageSize) || 10, MAX_SAFE_PAGE_SIZE);
+  if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
 
   try {
-    // Check if user has credentials in UserCredential model
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
     });
-
     if (!userCredential) {
       return res.status(200).json({
         message: "No email credentials found for this user.",
@@ -1121,43 +1124,13 @@ exports.getEmails = async (req, res) => {
         threads: [],
       });
     }
-
-    let filters = {
-      masterUserID,
-    };
-    // if (isShared === "true") {
-    //   filters.isShared = true;
-    //   if (folder) filters.folder = folder;
-    // } else {
-    //   filters = {
-    //     [Sequelize.Op.or]: [
-    //       { masterUserID },
-    //       { isShared: true },
-    //     ]
-    //   };
-    //   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
-    // }
-    if (folder) {
-      filters.folder = folder;
-    }
-
-    if (isRead !== undefined) {
-      filters.isRead = isRead === "true";
-    }
-
+    let filters = { masterUserID };
+    if (folder) filters.folder = folder;
+    if (isRead !== undefined) filters.isRead = isRead === "true";
     if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-      if (!userCredential) {
-        return res.status(404).json({ message: "User credentials not found." });
-      }
       const userEmail = userCredential.email;
       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
     }
-
-    // Add tracked emails filter
-    // --- Tracked emails filter ---
     if (trackedEmails === "true") {
       filters.isOpened = true;
       filters.isClicked = true;
@@ -1165,25 +1138,16 @@ exports.getEmails = async (req, res) => {
       if (isOpened !== undefined) filters.isOpened = isOpened === "true";
       if (isClicked !== undefined) filters.isClicked = isClicked === "true";
     }
-
-    // Add hasAttachments filter
     let includeAttachments = [
       {
         model: Attachment,
         as: "attachments",
+        attributes: ["attachmentID", "filename", "mimetype", "size"], // Only metadata
       },
     ];
     if (hasAttachments === "true") {
-      includeAttachments = [
-        {
-          model: Attachment,
-          as: "attachments",
-          required: true,
-        },
-      ];
+      includeAttachments[0].required = true;
     }
-
-    // Search by subject, sender, or recipient
     if (search) {
       filters[Sequelize.Op.or] = [
         { subject: { [Sequelize.Op.like]: `%${search}%` } },
@@ -1194,76 +1158,79 @@ exports.getEmails = async (req, res) => {
         { folder: { [Sequelize.Op.like]: `%${search}%` } },
       ];
     }
-
-    // Pagination logic
     const offset = (page - 1) * pageSize;
-    const limit = parseInt(pageSize);
-
-    // Fetch emails from the database
+    const limit = pageSize;
+    // Only select essential fields
+    const essentialFields = [
+      "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "folder", "createdAt", "isRead", "isOpened", "isClicked", "isShared", "leadId", "dealId"
+    ];
     const { count, rows: emails } = await Email.findAndCountAll({
       where: filters,
       include: includeAttachments,
       offset,
       limit,
-      order: [["createdAt", "DESC"]], // Sort by most recent emails
-      distinct: true, // <-- This ensures correct counting!
+      order: [["createdAt", "DESC"]],
+      distinct: true,
+      attributes: essentialFields,
     });
-
-    // Add baseURL to attachment paths
+    // Add baseURL to attachment paths (metadata only)
     const baseURL = process.env.LOCALHOST_URL;
     const emailsWithAttachments = emails.map((email) => {
-      const attachments = email.attachments.map((attachment) => ({
+      const attachments = (email.attachments || []).map((attachment) => ({
         ...attachment.toJSON(),
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
+        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
       }));
       return {
         ...email.toJSON(),
         attachments,
       };
     });
-
     // Calculate unviewCount for the specified folder or all folders
     const unviewCount = await Email.count({
       where: {
         ...filters,
-        isRead: false, // Count only unread emails
+        isRead: false,
       },
     });
-
+    // Grouping logic (only for current page)
     let responseThreads;
     if (folder === "drafts" || folder === "trash") {
-      // For drafts and trash, group by draftId if available, else by emailID
       const threads = {};
-      emails.forEach((email) => {
-        const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
+      emailsWithAttachments.forEach((email) => {
+        const threadId = email.draftId || email.emailID;
+        if (!threads[threadId]) threads[threadId] = [];
         threads[threadId].push(email);
       });
       responseThreads = Object.values(threads);
     } else {
-      // For other folders, group by inReplyTo or messageId
       const threads = {};
-      emails.forEach((email) => {
+      emailsWithAttachments.forEach((email) => {
         const threadId = email.inReplyTo || email.messageId || email.emailID;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
+        if (!threads[threadId]) threads[threadId] = [];
         threads[threadId].push(email);
       });
       responseThreads = Object.values(threads);
     }
-
-    // Return the paginated response with threads and unviewCount
+    // Safeguard: If response is too large, return error
+    const estimatedResponseSize = JSON.stringify(responseThreads).length;
+    const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
+    if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
+      return res.status(413).json({
+        message: "Response too large. Please reduce pageSize or apply more filters.",
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(count / pageSize),
+        totalEmails: count,
+        unviewCount,
+        threads: [],
+      });
+    }
     res.status(200).json({
       message: "Emails fetched successfully.",
       currentPage: parseInt(page),
       totalPages: Math.ceil(count / pageSize),
       totalEmails: count,
-      unviewCount, // Include the unviewCount field
-      // threads: Object.values(threads), // Return grouped threads
-      threads: responseThreads, // Return grouped threads
+      unviewCount,
+      threads: responseThreads,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
