@@ -1,6 +1,6 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-const limit = pLimit(10);
+const limit = pLimit(1);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
