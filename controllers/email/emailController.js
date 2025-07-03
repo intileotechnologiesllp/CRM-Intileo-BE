@@ -1142,7 +1142,7 @@ exports.getEmails = async (req, res) => {
       {
         model: Attachment,
         as: "attachments",
-        attributes: ["attachmentID", "filename", "mimetype", "size"], // Only metadata
+        attributes: ["attachmentID", "filename", "size"], // Only metadata, removed mimetype
       },
     ];
     if (hasAttachments === "true") {
@@ -1162,7 +1162,7 @@ exports.getEmails = async (req, res) => {
     const limit = pageSize;
     // Only select essential fields
     const essentialFields = [
-      "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "folder", "createdAt", "isRead", "isOpened", "isClicked", "isShared", "leadId", "dealId"
+      "emailID", "messageId", "inReplyTo", "references", "sender", "senderName", "recipient", "cc", "bcc", "subject", "folder", "createdAt", "isRead", "isOpened", "isClicked", "leadId", "dealId"
     ];
     const { count, rows: emails } = await Email.findAndCountAll({
       where: filters,
@@ -2139,6 +2139,7 @@ exports.getOneEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching email:", error);
+
     res.status(500).json({ message: "Internal server error." });
   }
 };
