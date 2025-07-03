@@ -791,7 +791,8 @@ async function startFetchInboxWorker() {
     "FETCH_INBOX_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const {
+        // Force a small batch size for memory safety
+        let {
           masterUserID,
           email,
           appPassword,
@@ -806,9 +807,11 @@ async function startFetchInboxWorker() {
           smtpPort,
           smtpSecure,
         } = JSON.parse(msg.content.toString());
+        batchSize = 10; // Enforce small batch size
         limit(async () => {
           try {
-            console.log("Starting fetchInboxEmails");
+            // Log memory usage before fetch
+            logMemoryUsage(`Before fetchInboxEmails for masterUserID ${masterUserID}`);
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
@@ -824,12 +827,12 @@ async function startFetchInboxWorker() {
                   smtpPort,
                   smtpSecure,
                 },
-                // body: { appPassword },
                 query: { batchSize, page, days },
               },
               { status: () => ({ json: () => {} }) }
             );
-            console.log("Finished fetchInboxEmails");
+            // Log memory usage after fetch
+            logMemoryUsage(`After fetchInboxEmails for masterUserID ${masterUserID}`);
             channel.ack(msg);
           } catch (err) {
             console.error("Failed to fetch inbox emails:", err);
