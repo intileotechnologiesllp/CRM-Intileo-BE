@@ -1,6 +1,6 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-const limit = pLimit(5);
+const limit = pLimit(1);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
@@ -721,12 +721,17 @@ async function startSyncEmailWorker() {
     "SYNC_EMAIL_QUEUE",
     async (msg) => {
       if (msg !== null) {
-        const { masterUserID, syncStartDate } = JSON.parse(msg.content.toString());
+        // Expect startUID and endUID in the message for batching
+        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
-            // Call fetchSyncEmails logic directly, but mock req/res
+            // Pass startUID and endUID to fetchSyncEmails for batch processing
             await fetchSyncEmails(
-              { adminId: masterUserID, body: { syncStartDate }, query: {} },
+              {
+                adminId: masterUserID,
+                body: { syncStartDate, startUID, endUID },
+                query: {}
+              },
               { status: () => ({ json: () => {} }) }
             );
             channel.ack(msg);
@@ -735,7 +740,7 @@ async function startSyncEmailWorker() {
             channel.nack(msg, false, false);
           }
         });
-              }
+      }
     },
     { noAck: false }
   );
@@ -756,6 +761,7 @@ async function startFetchInboxWorker() {
         const { masterUserID, email, appPassword, batchSize, page, days,provider,imapHost,imapPort,imapTLS,smtpHost,smtpPort,smtpSecure } = JSON.parse(msg.content.toString());
         limit(async () => {
           try {
+            console.log("Starting fetchInboxEmails");
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
@@ -766,6 +772,7 @@ async function startFetchInboxWorker() {
               },
               { status: () => ({ json: () => {} }) }
             );
+            console.log("Finished fetchInboxEmails");
             channel.ack(msg);
           } catch (err) {
             console.error("Failed to fetch inbox emails:", err);
@@ -785,5 +792,4 @@ startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 startWorker().catch(console.error);
 startScheduledEmailWorker().catch(console.error);
-
 
