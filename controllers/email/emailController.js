@@ -280,6 +280,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
       message: `Inbox fetch jobs queued: ${numBatches} batches for ${totalEmails} emails.`,
     });
   } catch (error) {
+    console.error("Error queuing inbox fetch job:", error);
     res.status(500).json({
       message: "Failed to queue inbox fetch job.",
       error: error.message,
