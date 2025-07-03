@@ -293,7 +293,6 @@ exports.queueFetchInboxEmails = async (req, res) => {
 exports.fetchInboxEmails = async (req, res) => {
   // Enforce max batch size
   let { batchSize = 50, page = 1, days = 7, startUID, endUID } = req.query;
-  //   batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
   // batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
 
   const masterUserID = req.adminId;
@@ -534,11 +533,9 @@ exports.fetchInboxEmails = async (req, res) => {
           // Save attachments
           const attachments = [];
           if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-            // Filter out icon/image attachments and inline (body/html) attachments
+            // Filter out icon/image attachments
             const filteredAttachments = parsedEmail.attachments.filter(
-              (att) =>
-                !isIconAttachment(att) &&
-                !att.contentDisposition?.toLowerCase().includes("inline")
+              (att) => !isIconAttachment(att)
             );
             if (filteredAttachments.length > 0) {
               const savedAttachments = await saveAttachments(
@@ -551,7 +548,7 @@ exports.fetchInboxEmails = async (req, res) => {
               );
             } else {
               console.log(
-                `No real attachments to save for email: ${emailData.messageId}`
+                `No non-icon/image attachments to save for email: ${emailData.messageId}`
               );
             }
           }
@@ -577,39 +574,15 @@ exports.fetchInboxEmails = async (req, res) => {
               `Full thread for messageId ${emailData.messageId}:`,
               uniqueThread.map((e) => e.messageId)
             );
-            // For each thread email, save only real attachments if not already saved
+            // Only save thread emails if not already present (no attachment logic)
             for (const threadEmail of uniqueThread) {
               if (threadEmail.messageId === emailData.messageId) continue;
               const existingThreadEmail = await Email.findOne({
                 where: { messageId: threadEmail.messageId },
               });
-              let savedThreadEmail = existingThreadEmail;
               if (!existingThreadEmail) {
-                savedThreadEmail = await Email.create(
-                  threadEmail.toJSON ? threadEmail.toJSON() : threadEmail
-                );
+                await Email.create(threadEmail.toJSON ? threadEmail.toJSON() : threadEmail);
                 console.log(`Thread email saved: ${threadEmail.messageId}`);
-              }
-              // Save only real attachments for thread emails
-              if (
-                threadEmail.attachments &&
-                threadEmail.attachments.length > 0 &&
-                savedThreadEmail
-              ) {
-                const realThreadAttachments = threadEmail.attachments.filter(
-                  (att) =>
-                    !isIconAttachment(att) &&
-                    !att.contentDisposition?.toLowerCase().includes("inline")
-                );
-                if (realThreadAttachments.length > 0) {
-                  await saveAttachments(
-                    realThreadAttachments,
-                    savedThreadEmail.emailID
-                  );
-                  console.log(
-                    `Saved ${realThreadAttachments.length} real attachments for thread email: ${threadEmail.messageId}`
-                  );
-                }
               }
             }
             // You can now use uniqueThread as the full conversation
@@ -879,9 +852,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
       // Filter out icon/image attachments and inline (body/html) attachments
       const filteredAttachments = parsedEmail.attachments.filter(
-        (att) =>
-          !isIconAttachment(att) &&
-          !att.contentDisposition?.toLowerCase().includes("inline")
+        (att) => !isIconAttachment(att) && !att.contentDisposition?.toLowerCase().includes('inline')
       );
       if (filteredAttachments.length > 0) {
         const savedAttachments = await saveAttachments(
