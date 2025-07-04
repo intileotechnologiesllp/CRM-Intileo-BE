@@ -581,7 +581,9 @@ exports.fetchInboxEmails = async (req, res) => {
                 where: { messageId: threadEmail.messageId },
               });
               if (!existingThreadEmail) {
-                await Email.create(threadEmail.toJSON ? threadEmail.toJSON() : threadEmail);
+                await Email.create(
+                  threadEmail.toJSON ? threadEmail.toJSON() : threadEmail
+                );
                 console.log(`Thread email saved: ${threadEmail.messageId}`);
               }
             }
@@ -852,7 +854,9 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
       // Filter out icon/image attachments and inline (body/html) attachments
       const filteredAttachments = parsedEmail.attachments.filter(
-        (att) => !isIconAttachment(att) && !att.contentDisposition?.toLowerCase().includes('inline')
+        (att) =>
+          !isIconAttachment(att) &&
+          !att.contentDisposition?.toLowerCase().includes("inline")
       );
       if (filteredAttachments.length > 0) {
         const savedAttachments = await saveAttachments(
@@ -1119,12 +1123,11 @@ exports.fetchArchiveEmails = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
-
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
   let {
     page = 1,
-    pageSize = 10,
+    pageSize = 20,
     folder,
     search,
     isRead,
@@ -1139,7 +1142,7 @@ exports.getEmails = async (req, res) => {
 
   // Enforce strict maximum page size
   const MAX_SAFE_PAGE_SIZE = 50;
-  pageSize = Math.min(Number(pageSize) || 10, MAX_SAFE_PAGE_SIZE);
+  pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
   if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
 
   try {
@@ -1286,6 +1289,204 @@ exports.getEmails = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+// // Get emails with pagination, filtering, and searching
+// exports.getEmails = async (req, res) => {
+//   let {
+//     pageSize = 10,
+//     folder,
+//     search,
+//     isRead,
+//     toMe,
+//     hasAttachments,
+//     isOpened,
+//     isClicked,
+//     trackedEmails,
+//     isShared,
+//     cursor, // Buffer pagination cursor (createdAt ISO string or emailID)
+//     direction = "next", // 'next' or 'prev'
+//   } = req.query;
+//   const masterUserID = req.adminId;
+
+//   // Enforce strict maximum page size
+//   const MAX_SAFE_PAGE_SIZE = 50;
+//   pageSize = Math.min(Number(pageSize) || 10, MAX_SAFE_PAGE_SIZE);
+//   if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
+
+//   try {
+//     const userCredential = await UserCredential.findOne({
+//       where: { masterUserID },
+//     });
+//     if (!userCredential) {
+//       return res.status(200).json({
+//         message: "No email credentials found for this user.",
+//         currentPage: 1,
+//         totalPages: 0,
+//         totalEmails: 0,
+//         unviewCount: 0,
+//         threads: [],
+//         nextCursor: null,
+//         prevCursor: null,
+//       });
+//     }
+//     let filters = { masterUserID };
+//     if (folder) filters.folder = folder;
+//     if (isRead !== undefined) filters.isRead = isRead === "true";
+//     if (toMe === "true") {
+//       const userEmail = userCredential.email;
+//       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
+//     }
+//     if (trackedEmails === "true") {
+//       filters.isOpened = true;
+//       filters.isClicked = true;
+//     } else {
+//       if (isOpened !== undefined) filters.isOpened = isOpened === "true";
+//       if (isClicked !== undefined) filters.isClicked = isClicked === "true";
+//     }
+//     let includeAttachments = [
+//       {
+//         model: Attachment,
+//         as: "attachments",
+//         attributes: ["attachmentID", "filename", "size"],
+//       },
+//     ];
+//     if (hasAttachments === "true") {
+//       includeAttachments[0].required = true;
+//     }
+//     if (search) {
+//       filters[Sequelize.Op.or] = [
+//         { subject: { [Sequelize.Op.like]: `%${search}%` } },
+//         { sender: { [Sequelize.Op.like]: `%${search}%` } },
+//         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+//         { senderName: { [Sequelize.Op.like]: `%${search}%` } },
+//         { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
+//         { folder: { [Sequelize.Op.like]: `%${search}%` } },
+//       ];
+//     }
+
+//     // Buffer pagination logic
+//     let order = [["createdAt", "DESC"]];
+//     if (cursor) {
+//       // If cursor is an emailID, fetch its createdAt
+//       let cursorDate = null;
+//       if (/^\d+$/.test(cursor)) {
+//         const cursorEmail = await Email.findOne({ where: { emailID: cursor } });
+//         if (cursorEmail) cursorDate = cursorEmail.createdAt;
+//       } else {
+//         cursorDate = new Date(cursor);
+//       }
+//       if (cursorDate) {
+//         if (direction === "next") {
+//           filters.createdAt = { [Sequelize.Op.lt]: cursorDate };
+//         } else {
+//           filters.createdAt = { [Sequelize.Op.gt]: cursorDate };
+//           order = [["createdAt", "ASC"]]; // Reverse order for prev
+//         }
+//       }
+//     }
+
+//     const limit = pageSize;
+//     const essentialFields = [
+//       "emailID",
+//       "messageId",
+//       "inReplyTo",
+//       "references",
+//       "sender",
+//       "senderName",
+//       "recipient",
+//       "cc",
+//       "bcc",
+//       "subject",
+//       "folder",
+//       "createdAt",
+//       "isRead",
+//       "isOpened",
+//       "isClicked",
+//       "leadId",
+//       "dealId",
+//     ];
+//     let emails = await Email.findAll({
+//       where: filters,
+//       include: includeAttachments,
+//       limit,
+//       order,
+//       attributes: essentialFields,
+//       distinct: true,
+//     });
+//     if (direction === "prev") emails = emails.reverse();
+//     const baseURL = process.env.LOCALHOST_URL;
+//     const emailsWithAttachments = emails.map((email) => {
+//       const attachments = (email.attachments || []).map((attachment) => ({
+//         ...attachment.toJSON(),
+//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
+//       }));
+//       return {
+//         ...email.toJSON(),
+//         attachments,
+//       };
+//     });
+//     // Calculate unviewCount for the specified folder or all folders
+//     const unviewCount = await Email.count({
+//       where: {
+//         ...filters,
+//         isRead: false,
+//       },
+//     });
+//     // Grouping logic (only for current page)
+//     let responseThreads;
+//     if (folder === "drafts" || folder === "trash") {
+//       const threads = {};
+//       emailsWithAttachments.forEach((email) => {
+//         const threadId = email.draftId || email.emailID;
+//         if (!threads[threadId]) threads[threadId] = [];
+//         threads[threadId].push(email);
+//       });
+//       responseThreads = Object.values(threads);
+//     } else {
+//       const threads = {};
+//       emailsWithAttachments.forEach((email) => {
+//         const threadId = email.inReplyTo || email.messageId || email.emailID;
+//         if (!threads[threadId]) threads[threadId] = [];
+//         threads[threadId].push(email);
+//       });
+//       responseThreads = Object.values(threads);
+//     }
+//     // Safeguard: If response is too large, return error
+//     const estimatedResponseSize = JSON.stringify(responseThreads).length;
+//     const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
+//     if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
+//       return res.status(413).json({
+//         message:
+//           "Response too large. Please reduce pageSize or apply more filters.",
+//         currentPage: 1,
+//         totalPages: 1,
+//         totalEmails: 0,
+//         unviewCount,
+//         threads: [],
+//         nextCursor: null,
+//         prevCursor: null,
+//       });
+//     }
+//     // Buffer pagination cursors
+//     const nextCursor =
+//       emailsWithAttachments.length > 0
+//         ? emailsWithAttachments[emailsWithAttachments.length - 1].createdAt
+//         : null;
+//     const prevCursor =
+//       emailsWithAttachments.length > 0
+//         ? emailsWithAttachments[0].createdAt
+//         : null;
+//     res.status(200).json({
+//       message: "Emails fetched successfully.",
+//       threads: responseThreads,
+//       unviewCount,
+//       nextCursor,
+//       prevCursor,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching emails:", error);
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 
 // Fetch and store emails from the Sent folder using batching
 exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
