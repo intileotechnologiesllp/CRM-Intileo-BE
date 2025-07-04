@@ -830,7 +830,8 @@ exports.fetchRecentEmail = async (adminId) => {
 
     console.log(`Processing recent email: ${emailData.messageId}`);
     const existingEmail = await Email.findOne({
-      where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
+      // where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
+      where: { messageId: emailData.messageId},
     });
 
     let savedEmail;
