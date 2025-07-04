@@ -1083,9 +1083,23 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     };
 
     console.log(`Processing recent email: ${emailData.messageId}`);
-    const existingEmail = await Email.findOne({
-      where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
-    });
+    // Check if the email exists in the trash folder
+const trashedEmail = await Email.findOne({
+  where: { messageId: emailData.messageId, folder: "trash" },
+});
+
+let existingEmail;
+if (trashedEmail) {
+  existingEmail = trashedEmail;
+} else {
+  existingEmail = await Email.findOne({
+    where: { messageId: emailData.messageId, folder: emailData.folder },
+  });
+}
+
+    // const existingEmail = await Email.findOne({
+    //   where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
+    // });
 
     let savedEmail;
     if (!existingEmail) {
