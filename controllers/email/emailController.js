@@ -1383,7 +1383,7 @@ exports.fetchArchiveEmails = async (req, res) => {
 };
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
-  const {
+  let {
     page = 1,
     pageSize = 20,
     folder,
@@ -1395,8 +1395,15 @@ exports.getEmails = async (req, res) => {
     isClicked, // <-- Add this
     trackedEmails,
     isShared,
+    cursor, // Buffer pagination cursor (createdAt ISO string or emailID)
+    direction = "next", // 'next' or 'prev'
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  // Enforce strict maximum page size
+  const MAX_SAFE_PAGE_SIZE = 50;
+  pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
+  if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
 
   try {
     // Check if user has credentials in UserCredential model
@@ -1412,6 +1419,8 @@ exports.getEmails = async (req, res) => {
         totalEmails: 0,
         unviewCount: 0,
         threads: [],
+        nextCursor: null,
+        prevCursor: null,
       });
     }
 
@@ -1488,24 +1497,88 @@ exports.getEmails = async (req, res) => {
       ];
     }
 
+    // Buffer pagination logic
+    let order = [["createdAt", "DESC"]];
+    if (cursor) {
+      // If cursor is an emailID, fetch its createdAt
+      let cursorDate = null;
+      if (/^\d+$/.test(cursor)) {
+        const cursorEmail = await Email.findOne({ where: { emailID: cursor } });
+        if (cursorEmail) cursorDate = cursorEmail.createdAt;
+      } else {
+        cursorDate = new Date(cursor);
+      }
+      if (cursorDate) {
+        if (direction === "next") {
+          filters.createdAt = { [Sequelize.Op.lt]: cursorDate };
+        } else {
+          filters.createdAt = { [Sequelize.Op.gt]: cursorDate };
+          order = [["createdAt", "ASC"]]; // Reverse order for prev
+        }
+      }
+    }
+
     // Pagination logic
-    const offset = (page - 1) * pageSize;
-    const limit = parseInt(pageSize);
+    const limit = pageSize;
+    let offset = null;
+    
+    // Use buffer pagination if cursor is provided, otherwise use offset pagination
+    if (!cursor) {
+      offset = (page - 1) * pageSize;
+    }
+
+    // Only select essential fields for better performance
+    const essentialFields = [
+      "emailID",
+      "messageId",
+      "inReplyTo",
+      "references",
+      "sender",
+      "senderName",
+      "recipient",
+      "cc",
+      "bcc",
+      "subject",
+      "folder",
+      "createdAt",
+      "isRead",
+      "isOpened",
+      "isClicked",
+      "leadId",
+      "dealId",
+    ];
 
     // Fetch emails from the database
-    const { count, rows: emails } = await Email.findAndCountAll({
-      where: filters,
-      include: includeAttachments,
-      offset,
-      limit,
-      order: [["createdAt", "DESC"]], // Sort by most recent emails
-      distinct: true, // <-- This ensures correct counting!
-    });
+    let emails;
+    if (cursor) {
+      // Buffer pagination - use findAll with limit and order
+      emails = await Email.findAll({
+        where: filters,
+        include: includeAttachments,
+        limit,
+        order,
+        attributes: essentialFields,
+        distinct: true,
+      });
+      if (direction === "prev") emails = emails.reverse();
+    } else {
+      // Traditional offset pagination
+      const { count, rows } = await Email.findAndCountAll({
+        where: filters,
+        include: includeAttachments,
+        offset,
+        limit,
+        order,
+        attributes: essentialFields,
+        distinct: true,
+      });
+      emails = rows;
+    }
 
     // Add baseURL to attachment paths
     const baseURL = process.env.LOCALHOST_URL;
     const emailsWithAttachments = emails.map((email) => {
-      const attachments = email.attachments.map((attachment) => ({
+      const attachments = (email.attachments || []).map((attachment) => ({
         ...attachment.toJSON(),
         path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
       }));
@@ -1523,11 +1596,12 @@ exports.getEmails = async (req, res) => {
       },
     });
 
+    // Grouping logic (only for current page)
     let responseThreads;
     if (folder === "drafts" || folder === "trash") {
       // For drafts and trash, group by draftId if available, else by emailID
       const threads = {};
-      emails.forEach((email) => {
+      emailsWithAttachments.forEach((email) => {
         const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
         if (!threads[threadId]) {
           threads[threadId] = [];
@@ -1538,7 +1612,7 @@ exports.getEmails = async (req, res) => {
     } else {
       // For other folders, group by inReplyTo or messageId
       const threads = {};
-      emails.forEach((email) => {
+      emailsWithAttachments.forEach((email) => {
         const threadId = email.inReplyTo || email.messageId || email.emailID;
         if (!threads[threadId]) {
           threads[threadId] = [];
@@ -1548,15 +1622,34 @@ exports.getEmails = async (req, res) => {
       responseThreads = Object.values(threads);
     }
 
+    // Buffer pagination cursors
+    const nextCursor =
+      emailsWithAttachments.length > 0
+        ? emailsWithAttachments[emailsWithAttachments.length - 1].createdAt
+        : null;
+    const prevCursor =
+      emailsWithAttachments.length > 0
+        ? emailsWithAttachments[0].createdAt
+        : null;
+
+    // Calculate total count if using cursor pagination
+    let totalCount = 0;
+    if (cursor) {
+      totalCount = await Email.count({ where: filters });
+    } else {
+      totalCount = await Email.count({ where: filters });
+    }
+
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
       message: "Emails fetched successfully.",
       currentPage: parseInt(page),
-      totalPages: Math.ceil(count / pageSize),
-      totalEmails: count,
+      totalPages: cursor ? 1 : Math.ceil(totalCount / pageSize), // totalPages not meaningful for buffer pagination
+      totalEmails: totalCount,
       unviewCount, // Include the unviewCount field
-      // threads: Object.values(threads), // Return grouped threads
       threads: responseThreads, // Return grouped threads
+      nextCursor,
+      prevCursor,
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
