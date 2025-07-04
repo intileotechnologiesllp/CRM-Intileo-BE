@@ -11,6 +11,7 @@ const UserCredential = require("../models/email/userCredentialModel");
 const DefaultEmail = require("../models/email/defaultEmailModel");
 const MasterUser = require("../models/master/masterUserModel");
 const { fetchInboxEmails } = require("../controllers/email/emailController");
+const { batch } = require("googleapis/build/src/apis/batch");
 const QUEUE_NAME = "email-fetch-queue";
 const SCHEDULED_QUEUE = "scheduled-email-queue";
 const QUEUE = "EMAIL_QUEUE";
@@ -72,7 +73,7 @@ async function startWorker() {
           await limit(async () => {
             // If fetchRecentEmail supports batchSize, pass it as 10
             if (typeof fetchRecentEmail === 'function' && fetchRecentEmail.length >= 2) {
-              await fetchRecentEmail(adminId);
+              await fetchRecentEmail(adminId,batchSize = 10);
             } else {
               await fetchRecentEmail(adminId);
             }
