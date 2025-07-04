@@ -913,7 +913,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     };
   } catch (error) {
     console.error("Error fetching recent email:", error);
-log("Error details:",masterUserID, email, appPassword, provider);
+console.log("Error details:",adminId, email, appPassword, provider);
     return { message: "Internal server error.", error: error.message };
   }
 };
