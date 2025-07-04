@@ -533,9 +533,11 @@ exports.fetchInboxEmails = async (req, res) => {
           // Save attachments
           const attachments = [];
           if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-            // Filter out icon/image attachments
+            // Only save real attachments (not inline/body content attachments)
             const filteredAttachments = parsedEmail.attachments.filter(
-              (att) => !isIconAttachment(att)
+              (att) =>
+                !att.contentDisposition ||
+                att.contentDisposition.toLowerCase() !== "inline"
             );
             if (filteredAttachments.length > 0) {
               const savedAttachments = await saveAttachments(
@@ -544,11 +546,11 @@ exports.fetchInboxEmails = async (req, res) => {
               );
               attachments.push(...savedAttachments);
               console.log(
-                `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+                `Saved ${attachments.length} real attachments for email: ${emailData.messageId}`
               );
             } else {
               console.log(
-                `No non-icon/image attachments to save for email: ${emailData.messageId}`
+                `No real attachments to save for email: ${emailData.messageId}`
               );
             }
           }
@@ -1015,6 +1017,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     // Get the most recent email
     const recentMessage = messages[messages.length - 1];
     const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
+
     const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
     if (!rawBody) {
