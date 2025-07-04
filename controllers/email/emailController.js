@@ -2736,7 +2736,6 @@ exports.getOneEmail = async (req, res) => {
     // Fetch all related emails in the thread (across all users)
     let relatedEmails = await Email.findAll({
       where: {
-          masterUserID, // <-- Only fetch emails for the current user
         [Sequelize.Op.or]: [
           { messageId: { [Sequelize.Op.in]: threadIds } },
           { inReplyTo: { [Sequelize.Op.in]: threadIds } },
