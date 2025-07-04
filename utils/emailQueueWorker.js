@@ -72,7 +72,7 @@ async function startWorker() {
           await limit(async () => {
             // If fetchRecentEmail supports batchSize, pass it as 10
             if (typeof fetchRecentEmail === 'function' && fetchRecentEmail.length >= 2) {
-              await fetchRecentEmail(adminId, { batchSize: 10 });
+              await fetchRecentEmail(adminId);
             } else {
               await fetchRecentEmail(adminId);
             }
