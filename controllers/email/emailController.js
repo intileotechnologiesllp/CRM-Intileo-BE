@@ -20,6 +20,65 @@ const Organization = require("../../models/leads/leadOrganizationModel");
 const Activity = require("../../models/activity/activityModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
+// Helper function to identify icon/image attachments and body content that shouldn't be saved as attachments
+const isIconAttachment = (attachment) => {
+  const filename = attachment.filename || attachment.generatedFileName || "";
+  const contentType = attachment.contentType || "";
+  const contentId = attachment.contentId || "";
+  const contentDisposition = attachment.contentDisposition || "";
+
+  // Skip if it's an inline attachment (part of email body)
+  if (contentDisposition.toLowerCase().includes("inline")) {
+    return true;
+  }
+
+  // Skip if it has a content ID (usually embedded images)
+  if (contentId) {
+    return true;
+  }
+
+  // Skip common icon/signature image patterns
+  const iconPatterns = [
+    /icon/i,
+    /signature/i,
+    /logo/i,
+    /avatar/i,
+    /spacer/i,
+    /pixel/i,
+    /tracker/i,
+    /blank/i,
+    /transparent/i,
+    /1x1/i,
+  ];
+
+  if (iconPatterns.some((pattern) => pattern.test(filename))) {
+    return true;
+  }
+
+  // Skip very small images (likely tracking pixels or icons)
+  if (
+    contentType.startsWith("image/") &&
+    attachment.size &&
+    attachment.size < 1024
+  ) {
+    return true;
+  }
+
+  // Skip common body content types
+  const bodyContentTypes = [
+    "text/html",
+    "text/plain",
+    "multipart/",
+    "message/",
+  ];
+
+  if (bodyContentTypes.some((type) => contentType.startsWith(type))) {
+    return true;
+  }
+
+  return false;
+};
+
 const PROVIDER_CONFIG = {
   gmail: {
     host: "imap.gmail.com",
@@ -45,7 +104,7 @@ const PROVIDER_CONFIG = {
 };
 
 // Maximum batch size for all email fetch operations
-const MAX_BATCH_SIZE = 20;
+const MAX_BATCH_SIZE = 100; // Increased from 25 to 100 for much better performance
 
 // Add this near PROVIDER_CONFIG
 const PROVIDER_FOLDER_MAP = {
@@ -187,7 +246,7 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
 }
 
 exports.queueFetchInboxEmails = async (req, res) => {
-  const { batchSize = 50, days = 7 } = req.query;
+  const { batchSize = 50, days = 7 } = req.query; // Increased default from 20 to 50
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
@@ -197,6 +256,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
     if (!masterUserID || !email || !appPassword) {
       return res.status(400).json({ message: "All fields are required." });
     }
+
+    console.log(
+      `[Queue] Starting email queue process for masterUserID: ${masterUserID}`
+    );
 
     // 1. Connect to IMAP and get all UIDs (not fetching all messages)
     let imapConfig;
@@ -245,24 +308,39 @@ exports.queueFetchInboxEmails = async (req, res) => {
     const totalEmails = uids.length;
     await connection.end();
 
-    // 2. Calculate UID ranges for batches
-    const numBatches = Math.ceil(totalEmails / batchSize);
+    console.log(`[Queue] Found ${totalEmails} emails to process`);
+
+    // 2. Calculate UID ranges for batches - optimized for much better performance
+    const safeBatchSize = Math.min(
+      parseInt(batchSize),
+      totalEmails > 5000 ? 50 : totalEmails > 2000 ? 75 : 100  // Much larger batches for faster processing
+    );
+    const numBatches = Math.ceil(totalEmails / safeBatchSize);
+
     if (numBatches === 0) {
       return res.status(200).json({ message: "No emails to fetch." });
     }
 
+    console.log(
+      `[Queue] Creating ${numBatches} batches with ${safeBatchSize} emails each`
+    );
+
     for (let page = 1; page <= numBatches; page++) {
-      const startIdx = (page - 1) * batchSize;
-      const endIdx = Math.min(startIdx + parseInt(batchSize), totalEmails);
+      const startIdx = (page - 1) * safeBatchSize;
+      const endIdx = Math.min(startIdx + parseInt(safeBatchSize), totalEmails);
       const batchUIDs = uids.slice(startIdx, endIdx);
       if (batchUIDs.length === 0) continue;
+      
+      // Use individual UIDs instead of ranges to avoid issues with non-consecutive UIDs
       const startUID = batchUIDs[0];
       const endUID = batchUIDs[batchUIDs.length - 1];
+      const allUIDsInBatch = batchUIDs.join(','); // e.g., "1001,1003,1005,1007"
+
       await publishToQueue("FETCH_INBOX_QUEUE", {
         masterUserID,
         email,
         appPassword,
-        batchSize,
+        batchSize: safeBatchSize,
         page,
         days,
         provider,
@@ -274,13 +352,24 @@ exports.queueFetchInboxEmails = async (req, res) => {
         smtpSecure: req.body.smtpSecure,
         startUID,
         endUID,
+        allUIDsInBatch, // Send all UIDs in the batch
+        expectedCount: batchUIDs.length, // Expected number of emails in this batch
       });
+
+      console.log(
+        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} emails, UIDs: ${startUID}-${endUID} (processing ${safeBatchSize} emails per batch)`
+      );
     }
+
     res.status(200).json({
       message: `Inbox fetch jobs queued: ${numBatches} batches for ${totalEmails} emails.`,
+      totalEmails,
+      numBatches,
+      batchSize: safeBatchSize,
+      estimatedTime: `${Math.ceil(numBatches * 0.2)} minutes`, // Reduced from 0.5 to 0.2 minutes per batch
     });
   } catch (error) {
-    console.error("Error queuing inbox fetch job:", error);
+    console.error("[Queue] Error queuing inbox fetch job:", error);
     res.status(500).json({
       message: "Failed to queue inbox fetch job.",
       error: error.message,
@@ -288,374 +377,542 @@ exports.queueFetchInboxEmails = async (req, res) => {
   }
 };
 
-
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
-// Enforce max batch size
-let { batchSize = 50, page = 1, days = 7, startUID, endUID } = req.query;
-// batchSize = Math.min(Number(batchSize) || 10, MAX_BATCH_SIZE);
+  // Optimized batch size for better performance
+  let { batchSize = 50, page = 1, days = 7, startUID, endUID, allUIDsInBatch, expectedCount } = req.query;
+  batchSize = Math.min(Number(batchSize) || 50, MAX_BATCH_SIZE);
 
-const masterUserID = req.adminId;
-const email = req.body?.email || req.email;
-const appPassword = req.body?.appPassword || req.appPassword;
-const provider = req.body?.provider;
+  const masterUserID = req.adminId;
+  const email = req.body?.email || req.email;
+  const appPassword = req.body?.appPassword || req.appPassword;
+  const provider = req.body?.provider;
 
-let connection;
-try {
-if (!masterUserID || !email || !appPassword || !provider) {
-return res.status(400).json({ message: "All fields are required." });
-}
+  let connection;
+  try {
+    console.log(
+      `[Batch ${page}] Starting fetch for ${batchSize} emails, UIDs: ${startUID}-${endUID}`
+    );
+    
+    if (allUIDsInBatch) {
+      console.log(`[Batch ${page}] Specific UIDs to fetch: ${allUIDsInBatch}`);
+    }
+    
+    if (expectedCount) {
+      console.log(`[Batch ${page}] Expected to process: ${expectedCount} emails`);
+    }
 
-// Check if the user already has credentials saved
-const existingCredential = await UserCredential.findOne({
-where: { masterUserID },
-});
-const smtpConfigByProvider = {
-gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
-yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
-yahoo: {
-smtpHost: "smtp.mail.yahoo.com",
-smtpPort: 465,
-smtpSecure: true,
-},
-outlook: {
-smtpHost: "smtp.office365.com",
-smtpPort: 587,
-smtpSecure: false,
-},
-};
+    if (!masterUserID || !email || !appPassword || !provider) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
 
-// Prepare SMTP config for saving
-let smtpHost = null,
-smtpPort = null,
-smtpSecure = null;
-if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
-const smtpConfig = smtpConfigByProvider[provider];
-smtpHost = smtpConfig.smtpHost;
-smtpPort = smtpConfig.smtpPort;
-smtpSecure = smtpConfig.smtpSecure;
-} else if (provider === "custom") {
-smtpHost = req.body.smtpHost;
-smtpPort = req.body.smtpPort;
-smtpSecure = req.body.smtpSecure;
-}
-if (existingCredential) {
-await existingCredential.update({
-email,
-appPassword,
-provider,
-imapHost: provider === "custom" ? req.body.imapHost : null,
-imapPort: provider === "custom" ? req.body.imapPort : null,
-imapTLS: provider === "custom" ? req.body.imapTLS : null,
-smtpHost,
-smtpPort,
-smtpSecure,
-});
-console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-} else {
-// Use upsert to avoid duplicate entry errors
-await UserCredential.create({
-masterUserID,
-email,
-appPassword,
-provider,
-imapHost: provider === "custom" ? req.body.imapHost : null,
-imapPort: provider === "custom" ? req.body.imapPort : null,
-imapTLS: provider === "custom" ? req.body.imapTLS : null,
-smtpHost,
-smtpPort,
-smtpSecure,
-});
-console.log(
-`User credentials upserted for masterUserID: ${masterUserID}`
-);
-}
+    // Check if the user already has credentials saved
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    const smtpConfigByProvider = {
+      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
+      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
+      yahoo: {
+        smtpHost: "smtp.mail.yahoo.com",
+        smtpPort: 465,
+        smtpSecure: true,
+      },
+      outlook: {
+        smtpHost: "smtp.office365.com",
+        smtpPort: 587,
+        smtpSecure: false,
+      },
+    };
 
-// Fetch emails after saving credentials
-console.log("Fetching emails for masterUserID:", masterUserID);
-// Fetch user credentials
-const userCredential = await UserCredential.findOne({
-where: { masterUserID },
-});
+    // Prepare SMTP config for saving
+    let smtpHost = null,
+      smtpPort = null,
+      smtpSecure = null;
+    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+      const smtpConfig = smtpConfigByProvider[provider];
+      smtpHost = smtpConfig.smtpHost;
+      smtpPort = smtpConfig.smtpPort;
+      smtpSecure = smtpConfig.smtpSecure;
+    } else if (provider === "custom") {
+      smtpHost = req.body.smtpHost;
+      smtpPort = req.body.smtpPort;
+      smtpSecure = req.body.smtpSecure;
+    }
+    if (existingCredential) {
+      await existingCredential.update({
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
+    } else {
+      // Use upsert to avoid duplicate entry errors
+      try {
+        await UserCredential.create({
+          masterUserID,
+          email,
+          appPassword,
+          provider,
+          imapHost: provider === "custom" ? req.body.imapHost : null,
+          imapPort: provider === "custom" ? req.body.imapPort : null,
+          imapTLS: provider === "custom" ? req.body.imapTLS : null,
+          smtpHost,
+          smtpPort,
+          smtpSecure,
+        });
+        console.log(
+          `User credentials created for masterUserID: ${masterUserID}`
+        );
+      } catch (createError) {
+        if (createError.name === "SequelizeUniqueConstraintError") {
+          // If creation fails due to duplicate, try to find and update
+          console.log(
+            `Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
+          );
+          const existingRecord = await UserCredential.findOne({
+            where: { masterUserID },
+          });
+          if (existingRecord) {
+            await existingRecord.update({
+              email,
+              appPassword,
+              provider,
+              imapHost: provider === "custom" ? req.body.imapHost : null,
+              imapPort: provider === "custom" ? req.body.imapPort : null,
+              imapTLS: provider === "custom" ? req.body.imapTLS : null,
+              smtpHost,
+              smtpPort,
+              smtpSecure,
+            });
+            console.log(
+              `User credentials updated after duplicate error for masterUserID: ${masterUserID}`
+            );
+          }
+        } else {
+          throw createError; // Re-throw if it's not a duplicate error
+        }
+      }
+    }
 
-if (!userCredential) {
-console.error(
-"User credentials not found for masterUserID:",
-masterUserID
-);
-return res.status(404).json({ message: "User credentials not found." });
-}
-console.log(userCredential.email, "email");
-console.log(userCredential.appPassword, "appPassword");
+    // Fetch emails after saving credentials
+    console.log("Fetching emails for masterUserID:", masterUserID);
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
 
-const userEmail = userCredential.email;
-const userPassword = userCredential.appPassword;
+    if (!userCredential) {
+      console.error(
+        "User credentials not found for masterUserID:",
+        masterUserID
+      );
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    console.log(userCredential.email, "email");
+    console.log(userCredential.appPassword, "appPassword");
 
-console.log("Connecting to IMAP server...");
-// const imapConfig = {
-//   imap: {
-//     user: userEmail,
-//     password: userPassword,
-//     host: "imap.gmail.com",
-//     port: 993,
-//     tls: true,
-//     authTimeout: 30000,
-//     tlsOptions: {
-//       rejectUnauthorized: false,
-//     },
-//   },
-// };
-let imapConfig;
-const providerd = userCredential.provider; // default to gmail
+    const userEmail = userCredential.email;
+    const userPassword = userCredential.appPassword;
 
-const providerConfig = PROVIDER_CONFIG[providerd];
-const folderMap =
-PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
-if (providerd === "custom") {
-if (!userCredential.imapHost || !userCredential.imapPort) {
-return res.status(400).json({
-message: "Custom IMAP settings are missing in user credentials.",
-});
-}
-imapConfig = {
-imap: {
-user: userCredential.email,
-password: userCredential.appPassword,
-host: userCredential.imapHost,
-port: userCredential.imapPort,
-tls: userCredential.imapTLS,
-authTimeout: 30000,
-tlsOptions: { rejectUnauthorized: false },
-},
-};
-} else {
-imapConfig = {
-imap: {
-user: userCredential.email,
-password: userCredential.appPassword,
-host: providerConfig.host,
-port: providerConfig.port,
-tls: providerConfig.tls,
-authTimeout: 30000,
-tlsOptions: { rejectUnauthorized: false },
-},
-};
-}
+    console.log("Connecting to IMAP server...");
+    // const imapConfig = {
+    //   imap: {
+    //     user: userEmail,
+    //     password: userPassword,
+    //     host: "imap.gmail.com",
+    //     port: 993,
+    //     tls: true,
+    //     authTimeout: 30000,
+    //     tlsOptions: {
+    //       rejectUnauthorized: false,
+    //     },
+    //   },
+    // };
+    let imapConfig;
+    const providerd = userCredential.provider; // default to gmail
 
-connection = await Imap.connect(imapConfig);
+    const providerConfig = PROVIDER_CONFIG[providerd];
+    const folderMap =
+      PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
+    if (providerd === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+          keepalive: true, // Enable keepalive for better performance
+        },
+      };
+    } else {
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+          keepalive: true, // Enable keepalive for better performance
+        },
+      };
+    }
 
-// Add robust error handler
-connection.on("error", (err) => {
-console.error("IMAP connection error:", err);
-});
+    connection = await Imap.connect(imapConfig);
 
-// Helper function to fetch emails from a specific folder using UID range
-const fetchEmailsFromFolder = async (folderName, folderType) => {
-try {
-await connection.openBox(folderName);
-let searchCriteria;
-if (startUID && endUID) {
-// Use UID range for this batch
-searchCriteria = [["UID", `${startUID}:${endUID}`]];
-} else if (!days || days === 0 || days === "all") {
-searchCriteria = ["ALL"];
-} else {
-const sinceDate = formatDateForIMAP(
-new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-);
-searchCriteria = [["SINCE", sinceDate]];
-}
-const fetchOptions = { bodies: "", struct: true };
-const messages = await connection.search(searchCriteria, fetchOptions);
+    // Add robust error handler
+    connection.on("error", (err) => {
+      console.error("IMAP connection error:", err);
+    });
 
-console.log(`Total emails found in ${folderType}: ${messages.length}`);
+    // Helper function to fetch emails from a specific folder using UID range
+    const fetchEmailsFromFolder = async (folderName, folderType) => {
+      try {
+        await connection.openBox(folderName);
+        let searchCriteria;
+        if (allUIDsInBatch) {
+          // Use specific UIDs for this batch (more reliable than ranges)
+          searchCriteria = [["UID", allUIDsInBatch]];
+          console.log(`[Batch ${page}] Using specific UIDs: ${allUIDsInBatch} (expecting ${expectedCount} emails)`);
+        } else if (startUID && endUID) {
+          // Fallback to UID range for this batch
+          searchCriteria = [["UID", `${startUID}:${endUID}`]];
+          console.log(`[Batch ${page}] Using UID range: ${startUID}-${endUID}`);
+        } else if (!days || days === 0 || days === "all") {
+          searchCriteria = ["ALL"];
+        } else {
+          const sinceDate = formatDateForIMAP(
+            new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+          );
+          searchCriteria = [["SINCE", sinceDate]];
+        }
 
-// Pagination logic
-const startIndex = (page - 1) * batchSize;
-const endIndex = startIndex + parseInt(batchSize);
-const batchMessages = messages.slice(startIndex, endIndex);
+        // Fetch only headers and structure, not full bodies yet
+        const fetchOptions = { bodies: "HEADER", struct: true };
+        const messages = await connection.search(searchCriteria, fetchOptions);
 
-for (const message of batchMessages) {
-const rawBodyPart = message.parts.find((part) => part.which === "");
-const rawBody = rawBodyPart ? rawBodyPart.body : null;
+        console.log(
+          `[Batch ${page}] Total emails found in ${folderType}: ${messages.length}`
+        );
 
-if (!rawBody) {
-console.log(`No body found for email in ${folderType}.`);
-continue;
-}
+        // Determine how many emails to process
+        let actualBatchSize;
+        if (allUIDsInBatch || (startUID && endUID)) {
+          // In batch mode with specific UIDs or UID range, process ALL emails found
+          actualBatchSize = messages.length;
+          if (expectedCount && messages.length !== parseInt(expectedCount)) {
+            console.warn(`[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${messages.length}`);
+          }
+          console.log(`[Batch ${page}] Processing all ${actualBatchSize} emails in batch`);
+        } else {
+          // In direct mode without UID specification, respect the batchSize limit
+          actualBatchSize = Math.min(batchSize, messages.length);
+          console.log(`[Batch ${page}] Processing ${actualBatchSize} out of ${messages.length} emails (direct mode)`);
+        }
+        
+        let processedCount = 0;
 
-const parsedEmail = await simpleParser(rawBody);
+        // Process emails in smaller chunks for better memory management
+        const CHUNK_SIZE = 25; // Process 25 emails at a time
+        for (let chunkStart = 0; chunkStart < actualBatchSize; chunkStart += CHUNK_SIZE) {
+          const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, actualBatchSize);
+          const chunk = messages.slice(chunkStart, chunkEnd);
+          
+          console.log(`[Batch ${page}] Processing chunk ${Math.floor(chunkStart/CHUNK_SIZE) + 1} (emails ${chunkStart + 1}-${chunkEnd})`);
+          
+          // Process each email in the chunk
+          for (let i = 0; i < chunk.length; i++) {
+            const message = chunk[i];
+            const globalIndex = chunkStart + i;
 
-//..............changes for inReplyTo and references fields................
-const referencesHeader = parsedEmail.headers.get("references");
-const references = Array.isArray(referencesHeader)
-? referencesHeader.join(" ") // Convert array to string
-: referencesHeader || null;
+          try {
+            console.log(
+              `[Batch ${page}] Processing email ${
+                globalIndex + 1
+              }/${actualBatchSize} in ${folderType}`
+            );
 
-const emailData = {
-messageId: parsedEmail.messageId || null,
-inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-references,
-sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-senderName: parsedEmail.from
-? parsedEmail.from.value[0].name
-: null,
-recipient: parsedEmail.to
-? parsedEmail.to.value.map((to) => to.address).join(", ")
-: null,
-cc: parsedEmail.cc
-? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-: null,
-bcc: parsedEmail.bcc
-? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-: null,
-masterUserID: masterUserID,
-subject: parsedEmail.subject || null,
-body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-folder: folderType, // Dynamically set the folder type
-createdAt: parsedEmail.date || new Date(),
-};
+            // Fetch full body only when needed
+            const fullMessage = await connection.search(
+              [["UID", message.attributes.uid]],
+              { bodies: "", struct: true }
+            );
+            if (!fullMessage || fullMessage.length === 0) {
+              console.log(
+                `[Batch ${page}] Could not fetch full message for UID ${message.attributes.uid}`
+              );
+              continue;
+            }
 
-// Save email to the database
-const existingEmail = await Email.findOne({
-where: { messageId: emailData.messageId },
-});
+            const rawBodyPart = fullMessage[0].parts.find(
+              (part) => part.which === ""
+            );
+            const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
-let savedEmail;
-if (!existingEmail) {
-savedEmail = await Email.create(emailData);
-console.log(`Recent email saved: ${emailData.messageId}`);
-} else {
-console.log(`Recent email already exists: ${emailData.messageId}`);
-savedEmail = existingEmail;
-}
+            if (!rawBody) {
+              console.log(
+                `[Batch ${page}] No body found for email ${
+                  globalIndex + 1
+                }/${actualBatchSize} in ${folderType}`
+              );
+              continue;
+            }
 
-// Save attachments
-const attachments = [];
-if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-// Filter out icon/image attachments
-const filteredAttachments = parsedEmail.attachments.filter(
-(att) => !isIconAttachment(att)
-);
-if (filteredAttachments.length > 0) {
-const savedAttachments = await saveAttachments(
-filteredAttachments,
-savedEmail.emailID
-);
-attachments.push(...savedAttachments);
-console.log(
-`Saved ${attachments.length} attachments for email: ${emailData.messageId}`
-);
-} else {
-console.log(
-`No non-icon/image attachments to save for email: ${emailData.messageId}`
-);
-}
-}
+            const parsedEmail = await simpleParser(rawBody);
 
-// Fetch the full thread recursively
-if (emailData.messageId) {
-const fullThread = await getFullThread(emailData.messageId, Email);
-// Remove duplicates by messageId
-const uniqueThread = [];
-const seen = new Set();
-for (const em of fullThread) {
-if (!seen.has(em.messageId)) {
-uniqueThread.push(em);
-seen.add(em.messageId);
-}
-}
-// Sort by createdAt (oldest first)
-uniqueThread.sort(
-(a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-);
-// Optionally, you can log the thread for debugging
-console.log(
-`Full thread for messageId ${emailData.messageId}:`,
-uniqueThread.map((e) => e.messageId)
-);
-// Only save thread emails if not already present (no attachment logic)
-for (const threadEmail of uniqueThread) {
-if (threadEmail.messageId === emailData.messageId) continue;
-const existingThreadEmail = await Email.findOne({
-where: { messageId: threadEmail.messageId },
-});
-if (!existingThreadEmail) {
-await Email.create(
-threadEmail.toJSON ? threadEmail.toJSON() : threadEmail
-);
-console.log(`Thread email saved: ${threadEmail.messageId}`);
-}
-}
-// You can now use uniqueThread as the full conversation
-}
-}
-} catch (folderError) {
-console.error(
-`Error fetching emails from folder ${folderType}:`,
-folderError
-);
-}
-};
-const boxes = await connection.getBoxes();
-const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
-const folderTypes = ["inbox", "drafts", "archive", "sent"];
-for (const type of folderTypes) {
-const folderName = folderMap[type];
-if (allFoldersArr.includes(folderName.toLowerCase())) {
-console.log(`Fetching emails from ${type}...`);
-await fetchEmailsFromFolder(folderName, type);
-} else {
-console.log(
-`Folder "${folderName}" not found for provider ${provider}. Skipping.`
-);
-}
-}
+            // Process email data with memory-conscious approach
+            const referencesHeader = parsedEmail.headers.get("references");
+            const references = Array.isArray(referencesHeader)
+              ? referencesHeader.join(" ")
+              : referencesHeader || null;
 
-console.log("Fetching emails from Inbox...");
-await fetchEmailsFromFolder(folderMap.inbox, "inbox");
+            const emailData = {
+              messageId: parsedEmail.messageId || null,
+              inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+              references,
+              sender: parsedEmail.from
+                ? parsedEmail.from.value[0].address
+                : null,
+              senderName: parsedEmail.from
+                ? parsedEmail.from.value[0].name
+                : null,
+              recipient: parsedEmail.to
+                ? parsedEmail.to.value.map((to) => to.address).join(", ")
+                : null,
+              cc: parsedEmail.cc
+                ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+                : null,
+              bcc: parsedEmail.bcc
+                ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+                : null,
+              masterUserID: masterUserID,
+              subject: parsedEmail.subject || null,
+              body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
+              folder: folderType,
+              createdAt: parsedEmail.date || new Date(),
+            };
 
-console.log("Fetching emails from Drafts...");
-await fetchEmailsFromFolder(folderMap.drafts, "drafts");
+            // Check if email already exists
+            const existingEmail = await Email.findOne({
+              where: { messageId: emailData.messageId },
+            });
 
-console.log("Fetching emails from Archive...");
-// await fetchEmailsFromFolder(folderMap.archive, "archive");
-if (allFoldersArr.includes(folderMap.archive.toLowerCase())) {
-console.log("Fetching emails from Archive...");
-await fetchEmailsFromFolder(folderMap.archive, "archive");
-} else {
-console.log(
-`Archive folder "${folderMap.archive}" not found for provider ${provider}. Skipping.`
-);
-}
+            let savedEmail;
+            if (!existingEmail) {
+              savedEmail = await Email.create(emailData);
+              console.log(
+                `[Batch ${page}] Email ${globalIndex + 1}/${actualBatchSize} saved: ${
+                  emailData.messageId
+                }`
+              );
+              processedCount++;
+            } else {
+              console.log(
+                `[Batch ${page}] Email ${
+                  globalIndex + 1
+                }/${actualBatchSize} already exists: ${emailData.messageId}`
+              );
+              savedEmail = existingEmail;
+            }
 
-console.log("Fetching emails from Sent...");
-await fetchEmailsFromFolder(folderMap.sent, "sent");
+            // Process attachments with better filtering and error handling
+            if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+              const filteredAttachments = parsedEmail.attachments.filter(
+                (att) =>
+                  !isIconAttachment(att) &&
+                  !att.contentDisposition?.toLowerCase().includes("inline") &&
+                  att.contentType !== "text/html" &&
+                  att.contentType !== "text/plain" &&
+                  att.size > 0 &&
+                  att.size < 10 * 1024 * 1024 // Max 10MB per attachment
+              );
 
-connection.end();
-console.log("IMAP connection closed.");
+              if (
+                filteredAttachments.length > 0 &&
+                filteredAttachments.length <= 5
+              ) {
+                // Max 5 attachments per email
+                try {
+                  const savedAttachments = await saveAttachments(
+                    filteredAttachments,
+                    savedEmail.emailID
+                  );
+                  console.log(
+                    `[Batch ${page}] Saved ${
+                      savedAttachments.length
+                    } attachments for email ${globalIndex + 1}/${actualBatchSize}`
+                  );
+                } catch (attachmentError) {
+                  console.error(
+                    `[Batch ${page}] Error saving attachments for email ${emailData.messageId}:`,
+                    attachmentError.message
+                  );
+                }
+              }
+            }
 
-res.status(200).json({
-message:
-"Fetched and saved emails from Inbox, Drafts, Archive, and Sent folders.",
-});
-} catch (error) {
-console.error("Error fetching emails:", error);
-res.status(500).json({ message: "Internal server error." });
-} finally {
-// Safe connection close
-if (
-connection &&
-connection.imap &&
-connection.imap.state !== "disconnected"
-) {
-try {
-connection.end();
-} catch (closeErr) {
-console.error("Error closing IMAP connection:", closeErr);
-}
-}
-}
+            // Skip thread processing for batches larger than 10 emails to save time and memory
+            if (
+              actualBatchSize <= 10 &&
+              emailData.messageId &&
+              folderType === "inbox"
+            ) {
+              try {
+                // Only fetch immediate replies, not full recursive thread
+                const immediateReplies = await Email.findAll({
+                  where: {
+                    inReplyTo: emailData.messageId,
+                    masterUserID: masterUserID,
+                  },
+                  limit: 3, // Reduced limit for memory safety
+                  order: [["createdAt", "ASC"]],
+                });
+
+                console.log(
+                  `[Batch ${page}] Found ${immediateReplies.length} immediate replies for ${emailData.messageId}`
+                );
+              } catch (threadError) {
+                console.error(
+                  `[Batch ${page}] Error processing thread for ${emailData.messageId}:`,
+                  threadError.message
+                );
+              }
+            }
+
+            // Force garbage collection every 25 emails (optimized for larger batches)
+            if (global.gc && globalIndex % 25 === 0) {
+              global.gc();
+            }
+
+            // Clean up parsed email object
+            parsedEmail.attachments = null;
+            parsedEmail.html = null;
+            parsedEmail.text = null;
+          } catch (emailError) {
+            console.error(
+              `[Batch ${page}] Error processing email ${
+                globalIndex + 1
+              }/${actualBatchSize} in ${folderType}:`,
+              emailError.message
+            );
+            continue;
+          }
+        }
+        
+        // Force garbage collection after each chunk
+        if (global.gc && chunkStart % 50 === 0) {
+          global.gc();
+        }
+      }
+
+        console.log(
+          `[Batch ${page}] Completed processing ${processedCount} new emails in ${folderType}`
+        );
+        
+        return processedCount; // Return the count for tracking
+      } catch (folderError) {
+        console.error(
+          `[Batch ${page}] Error fetching emails from folder ${folderType}:`,
+          folderError.message
+        );
+        return 0; // Return 0 on error
+      }
+    };
+    const boxes = await connection.getBoxes();
+    const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
+
+    console.log(
+      `[Batch ${page}] Processing inbox folder for masterUserID: ${masterUserID}`
+    );
+
+    // Process folders one by one to avoid memory issues
+    const folderTypes = ["inbox"];
+    let totalProcessedEmails = 0;
+    
+    for (const type of folderTypes) {
+      const folderName = folderMap[type];
+      if (allFoldersArr.includes(folderName.toLowerCase())) {
+        console.log(`[Batch ${page}] Processing ${type} folder...`);
+        const folderProcessedCount = await fetchEmailsFromFolder(folderName, type);
+        totalProcessedEmails += folderProcessedCount || 0;
+      } else {
+        console.log(
+          `[Batch ${page}] Folder "${folderName}" not found for provider ${provider}. Skipping.`
+        );
+      }
+    }
+
+    // Memory cleanup for large batches
+    console.log(`[Batch ${page}] Performing memory cleanup...`);
+    if (global.gc && page % 10 === 0) { // Only every 10th batch for larger batches
+      global.gc();
+    }
+
+    // Add small delay for system recovery (optimized for larger batches)
+    if (page > 1 && page % 10 === 0) { // Only every 10th batch
+      await new Promise((resolve) => setTimeout(resolve, 100)); // Reduced from 200ms to 100ms
+    }
+
+    connection.end();
+    console.log(`[Batch ${page}] IMAP connection closed successfully.`);
+
+    res.status(200).json({
+      message: `[Batch ${page}] Fetched and saved ${totalProcessedEmails} new emails from inbox folder successfully.`,
+      processedBatch: `Page ${page}, Batch size: ${batchSize}`,
+      processedEmails: totalProcessedEmails,
+      expectedEmails: expectedCount ? parseInt(expectedCount) : null,
+      uidRange: startUID && endUID ? `${startUID}-${endUID}` : "Not specified",
+      specificUIDs: allUIDsInBatch ? allUIDsInBatch : "Not specified",
+      masterUserID: masterUserID,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error(`[Batch ${page}] Error fetching emails:`, error.message);
+    res.status(500).json({
+      message: `[Batch ${page}] Internal server error.`,
+      error: error.message,
+      batch: page,
+      masterUserID: masterUserID,
+    });
+  } finally {
+    // Safe connection close with better error handling
+    if (connection) {
+      try {
+        if (connection.imap && connection.imap.state !== "disconnected") {
+          await connection.end();
+          console.log(
+            `[Batch ${page}] IMAP connection closed in finally block.`
+          );
+        }
+      } catch (closeErr) {
+        console.error(
+          `[Batch ${page}] Error closing IMAP connection:`,
+          closeErr.message
+        );
+      }
+    }
+    // Final memory cleanup
+    console.log(`[Batch ${page}] Final memory cleanup...`);
+    if (global.gc && page % 15 === 0) { // Only every 15th batch for larger batches
+      global.gc();
+    }
+  }
 };
 // exports.fetchRecentEmail = async (adminId) => {
 //   try {
@@ -1521,7 +1778,7 @@ exports.getEmails = async (req, res) => {
     // Pagination logic
     const limit = pageSize;
     let offset = null;
-    
+
     // Use buffer pagination if cursor is provided, otherwise use offset pagination
     if (!cursor) {
       offset = (page - 1) * pageSize;
@@ -1758,194 +2015,6 @@ exports.getEmails = async (req, res) => {
 //       attributes: essentialFields,
 //     });
 //     // Add baseURL to attachment paths (metadata only)
-//     const baseURL = process.env.LOCALHOST_URL;
-//     const emailsWithAttachments = emails.map((email) => {
-//       const attachments = (email.attachments || []).map((attachment) => ({
-//         ...attachment.toJSON(),
-//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//       }));
-//       return {
-//         ...email.toJSON(),
-//         attachments,
-//       };
-//     });
-//     // Calculate unviewCount for the specified folder or all folders
-//     const unviewCount = await Email.count({
-//       where: {
-//         ...filters,
-//         isRead: false,
-//       },
-//     });
-//     // Grouping logic (only for current page)
-//     let responseThreads;
-//     if (folder === "drafts" || folder === "trash") {
-//       const threads = {};
-//       emailsWithAttachments.forEach((email) => {
-//         const threadId = email.draftId || email.emailID;
-//         if (!threads[threadId]) threads[threadId] = [];
-//         threads[threadId].push(email);
-//       });
-//       responseThreads = Object.values(threads);
-//     } else {
-//       const threads = {};
-//       emailsWithAttachments.forEach((email) => {
-//         const threadId = email.inReplyTo || email.messageId || email.emailID;
-//         if (!threads[threadId]) threads[threadId] = [];
-//         threads[threadId].push(email);
-//       });
-//       responseThreads = Object.values(threads);
-//     }
-//     // Safeguard: If response is too large, return error
-//     const estimatedResponseSize = JSON.stringify(responseThreads).length;
-//     const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
-//     if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
-//       return res.status(413).json({
-//         message:
-//           "Response too large. Please reduce pageSize or apply more filters.",
-//         currentPage: parseInt(page),
-//         totalPages: Math.ceil(count / pageSize),
-//         totalEmails: count,
-//         unviewCount,
-//         threads: [],
-//       });
-//     }
-//     res.status(200).json({
-//       message: "Emails fetched successfully.",
-//       currentPage: parseInt(page),
-//       totalPages: Math.ceil(count / pageSize),
-//       totalEmails: count,
-//       unviewCount,
-//       threads: responseThreads,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching emails:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
-// // Get emails with pagination, filtering, and searching
-// exports.getEmails = async (req, res) => {
-//   let {
-//     pageSize = 10,
-//     folder,
-//     search,
-//     isRead,
-//     toMe,
-//     hasAttachments,
-//     isOpened,
-//     isClicked,
-//     trackedEmails,
-//     isShared,
-//     cursor, // Buffer pagination cursor (createdAt ISO string or emailID)
-//     direction = "next", // 'next' or 'prev'
-//   } = req.query;
-//   const masterUserID = req.adminId;
-
-//   // Enforce strict maximum page size
-//   const MAX_SAFE_PAGE_SIZE = 50;
-//   pageSize = Math.min(Number(pageSize) || 10, MAX_SAFE_PAGE_SIZE);
-//   if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
-
-//   try {
-//     const userCredential = await UserCredential.findOne({
-//       where: { masterUserID },
-//     });
-//     if (!userCredential) {
-//       return res.status(200).json({
-//         message: "No email credentials found for this user.",
-//         currentPage: 1,
-//         totalPages: 0,
-//         totalEmails: 0,
-//         unviewCount: 0,
-//         threads: [],
-//         nextCursor: null,
-//         prevCursor: null,
-//       });
-//     }
-//     let filters = { masterUserID };
-//     if (folder) filters.folder = folder;
-//     if (isRead !== undefined) filters.isRead = isRead === "true";
-//     if (toMe === "true") {
-//       const userEmail = userCredential.email;
-//       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
-//     }
-//     if (trackedEmails === "true") {
-//       filters.isOpened = true;
-//       filters.isClicked = true;
-//     } else {
-//       if (isOpened !== undefined) filters.isOpened = isOpened === "true";
-//       if (isClicked !== undefined) filters.isClicked = isClicked === "true";
-//     }
-//     let includeAttachments = [
-//       {
-//         model: Attachment,
-//         as: "attachments",
-//         attributes: ["attachmentID", "filename", "size"],
-//       },
-//     ];
-//     if (hasAttachments === "true") {
-//       includeAttachments[0].required = true;
-//     }
-//     if (search) {
-//       filters[Sequelize.Op.or] = [
-//         { subject: { [Sequelize.Op.like]: `%${search}%` } },
-//         { sender: { [Sequelize.Op.like]: `%${search}%` } },
-//         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-//         { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-//         { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-//         { folder: { [Sequelize.Op.like]: `%${search}%` } },
-//       ];
-//     }
-
-//     // Buffer pagination logic
-//     let order = [["createdAt", "DESC"]];
-//     if (cursor) {
-//       // If cursor is an emailID, fetch its createdAt
-//       let cursorDate = null;
-//       if (/^\d+$/.test(cursor)) {
-//         const cursorEmail = await Email.findOne({ where: { emailID: cursor } });
-//         if (cursorEmail) cursorDate = cursorEmail.createdAt;
-//       } else {
-//         cursorDate = new Date(cursor);
-//       }
-//       if (cursorDate) {
-//         if (direction === "next") {
-//           filters.createdAt = { [Sequelize.Op.lt]: cursorDate };
-//         } else {
-//           filters.createdAt = { [Sequelize.Op.gt]: cursorDate };
-//           order = [["createdAt", "ASC"]]; // Reverse order for prev
-//         }
-//       }
-//     }
-
-//     const limit = pageSize;
-//     const essentialFields = [
-//       "emailID",
-//       "messageId",
-//       "inReplyTo",
-//       "references",
-//       "sender",
-//       "senderName",
-//       "recipient",
-//       "cc",
-//       "bcc",
-//       "subject",
-//       "folder",
-//       "createdAt",
-//       "isRead",
-//       "isOpened",
-//       "isClicked",
-//       "leadId",
-//       "dealId",
-//     ];
-//     let emails = await Email.findAll({
-//       where: filters,
-//       include: includeAttachments,
-//       limit,
-//       order,
-//       attributes: essentialFields,
-//       distinct: true,
-//     });
-//     if (direction === "prev") emails = emails.reverse();
 //     const baseURL = process.env.LOCALHOST_URL;
 //     const emailsWithAttachments = emails.map((email) => {
 //       const attachments = (email.attachments || []).map((attachment) => ({
@@ -3874,28 +3943,112 @@ exports.scheduleEmail = [
 exports.deleteAllEmailsForUser = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const BATCH_SIZE = 1000;
-  let totalDeleted = 0;
+  let totalEmailsDeleted = 0;
+  let totalAttachmentsDeleted = 0;
+
+  // Use transaction to ensure data consistency
+  const transaction = await Email.sequelize.transaction();
+
   try {
+    // First, get the total count for verification
+    const totalEmailsCount = await Email.count({
+      where: { masterUserID },
+      transaction,
+    });
+
+    // Get total attachments count by finding all emails first, then counting attachments
+    const allEmailIds = await Email.findAll({
+      where: { masterUserID },
+      attributes: ["emailID"],
+      transaction,
+    });
+
+    const emailIds = allEmailIds.map((email) => email.emailID);
+    const totalAttachmentsCount =
+      emailIds.length > 0
+        ? await Attachment.count({
+            where: { emailID: emailIds },
+            transaction,
+          })
+        : 0;
+
+    console.log(`Starting deletion for user ${masterUserID}:`);
+    console.log(`- Total emails to delete: ${totalEmailsCount}`);
+    console.log(`- Total attachments to delete: ${totalAttachmentsCount}`);
+
     while (true) {
       // Fetch a batch of email IDs for the user
       const emails = await Email.findAll({
         where: { masterUserID },
         attributes: ["emailID"],
         limit: BATCH_SIZE,
+        transaction,
       });
+
       if (emails.length === 0) break;
       const emailIDs = emails.map((e) => e.emailID);
-      // Delete all attachments for these emails
-      await Attachment.destroy({ where: { emailID: emailIDs } });
+
+      // Delete all attachments for these emails first
+      const attachmentsDeleted = await Attachment.destroy({
+        where: { emailID: emailIDs },
+        transaction,
+      });
+
       // Delete all emails for the user in this batch
-      await Email.destroy({ where: { emailID: emailIDs } });
-      totalDeleted += emails.length;
+      const emailsDeleted = await Email.destroy({
+        where: { emailID: emailIDs },
+        transaction,
+      });
+
+      totalEmailsDeleted += emailsDeleted;
+      totalAttachmentsDeleted += attachmentsDeleted;
+
+      console.log(
+        `Batch processed: ${emailsDeleted} emails, ${attachmentsDeleted} attachments`
+      );
+
       if (emails.length < BATCH_SIZE) break;
     }
+
+    // Commit the transaction
+    await transaction.commit();
+
+    // Verify deletion
+    const remainingEmails = await Email.count({ where: { masterUserID } });
+
+    // Check remaining attachments by getting remaining email IDs
+    const remainingEmailIds = await Email.findAll({
+      where: { masterUserID },
+      attributes: ["emailID"],
+    });
+    const remainingEmailIdsList = remainingEmailIds.map(
+      (email) => email.emailID
+    );
+    const remainingAttachments =
+      remainingEmailIdsList.length > 0
+        ? await Attachment.count({
+            where: { emailID: remainingEmailIdsList },
+          })
+        : 0;
+
+    console.log(`Deletion completed for user ${masterUserID}:`);
+    console.log(`- Emails deleted: ${totalEmailsDeleted}`);
+    console.log(`- Attachments deleted: ${totalAttachmentsDeleted}`);
+    console.log(`- Remaining emails: ${remainingEmails}`);
+    console.log(`- Remaining attachments: ${remainingAttachments}`);
+
     res.status(200).json({
-      message: `All emails and attachments deleted for user ${masterUserID}. Total deleted: ${totalDeleted}`,
+      message: `All emails and attachments deleted for user ${masterUserID}`,
+      details: {
+        emailsDeleted: totalEmailsDeleted,
+        attachmentsDeleted: totalAttachmentsDeleted,
+        remainingEmails: remainingEmails,
+        remainingAttachments: remainingAttachments,
+      },
     });
   } catch (error) {
+    // Rollback the transaction in case of error
+    await transaction.rollback();
     console.error("Error deleting all emails and attachments:", error);
     res.status(500).json({
       message: "Failed to delete all emails and attachments.",
@@ -3903,37 +4056,3 @@ exports.deleteAllEmailsForUser = async (req, res) => {
     });
   }
 };
-
-const ICON_EXTENSIONS = [
-  ".ico",
-  ".png",
-  ".svg",
-  ".gif",
-  ".jpg",
-  ".jpeg",
-  ".bmp",
-  ".webp",
-  ".tiff",
-  ".svgz",
-  ".apng",
-  ".cur",
-  ".icns",
-];
-const ICON_MIMETYPES = [
-  "image/x-icon",
-  "image/vnd.microsoft.icon",
-  "image/png",
-  "image/svg+xml",
-  "image/gif",
-  "image/jpeg",
-  "image/bmp",
-  "image/webp",
-  "image/tiff",
-  "image/svg+xml",
-  "image/apng",
-];
-function isIconAttachment(attachment) {
-  const ext = path.extname(attachment.filename || "").toLowerCase();
-  const mimetype = (attachment.contentType || "").toLowerCase();
-  return ICON_EXTENSIONS.includes(ext) || ICON_MIMETYPES.includes(mimetype);
-}
