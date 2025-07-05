@@ -1,7 +1,7 @@
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
 // Reduce concurrency to 1 for all workers to minimize memory/connection usage
-const limit = pLimit(5);
+const limit = pLimit(1);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
@@ -34,13 +34,19 @@ const PROVIDER_SMTP_CONFIG = {
 // Utility: Log memory usage for diagnostics
 function logMemoryUsage(context = "") {
   const mem = process.memoryUsage();
+  const rss = (mem.rss / 1024 / 1024).toFixed(1);
+  const heapUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
+  const heapTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
+  const external = (mem.external / 1024 / 1024).toFixed(1);
+  
   console.log(
-    `[Memory] ${context} RSS: ${(mem.rss / 1024 / 1024).toFixed(
-      1
-    )}MB, Heap: ${(mem.heapUsed / 1024 / 1024).toFixed(
-      1
-    )}MB / ${(mem.heapTotal / 1024 / 1024).toFixed(1)}MB`
+    `[Memory] ${context} RSS: ${rss}MB, Heap: ${heapUsed}MB / ${heapTotal}MB, External: ${external}MB`
   );
+  
+  // Warning if memory usage is high
+  if (mem.heapUsed > 500 * 1024 * 1024) { // 500MB
+    console.warn(`[Memory Warning] High heap usage: ${heapUsed}MB`);
+  }
 }
 
 // Add process-level error handling
@@ -62,6 +68,9 @@ async function startWorker() {
   const channel = await connection.createChannel();
   await channel.assertQueue(QUEUE_NAME, { durable: true });
 
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
+
   channel.consume(
     QUEUE_NAME,
     async (msg) => {
@@ -71,12 +80,8 @@ async function startWorker() {
         logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
         try {
           await limit(async () => {
-            // If fetchRecentEmail supports batchSize, pass it as 10
-            if (typeof fetchRecentEmail === 'function' && fetchRecentEmail.length >= 2) {
-              await fetchRecentEmail(adminId,batchSize = 10);
-            } else {
-              await fetchRecentEmail(adminId);
-            }
+            // Pass smaller batch size to fetchRecentEmail for memory safety
+            await fetchRecentEmail(adminId, { batchSize: 5 });
           });
           channel.ack(msg);
         } catch (error) {
@@ -87,6 +92,10 @@ async function startWorker() {
           channel.nack(msg, false, false); // Discard the message on error
         } finally {
           logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
+          // Force garbage collection
+          if (global.gc) {
+            global.gc();
+          }
         }
       }
     },
@@ -102,6 +111,9 @@ async function startScheduledEmailWorker() {
   const connection = await amqp.connect(amqpUrl);
   const channel = await connection.createChannel();
   await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
+
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
 
   channel.consume(
     SCHEDULED_QUEUE,
@@ -154,13 +166,6 @@ async function startScheduledEmailWorker() {
             };
           }
           const transporter = nodemailer.createTransport(transporterConfig);
-          // const transporter = nodemailer.createTransport({
-          //   service: "gmail",
-          //   auth: {
-          //     user: userCredential.email,
-          //     pass: userCredential.appPassword,
-          //   },
-          // });
 
           const info = await transporter.sendMail({
             from: userCredential.email,
@@ -755,6 +760,9 @@ async function startSyncEmailWorker() {
   const channel = await connection.createChannel();
   await channel.assertQueue("SYNC_EMAIL_QUEUE", { durable: true });
 
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
+
   channel.consume(
     "SYNC_EMAIL_QUEUE",
     async (msg) => {
@@ -763,17 +771,27 @@ async function startSyncEmailWorker() {
         const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
           msg.content.toString()
         );
-        limit(async () => {
+        await limit(async () => {
           try {
+            logMemoryUsage(`Before syncEmails for masterUserID ${masterUserID}`);
+            
             // Pass startUID and endUID to fetchSyncEmails for batch processing
             await fetchSyncEmails(
               {
                 adminId: masterUserID,
                 body: { syncStartDate, startUID, endUID },
-                query: {},
+                query: { batchSize: 10 }, // Enforce small batch size
               },
               { status: () => ({ json: () => {} }) }
             );
+            
+            logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
+            
+            // Force garbage collection
+            if (global.gc) {
+              global.gc();
+            }
+            
             channel.ack(msg);
           } catch (err) {
             console.error("Failed to sync emails:", err);
@@ -794,6 +812,9 @@ async function startFetchInboxWorker() {
   const channel = await connection.createChannel();
   await channel.assertQueue("FETCH_INBOX_QUEUE", { durable: true });
 
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
+
   channel.consume(
     "FETCH_INBOX_QUEUE",
     async (msg) => {
@@ -813,16 +834,29 @@ async function startFetchInboxWorker() {
           smtpHost,
           smtpPort,
           smtpSecure,
+          startUID,
+          endUID,
         } = JSON.parse(msg.content.toString());
-        // batchSize = 10; // Enforce small batch size
-        limit(async () => {
+        
+        // Enforce maximum batch size to prevent memory issues
+        batchSize = Math.min(parseInt(batchSize) || 5, 5);
+        
+        await limit(async () => {
           try {
             // Log memory usage before fetch
-            logMemoryUsage(`Before fetchInboxEmails for masterUserID ${masterUserID}`);
+            logMemoryUsage(`Before fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`);
+            
+            // Add delay between batches to prevent overwhelming the system
+            if (page > 1) {
+              await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+            }
+            
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
                 adminId: masterUserID,
+                email,
+                appPassword,
                 body: {
                   email,
                   appPassword,
@@ -834,15 +868,46 @@ async function startFetchInboxWorker() {
                   smtpPort,
                   smtpSecure,
                 },
-                query: { batchSize, page, days },
+                query: { 
+                  batchSize, 
+                  page, 
+                  days,
+                  startUID,
+                  endUID
+                },
               },
-              { status: () => ({ json: () => {} }) }
+              { 
+                status: (code) => ({ 
+                  json: (data) => {
+                    console.log(`Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`);
+                  }
+                })
+              }
             );
+            
             // Log memory usage after fetch
-            logMemoryUsage(`After fetchInboxEmails for masterUserID ${masterUserID}`);
+            logMemoryUsage(`After fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}`);
+            
+            // Force garbage collection after processing
+            if (global.gc) {
+              global.gc();
+              logMemoryUsage(`After garbage collection for masterUserID ${masterUserID}, page ${page}`);
+            }
+            
+            // Additional memory cleanup
+            if (page % 10 === 0) { // Every 10 batches
+              console.log(`Completed ${page} batches, forcing additional cleanup...`);
+              if (global.gc) {
+                global.gc();
+                global.gc(); // Double GC for thorough cleanup
+              }
+              // Small delay to let system recover
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            
             channel.ack(msg);
           } catch (err) {
-            console.error("Failed to fetch inbox emails:", err);
+            console.error(`Failed to fetch inbox emails for masterUserID ${masterUserID}, page ${page}:`, err);
             channel.nack(msg, false, false);
           }
         });
@@ -850,6 +915,16 @@ async function startFetchInboxWorker() {
     },
     { noAck: false }
   );
+
+  // Add connection error handling
+  connection.on("error", (err) => {
+    console.error("AMQP connection error in fetchInboxWorker:", err);
+  });
+
+  connection.on("close", () => {
+    console.log("AMQP connection closed in fetchInboxWorker. Attempting to reconnect...");
+    setTimeout(() => startFetchInboxWorker(), 5000);
+  });
 
   console.log("Inbox fetch worker started and waiting for jobs...");
 }
