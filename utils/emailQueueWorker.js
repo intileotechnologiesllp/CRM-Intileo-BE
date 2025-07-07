@@ -3,7 +3,9 @@ const pLimit = require("p-limit");
 // Reduce concurrency to 1 for all workers to minimize memory/connection usage
 const limit = pLimit(1);
 const { fetchRecentEmail } = require("../controllers/email/emailController");
-const { fetchSyncEmails } = require("../controllers/email/emailSettingController");
+const {
+  fetchSyncEmails,
+} = require("../controllers/email/emailSettingController");
 const nodemailer = require("nodemailer");
 const Email = require("../models/email/emailModel");
 const Attachment = require("../models/email/attachmentModel");
@@ -38,13 +40,14 @@ function logMemoryUsage(context = "") {
   const heapUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
   const heapTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
   const external = (mem.external / 1024 / 1024).toFixed(1);
-  
+
   console.log(
     `[Memory] ${context} RSS: ${rss}MB, Heap: ${heapUsed}MB / ${heapTotal}MB, External: ${external}MB`
   );
-  
+
   // Warning if memory usage is high
-  if (mem.heapUsed > 500 * 1024 * 1024) { // 500MB
+  if (mem.heapUsed > 500 * 1024 * 1024) {
+    // 500MB
     console.warn(`[Memory Warning] High heap usage: ${heapUsed}MB`);
   }
 }
@@ -314,8 +317,6 @@ async function startScheduledEmailWorker() {
 //   console.log(`Queued email sent and saved: ${info.messageId}`);
 // }
 
-
-
 // --- Update EMAIL_QUEUE consumer ---
 // async function startEmailWorker() {
 //   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
@@ -345,7 +346,6 @@ async function startScheduledEmailWorker() {
 // }
 
 ///.......................new............
-
 
 async function startEmailWorker() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
@@ -465,7 +465,7 @@ async function sendEmailJob(emailData) {
   const provider =
     emailData.provider ||
     (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
-    (userCredential?.provider);
+    userCredential?.provider;
 
   let transporterConfig;
   if (provider === "gmail" || provider === "yandex") {
@@ -577,20 +577,22 @@ async function sendEmailJob(emailData) {
       isDraft: false,
     });
 
-    // Save attachments if any
+    // Save attachments if any (for user-uploaded files in compose email)
     if (emailData.attachments && emailData.attachments.length > 0) {
+      const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
       const savedAttachments = emailData.attachments.map((file) => ({
         emailID: savedEmail.emailID,
         filename: file.filename,
-        // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-        //   file.filename
-        // )}`,
-        filePath: file.path,
-        // filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`,
+        filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+          file.filename
+        )}`, // Save public URL for user uploads
         size: file.size,
         contentType: file.contentType,
       }));
       await Attachment.bulkCreate(savedAttachments);
+      console.log(
+        `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${savedEmail.emailID}`
+      );
     }
     console.log(`Queued email sent and saved: ${info.messageId}`);
   }
@@ -635,7 +637,7 @@ async function startEmailWorker() {
 //   // Fetch sender credentials (prefer DefaultEmail)
 //   let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
 //   let signatureBlock = "";
-//   let userCredential; 
+//   let userCredential;
 //   const defaultEmail = await DefaultEmail.findOne({
 //     where: { masterUserID: email.masterUserID, isDefault: true },
 //   });
@@ -664,7 +666,7 @@ async function startEmailWorker() {
 //       where: { masterUserID: email.masterUserID },
 //     });
 //     SENDER_NAME = masterUser ? masterUser.name : "";
-    
+
 //   }
 //     // Build signature block if not already present in email.body
 //   if (userCredential) {
@@ -773,8 +775,10 @@ async function startSyncEmailWorker() {
         );
         await limit(async () => {
           try {
-            logMemoryUsage(`Before syncEmails for masterUserID ${masterUserID}`);
-            
+            logMemoryUsage(
+              `Before syncEmails for masterUserID ${masterUserID}`
+            );
+
             // Pass startUID and endUID to fetchSyncEmails for batch processing
             await fetchSyncEmails(
               {
@@ -784,14 +788,14 @@ async function startSyncEmailWorker() {
               },
               { status: () => ({ json: () => {} }) }
             );
-            
+
             logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
-            
+
             // Force garbage collection
             if (global.gc) {
               global.gc();
             }
-            
+
             channel.ack(msg);
           } catch (err) {
             console.error("Failed to sync emails:", err);
@@ -837,20 +841,22 @@ async function startFetchInboxWorker() {
           startUID,
           endUID,
         } = JSON.parse(msg.content.toString());
-        
+
         // Enforce maximum batch size to prevent memory issues
         batchSize = Math.min(parseInt(batchSize) || 5, 5);
-        
+
         await limit(async () => {
           try {
             // Log memory usage before fetch
-            logMemoryUsage(`Before fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`);
-            
+            logMemoryUsage(
+              `Before fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`
+            );
+
             // Add delay between batches to prevent overwhelming the system
             if (page > 1) {
-              await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+              await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
             }
-            
+
             // Call fetchInboxEmails logic directly, but mock req/res
             await fetchInboxEmails(
               {
@@ -868,46 +874,58 @@ async function startFetchInboxWorker() {
                   smtpPort,
                   smtpSecure,
                 },
-                query: { 
-                  batchSize, 
-                  page, 
+                query: {
+                  batchSize,
+                  page,
                   days,
                   startUID,
-                  endUID
+                  endUID,
                 },
               },
-              { 
-                status: (code) => ({ 
+              {
+                status: (code) => ({
                   json: (data) => {
-                    console.log(`Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`);
-                  }
-                })
+                    console.log(
+                      `Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`
+                    );
+                  },
+                }),
               }
             );
-            
+
             // Log memory usage after fetch
-            logMemoryUsage(`After fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}`);
-            
+            logMemoryUsage(
+              `After fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}`
+            );
+
             // Force garbage collection after processing
             if (global.gc) {
               global.gc();
-              logMemoryUsage(`After garbage collection for masterUserID ${masterUserID}, page ${page}`);
+              logMemoryUsage(
+                `After garbage collection for masterUserID ${masterUserID}, page ${page}`
+              );
             }
-            
+
             // Additional memory cleanup
-            if (page % 10 === 0) { // Every 10 batches
-              console.log(`Completed ${page} batches, forcing additional cleanup...`);
+            if (page % 10 === 0) {
+              // Every 10 batches
+              console.log(
+                `Completed ${page} batches, forcing additional cleanup...`
+              );
               if (global.gc) {
                 global.gc();
                 global.gc(); // Double GC for thorough cleanup
               }
               // Small delay to let system recover
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              await new Promise((resolve) => setTimeout(resolve, 2000));
             }
-            
+
             channel.ack(msg);
           } catch (err) {
-            console.error(`Failed to fetch inbox emails for masterUserID ${masterUserID}, page ${page}:`, err);
+            console.error(
+              `Failed to fetch inbox emails for masterUserID ${masterUserID}, page ${page}:`,
+              err
+            );
             channel.nack(msg, false, false);
           }
         });
@@ -922,7 +940,9 @@ async function startFetchInboxWorker() {
   });
 
   connection.on("close", () => {
-    console.log("AMQP connection closed in fetchInboxWorker. Attempting to reconnect...");
+    console.log(
+      "AMQP connection closed in fetchInboxWorker. Attempting to reconnect..."
+    );
     setTimeout(() => startFetchInboxWorker(), 5000);
   });
 
@@ -937,5 +957,3 @@ startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 startWorker().catch(console.error);
 startScheduledEmailWorker().catch(console.error);
-
-

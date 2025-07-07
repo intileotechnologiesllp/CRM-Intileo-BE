@@ -6,7 +6,10 @@ const Attachment = require("../../models/email/attachmentModel");
 const Template = require("../../models/email/templateModel");
 const { Sequelize } = require("sequelize");
 const nodemailer = require("nodemailer");
-const { saveAttachments } = require("../../services/attachmentService");
+const {
+  saveAttachments,
+  saveUserUploadedAttachments,
+} = require("../../services/attachmentService");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -20,6 +23,11 @@ const Organization = require("../../models/leads/leadOrganizationModel");
 const Activity = require("../../models/activity/activityModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
+
+// Configuration constants
+const ICON_ATTACHMENT_SIZE_THRESHOLD = 100; // bytes - attachments smaller than this are considered icons/tracking pixels
+const MAX_BATCH_SIZE = 100; // Maximum number of emails to process in one batch
+const DEFAULT_BATCH_SIZE = 50; // Default batch size for email fetching
 // Helper function to identify icon/image attachments and body content that shouldn't be saved as attachments
 const isIconAttachment = (attachment) => {
   const filename = attachment.filename || attachment.generatedFileName || "";
@@ -29,12 +37,41 @@ const isIconAttachment = (attachment) => {
 
   // Skip if it's an inline attachment (part of email body)
   if (contentDisposition.toLowerCase().includes("inline")) {
+    console.log(
+      `Filtering out inline attachment: ${filename} (${contentType})`
+    );
     return true;
   }
 
   // Skip if it has a content ID (usually embedded images)
+  // BUT allow screenshots and important embedded images
   if (contentId) {
-    return true;
+    // Allow screenshots and important embedded images
+    const importantEmbeddedPatterns = [
+      /screenshot/i,
+      /image_?\d+/i, // image001, image_1, etc.
+      /photo/i,
+      /picture/i,
+      /document/i,
+      /scan/i,
+      /attachment/i,
+      /file/i,
+    ];
+
+    const isImportantEmbedded =
+      importantEmbeddedPatterns.some((pattern) => pattern.test(filename)) ||
+      attachment.size > 5000; // Also keep larger embedded images (> 5KB)
+
+    if (!isImportantEmbedded) {
+      console.log(
+        `Filtering out small embedded attachment: ${filename} (${contentType}) with contentId: ${contentId}`
+      );
+      return true;
+    } else {
+      console.log(
+        `Keeping important embedded attachment: ${filename} (${contentType}) with contentId: ${contentId} - size: ${attachment.size} bytes`
+      );
+    }
   }
 
   // Skip common icon/signature image patterns
@@ -52,15 +89,21 @@ const isIconAttachment = (attachment) => {
   ];
 
   if (iconPatterns.some((pattern) => pattern.test(filename))) {
+    console.log(
+      `Filtering out icon/pattern attachment: ${filename} (${contentType})`
+    );
     return true;
   }
 
-  // Skip very small images (likely tracking pixels or icons)
+  // Skip very small images (likely tracking pixels or icons) - CONFIGURABLE
   if (
     contentType.startsWith("image/") &&
     attachment.size &&
-    attachment.size < 1024
+    attachment.size < ICON_ATTACHMENT_SIZE_THRESHOLD
   ) {
+    console.log(
+      `Filtering out small image attachment: ${filename} (${contentType}) - size: ${attachment.size} bytes (threshold: ${ICON_ATTACHMENT_SIZE_THRESHOLD} bytes)`
+    );
     return true;
   }
 
@@ -73,6 +116,9 @@ const isIconAttachment = (attachment) => {
   ];
 
   if (bodyContentTypes.some((type) => contentType.startsWith(type))) {
+    console.log(
+      `Filtering out body content attachment: ${filename} (${contentType})`
+    );
     return true;
   }
 
@@ -102,9 +148,6 @@ const PROVIDER_CONFIG = {
   },
   // Add more providers as needed
 };
-
-// Maximum batch size for all email fetch operations
-const MAX_BATCH_SIZE = 100; // Increased from 25 to 100 for much better performance
 
 // Add this near PROVIDER_CONFIG
 const PROVIDER_FOLDER_MAP = {
@@ -313,7 +356,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
     // 2. Calculate UID ranges for batches - optimized for much better performance
     const safeBatchSize = Math.min(
       parseInt(batchSize),
-      totalEmails > 5000 ? 50 : totalEmails > 2000 ? 75 : 100  // Much larger batches for faster processing
+      totalEmails > 5000 ? 50 : totalEmails > 2000 ? 75 : 100 // Much larger batches for faster processing
     );
     const numBatches = Math.ceil(totalEmails / safeBatchSize);
 
@@ -330,11 +373,11 @@ exports.queueFetchInboxEmails = async (req, res) => {
       const endIdx = Math.min(startIdx + parseInt(safeBatchSize), totalEmails);
       const batchUIDs = uids.slice(startIdx, endIdx);
       if (batchUIDs.length === 0) continue;
-      
+
       // Use individual UIDs instead of ranges to avoid issues with non-consecutive UIDs
       const startUID = batchUIDs[0];
       const endUID = batchUIDs[batchUIDs.length - 1];
-      const allUIDsInBatch = batchUIDs.join(','); // e.g., "1001,1003,1005,1007"
+      const allUIDsInBatch = batchUIDs.join(","); // e.g., "1001,1003,1005,1007"
 
       await publishToQueue("FETCH_INBOX_QUEUE", {
         masterUserID,
@@ -380,7 +423,15 @@ exports.queueFetchInboxEmails = async (req, res) => {
 // Fetch emails from the inbox in batches
 exports.fetchInboxEmails = async (req, res) => {
   // Optimized batch size for better performance
-  let { batchSize = 50, page = 1, days = 7, startUID, endUID, allUIDsInBatch, expectedCount } = req.query;
+  let {
+    batchSize = 50,
+    page = 1,
+    days = 7,
+    startUID,
+    endUID,
+    allUIDsInBatch,
+    expectedCount,
+  } = req.query;
   batchSize = Math.min(Number(batchSize) || 50, MAX_BATCH_SIZE);
 
   const masterUserID = req.adminId;
@@ -393,13 +444,15 @@ exports.fetchInboxEmails = async (req, res) => {
     console.log(
       `[Batch ${page}] Starting fetch for ${batchSize} emails, UIDs: ${startUID}-${endUID}`
     );
-    
+
     if (allUIDsInBatch) {
       console.log(`[Batch ${page}] Specific UIDs to fetch: ${allUIDsInBatch}`);
     }
-    
+
     if (expectedCount) {
-      console.log(`[Batch ${page}] Expected to process: ${expectedCount} emails`);
+      console.log(
+        `[Batch ${page}] Expected to process: ${expectedCount} emails`
+      );
     }
 
     if (!masterUserID || !email || !appPassword || !provider) {
@@ -589,7 +642,9 @@ exports.fetchInboxEmails = async (req, res) => {
         if (allUIDsInBatch) {
           // Use specific UIDs for this batch (more reliable than ranges)
           searchCriteria = [["UID", allUIDsInBatch]];
-          console.log(`[Batch ${page}] Using specific UIDs: ${allUIDsInBatch} (expecting ${expectedCount} emails)`);
+          console.log(
+            `[Batch ${page}] Using specific UIDs: ${allUIDsInBatch} (expecting ${expectedCount} emails)`
+          );
         } else if (startUID && endUID) {
           // Fallback to UID range for this batch
           searchCriteria = [["UID", `${startUID}:${endUID}`]];
@@ -617,214 +672,235 @@ exports.fetchInboxEmails = async (req, res) => {
           // In batch mode with specific UIDs or UID range, process ALL emails found
           actualBatchSize = messages.length;
           if (expectedCount && messages.length !== parseInt(expectedCount)) {
-            console.warn(`[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${messages.length}`);
+            console.warn(
+              `[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${messages.length}`
+            );
           }
-          console.log(`[Batch ${page}] Processing all ${actualBatchSize} emails in batch`);
+          console.log(
+            `[Batch ${page}] Processing all ${actualBatchSize} emails in batch`
+          );
         } else {
           // In direct mode without UID specification, respect the batchSize limit
           actualBatchSize = Math.min(batchSize, messages.length);
-          console.log(`[Batch ${page}] Processing ${actualBatchSize} out of ${messages.length} emails (direct mode)`);
+          console.log(
+            `[Batch ${page}] Processing ${actualBatchSize} out of ${messages.length} emails (direct mode)`
+          );
         }
-        
+
         let processedCount = 0;
 
         // Process emails in smaller chunks for better memory management
         const CHUNK_SIZE = 25; // Process 25 emails at a time
-        for (let chunkStart = 0; chunkStart < actualBatchSize; chunkStart += CHUNK_SIZE) {
+        for (
+          let chunkStart = 0;
+          chunkStart < actualBatchSize;
+          chunkStart += CHUNK_SIZE
+        ) {
           const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, actualBatchSize);
           const chunk = messages.slice(chunkStart, chunkEnd);
-          
-          console.log(`[Batch ${page}] Processing chunk ${Math.floor(chunkStart/CHUNK_SIZE) + 1} (emails ${chunkStart + 1}-${chunkEnd})`);
-          
+
+          console.log(
+            `[Batch ${page}] Processing chunk ${
+              Math.floor(chunkStart / CHUNK_SIZE) + 1
+            } (emails ${chunkStart + 1}-${chunkEnd})`
+          );
+
           // Process each email in the chunk
           for (let i = 0; i < chunk.length; i++) {
             const message = chunk[i];
             const globalIndex = chunkStart + i;
 
-          try {
-            console.log(
-              `[Batch ${page}] Processing email ${
-                globalIndex + 1
-              }/${actualBatchSize} in ${folderType}`
-            );
-
-            // Fetch full body only when needed
-            const fullMessage = await connection.search(
-              [["UID", message.attributes.uid]],
-              { bodies: "", struct: true }
-            );
-            if (!fullMessage || fullMessage.length === 0) {
+            try {
               console.log(
-                `[Batch ${page}] Could not fetch full message for UID ${message.attributes.uid}`
-              );
-              continue;
-            }
-
-            const rawBodyPart = fullMessage[0].parts.find(
-              (part) => part.which === ""
-            );
-            const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-            if (!rawBody) {
-              console.log(
-                `[Batch ${page}] No body found for email ${
+                `[Batch ${page}] Processing email ${
                   globalIndex + 1
                 }/${actualBatchSize} in ${folderType}`
               );
-              continue;
-            }
 
-            const parsedEmail = await simpleParser(rawBody);
-
-            // Process email data with memory-conscious approach
-            const referencesHeader = parsedEmail.headers.get("references");
-            const references = Array.isArray(referencesHeader)
-              ? referencesHeader.join(" ")
-              : referencesHeader || null;
-
-            const emailData = {
-              messageId: parsedEmail.messageId || null,
-              inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-              references,
-              sender: parsedEmail.from
-                ? parsedEmail.from.value[0].address
-                : null,
-              senderName: parsedEmail.from
-                ? parsedEmail.from.value[0].name
-                : null,
-              recipient: parsedEmail.to
-                ? parsedEmail.to.value.map((to) => to.address).join(", ")
-                : null,
-              cc: parsedEmail.cc
-                ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-                : null,
-              bcc: parsedEmail.bcc
-                ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-                : null,
-              masterUserID: masterUserID,
-              subject: parsedEmail.subject || null,
-              body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-              folder: folderType,
-              createdAt: parsedEmail.date || new Date(),
-            };
-
-            // Check if email already exists
-            const existingEmail = await Email.findOne({
-              where: { messageId: emailData.messageId },
-            });
-
-            let savedEmail;
-            if (!existingEmail) {
-              savedEmail = await Email.create(emailData);
-              console.log(
-                `[Batch ${page}] Email ${globalIndex + 1}/${actualBatchSize} saved: ${
-                  emailData.messageId
-                }`
+              // Fetch full body only when needed
+              const fullMessage = await connection.search(
+                [["UID", message.attributes.uid]],
+                { bodies: "", struct: true }
               );
-              processedCount++;
-            } else {
-              console.log(
-                `[Batch ${page}] Email ${
-                  globalIndex + 1
-                }/${actualBatchSize} already exists: ${emailData.messageId}`
-              );
-              savedEmail = existingEmail;
-            }
+              if (!fullMessage || fullMessage.length === 0) {
+                console.log(
+                  `[Batch ${page}] Could not fetch full message for UID ${message.attributes.uid}`
+                );
+                continue;
+              }
 
-            // Process attachments with better filtering and error handling
-            if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-              const filteredAttachments = parsedEmail.attachments.filter(
-                (att) =>
-                  !isIconAttachment(att) &&
-                  !att.contentDisposition?.toLowerCase().includes("inline") &&
-                  att.contentType !== "text/html" &&
-                  att.contentType !== "text/plain" &&
-                  att.size > 0 &&
-                  att.size < 10 * 1024 * 1024 // Max 10MB per attachment
+              const rawBodyPart = fullMessage[0].parts.find(
+                (part) => part.which === ""
               );
+              const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
+              if (!rawBody) {
+                console.log(
+                  `[Batch ${page}] No body found for email ${
+                    globalIndex + 1
+                  }/${actualBatchSize} in ${folderType}`
+                );
+                continue;
+              }
+
+              const parsedEmail = await simpleParser(rawBody);
+
+              // Process email data with memory-conscious approach
+              const referencesHeader = parsedEmail.headers.get("references");
+              const references = Array.isArray(referencesHeader)
+                ? referencesHeader.join(" ")
+                : referencesHeader || null;
+
+              const emailData = {
+                messageId: parsedEmail.messageId || null,
+                inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+                references,
+                sender: parsedEmail.from
+                  ? parsedEmail.from.value[0].address
+                  : null,
+                senderName: parsedEmail.from
+                  ? parsedEmail.from.value[0].name
+                  : null,
+                recipient: parsedEmail.to
+                  ? parsedEmail.to.value.map((to) => to.address).join(", ")
+                  : null,
+                cc: parsedEmail.cc
+                  ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+                  : null,
+                bcc: parsedEmail.bcc
+                  ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+                  : null,
+                masterUserID: masterUserID,
+                subject: parsedEmail.subject || null,
+                body: cleanEmailBody(
+                  parsedEmail.html || parsedEmail.text || ""
+                ),
+                folder: folderType,
+                createdAt: parsedEmail.date || new Date(),
+              };
+
+              // Check if email already exists
+              const existingEmail = await Email.findOne({
+                where: { messageId: emailData.messageId },
+              });
+
+              let savedEmail;
+              if (!existingEmail) {
+                savedEmail = await Email.create(emailData);
+                console.log(
+                  `[Batch ${page}] Email ${
+                    globalIndex + 1
+                  }/${actualBatchSize} saved: ${emailData.messageId}`
+                );
+                processedCount++;
+              } else {
+                console.log(
+                  `[Batch ${page}] Email ${
+                    globalIndex + 1
+                  }/${actualBatchSize} already exists: ${emailData.messageId}`
+                );
+                savedEmail = existingEmail;
+              }
+
+              // Process attachments with better filtering and error handling
               if (
-                filteredAttachments.length > 0 &&
-                filteredAttachments.length <= 5
+                parsedEmail.attachments &&
+                parsedEmail.attachments.length > 0
               ) {
-                // Max 5 attachments per email
+                const filteredAttachments = parsedEmail.attachments.filter(
+                  (att) =>
+                    !isIconAttachment(att) &&
+                    !att.contentDisposition?.toLowerCase().includes("inline") &&
+                    att.contentType !== "text/html" &&
+                    att.contentType !== "text/plain" &&
+                    att.size > 0 &&
+                    att.size < 10 * 1024 * 1024 // Max 10MB per attachment
+                );
+
+                if (
+                  filteredAttachments.length > 0 &&
+                  filteredAttachments.length <= 5
+                ) {
+                  // Max 5 attachments per email
+                  try {
+                    const savedAttachments = await saveAttachments(
+                      filteredAttachments,
+                      savedEmail.emailID
+                    );
+                    console.log(
+                      `[Batch ${page}] Saved ${
+                        savedAttachments.length
+                      } attachment metadata records for email ${
+                        globalIndex + 1
+                      }/${actualBatchSize}`
+                    );
+                  } catch (attachmentError) {
+                    console.error(
+                      `[Batch ${page}] Error saving attachment metadata for email ${emailData.messageId}:`,
+                      attachmentError.message
+                    );
+                  }
+                }
+              }
+
+              // Skip thread processing for batches larger than 10 emails to save time and memory
+              if (
+                actualBatchSize <= 10 &&
+                emailData.messageId &&
+                folderType === "inbox"
+              ) {
                 try {
-                  const savedAttachments = await saveAttachments(
-                    filteredAttachments,
-                    savedEmail.emailID
-                  );
+                  // Only fetch immediate replies, not full recursive thread
+                  const immediateReplies = await Email.findAll({
+                    where: {
+                      inReplyTo: emailData.messageId,
+                      masterUserID: masterUserID,
+                    },
+                    limit: 3, // Reduced limit for memory safety
+                    order: [["createdAt", "ASC"]],
+                  });
+
                   console.log(
-                    `[Batch ${page}] Saved ${
-                      savedAttachments.length
-                    } attachments for email ${globalIndex + 1}/${actualBatchSize}`
+                    `[Batch ${page}] Found ${immediateReplies.length} immediate replies for ${emailData.messageId}`
                   );
-                } catch (attachmentError) {
+                } catch (threadError) {
                   console.error(
-                    `[Batch ${page}] Error saving attachments for email ${emailData.messageId}:`,
-                    attachmentError.message
+                    `[Batch ${page}] Error processing thread for ${emailData.messageId}:`,
+                    threadError.message
                   );
                 }
               }
-            }
 
-            // Skip thread processing for batches larger than 10 emails to save time and memory
-            if (
-              actualBatchSize <= 10 &&
-              emailData.messageId &&
-              folderType === "inbox"
-            ) {
-              try {
-                // Only fetch immediate replies, not full recursive thread
-                const immediateReplies = await Email.findAll({
-                  where: {
-                    inReplyTo: emailData.messageId,
-                    masterUserID: masterUserID,
-                  },
-                  limit: 3, // Reduced limit for memory safety
-                  order: [["createdAt", "ASC"]],
-                });
-
-                console.log(
-                  `[Batch ${page}] Found ${immediateReplies.length} immediate replies for ${emailData.messageId}`
-                );
-              } catch (threadError) {
-                console.error(
-                  `[Batch ${page}] Error processing thread for ${emailData.messageId}:`,
-                  threadError.message
-                );
+              // Force garbage collection every 25 emails (optimized for larger batches)
+              if (global.gc && globalIndex % 25 === 0) {
+                global.gc();
               }
-            }
 
-            // Force garbage collection every 25 emails (optimized for larger batches)
-            if (global.gc && globalIndex % 25 === 0) {
-              global.gc();
+              // Clean up parsed email object
+              parsedEmail.attachments = null;
+              parsedEmail.html = null;
+              parsedEmail.text = null;
+            } catch (emailError) {
+              console.error(
+                `[Batch ${page}] Error processing email ${
+                  globalIndex + 1
+                }/${actualBatchSize} in ${folderType}:`,
+                emailError.message
+              );
+              continue;
             }
+          }
 
-            // Clean up parsed email object
-            parsedEmail.attachments = null;
-            parsedEmail.html = null;
-            parsedEmail.text = null;
-          } catch (emailError) {
-            console.error(
-              `[Batch ${page}] Error processing email ${
-                globalIndex + 1
-              }/${actualBatchSize} in ${folderType}:`,
-              emailError.message
-            );
-            continue;
+          // Force garbage collection after each chunk
+          if (global.gc && chunkStart % 50 === 0) {
+            global.gc();
           }
         }
-        
-        // Force garbage collection after each chunk
-        if (global.gc && chunkStart % 50 === 0) {
-          global.gc();
-        }
-      }
 
         console.log(
           `[Batch ${page}] Completed processing ${processedCount} new emails in ${folderType}`
         );
-        
+
         return processedCount; // Return the count for tracking
       } catch (folderError) {
         console.error(
@@ -844,12 +920,15 @@ exports.fetchInboxEmails = async (req, res) => {
     // Process folders one by one to avoid memory issues
     const folderTypes = ["inbox"];
     let totalProcessedEmails = 0;
-    
+
     for (const type of folderTypes) {
       const folderName = folderMap[type];
       if (allFoldersArr.includes(folderName.toLowerCase())) {
         console.log(`[Batch ${page}] Processing ${type} folder...`);
-        const folderProcessedCount = await fetchEmailsFromFolder(folderName, type);
+        const folderProcessedCount = await fetchEmailsFromFolder(
+          folderName,
+          type
+        );
         totalProcessedEmails += folderProcessedCount || 0;
       } else {
         console.log(
@@ -860,12 +939,14 @@ exports.fetchInboxEmails = async (req, res) => {
 
     // Memory cleanup for large batches
     console.log(`[Batch ${page}] Performing memory cleanup...`);
-    if (global.gc && page % 10 === 0) { // Only every 10th batch for larger batches
+    if (global.gc && page % 10 === 0) {
+      // Only every 10th batch for larger batches
       global.gc();
     }
 
     // Add small delay for system recovery (optimized for larger batches)
-    if (page > 1 && page % 10 === 0) { // Only every 10th batch
+    if (page > 1 && page % 10 === 0) {
+      // Only every 10th batch
       await new Promise((resolve) => setTimeout(resolve, 100)); // Reduced from 200ms to 100ms
     }
 
@@ -909,7 +990,8 @@ exports.fetchInboxEmails = async (req, res) => {
     }
     // Final memory cleanup
     console.log(`[Batch ${page}] Final memory cleanup...`);
-    if (global.gc && page % 15 === 0) { // Only every 15th batch for larger batches
+    if (global.gc && page % 15 === 0) {
+      // Only every 15th batch for larger batches
       global.gc();
     }
   }
@@ -1367,24 +1449,49 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     // Save attachments
     const attachments = [];
     if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+      console.log(
+        `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
+      );
+
       // Filter out icon/image attachments and inline (body/html) attachments
       const filteredAttachments = parsedEmail.attachments.filter(
         (att) =>
           !isIconAttachment(att) &&
-          !att.contentDisposition?.toLowerCase().includes("inline")
+          !att.contentDisposition?.toLowerCase().includes("inline") &&
+          att.contentType !== "text/html" &&
+          att.contentType !== "text/plain" &&
+          att.size > 0 &&
+          att.size < 10 * 1024 * 1024 // Max 10MB per attachment
       );
-      if (filteredAttachments.length > 0) {
-        const savedAttachments = await saveAttachments(
-          filteredAttachments,
-          savedEmail.emailID
-        );
-        attachments.push(...savedAttachments);
+
+      console.log(
+        `Filtered to ${filteredAttachments.length} real attachments for email: ${emailData.messageId}`
+      );
+
+      if (filteredAttachments.length > 0 && filteredAttachments.length <= 5) {
+        // Max 5 attachments per email
+        try {
+          const savedAttachments = await saveAttachments(
+            filteredAttachments,
+            savedEmail.emailID
+          );
+          attachments.push(...savedAttachments);
+          console.log(
+            `Saved ${attachments.length} attachment metadata records for email: ${emailData.messageId}`
+          );
+        } catch (attachmentError) {
+          console.error(
+            `Error saving attachment metadata for email ${emailData.messageId}:`,
+            attachmentError.message
+          );
+        }
+      } else if (filteredAttachments.length > 5) {
         console.log(
-          `Saved ${attachments.length} attachments for email: ${emailData.messageId}`
+          `Too many attachments (${filteredAttachments.length}) for email: ${emailData.messageId}, skipping attachment metadata processing`
         );
       } else {
         console.log(
-          `No real attachments to save for email: ${emailData.messageId}`
+          `No real attachments to save metadata for email: ${emailData.messageId}`
         );
       }
     }
@@ -1513,7 +1620,7 @@ exports.fetchDraftEmails = async (req, res) => {
           savedEmail.emailID
         );
         console.log(
-          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
         );
       }
     }
@@ -1620,7 +1727,7 @@ exports.fetchArchiveEmails = async (req, res) => {
           savedEmail.emailID
         );
         console.log(
-          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
         );
       }
     }
@@ -1832,13 +1939,20 @@ exports.getEmails = async (req, res) => {
       emails = rows;
     }
 
-    // Add baseURL to attachment paths
-    const baseURL = process.env.LOCALHOST_URL;
+    // Handle attachment metadata and file paths appropriately
     const emailsWithAttachments = emails.map((email) => {
-      const attachments = (email.attachments || []).map((attachment) => ({
-        ...attachment.toJSON(),
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`, // Add baseURL to the path
-      }));
+      const attachments = (email.attachments || []).map((attachment) => {
+        const baseAttachment = { ...attachment.toJSON() };
+
+        // If filePath exists, it's a user-uploaded file, include the path
+        // If filePath is null, it's metadata-only from fetched emails
+        if (attachment.filePath) {
+          baseAttachment.path = attachment.filePath; // User-uploaded files
+        }
+        // For metadata-only attachments, we just return the basic info
+
+        return baseAttachment;
+      });
       return {
         ...email.toJSON(),
         attachments,
@@ -2231,7 +2345,7 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
           savedEmail.emailID
         );
         console.log(
-          `Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
         );
       }
     }
@@ -2852,12 +2966,19 @@ exports.getOneEmail = async (req, res) => {
     // Clean the body of the main email
     mainEmail.body = cleanEmailBody(mainEmail.body);
 
-    // Add baseURL to attachment paths
-    const baseURL = process.env.LOCALHOST_URL;
-    mainEmail.attachments = mainEmail.attachments.map((attachment) => ({
-      ...attachment,
-      path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-    }));
+    // Handle attachments appropriately based on type (user-uploaded vs fetched)
+    mainEmail.attachments = mainEmail.attachments.map((attachment) => {
+      const baseAttachment = { ...attachment };
+
+      // If filePath exists, it's a user-uploaded file, include the path
+      // If filePath is null, it's metadata-only from fetched emails
+      if (attachment.filePath) {
+        baseAttachment.path = attachment.filePath; // User-uploaded files
+      }
+      // For metadata-only attachments, we just return the basic info
+
+      return baseAttachment;
+    });
 
     // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
@@ -2966,13 +3087,21 @@ exports.getOneEmail = async (req, res) => {
     // const sortedMainEmail = conversation[0];
     // const sortedRelatedEmails = conversation.slice(1);
 
-    // Clean the body and attachment paths for related emails
+    // Handle attachments appropriately for related emails
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
-      email.attachments = email.attachments.map((attachment) => ({
-        ...attachment,
-        path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-      }));
+      email.attachments = email.attachments.map((attachment) => {
+        const baseAttachment = { ...attachment };
+
+        // If filePath exists, it's a user-uploaded file, include the path
+        // If filePath is null, it's metadata-only from fetched emails
+        if (attachment.filePath) {
+          baseAttachment.path = attachment.filePath; // User-uploaded files
+        }
+        // For metadata-only attachments, we just return the basic info
+
+        return baseAttachment;
+      });
     });
 
     const sortedMainEmail = conversation[0];
@@ -3321,19 +3450,9 @@ exports.composeEmail = [
         };
         const savedEmail = await Email.create(emailData);
 
-        // Save attachments in the database
-        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        const savedAttachments = req.files.map((file) => ({
-          emailID: savedEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`,
-          size: file.size,
-          contentType: file.mimetype,
-        }));
-        if (savedAttachments.length > 0) {
-          await Attachment.bulkCreate(savedAttachments);
+        // Save user-uploaded attachment files with file paths for scheduled emails
+        if (req.files && req.files.length > 0) {
+          await saveUserUploadedAttachments(req.files, savedEmail.emailID);
         }
 
         return res.status(200).json({
@@ -3372,11 +3491,12 @@ exports.composeEmail = [
 
       let attachments = [];
       if (req.files && req.files.length > 0) {
+        // For user-uploaded files, include the full file path for proper saving
+        const baseURL = process.env.LOCALHOST_URL;
         attachments = req.files.map((file) => ({
           filename: file.filename,
           originalname: file.originalname,
-          path: file.path,
-          // path: `${baseURL}/uploads/attachments/${encodeURIComponent(file.filename)}`, // <-- public URL
+          path: file.path, // This is the actual file path on disk where multer saved the file
           size: file.size,
           contentType: file.mimetype,
         }));
@@ -3813,25 +3933,21 @@ exports.saveDraft = [
         });
       }
 
-      // Handle attachments
+      // Handle attachments (save actual files for user uploads)
       let savedAttachments = [];
       if (req.files && req.files.length > 0) {
         if (isUpdate) {
           // Remove old attachments if updating
           await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
         }
-        // savedAttachments = req.files.map((file) => ({
-        //   emailID: savedDraft.emailID,
-        //   filename: file.originalname,
-        //   path: file.path,
-        // }));
+        // Save user-uploaded draft attachments with file paths
         const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        const savedAttachments = req.files.map((file) => ({
+        savedAttachments = req.files.map((file) => ({
           emailID: savedDraft.emailID,
           filename: file.filename,
           filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
             file.filename
-          )}`,
+          )}`, // Save actual file path for user uploads
           size: file.size,
           contentType: file.mimetype,
         }));
@@ -3843,10 +3959,10 @@ exports.saveDraft = [
         });
       }
 
-      // Generate public URLs for attachments
+      // Return attachment links for user-uploaded files
       const attachmentLinks = savedAttachments.map((attachment) => ({
         filename: attachment.filename,
-        link: `${process.env.LOCALHOST_URL}/uploads/attachments/${attachment.filename}`,
+        link: attachment.filePath, // Return the file path for user uploads
       }));
 
       res.status(200).json({
