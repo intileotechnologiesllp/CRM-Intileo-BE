@@ -46,7 +46,7 @@ router.get("/get-signature", verifyToken, emailSettingsController.getSignature);
 router.get("/get-blocked-addresses", verifyToken, emailSettingsController.getBlockedAddress);
 router.get("/get-smart-bcc", verifyToken, emailSettingsController.getSmartBcc);
 router.get("/get-email-autopopulate",verifyToken,emailSettingsController.getEmailAutocomplete);
-router.get("/download-attachment/:emailID/attachments/:filename",verifyToken,emailSettingsController.downloadAttachment);
+router.get("/download-attachment",verifyToken,emailSettingsController.downloadAttachment);
 router.get("/mark-as-unraed-single/:emailID",verifyToken,emailSettingsController.markAsUnreadSingle);
 router.get("/diagnoseAttachment", verifyToken, emailSettingsController.diagnoseAttachment);
 
