@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Fields - CRM</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, sans-serif;
+        background-color: #f8f9fa;
+        color: #333;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .header {
+        background: white;
+        padding: 24px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 24px;
+      }
+
+      .header h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      .header p {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 16px;
+      }
+
+      .tabs {
+        display: flex;
+        border-bottom: 2px solid #e9ecef;
+        margin-bottom: 24px;
+      }
+
+      .tab {
+        padding: 12px 16px;
+        background: none;
+        border: none;
+        font-size: 14px;
+        font-weight: 500;
+        color: #666;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .tab.active {
+        color: #2563eb;
+        border-bottom-color: #2563eb;
+      }
+
+      .tab-icon {
+        width: 16px;
+        height: 16px;
+      }
+
+      .main-content {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .toolbar {
+        padding: 20px 24px;
+        border-bottom: 1px solid #e9ecef;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .btn {
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        border: 1px solid;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        text-decoration: none;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: #16a34a;
+        color: white;
+        border-color: #16a34a;
+      }
+
+      .btn-primary:hover {
+        background: #15803d;
+        border-color: #15803d;
+      }
+
+      .btn-secondary {
+        background: white;
+        color: #374151;
+        border-color: #d1d5db;
+      }
+
+      .btn-secondary:hover {
+        background: #f9fafb;
+      }
+
+      .field-groups {
+        padding: 24px;
+      }
+
+      .field-group {
+        margin-bottom: 32px;
+      }
+
+      .field-group-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .field-group-header h3 {
+        font-size: 16px;
+        font-weight: 600;
+        color: #374151;
+      }
+
+      .field-group-header .badge {
+        background: #f3f4f6;
+        color: #6b7280;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .field-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .field-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #fafafa;
+      }
+
+      .field-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 1;
+      }
+
+      .field-type-icon {
+        width: 20px;
+        height: 20px;
+        color: #6b7280;
+      }
+
+      .field-details h4 {
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 4px;
+      }
+
+      .field-details p {
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      .field-badges {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0;
+      }
+
+      .field-badge {
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 500;
+      }
+
+      .field-badge.required {
+        background: #fef2f2;
+        color: #dc2626;
+      }
+
+      .field-badge.important {
+        background: #fffbeb;
+        color: #d97706;
+      }
+
+      .field-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn-sm {
+        padding: 6px 12px;
+        font-size: 12px;
+        border-radius: 4px;
+      }
+
+      /* Modal Styles */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .modal-overlay.active {
+        display: flex;
+      }
+
+      .modal {
+        background: white;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      }
+
+      .modal-header {
+        padding: 24px 24px 0 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .modal-header h2 {
+        font-size: 20px;
+        font-weight: 600;
+        color: #111827;
+      }
+
+      .modal-close {
+        background: none;
+        border: none;
+        font-size: 24px;
+        color: #6b7280;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal-close:hover {
+        background: #f3f4f6;
+      }
+
+      .modal-body {
+        padding: 24px;
+      }
+
+      .modal-section {
+        margin-bottom: 24px;
+      }
+
+      .modal-section:last-child {
+        margin-bottom: 0;
+      }
+
+      .modal-section h3 {
+        font-size: 14px;
+        font-weight: 500;
+        color: #374151;
+        margin-bottom: 12px;
+      }
+
+      .form-group {
+        margin-bottom: 16px;
+      }
+
+      .form-label {
+        display: block;
+        font-size: 14px;
+        font-weight: 500;
+        color: #374151;
+        margin-bottom: 6px;
+      }
+
+      .form-label.required::after {
+        content: " *";
+        color: #dc2626;
+      }
+
+      .form-input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+      }
+
+      .form-input:focus {
+        outline: none;
+        border-color: #2563eb;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+
+      .form-select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        background: white;
+        cursor: pointer;
+      }
+
+      .form-textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        min-height: 80px;
+        resize: vertical;
+      }
+
+      .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0;
+      }
+
+      .checkbox {
+        width: 16px;
+        height: 16px;
+      }
+
+      .toggle-group {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid #f3f4f6;
+      }
+
+      .toggle-group:last-child {
+        border-bottom: none;
+      }
+
+      .toggle-label {
+        font-size: 14px;
+        color: #374151;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .toggle-switch {
+        position: relative;
+        width: 44px;
+        height: 24px;
+        background: #d1d5db;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .toggle-switch.active {
+        background: #10b981;
+      }
+
+      .toggle-switch::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border-radius: 50%;
+        transition: transform 0.2s;
+      }
+
+      .toggle-switch.active::after {
+        transform: translateX(20px);
+      }
+
+      .modal-footer {
+        padding: 16px 24px 24px 24px;
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+      }
+
+      .description-link {
+        color: #2563eb;
+        font-size: 12px;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 4px;
+      }
+
+      .description-link:hover {
+        text-decoration: underline;
+      }
+
+      .new-badge {
+        background: #2563eb;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 500;
+        margin-left: 8px;
+      }
+
+      .options-container {
+        margin-top: 8px;
+        display: none;
+      }
+
+      .options-container.show {
+        display: block;
+      }
+
+      .options-textarea {
+        width: 100%;
+        min-height: 80px;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        resize: vertical;
+      }
+
+      .help-text {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <div class="header">
+        <h1>Data fields</h1>
+        <p>15/300 custom fields used (including 0/10 formula fields)</p>
+        <p>
+          Improve the quality of your data by choosing where certain fields
+          appear and by highlighting some as important. This includes custom
+          fields that help you tailor data to your business needs.
+        </p>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab active">
+          <svg class="tab-icon" fill="currentColor" viewBox="0 0 20 20">
+            <circle cx="10" cy="10" r="8" />
+          </svg>
+          Lead/deal
+        </button>
+        <button class="tab">
+          <svg class="tab-icon" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
+          </svg>
+          Person
+        </button>
+        <button class="tab">
+          <svg class="tab-icon" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+            />
+          </svg>
+          Organization
+        </button>
+        <button class="tab">
+          <svg class="tab-icon" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"
+            />
+          </svg>
+          Product
+        </button>
+      </div>
+
+      <!-- Main Content -->
+      <div class="main-content">
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <button class="btn btn-primary" onclick="openCreateFieldModal()">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                fill-rule="evenodd"
+                d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            Custom field
+          </button>
+          <button class="btn btn-secondary">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"
+              />
+            </svg>
+            Organize fields
+          </button>
+        </div>
+
+        <!-- Field Groups -->
+        <div class="field-groups">
+          <!-- Summary Group -->
+          <div class="field-group">
+            <div class="field-group-header">
+              <svg
+                width="16"
+                height="16"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <h3>Summary</h3>
+            </div>
+            <div class="field-list" id="summaryFields">
+              <!-- Fields will be populated here -->
+            </div>
+          </div>
+
+          <!-- Ungrouped Custom Fields -->
+          <div class="field-group">
+            <div class="field-group-header">
+              <svg
+                width="16"
+                height="16"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <h3>Ungrouped custom fields</h3>
+              <span class="badge" id="ungroupedCount">0</span>
+            </div>
+            <div class="field-list" id="ungroupedFields">
+              <!-- Custom fields will be populated here -->
+            </div>
+          </div>
+
+          <!-- Default Fields -->
+          <div class="field-group">
+            <div class="field-group-header">
+              <svg
+                width="16"
+                height="16"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <h3>Default fields</h3>
+            </div>
+            <div class="field-list" id="defaultFields">
+              <!-- Default fields will be populated here -->
+            </div>
+          </div>
+
+          <!-- System Fields -->
+          <div class="field-group">
+            <div class="field-group-header">
+              <svg
+                width="16"
+                height="16"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <h3>System fields</h3>
+            </div>
+            <div class="field-list" id="systemFields">
+              <!-- System fields will be populated here -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Field Modal -->
+    <div class="modal-overlay" id="createFieldModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h2>Add lead/deal field</h2>
+          <button class="modal-close" onclick="closeCreateFieldModal()">
+            ×
+          </button>
+        </div>
+        <div class="modal-body">
+          <form id="createFieldForm">
+            <!-- Field Name -->
+            <div class="form-group">
+              <label class="form-label required" for="fieldName"
+                >Field name</label
+              >
+              <input
+                type="text"
+                id="fieldName"
+                name="fieldName"
+                class="form-input"
+                required
+              />
+            </div>
+
+            <!-- Field Group -->
+            <div class="form-group">
+              <label class="form-label" for="fieldGroup">Field group</label>
+              <select id="fieldGroup" name="fieldGroup" class="form-select">
+                <option value="ungrouped">🔗 Ungrouped</option>
+                <option value="summary">Summary</option>
+                <option value="details">Details</option>
+                <option value="financial">Financial</option>
+                <option value="contact">Contact</option>
+              </select>
+            </div>
+
+            <!-- Add Description -->
+            <div class="form-group">
+              <a
+                href="#"
+                class="description-link"
+                onclick="toggleDescription()"
+              >
+                + Add description
+                <span class="new-badge">NEW</span>
+              </a>
+              <textarea
+                id="fieldDescription"
+                name="description"
+                class="form-textarea"
+                placeholder="Add a description for this field..."
+                style="display: none; margin-top: 8px"
+              ></textarea>
+            </div>
+
+            <!-- Field Type -->
+            <div class="form-group">
+              <label class="form-label required" for="fieldType"
+                >Field type</label
+              >
+              <select
+                id="fieldType"
+                name="fieldType"
+                class="form-select"
+                required
+                onchange="handleFieldTypeChange()"
+              >
+                <option value="">📋 Select type</option>
+                <option value="text">📝 Text</option>
+                <option value="textarea">📄 Long text</option>
+                <option value="number">🔢 Number</option>
+                <option value="decimal">💯 Decimal</option>
+                <option value="currency">💰 Currency</option>
+                <option value="date">📅 Date</option>
+                <option value="datetime">🕐 Date & Time</option>
+                <option value="email">📧 Email</option>
+                <option value="phone">📞 Phone</option>
+                <option value="url">🔗 URL</option>
+                <option value="select">📋 Single option</option>
+                <option value="multiselect">☑️ Multiple options</option>
+                <option value="checkbox">✅ Checkbox</option>
+              </select>
+
+              <!-- Options for select fields -->
+              <div id="optionsContainer" class="options-container">
+                <label class="form-label" for="fieldOptions">Options</label>
+                <textarea
+                  id="fieldOptions"
+                  name="options"
+                  class="options-textarea"
+                  placeholder="Option 1&#10;Option 2&#10;Option 3"
+                ></textarea>
+                <div class="help-text">Enter one option per line</div>
+              </div>
+            </div>
+
+            <!-- User Specifications -->
+            <div class="modal-section">
+              <h3>User specifications</h3>
+              <div class="form-group">
+                <label class="form-label" for="editingUsers">Editing</label>
+                <select
+                  id="editingUsers"
+                  name="editingUsers"
+                  class="form-select"
+                >
+                  <option value="all">✏️ All users (9/9)</option>
+                  <option value="admin">👑 Admin only</option>
+                  <option value="specific">👥 Specific users</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Places Where Shown -->
+            <div class="modal-section">
+              <h3>Places where shown</h3>
+              <div class="checkbox-group">
+                <input
+                  type="checkbox"
+                  id="showInAddView"
+                  name="showInAddView"
+                  class="checkbox"
+                  checked
+                />
+                <label for="showInAddView">Lead/deal add view</label>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pipelineVisibility"
+                  >Pipelines</label
+                >
+                <select
+                  id="pipelineVisibility"
+                  name="pipelineVisibility"
+                  class="form-select"
+                >
+                  <option value="all">🔗 All pipelines (2/2)</option>
+                  <option value="specific">📋 Specific pipelines</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Quality Rules -->
+            <div class="modal-section">
+              <h3>Quality rules</h3>
+              <div class="toggle-group">
+                <div class="toggle-label">
+                  <span>Required</span>
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div
+                  class="toggle-switch"
+                  onclick="toggleSwitch(this, 'isRequired')"
+                ></div>
+              </div>
+              <div class="toggle-group">
+                <div class="toggle-label">
+                  <span>Important</span>
+                  <svg
+                    width="16"
+                    height="16"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div
+                  class="toggle-switch"
+                  onclick="toggleSwitch(this, 'isImportant')"
+                ></div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick="closeCreateFieldModal()"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick="saveCustomField()"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let customFields = [];
+      let formData = {
+        isRequired: false,
+        isImportant: false,
+      };
+
+      // Initialize page
+      document.addEventListener("DOMContentLoaded", function () {
+        loadCustomFields();
+        loadDefaultFields();
+        loadSystemFields();
+      });
+
+      function openCreateFieldModal() {
+        document.getElementById("createFieldModal").classList.add("active");
+        document.body.style.overflow = "hidden";
+      }
+
+      function closeCreateFieldModal() {
+        document.getElementById("createFieldModal").classList.remove("active");
+        document.body.style.overflow = "";
+        resetForm();
+      }
+
+      function resetForm() {
+        document.getElementById("createFieldForm").reset();
+        document.getElementById("fieldDescription").style.display = "none";
+        document.getElementById("optionsContainer").classList.remove("show");
+        formData.isRequired = false;
+        formData.isImportant = false;
+        updateToggleSwitches();
+      }
+
+      function toggleDescription() {
+        const textarea = document.getElementById("fieldDescription");
+        if (textarea.style.display === "none") {
+          textarea.style.display = "block";
+          textarea.focus();
+        } else {
+          textarea.style.display = "none";
+        }
+      }
+
+      function handleFieldTypeChange() {
+        const fieldType = document.getElementById("fieldType").value;
+        const optionsContainer = document.getElementById("optionsContainer");
+
+        if (["select", "multiselect"].includes(fieldType)) {
+          optionsContainer.classList.add("show");
+        } else {
+          optionsContainer.classList.remove("show");
+        }
+      }
+
+      function toggleSwitch(element, property) {
+        element.classList.toggle("active");
+        formData[property] = element.classList.contains("active");
+      }
+
+      function updateToggleSwitches() {
+        const requiredSwitch = document.querySelector(
+          '[onclick*="isRequired"]'
+        );
+        const importantSwitch = document.querySelector(
+          '[onclick*="isImportant"]'
+        );
+
+        if (formData.isRequired) {
+          requiredSwitch.classList.add("active");
+        } else {
+          requiredSwitch.classList.remove("active");
+        }
+
+        if (formData.isImportant) {
+          importantSwitch.classList.add("active");
+        } else {
+          importantSwitch.classList.remove("active");
+        }
+      }
+
+      async function saveCustomField() {
+        const form = document.getElementById("createFieldForm");
+        const formDataObj = new FormData(form);
+
+        const fieldData = {
+          fieldName: formDataObj
+            .get("fieldName")
+            .toLowerCase()
+            .replace(/\s+/g, "_"),
+          fieldLabel: formDataObj.get("fieldName"),
+          fieldType: formDataObj.get("fieldType"),
+          entityType: "lead", // Current tab
+          category:
+            formDataObj.get("fieldGroup") === "ungrouped"
+              ? "Details"
+              : formDataObj.get("fieldGroup"),
+          description: formDataObj.get("description") || null,
+          isRequired: formData.isRequired,
+          isImportant: formData.isImportant,
+          showInAddView: formDataObj.has("showInAddView"),
+          editingUsers: formDataObj.get("editingUsers"),
+          pipelineVisibility: formDataObj.get("pipelineVisibility"),
+        };
+
+        // Handle options for select fields
+        if (["select", "multiselect"].includes(fieldData.fieldType)) {
+          const options = formDataObj.get("options");
+          if (options) {
+            fieldData.options = options
+              .split("\n")
+              .map((opt) => opt.trim())
+              .filter((opt) => opt);
+          }
+        }
+
+        try {
+          // In a real implementation, you would make an API call here
+          console.log("Creating custom field:", fieldData);
+
+          // Simulate API response
+          const newField = {
+            fieldId: Date.now(),
+            ...fieldData,
+            createdAt: new Date().toISOString(),
+          };
+
+          customFields.push(newField);
+          renderCustomFields();
+          closeCreateFieldModal();
+
+          // Show success message
+          alert("Custom field created successfully!");
+        } catch (error) {
+          console.error("Error creating custom field:", error);
+          alert("Error creating custom field. Please try again.");
+        }
+      }
+
+      function loadCustomFields() {
+        // Mock data - in real implementation, fetch from API
+        customFields = [
+          {
+            fieldId: 1,
+            fieldName: "project_priority",
+            fieldLabel: "Project Priority",
+            fieldType: "select",
+            entityType: "lead",
+            category: "Summary",
+            isRequired: true,
+            isImportant: true,
+            options: ["High", "Medium", "Low"],
+          },
+          {
+            fieldId: 2,
+            fieldName: "budget_range",
+            fieldLabel: "Budget Range",
+            fieldType: "currency",
+            entityType: "lead",
+            category: "Details",
+            isRequired: false,
+            isImportant: true,
+          },
+        ];
+
+        renderCustomFields();
+      }
+
+      function renderCustomFields() {
+        const summaryContainer = document.getElementById("summaryFields");
+        const ungroupedContainer = document.getElementById("ungroupedFields");
+        const ungroupedCount = document.getElementById("ungroupedCount");
+
+        // Clear containers
+        summaryContainer.innerHTML = "";
+        ungroupedContainer.innerHTML = "";
+
+        // Group fields by category
+        const summaryFields = customFields.filter(
+          (field) => field.category === "Summary"
+        );
+        const ungroupedFields = customFields.filter(
+          (field) => field.category === "Details" || !field.category
+        );
+
+        // Render summary fields
+        summaryFields.forEach((field) => {
+          summaryContainer.appendChild(createFieldElement(field));
+        });
+
+        // Render ungrouped fields
+        ungroupedFields.forEach((field) => {
+          ungroupedContainer.appendChild(createFieldElement(field));
+        });
+
+        // Update count
+        ungroupedCount.textContent = ungroupedFields.length;
+      }
+
+      function createFieldElement(field) {
+        const div = document.createElement("div");
+        div.className = "field-item";
+
+        const typeIcons = {
+          text: "📝",
+          select: "📋",
+          currency: "💰",
+          number: "🔢",
+          date: "📅",
+          email: "📧",
+        };
+
+        div.innerHTML = `
+                <div class="field-info">
+                    <div class="field-type-icon">${
+                      typeIcons[field.fieldType] || "📝"
+                    }</div>
+                    <div class="field-details">
+                        <h4>${field.fieldLabel}</h4>
+                        <p>${field.fieldType}</p>
+                        <div class="field-badges">
+                            ${
+                              field.isRequired
+                                ? '<span class="field-badge required">REQUIRED</span>'
+                                : ""
+                            }
+                            ${
+                              field.isImportant
+                                ? '<span class="field-badge important">IMPORTANT</span>'
+                                : ""
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="field-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="editField(${
+                      field.fieldId
+                    })">Edit</button>
+                    <button class="btn btn-secondary btn-sm" onclick="deleteField(${
+                      field.fieldId
+                    })">Delete</button>
+                </div>
+            `;
+
+        return div;
+      }
+
+      function loadDefaultFields() {
+        const container = document.getElementById("defaultFields");
+        const defaultFields = [
+          { name: "Title", type: "text", required: true },
+          { name: "Value", type: "currency", required: false },
+          { name: "Person", type: "person", required: true },
+          { name: "Organization", type: "organization", required: true },
+          { name: "Expected close date", type: "date", required: false },
+          { name: "Pipeline", type: "select", required: true },
+        ];
+
+        defaultFields.forEach((field) => {
+          const div = document.createElement("div");
+          div.className = "field-item";
+          div.innerHTML = `
+                    <div class="field-info">
+                        <div class="field-details">
+                            <h4>${field.name}</h4>
+                            <p>${field.type}</p>
+                            ${
+                              field.required
+                                ? '<div class="field-badges"><span class="field-badge required">REQUIRED</span></div>'
+                                : ""
+                            }
+                        </div>
+                    </div>
+                `;
+          container.appendChild(div);
+        });
+      }
+
+      function loadSystemFields() {
+        const container = document.getElementById("systemFields");
+        const systemFields = [
+          { name: "Created", type: "datetime" },
+          { name: "Updated", type: "datetime" },
+          { name: "Owner", type: "user" },
+          { name: "Source", type: "text" },
+          { name: "ID", type: "number" },
+        ];
+
+        systemFields.forEach((field) => {
+          const div = document.createElement("div");
+          div.className = "field-item";
+          div.innerHTML = `
+                    <div class="field-info">
+                        <div class="field-details">
+                            <h4>${field.name}</h4>
+                            <p>${field.type}</p>
+                        </div>
+                    </div>
+                `;
+          container.appendChild(div);
+        });
+      }
+
+      function editField(fieldId) {
+        const field = customFields.find((f) => f.fieldId === fieldId);
+        if (field) {
+          // Populate form with field data
+          document.getElementById("fieldName").value = field.fieldLabel;
+          document.getElementById("fieldGroup").value =
+            field.category.toLowerCase();
+          document.getElementById("fieldType").value = field.fieldType;
+          document.getElementById("fieldDescription").value =
+            field.description || "";
+
+          if (field.description) {
+            document.getElementById("fieldDescription").style.display = "block";
+          }
+
+          formData.isRequired = field.isRequired;
+          formData.isImportant = field.isImportant;
+          updateToggleSwitches();
+
+          handleFieldTypeChange();
+
+          if (field.options) {
+            document.getElementById("fieldOptions").value =
+              field.options.join("\n");
+          }
+
+          openCreateFieldModal();
+        }
+      }
+
+      function deleteField(fieldId) {
+        if (confirm("Are you sure you want to delete this field?")) {
+          customFields = customFields.filter((f) => f.fieldId !== fieldId);
+          renderCustomFields();
+        }
+      }
+
+      // Close modal when clicking outside
+      document
+        .getElementById("createFieldModal")
+        .addEventListener("click", function (e) {
+          if (e.target === this) {
+            closeCreateFieldModal();
+          }
+        });
+
+      // Tab switching
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", function () {
+          document
+            .querySelectorAll(".tab")
+            .forEach((t) => t.classList.remove("active"));
+          this.classList.add("active");
+
+          // In a real implementation, you would filter fields by entity type
+          console.log("Switched to tab:", this.textContent.trim());
+        });
+      });
+    </script>
+  </body>
+</html>

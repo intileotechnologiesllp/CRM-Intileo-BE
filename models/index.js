@@ -5,6 +5,8 @@ const Organization = require("./leads/leadOrganizationModel");
 const MasterUser = require("./master/masterUserModel");
 const Activity = require("./activity/activityModel");
 const Deal = require("./deals/dealsModels");
+const CustomField = require("./customFieldModel");
+const CustomFieldValue = require("./customFieldValueModel");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -57,6 +59,13 @@ Activity.belongsTo(Organization, {
 // MasterUser.hasMany(OrganizationNote, { foreignKey: "createdBy", as: "organizationNotes" });
 // OrganizationNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
 
+// Custom Field associations
+CustomField.hasMany(CustomFieldValue, { foreignKey: "fieldId", as: "values" });
+CustomFieldValue.belongsTo(CustomField, {
+  foreignKey: "fieldId",
+  as: "CustomField",
+});
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -64,4 +73,6 @@ module.exports = {
   Organization,
   Activity,
   Deal,
+  CustomField,
+  CustomFieldValue,
 };

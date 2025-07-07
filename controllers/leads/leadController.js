@@ -18,6 +18,8 @@ const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 const Deal = require("../../models/deals/dealsModels"); // Import Deal model
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
 
 const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
@@ -45,6 +47,7 @@ exports.createLead = async (req, res) => {
     SBUClass,
     numberOfReportsPrepared,
     emailID, // Added emailID to the request body
+    customFields, // Add custom fields to request body
   } = req.body;
 
   console.log("Request body email ID:", req.body.emailID);
@@ -235,6 +238,46 @@ exports.createLead = async (req, res) => {
       responsiblePerson: req.adminId,
       sourceOrgin: sourceOrgin,
     });
+
+    // Handle custom fields if provided
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        for (const [fieldId, value] of Object.entries(customFields)) {
+          // Verify the custom field exists and belongs to the user
+          const customField = await CustomField.findOne({
+            where: {
+              fieldId,
+              masterUserID: req.adminId,
+              entityType: "lead",
+              isActive: true,
+            },
+          });
+
+          if (
+            customField &&
+            value !== null &&
+            value !== undefined &&
+            value !== ""
+          ) {
+            await CustomFieldValue.create({
+              fieldId,
+              entityId: lead.leadId,
+              entityType: "lead",
+              value: value,
+              masterUserID: req.adminId,
+            });
+          }
+        }
+        console.log(
+          `Saved ${
+            Object.keys(customFields).length
+          } custom field values for lead ${lead.leadId}`
+        );
+      } catch (customFieldError) {
+        console.error("Error saving custom fields:", customFieldError);
+        // Don't fail the lead creation, just log the error
+      }
+    }
 
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
@@ -681,6 +724,38 @@ exports.getLeads = async (req, res) => {
 
     console.log("→ Query executed. Total records:", leads.count);
 
+    // Get custom field values for all leads
+    const leadIds = leads.rows.map((lead) => lead.leadId);
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: leadIds,
+        entityType: "lead",
+        masterUserID: req.adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: { isActive: true },
+          required: true,
+        },
+      ],
+    });
+
+    // Group custom field values by leadId
+    const customFieldsByLead = {};
+    customFieldValues.forEach((value) => {
+      if (!customFieldsByLead[value.entityId]) {
+        customFieldsByLead[value.entityId] = {};
+      }
+      customFieldsByLead[value.entityId][value.CustomField.fieldName] = {
+        label: value.CustomField.fieldLabel,
+        value: value.value,
+        type: value.CustomField.fieldType,
+        isImportant: value.CustomField.isImportant,
+      };
+    });
+
     const flatLeads = leads.rows.map((lead) => {
       const leadObj = lead.toJSON();
       // Overwrite ownerName with the latest Owner.name if present
@@ -694,6 +769,10 @@ exports.getLeads = async (req, res) => {
         Object.assign(leadObj, leadObj.details);
         delete leadObj.details;
       }
+
+      // Add custom fields
+      leadObj.customFields = customFieldsByLead[leadObj.leadId] || {};
+
       return leadObj;
     });
     console.log(leads.rows, "leads rows after flattening");
@@ -820,7 +899,7 @@ exports.getLeads = async (req, res) => {
       leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
       persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
     }));
-console.log(req.role, "role of the user............");
+    console.log(req.role, "role of the user............");
 
     res.status(200).json({
       message: "Leads fetched successfully",
@@ -834,7 +913,6 @@ console.log(req.role, "role of the user............");
       role: req.role, // Include user role in the response
       // leadDetails
     });
-    
   } catch (error) {
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication

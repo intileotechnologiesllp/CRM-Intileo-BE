@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pipedrive-Style Field Organization</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background-color: #f5f5f7;
+        margin: 0;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+        padding: 24px;
+      }
+
+      .header {
+        margin-bottom: 32px;
+      }
+
+      .header h1 {
+        color: #1a1a1a;
+        margin: 0 0 8px 0;
+        font-size: 24px;
+        font-weight: 600;
+      }
+
+      .header .subtitle {
+        color: #6b6b6b;
+        font-size: 14px;
+        margin-bottom: 16px;
+      }
+
+      .stats {
+        background: #f8f9fa;
+        padding: 12px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        color: #6b6b6b;
+        margin-bottom: 20px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 24px;
+        margin-bottom: 32px;
+        border-bottom: 2px solid #e5e5e5;
+      }
+
+      .tab {
+        padding: 12px 0;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+        color: #6b6b6b;
+        font-weight: 500;
+      }
+
+      .tab.active {
+        color: #0066cc;
+        border-bottom-color: #0066cc;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 32px;
+      }
+
+      .btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: #0066cc;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: #0052a3;
+      }
+
+      .btn-secondary {
+        background: #f0f0f0;
+        color: #1a1a1a;
+        border: 1px solid #d0d0d0;
+      }
+
+      .btn-secondary:hover {
+        background: #e0e0e0;
+      }
+
+      .field-section {
+        margin-bottom: 24px;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        background: white;
+      }
+
+      .section-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid #e5e5e5;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .section-header:hover {
+        background-color: #f8f9fa;
+      }
+
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .section-icon {
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6b6b6b;
+      }
+
+      .section-name {
+        font-weight: 600;
+        color: #1a1a1a;
+      }
+
+      .field-count {
+        background: #f0f0f0;
+        color: #6b6b6b;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .toggle-arrow {
+        transition: transform 0.2s;
+      }
+
+      .toggle-arrow.expanded {
+        transform: rotate(90deg);
+      }
+
+      .section-content {
+        padding: 16px 20px;
+        display: none;
+      }
+
+      .section-content.expanded {
+        display: block;
+      }
+
+      .field-item {
+        display: flex;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #f0f0f0;
+      }
+
+      .field-item:last-child {
+        border-bottom: none;
+      }
+
+      .field-icon {
+        width: 24px;
+        height: 24px;
+        margin-right: 12px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        color: #6b6b6b;
+      }
+
+      .field-info {
+        flex: 1;
+      }
+
+      .field-name {
+        font-weight: 500;
+        color: #1a1a1a;
+        margin-bottom: 2px;
+      }
+
+      .field-type {
+        font-size: 12px;
+        color: #6b6b6b;
+      }
+
+      .field-badges {
+        display: flex;
+        gap: 8px;
+        margin-right: 12px;
+      }
+
+      .badge {
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+      }
+
+      .badge-required {
+        background: #ffe6e6;
+        color: #cc0000;
+      }
+
+      .badge-important {
+        background: #fff3cd;
+        color: #856404;
+      }
+
+      .field-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .action-btn {
+        padding: 4px 8px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 4px;
+        color: #6b6b6b;
+        font-size: 12px;
+      }
+
+      .action-btn:hover {
+        background: #f0f0f0;
+      }
+
+      .description {
+        margin-top: 16px;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        color: #6b6b6b;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .pipelines-indicator {
+        color: #0066cc;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+
+      .edit-btn {
+        color: #0066cc;
+        font-size: 12px;
+        text-decoration: none;
+      }
+
+      .edit-btn:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Data fields</h1>
+        <div class="subtitle">
+          Improve the quality of your data by choosing where certain fields
+          appear and by highlighting some as important. This includes custom
+          fields that help you tailor data to your business' needs.
+        </div>
+        <div class="stats">
+          <span id="field-stats"
+            >15/300 custom fields used (including 0/10 formula fields)</span
+          >
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="lead">🎯 Lead/deal</div>
+        <div class="tab" data-tab="person">👤 Person</div>
+        <div class="tab" data-tab="organization">🏢 Organization</div>
+        <div class="tab" data-tab="product">📦 Product</div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary">+ Custom field</button>
+        <button class="btn btn-secondary">📋 Organize fields</button>
+      </div>
+
+      <div id="fields-container">
+        <!-- Summary Section -->
+        <div class="field-section">
+          <div class="section-header" onclick="toggleSection('summary')">
+            <div class="section-title">
+              <div class="section-icon">
+                <span class="toggle-arrow">▶</span>
+              </div>
+              <div class="section-name">Summary</div>
+            </div>
+            <div class="field-count" id="summary-count">7</div>
+          </div>
+          <div class="section-content" id="summary-content">
+            <div class="field-item">
+              <div class="field-icon">$$</div>
+              <div class="field-info">
+                <div class="field-name">Value</div>
+                <div class="field-type">Monetary</div>
+              </div>
+              <div class="field-badges">
+                <span class="badge badge-required">Required</span>
+                <span class="badge badge-important">Important</span>
+              </div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">123</div>
+              <div class="field-info">
+                <div class="field-name">Probability</div>
+                <div class="field-type">Number</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">🏢</div>
+              <div class="field-info">
+                <div class="field-name">Organization</div>
+                <div class="field-type">Organization</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">👤</div>
+              <div class="field-info">
+                <div class="field-name">Contact person</div>
+                <div class="field-type">Person</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">🏷️</div>
+              <div class="field-info">
+                <div class="field-name">Label</div>
+                <div class="field-type">Multiple options</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">📅</div>
+              <div class="field-info">
+                <div class="field-name">Expected close date</div>
+                <div class="field-type">Date</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+            <div class="field-item">
+              <div class="field-icon">📧</div>
+              <div class="field-info">
+                <div class="field-name">Sequence enrollment</div>
+                <div class="field-type">Text</div>
+              </div>
+              <div class="field-badges"></div>
+              <div class="pipelines-indicator">✓</div>
+              <div class="field-actions">
+                <a href="#" class="edit-btn">Edit</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ungrouped Custom Fields Section -->
+        <div class="field-section">
+          <div class="section-header" onclick="toggleSection('ungrouped')">
+            <div class="section-title">
+              <div class="section-icon">
+                <span class="toggle-arrow">▶</span>
+              </div>
+              <div class="section-name">📋 Ungrouped custom fields</div>
+            </div>
+            <div class="field-count" id="ungrouped-count">15</div>
+          </div>
+          <div class="section-content" id="ungrouped-content">
+            <div class="description">
+              These are your custom fields that haven't been organized into
+              groups yet. You can move them to custom groups using the "Organize
+              fields" button.
+            </div>
+          </div>
+        </div>
+
+        <!-- Default Fields Section -->
+        <div class="field-section">
+          <div class="section-header" onclick="toggleSection('default')">
+            <div class="section-title">
+              <div class="section-icon">
+                <span class="toggle-arrow">▶</span>
+              </div>
+              <div class="section-name">📝 Default fields</div>
+            </div>
+            <div class="field-count" id="default-count">8</div>
+          </div>
+          <div class="section-content" id="default-content">
+            <div class="description">
+              These are the standard fields provided by your CRM. They come
+              built-in and are integrated into core features like pipelines and
+              reporting.
+            </div>
+          </div>
+        </div>
+
+        <!-- System Fields Section -->
+        <div class="field-section">
+          <div class="section-header" onclick="toggleSection('system')">
+            <div class="section-title">
+              <div class="section-icon">
+                <span class="toggle-arrow">▶</span>
+              </div>
+              <div class="section-name">⚙️ System fields</div>
+            </div>
+            <div class="field-count" id="system-count">9</div>
+          </div>
+          <div class="section-content" id="system-content">
+            <div class="description">
+              These are read-only fields managed by the system for tracking and
+              automation purposes. They include creation dates, modification
+              times, and other metadata.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function toggleSection(sectionId) {
+        const content = document.getElementById(sectionId + "-content");
+        const arrow = document.querySelector(
+          `[onclick="toggleSection('${sectionId}')"] .toggle-arrow`
+        );
+
+        if (content.classList.contains("expanded")) {
+          content.classList.remove("expanded");
+          arrow.classList.remove("expanded");
+        } else {
+          content.classList.add("expanded");
+          arrow.classList.add("expanded");
+        }
+      }
+
+      // Tab switching
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", function () {
+          document
+            .querySelectorAll(".tab")
+            .forEach((t) => t.classList.remove("active"));
+          this.classList.add("active");
+
+          // Here you would typically load fields for the selected entity type
+          loadFieldsForEntity(this.dataset.tab);
+        });
+      });
+
+      function loadFieldsForEntity(entityType) {
+        console.log(`Loading fields for ${entityType}`);
+        // This would make an API call to load fields for the selected entity type
+        // fetch(`/api/custom-fields?entityType=${entityType}`)
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         updateFieldsDisplay(data.organizedFields);
+        //     });
+      }
+
+      function updateFieldsDisplay(organizedFields) {
+        // Update the counts
+        document.getElementById("summary-count").textContent =
+          organizedFields.summary.length;
+        document.getElementById("ungrouped-count").textContent =
+          organizedFields.ungroupedCustomFields.length;
+        document.getElementById("default-count").textContent =
+          organizedFields.defaultFields.length;
+        document.getElementById("system-count").textContent =
+          organizedFields.systemFields.length;
+
+        // Update field stats
+        const totalCustomFields =
+          organizedFields.ungroupedCustomFields.length +
+          Object.values(organizedFields.customGroups).flat().length;
+        document.getElementById(
+          "field-stats"
+        ).textContent = `${totalCustomFields}/300 custom fields used (including 0/10 formula fields)`;
+      }
+
+      // Initialize with expanded summary section
+      toggleSection("summary");
+    </script>
+  </body>
+</html>
