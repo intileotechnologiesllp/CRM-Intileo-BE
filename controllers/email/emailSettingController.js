@@ -405,7 +405,9 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
       const refs = email.references.split(" ");
       for (const ref of refs) {
         if (ref && !collected.has(ref)) {
-          thread = thread.concat(await getFullThread(ref, EmailModel, collected));
+          thread = thread.concat(
+            await getFullThread(ref, EmailModel, collected)
+          );
         }
       }
     }
@@ -629,9 +631,14 @@ exports.fetchSyncEmails = async (req, res) => {
             }
           }
           // Sort by createdAt (oldest first)
-          uniqueThread.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          uniqueThread.sort(
+            (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+          );
           // Optionally, you can log the thread for debugging
-          console.debug(`Full thread for messageId ${emailData.messageId}:`, uniqueThread.map(e => e.messageId));
+          console.debug(
+            `Full thread for messageId ${emailData.messageId}:`,
+            uniqueThread.map((e) => e.messageId)
+          );
           // You can now use uniqueThread as the full conversation
         }
       }
@@ -1039,7 +1046,7 @@ exports.getEmailAutocomplete = async (req, res) => {
 };
 
 exports.downloadAttachment = async (req, res) => {
-  const { emailID, filename } = req.params;
+  const { emailID, filename } = req.query;
   const masterUserID = req.adminId;
   console.debug(
     `[downloadAttachment] emailID: ${emailID}, filename: ${filename}, masterUserID: ${masterUserID}`
@@ -1190,7 +1197,9 @@ exports.downloadAttachment = async (req, res) => {
       try {
         const fetchOptions = { bodies: "", struct: true };
         const allMessages = await connection.search(["ALL"], fetchOptions);
-        console.debug(`[downloadAttachment] Deep scan: total messages in folder: ${allMessages.length}`);
+        console.debug(
+          `[downloadAttachment] Deep scan: total messages in folder: ${allMessages.length}`
+        );
         for (const msg of allMessages) {
           const rawBodyPart = msg.parts.find((part) => part.which === "");
           const rawBody = rawBodyPart ? rawBodyPart.body : null;
@@ -1198,10 +1207,18 @@ exports.downloadAttachment = async (req, res) => {
           const parsedEmail = await simpleParser(rawBody);
           // Log messageId and all attachment filenames for diagnostics
           const msgId = parsedEmail.messageId || null;
-          const attNames = (parsedEmail.attachments || []).map(a => a.filename);
-          deepScanLog.push({ uid: msg.attributes.uid, messageId: msgId, attachments: attNames });
+          const attNames = (parsedEmail.attachments || []).map(
+            (a) => a.filename
+          );
+          deepScanLog.push({
+            uid: msg.attributes.uid,
+            messageId: msgId,
+            attachments: attNames,
+          });
           if (attNames.includes(filename)) {
-            foundAttachment = parsedEmail.attachments.find(a => a.filename === filename);
+            foundAttachment = parsedEmail.attachments.find(
+              (a) => a.filename === filename
+            );
             foundMessage = msg;
             console.debug(
               `[downloadAttachment] Deep scan: found attachment in message UID ${msg.attributes.uid}`
@@ -1210,20 +1227,19 @@ exports.downloadAttachment = async (req, res) => {
           }
         }
         // Log all messageIds and attachment filenames found during the deep scan
-        console.debug("[downloadAttachment] Deep scan log:", JSON.stringify(deepScanLog, null, 2));
+        console.debug(
+          "[downloadAttachment] Deep scan log:",
+          JSON.stringify(deepScanLog, null, 2)
+        );
         if (!foundAttachment) {
           connection.end();
           return res.status(404).json({
-            message:
-              "Attachment not found in any email in folder (deep scan).",
+            message: "Attachment not found in any email in folder (deep scan).",
             deepScanLog,
           });
         }
       } catch (deepErr) {
-        console.error(
-          "[downloadAttachment] Deep scan failed:",
-          deepErr
-        );
+        console.error("[downloadAttachment] Deep scan failed:", deepErr);
         connection.end();
         return res.status(500).json({
           message: "Deep scan failed.",
@@ -1250,7 +1266,9 @@ exports.downloadAttachment = async (req, res) => {
         );
         return res
           .status(404)
-          .json({ message: "Attachment not found in email (after messageId search)." });
+          .json({
+            message: "Attachment not found in email (after messageId search).",
+          });
       }
     }
 
@@ -1415,7 +1433,10 @@ exports.diagnoseAttachment = async (req, res) => {
       try {
         const fetchOptions = { bodies: "", struct: true };
         const allMessages = await connection.search(["ALL"], fetchOptions);
-        diagnostics.push({ step: "deep_scan_total_messages", count: allMessages.length });
+        diagnostics.push({
+          step: "deep_scan_total_messages",
+          count: allMessages.length,
+        });
         let foundAttachment = null;
         let foundMessage = null;
         const deepScanLog = [];
@@ -1426,10 +1447,18 @@ exports.diagnoseAttachment = async (req, res) => {
           const parsedEmail = await simpleParser(rawBody);
           // Log messageId and all attachment filenames for diagnostics
           const msgId = parsedEmail.messageId || null;
-          const attNames = (parsedEmail.attachments || []).map(a => a.filename);
-          deepScanLog.push({ uid: msg.attributes.uid, messageId: msgId, attachments: attNames });
+          const attNames = (parsedEmail.attachments || []).map(
+            (a) => a.filename
+          );
+          deepScanLog.push({
+            uid: msg.attributes.uid,
+            messageId: msgId,
+            attachments: attNames,
+          });
           if (attNames.includes(filename)) {
-            foundAttachment = parsedEmail.attachments.find(a => a.filename === filename);
+            foundAttachment = parsedEmail.attachments.find(
+              (a) => a.filename === filename
+            );
             foundMessage = msg;
             diagnostics.push({
               step: "deep_fallback_found",
