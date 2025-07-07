@@ -21,27 +21,34 @@ const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // I
 const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
-const historyRoutes=require("./routes/reports/historyRoutes"); // Import history routes
+const historyRoutes = require("./routes/reports/historyRoutes"); // Import history routes
 const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes");
-const leadColumnRoutes=require("./routes/admin/masters/leadColumn/leadColumn.js") // Import privileges routes
+const leadColumnRoutes = require("./routes/admin/masters/leadColumn/leadColumn.js"); // Import privileges routes
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
-const emailSettingController=require("./routes/email/emailSettingRoutes.js")
+const emailSettingController = require("./routes/email/emailSettingRoutes.js");
 const Email = require("./models/email/emailModel"); // Import Email model
 const leadFilterRoutes = require("./routes/leads/leadFilterRoutes"); // Import lead filter routes
-const leadColumnController=require("./routes/leads/leadColumnRoutes.js"); // Import lead column controller
+const leadColumnController = require("./routes/leads/leadColumnRoutes.js"); // Import lead column controller
 const leadContactsRoutes = require("./routes/leads/leadContactsRoutes.js"); // Import lead contacts routes
 const dealRoutes = require("./routes/deals/dealsRoutes.js"); // Import deal routes
 const activityRoutes = require("./routes/activity/activityRoutes.js"); // Import activity routes
 const insightRoutes = require("./routes/insight/insightRoutes.js"); // Import insight routes
+const customFieldRoutes = require("./routes/customFieldRoutes.js"); // Import custom field routes
+const personRoutes = require("./routes/personRoutes.js"); // Import person routes
+const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
-require("./utils/cronJob.js")
-require('./utils/emailQueueWorker');
+require("./utils/cronJob.js");
+require("./utils/emailQueueWorker");
 app.use(express.static(path.join(__dirname, "public")));
 // Serve static files from the "uploads" directory
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-console.log("Serving static files from:", path.join(__dirname, "public"),"........//.....//")
+console.log(
+  "Serving static files from:",
+  path.join(__dirname, "public"),
+  "........//.....//"
+);
 const cors = require("cors");
 app.use(cors());
 // Middleware
@@ -80,16 +87,18 @@ app.use("/api/lead-contacts", leadContactsRoutes); // Register lead contacts rou
 app.use("/api/deals", dealRoutes); // Register deal routes
 app.use("/api/activities", activityRoutes); // Register activity routes
 app.use("/api/insights", insightRoutes); // Register insight routes
+app.use("/api/custom-fields", customFieldRoutes); // Register custom field routes
+app.use("/api/persons", personRoutes); // Register person routes
+app.use("/api/organizations-new", organizationRoutesNew); // Register organization routes (new)
+app.use("/api/persons", personRoutes); // Register person routes
+app.use("/api/organizations-new", organizationRoutesNew); // Register new organization routes
 
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
   try {
     // Update the `isOpened` field for the email with the given `tempMessageId`
-    await Email.update(
-      { isOpened: true },
-      { where: { tempMessageId } }
-    );
+    await Email.update({ isOpened: true }, { where: { tempMessageId } });
 
     // Return a 1x1 transparent pixel
     const pixel = Buffer.from(
@@ -111,10 +120,7 @@ app.get("/track/click", async (req, res) => {
 
   try {
     // Update the `isClicked` field for the email with the given `tempMessageId`
-    await Email.update(
-      { isClicked: true },
-      { where: { tempMessageId } }
-    );
+    await Email.update({ isClicked: true }, { where: { tempMessageId } });
 
     // Redirect to the original URL
     res.redirect(url);
