@@ -50,12 +50,25 @@ exports.createLead = async (req, res) => {
     customFields, // Add custom fields to request body
   } = req.body;
 
-  console.log("Request body email ID:", req.body.emailID);
   console.log("Request body sourceOrgin:", sourceOrgin);
+
+  // Log emailID only when it's relevant (sourceOrgin is 0)
+  if (sourceOrgin === 0 || sourceOrgin === "0") {
+    console.log("Request body email ID:", req.body.emailID);
+  }
+
   // --- Add validation here ---
   if (!contactPerson || !organization || !title || !email) {
     return res.status(400).json({
       message: "contactPerson, organization, title, and email are required.",
+    });
+  }
+
+  // Validate emailID is required when sourceOrgin is 0 (email-created lead)
+  if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
+    return res.status(400).json({
+      message:
+        "emailID is required when sourceOrgin is 0 (email-created lead).",
     });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
