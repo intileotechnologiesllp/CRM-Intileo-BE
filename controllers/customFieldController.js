@@ -265,6 +265,53 @@ exports.getCustomFields = async (req, res) => {
     customFields.forEach((field) => {
       const fieldObj = field.toJSON();
 
+      // Parse JSON fields that might be stored as strings
+      const parsedUserSpecs = (() => {
+        try {
+          return typeof field.userSpecifications === "string"
+            ? JSON.parse(field.userSpecifications)
+            : field.userSpecifications || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      const parsedQualityRules = (() => {
+        try {
+          return typeof field.qualityRules === "string"
+            ? JSON.parse(field.qualityRules)
+            : field.qualityRules || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      const parsedPipelineRestrictions = (() => {
+        try {
+          return typeof field.pipelineRestrictions === "string"
+            ? JSON.parse(field.pipelineRestrictions)
+            : field.pipelineRestrictions || "all";
+        } catch (e) {
+          return "all";
+        }
+      })();
+
+      const parsedPlacesWhereShown = (() => {
+        try {
+          return typeof field.placesWhereShown === "string"
+            ? JSON.parse(field.placesWhereShown)
+            : field.placesWhereShown || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      // Update fieldObj with parsed values
+      fieldObj.userSpecifications = parsedUserSpecs;
+      fieldObj.qualityRules = parsedQualityRules;
+      fieldObj.pipelineRestrictions = parsedPipelineRestrictions;
+      fieldObj.placesWhereShown = parsedPlacesWhereShown;
+
       // Enhance field object with UI configuration and ensure new field structure
       fieldObj.uiConfiguration = {
         showInForms: {
@@ -273,24 +320,27 @@ exports.getCustomFields = async (req, res) => {
           listView: field.showInListView ?? false,
         },
         permissions: {
-          editingUsers: field.userSpecifications?.editingUsers || "all",
-          viewingUsers: field.userSpecifications?.viewingUsers || "all",
+          editingUsers: parsedUserSpecs.editingUsers || "all",
+          viewingUsers: parsedUserSpecs.viewingUsers || "all",
         },
-        pipelines: field.pipelineRestrictions || "all",
+        pipelines: parsedPipelineRestrictions,
         qualityRules: {
           required: field.isRequired || false,
           important: field.isImportant || false,
-          ...(field.qualityRules || {}),
+          ...parsedQualityRules,
         },
       };
 
       // Ensure places where shown structure includes new field names
-      if (!fieldObj.placesWhereShown) {
+      if (
+        !fieldObj.placesWhereShown ||
+        Object.keys(fieldObj.placesWhereShown).length === 0
+      ) {
         fieldObj.placesWhereShown = {
           leadView: field.leadView ?? field.showInAddView ?? false,
           dealView: field.dealView ?? field.showInDetailView ?? false,
           listView: field.showInListView ?? false,
-          pipelines: field.pipelineRestrictions || "all",
+          pipelines: parsedPipelineRestrictions,
         };
       } else if (
         !fieldObj.placesWhereShown.leadView &&
@@ -311,8 +361,7 @@ exports.getCustomFields = async (req, res) => {
           listView:
             fieldObj.placesWhereShown.listView ?? field.showInListView ?? false,
           pipelines:
-            fieldObj.placesWhereShown.pipelines ??
-            (field.pipelineRestrictions || "all"),
+            fieldObj.placesWhereShown.pipelines ?? parsedPipelineRestrictions,
         };
       }
 
@@ -347,6 +396,53 @@ exports.getCustomFields = async (req, res) => {
     const enhancedCustomFields = customFields.map((field) => {
       const fieldObj = field.toJSON();
 
+      // Parse JSON fields that might be stored as strings
+      const parsedUserSpecs = (() => {
+        try {
+          return typeof field.userSpecifications === "string"
+            ? JSON.parse(field.userSpecifications)
+            : field.userSpecifications || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      const parsedQualityRules = (() => {
+        try {
+          return typeof field.qualityRules === "string"
+            ? JSON.parse(field.qualityRules)
+            : field.qualityRules || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      const parsedPipelineRestrictions = (() => {
+        try {
+          return typeof field.pipelineRestrictions === "string"
+            ? JSON.parse(field.pipelineRestrictions)
+            : field.pipelineRestrictions || "all";
+        } catch (e) {
+          return "all";
+        }
+      })();
+
+      const parsedPlacesWhereShown = (() => {
+        try {
+          return typeof field.placesWhereShown === "string"
+            ? JSON.parse(field.placesWhereShown)
+            : field.placesWhereShown || {};
+        } catch (e) {
+          return {};
+        }
+      })();
+
+      // Update fieldObj with parsed values
+      fieldObj.userSpecifications = parsedUserSpecs;
+      fieldObj.qualityRules = parsedQualityRules;
+      fieldObj.pipelineRestrictions = parsedPipelineRestrictions;
+      fieldObj.placesWhereShown = parsedPlacesWhereShown;
+
       // Add UI configuration for consistency with create/update responses
       fieldObj.uiConfiguration = {
         showInForms: {
@@ -355,28 +451,27 @@ exports.getCustomFields = async (req, res) => {
           listView: field.showInListView ?? false,
         },
         permissions: {
-          editingUsers: field.userSpecifications?.editingUsers || "all",
-          viewingUsers: field.userSpecifications?.viewingUsers || "all",
+          editingUsers: parsedUserSpecs.editingUsers || "all",
+          viewingUsers: parsedUserSpecs.viewingUsers || "all",
         },
-        pipelines: field.pipelineRestrictions || "all",
+        pipelines: parsedPipelineRestrictions,
         qualityRules: {
           required: field.isRequired || false,
           important: field.isImportant || false,
-          ...(field.qualityRules || {}),
+          ...parsedQualityRules,
         },
       };
 
       // Ensure places where shown structure is consistent
       if (
         !fieldObj.placesWhereShown ||
-        (!fieldObj.placesWhereShown.leadView &&
-          !fieldObj.placesWhereShown.dealView)
+        Object.keys(fieldObj.placesWhereShown).length === 0
       ) {
         fieldObj.placesWhereShown = {
           leadView: field.leadView ?? field.showInAddView ?? false,
           dealView: field.dealView ?? field.showInDetailView ?? false,
           listView: field.showInListView ?? false,
-          pipelines: field.pipelineRestrictions || "all",
+          pipelines: parsedPipelineRestrictions,
         };
       }
 
