@@ -485,19 +485,19 @@ exports.getCustomFields = async (req, res) => {
     res.status(200).json({
       message: "Custom fields retrieved successfully.",
       customFields: enhancedCustomFields,
-      organizedFields,
+      // organizedFields,
       fieldCounts,
-      // Summary statistics
-      statistics: {
-        totalFields: customFields.length,
-        activeFields: customFields.filter((f) => f.isActive).length,
-        requiredFields: customFields.filter((f) => f.isRequired).length,
-        importantFields: customFields.filter((f) => f.isImportant).length,
-        fieldsByType: customFields.reduce((acc, field) => {
-          acc[field.fieldType] = (acc[field.fieldType] || 0) + 1;
-          return acc;
-        }, {}),
-      },
+      // // Summary statistics
+      // statistics: {
+      //   totalFields: customFields.length,
+      //   activeFields: customFields.filter((f) => f.isActive).length,
+      //   requiredFields: customFields.filter((f) => f.isRequired).length,
+      //   importantFields: customFields.filter((f) => f.isImportant).length,
+      //   fieldsByType: customFields.reduce((acc, field) => {
+      //     acc[field.fieldType] = (acc[field.fieldType] || 0) + 1;
+      //     return acc;
+      //   }, {}),
+      // },
       // UI metadata
       // uiMetadata: {
       //   supportedFieldTypes: [
