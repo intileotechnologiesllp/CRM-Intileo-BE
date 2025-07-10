@@ -1773,7 +1773,7 @@ exports.getAllLeadDetails = async (req, res) => {
       include: [
         {
           model: CustomField,
-          as: "customField",
+          as: "CustomField",
           attributes: ["fieldId", "fieldName", "fieldType", "isRequired"],
         },
       ],
@@ -1783,9 +1783,9 @@ exports.getAllLeadDetails = async (req, res) => {
     const customFields = {};
     customFieldValues.forEach((cfv) => {
       customFields[cfv.fieldId] = {
-        fieldName: cfv.customField.fieldName,
-        fieldType: cfv.customField.fieldType,
-        isRequired: cfv.customField.isRequired,
+        fieldName: cfv.CustomField.fieldName,
+        fieldType: cfv.CustomField.fieldType,
+        isRequired: cfv.CustomField.isRequired,
         value: cfv.value,
       };
     });
