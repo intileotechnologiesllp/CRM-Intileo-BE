@@ -3538,7 +3538,7 @@ exports.composeEmail = [
         bcc: finalBccValue,
         subject: finalSubject,
         body: finalBody,
-        folder: "sent",
+        folder: "outbox", // Changed from "sent" to "outbox" - will be updated to "sent" after successful sending
         createdAt: new Date(),
         masterUserID,
         tempMessageId,
