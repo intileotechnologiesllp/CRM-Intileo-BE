@@ -229,7 +229,10 @@ exports.getCustomFields = async (req, res) => {
     };
 
     if (entityType) {
-      whereClause.entityType = entityType;
+      // Include fields specific to this entity type AND fields that work for both
+      whereClause.entityType = {
+        [Op.in]: [entityType, "both"],
+      };
     }
 
     if (includeInactive !== "true") {
@@ -406,24 +409,128 @@ exports.getCustomFields = async (req, res) => {
           "text",
           "textarea",
           "number",
+          "decimal",
           "email",
           "phone",
           "url",
-          "password",
-          "select",
-          "multiselect",
-          "radio",
-          "checkbox",
-          "boolean",
           "date",
           "datetime",
-          "time",
-          "currency",
+          "select",
+          "multiselect",
+          "checkbox",
+          "radio",
           "file",
-          "user",
+          "currency",
           "organization",
           "person",
         ],
+        fieldTypeDetails: {
+          text: {
+            label: "Text",
+            description: "Single line text input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          textarea: {
+            label: "Textarea",
+            description: "Multi-line text input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          number: {
+            label: "Number",
+            description: "Whole number input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          decimal: {
+            label: "Decimal",
+            description: "Decimal number input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          email: {
+            label: "Email",
+            description: "Email address input with validation",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          phone: {
+            label: "Phone",
+            description: "Phone number input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          url: {
+            label: "URL",
+            description: "Website URL input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          date: {
+            label: "Date",
+            description: "Date picker",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          datetime: {
+            label: "Date & Time",
+            description: "Date and time picker",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          select: {
+            label: "Single Select",
+            description: "Dropdown with single selection",
+            supportsOptions: true,
+            supportsValidation: true,
+            requiresOptions: true,
+          },
+          multiselect: {
+            label: "Multi Select",
+            description: "Dropdown with multiple selections",
+            supportsOptions: true,
+            supportsValidation: true,
+            requiresOptions: true,
+          },
+          checkbox: {
+            label: "Checkbox",
+            description: "Single checkbox (true/false)",
+            supportsOptions: false,
+            supportsValidation: false,
+          },
+          radio: {
+            label: "Radio Button",
+            description: "Radio button group",
+            supportsOptions: true,
+            supportsValidation: true,
+            requiresOptions: true,
+          },
+          file: {
+            label: "File Upload",
+            description: "File upload field",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          currency: {
+            label: "Currency",
+            description: "Currency amount input",
+            supportsOptions: false,
+            supportsValidation: true,
+          },
+          organization: {
+            label: "Organization",
+            description: "Link to organization entity",
+            supportsOptions: false,
+            supportsValidation: false,
+          },
+          person: {
+            label: "Person",
+            description: "Link to person entity",
+            supportsOptions: false,
+            supportsValidation: false,
+          },
+        },
         placesWhereShownOptions: {
           leadView: "Show in lead creation/edit forms",
           dealView: "Show in deal creation/edit forms",
@@ -433,6 +540,39 @@ exports.getCustomFields = async (req, res) => {
         permissionOptions: {
           editingUsers: ["all", "specific", "owner_only"],
           viewingUsers: ["all", "specific", "owner_only"],
+        },
+        categoryOptions: [
+          "Summary",
+          "Details",
+          "Business Information",
+          "Contact Information",
+          "Location Information",
+          "Service Information",
+          "Source Information",
+          "Additional Information",
+          "Lead Details",
+          "Custom",
+        ],
+        validationRulesOptions: {
+          required: "Field is required",
+          minLength: "Minimum length validation",
+          maxLength: "Maximum length validation",
+          pattern: "Regular expression pattern",
+          unique: "Field value must be unique",
+          email: "Valid email format",
+          url: "Valid URL format",
+          phone: "Valid phone number format",
+          dateRange: "Date must be within range",
+          numberRange: "Number must be within range",
+        },
+        qualityRulesOptions: {
+          required: "Mark field as required",
+          important: "Mark field as important/summary",
+          unique: "Ensure field value is unique",
+          minLength: "Minimum character length",
+          maxLength: "Maximum character length",
+          pattern: "Custom validation pattern",
+          customMessage: "Custom validation message",
         },
       },
       // Legacy support for existing code
@@ -1166,7 +1306,12 @@ exports.getCustomFieldsWithStats = async (req, res) => {
 
   try {
     const customFields = await CustomField.findAll({
-      where: { entityType, masterUserID },
+      where: {
+        entityType: {
+          [Op.in]: [entityType, "both"],
+        },
+        masterUserID,
+      },
       include: [
         {
           model: CustomFieldValue,
@@ -1229,7 +1374,13 @@ exports.getFieldGroups = async (req, res) => {
 
   try {
     const fieldGroups = await CustomField.findAll({
-      where: { entityType, masterUserID, isActive: true },
+      where: {
+        entityType: {
+          [Op.in]: [entityType, "both"],
+        },
+        masterUserID,
+        isActive: true,
+      },
       attributes: ["fieldGroup"],
       group: ["fieldGroup"],
       having: sequelize.where(sequelize.col("fieldGroup"), "IS NOT", null),
