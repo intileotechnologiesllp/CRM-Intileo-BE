@@ -3538,7 +3538,7 @@ exports.composeEmail = [
         bcc: finalBccValue,
         subject: finalSubject,
         body: finalBody,
-        folder: "outbox", // Changed from "sent" to "outbox" - will be updated to "sent" after successful sending
+        folder: "sent", // Will be set when saved in queue worker
         createdAt: new Date(),
         masterUserID,
         tempMessageId,
@@ -3547,17 +3547,8 @@ exports.composeEmail = [
         // isShared: isShared === true || isShared === "true", // ensure boolean
       };
 
-      // Save the email to database first to get emailID
-      const savedEmail = await Email.create(emailData);
-
-      // Save attachments to database for regular emails
-      if (req.files && req.files.length > 0) {
-        await saveUserUploadedAttachments(req.files, savedEmail.emailID);
-      }
-
-      // Update emailData with the actual emailID before sending to queue
-      emailData.emailID = savedEmail.emailID;
-
+      // Don't save to database here - let the queue worker handle it
+      // Just send the email data to the queue for processing
       await publishToQueue("EMAIL_QUEUE", emailData);
       // }
 
