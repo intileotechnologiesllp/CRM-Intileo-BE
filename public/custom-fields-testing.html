@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Fields API Testing Interface</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 10px;
+      }
+
+      .header p {
+        font-size: 1.1rem;
+        opacity: 0.9;
+      }
+
+      .content {
+        padding: 30px;
+      }
+
+      .config-section {
+        background: #f8f9fa;
+        padding: 25px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+        border-left: 5px solid #007bff;
+      }
+
+      .config-section h3 {
+        color: #007bff;
+        margin-bottom: 15px;
+        font-size: 1.3rem;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      .form-group input,
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.3s ease;
+      }
+
+      .form-group input:focus,
+      .form-group select:focus,
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+      }
+
+      .btn {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        border: none;
+        padding: 12px 25px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        margin-right: 10px;
+        margin-bottom: 10px;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+      }
+
+      .btn-secondary {
+        background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+      }
+
+      .btn-secondary:hover {
+        box-shadow: 0 5px 15px rgba(108, 117, 125, 0.3);
+      }
+
+      .btn-danger {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+      }
+
+      .btn-danger:hover {
+        box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
+      }
+
+      .test-section {
+        margin-bottom: 30px;
+        padding: 25px;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        background: #ffffff;
+      }
+
+      .test-section h3 {
+        color: #495057;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #e9ecef;
+      }
+
+      .response-container {
+        margin-top: 20px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 5px solid #17a2b8;
+      }
+
+      .response-container h4 {
+        color: #17a2b8;
+        margin-bottom: 15px;
+      }
+
+      .response-content {
+        background: #2d3748;
+        color: #e2e8f0;
+        padding: 15px;
+        border-radius: 6px;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .status-indicator {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+
+      .status-success {
+        background: #d4edda;
+        color: #155724;
+      }
+
+      .status-error {
+        background: #f8d7da;
+        color: #721c24;
+      }
+
+      .endpoints-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-top: 30px;
+      }
+
+      .endpoint-card {
+        background: white;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 20px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .endpoint-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      }
+
+      .endpoint-method {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+
+      .method-get {
+        background: #e3f2fd;
+        color: #1976d2;
+      }
+      .method-post {
+        background: #e8f5e8;
+        color: #388e3c;
+      }
+      .method-put {
+        background: #fff3e0;
+        color: #f57c00;
+      }
+      .method-delete {
+        background: #ffebee;
+        color: #d32f2f;
+      }
+
+      .loading {
+        display: none;
+        text-align: center;
+        padding: 20px;
+      }
+
+      .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #007bff;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 10px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        font-weight: 500;
+      }
+
+      .alert-warning {
+        background: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      @media (max-width: 768px) {
+        .container {
+          margin: 10px;
+          border-radius: 10px;
+        }
+
+        .header {
+          padding: 20px;
+        }
+
+        .header h1 {
+          font-size: 2rem;
+        }
+
+        .content {
+          padding: 20px;
+        }
+
+        .endpoints-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🔧 Custom Fields API Testing</h1>
+        <p>Interactive testing interface for the Custom Fields API</p>
+      </div>
+
+      <div class="content">
+        <!-- Configuration Section -->
+        <div class="config-section">
+          <h3>🔑 API Configuration</h3>
+          <div class="alert alert-warning">
+            <strong>⚠️ Important:</strong> Make sure your CRM server is running
+            and you have a valid authentication token.
+          </div>
+
+          <div class="form-group">
+            <label for="baseUrl">Base URL:</label>
+            <input
+              type="text"
+              id="baseUrl"
+              value="http://localhost:3000/api/custom-fields"
+              placeholder="http://localhost:3000/api/custom-fields"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="authToken">Authentication Token:</label>
+            <input
+              type="password"
+              id="authToken"
+              placeholder="Enter your Bearer token"
+            />
+          </div>
+
+          <button class="btn" onclick="testConnection()">
+            🔗 Test Connection
+          </button>
+          <div id="connectionResult"></div>
+        </div>
+
+        <!-- Quick Tests Section -->
+        <div class="test-section">
+          <h3>🚀 Quick Tests</h3>
+
+          <div class="endpoints-grid">
+            <!-- Get All Fields -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-get">GET</span>
+              <h4>Get All Custom Fields</h4>
+              <p>Retrieve all custom fields in the system</p>
+              <button class="btn" onclick="getAllFields()">Test</button>
+            </div>
+
+            <!-- Get Organization Fields -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-get">GET</span>
+              <h4>Get Organization Fields</h4>
+              <p>Get custom fields for organizations</p>
+              <button class="btn" onclick="getOrganizationFields()">
+                Test
+              </button>
+            </div>
+
+            <!-- Create Text Field -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-post">POST</span>
+              <h4>Create Text Field</h4>
+              <p>Create a sample text field</p>
+              <button class="btn" onclick="createSampleTextField()">
+                Test
+              </button>
+            </div>
+
+            <!-- Create Picklist Field -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-post">POST</span>
+              <h4>Create Picklist Field</h4>
+              <p>Create a sample picklist field</p>
+              <button class="btn" onclick="createSamplePicklistField()">
+                Test
+              </button>
+            </div>
+
+            <!-- Get Field Statistics -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-get">GET</span>
+              <h4>Get Field Statistics</h4>
+              <p>Get usage statistics for organization fields</p>
+              <button class="btn" onclick="getFieldStatistics()">Test</button>
+            </div>
+
+            <!-- Get Hybrid Sections -->
+            <div class="endpoint-card">
+              <span class="endpoint-method method-get">GET</span>
+              <h4>Get Hybrid Sections</h4>
+              <p>Get organized field sections</p>
+              <button class="btn" onclick="getHybridSections()">Test</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom Field Creation -->
+        <div class="test-section">
+          <h3>🛠️ Create Custom Field</h3>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px">
+            <div>
+              <div class="form-group">
+                <label for="fieldName">Field Name:</label>
+                <input
+                  type="text"
+                  id="fieldName"
+                  placeholder="e.g., Company Size"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="fieldKey">Field Key:</label>
+                <input
+                  type="text"
+                  id="fieldKey"
+                  placeholder="e.g., company_size"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="fieldType">Field Type:</label>
+                <select id="fieldType" onchange="toggleOptions()">
+                  <option value="text">Text</option>
+                  <option value="textarea">Textarea</option>
+                  <option value="number">Number</option>
+                  <option value="email">Email</option>
+                  <option value="phone">Phone</option>
+                  <option value="url">URL</option>
+                  <option value="date">Date</option>
+                  <option value="datetime">DateTime</option>
+                  <option value="picklist">Picklist</option>
+                  <option value="multipicklist">Multi-Picklist</option>
+                  <option value="checkbox">Checkbox</option>
+                  <option value="currency">Currency</option>
+                  <option value="percentage">Percentage</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="entityType">Entity Type:</label>
+                <select id="entityType">
+                  <option value="person">Person</option>
+                  <option value="organization">Organization</option>
+                  <option value="deal">Deal</option>
+                  <option value="lead">Lead</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div class="form-group">
+                <label for="fieldCategory">Category:</label>
+                <input
+                  type="text"
+                  id="fieldCategory"
+                  placeholder="e.g., Business Information"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="fieldGroup">Group:</label>
+                <input
+                  type="text"
+                  id="fieldGroup"
+                  placeholder="e.g., Details"
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="fieldDescription">Description:</label>
+                <textarea
+                  id="fieldDescription"
+                  rows="3"
+                  placeholder="Field description..."
+                ></textarea>
+              </div>
+
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" id="isRequired" /> Required Field
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div id="optionsSection" class="form-group hidden">
+            <label>Options (for picklist/multipicklist):</label>
+            <textarea
+              id="fieldOptions"
+              rows="4"
+              placeholder='[{"label": "Option 1", "value": "opt1"}, {"label": "Option 2", "value": "opt2"}]'
+            ></textarea>
+            <small>Enter JSON array of options</small>
+          </div>
+
+          <button class="btn" onclick="createCustomField()">
+            Create Field
+          </button>
+          <button class="btn btn-secondary" onclick="clearForm()">
+            Clear Form
+          </button>
+        </div>
+
+        <!-- Response Section -->
+        <div id="responseSection" class="response-container hidden">
+          <h4>📡 API Response</h4>
+          <div id="statusIndicator"></div>
+          <div id="responseContent" class="response-content"></div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <p>Making API request...</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Global configuration
+      let apiConfig = {
+        baseUrl: "",
+        authToken: "",
+        headers: {},
+      };
+
+      // Initialize
+      document.addEventListener("DOMContentLoaded", function () {
+        updateConfig();
+      });
+
+      function updateConfig() {
+        apiConfig.baseUrl = document.getElementById("baseUrl").value;
+        apiConfig.authToken = document.getElementById("authToken").value;
+        apiConfig.headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiConfig.authToken}`,
+        };
+      }
+
+      function showLoading() {
+        document.getElementById("loading").style.display = "block";
+        document.getElementById("responseSection").classList.add("hidden");
+      }
+
+      function hideLoading() {
+        document.getElementById("loading").style.display = "none";
+      }
+
+      function showResponse(response, status, isError = false) {
+        hideLoading();
+
+        const responseSection = document.getElementById("responseSection");
+        const statusIndicator = document.getElementById("statusIndicator");
+        const responseContent = document.getElementById("responseContent");
+
+        responseSection.classList.remove("hidden");
+
+        // Status indicator
+        statusIndicator.innerHTML = `<span class="status-indicator ${
+          isError ? "status-error" : "status-success"
+        }">${status}</span>`;
+
+        // Response content
+        responseContent.textContent = JSON.stringify(response, null, 2);
+
+        // Scroll to response
+        responseSection.scrollIntoView({ behavior: "smooth" });
+      }
+
+      async function makeApiRequest(method, url, body = null) {
+        updateConfig();
+
+        if (!apiConfig.authToken) {
+          alert("Please enter your authentication token first!");
+          return;
+        }
+
+        showLoading();
+
+        try {
+          const options = {
+            method: method,
+            headers: apiConfig.headers,
+          };
+
+          if (body) {
+            options.body = JSON.stringify(body);
+          }
+
+          const response = await fetch(url, options);
+          const data = await response.json();
+
+          if (response.ok) {
+            showResponse(data, `${response.status} ${response.statusText}`);
+          } else {
+            showResponse(
+              data,
+              `${response.status} ${response.statusText}`,
+              true
+            );
+          }
+        } catch (error) {
+          showResponse({ error: error.message }, "Network Error", true);
+        }
+      }
+
+      async function testConnection() {
+        updateConfig();
+
+        if (!apiConfig.authToken) {
+          document.getElementById("connectionResult").innerHTML =
+            '<div class="alert alert-warning" style="margin-top: 10px;">Please enter your authentication token first!</div>';
+          return;
+        }
+
+        try {
+          const response = await fetch(apiConfig.baseUrl, {
+            method: "GET",
+            headers: apiConfig.headers,
+          });
+
+          if (response.ok) {
+            document.getElementById("connectionResult").innerHTML =
+              '<div style="margin-top: 10px; color: #28a745; font-weight: 600;">✅ Connection successful!</div>';
+          } else {
+            document.getElementById("connectionResult").innerHTML =
+              '<div style="margin-top: 10px; color: #dc3545; font-weight: 600;">❌ Connection failed: ' +
+              response.status +
+              "</div>";
+          }
+        } catch (error) {
+          document.getElementById("connectionResult").innerHTML =
+            '<div style="margin-top: 10px; color: #dc3545; font-weight: 600;">❌ Connection error: ' +
+            error.message +
+            "</div>";
+        }
+      }
+
+      // Quick test functions
+      function getAllFields() {
+        makeApiRequest("GET", apiConfig.baseUrl);
+      }
+
+      function getOrganizationFields() {
+        makeApiRequest("GET", `${apiConfig.baseUrl}?entityType=organization`);
+      }
+
+      function getFieldStatistics() {
+        makeApiRequest("GET", `${apiConfig.baseUrl}/organization/stats`);
+      }
+
+      function getHybridSections() {
+        makeApiRequest(
+          "GET",
+          `${apiConfig.baseUrl}/organization/hybrid-sections`
+        );
+      }
+
+      function createSampleTextField() {
+        const sampleField = {
+          name: "Sample Text Field",
+          key: `sample_text_${Date.now()}`,
+          fieldType: "text",
+          entityType: "organization",
+          isRequired: false,
+          category: "Sample Category",
+          group: "Sample Group",
+          description: "This is a sample text field created for testing",
+        };
+
+        makeApiRequest("POST", apiConfig.baseUrl, sampleField);
+      }
+
+      function createSamplePicklistField() {
+        const sampleField = {
+          name: "Sample Picklist Field",
+          key: `sample_picklist_${Date.now()}`,
+          fieldType: "picklist",
+          entityType: "organization",
+          isRequired: false,
+          category: "Sample Category",
+          group: "Sample Group",
+          description: "This is a sample picklist field created for testing",
+          options: [
+            { label: "Option 1", value: "opt1" },
+            { label: "Option 2", value: "opt2" },
+            { label: "Option 3", value: "opt3" },
+          ],
+        };
+
+        makeApiRequest("POST", apiConfig.baseUrl, sampleField);
+      }
+
+      function toggleOptions() {
+        const fieldType = document.getElementById("fieldType").value;
+        const optionsSection = document.getElementById("optionsSection");
+
+        if (fieldType === "picklist" || fieldType === "multipicklist") {
+          optionsSection.classList.remove("hidden");
+        } else {
+          optionsSection.classList.add("hidden");
+        }
+      }
+
+      function createCustomField() {
+        updateConfig();
+
+        // Get form values
+        const fieldData = {
+          name: document.getElementById("fieldName").value,
+          key: document.getElementById("fieldKey").value,
+          fieldType: document.getElementById("fieldType").value,
+          entityType: document.getElementById("entityType").value,
+          isRequired: document.getElementById("isRequired").checked,
+          category: document.getElementById("fieldCategory").value,
+          group: document.getElementById("fieldGroup").value,
+          description: document.getElementById("fieldDescription").value,
+        };
+
+        // Validate required fields
+        if (!fieldData.name || !fieldData.key) {
+          alert("Please fill in at least the Field Name and Field Key!");
+          return;
+        }
+
+        // Add options for picklist/multipicklist
+        if (
+          fieldData.fieldType === "picklist" ||
+          fieldData.fieldType === "multipicklist"
+        ) {
+          const optionsText = document.getElementById("fieldOptions").value;
+          if (optionsText) {
+            try {
+              fieldData.options = JSON.parse(optionsText);
+            } catch (error) {
+              alert("Invalid JSON format for options!");
+              return;
+            }
+          }
+        }
+
+        makeApiRequest("POST", apiConfig.baseUrl, fieldData);
+      }
+
+      function clearForm() {
+        document.getElementById("fieldName").value = "";
+        document.getElementById("fieldKey").value = "";
+        document.getElementById("fieldType").value = "text";
+        document.getElementById("entityType").value = "person";
+        document.getElementById("fieldCategory").value = "";
+        document.getElementById("fieldGroup").value = "";
+        document.getElementById("fieldDescription").value = "";
+        document.getElementById("isRequired").checked = false;
+        document.getElementById("fieldOptions").value = "";
+        document.getElementById("optionsSection").classList.add("hidden");
+      }
+    </script>
+  </body>
+</html>

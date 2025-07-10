@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Fields Manager - CRM</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background-color: #f8f9fa;
+        color: #333;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .header {
+        background: white;
+        padding: 24px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .header h1 {
+        font-size: 28px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        color: #1a1a1a;
+      }
+
+      .field-count {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 16px;
+      }
+
+      .description {
+        color: #666;
+        line-height: 1.5;
+        margin-bottom: 16px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 1px;
+        background: #e9ecef;
+        border-radius: 8px;
+        padding: 4px;
+        margin-bottom: 20px;
+      }
+
+      .tab {
+        padding: 8px 16px;
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        color: #666;
+        transition: all 0.2s;
+      }
+
+      .tab.active {
+        background: white;
+        color: #333;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      .btn {
+        padding: 10px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s;
+      }
+
+      .btn-primary {
+        background: #28a745;
+        color: white;
+      }
+
+      .btn-primary:hover {
+        background: #218838;
+      }
+
+      .btn-secondary {
+        background: white;
+        color: #666;
+        border: 1px solid #dee2e6;
+      }
+
+      .btn-secondary:hover {
+        background: #f8f9fa;
+      }
+
+      .field-category {
+        background: white;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .category-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid #e9ecef;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+      }
+
+      .category-header:hover {
+        background: #f8f9fa;
+      }
+
+      .category-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      .category-count {
+        background: #e9ecef;
+        color: #666;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .chevron {
+        transition: transform 0.2s;
+      }
+
+      .category-content {
+        padding: 0 20px 16px;
+      }
+
+      .field-item {
+        display: flex;
+        align-items: center;
+        justify-content: between;
+        padding: 12px 0;
+        border-bottom: 1px solid #f1f3f4;
+      }
+
+      .field-item:last-child {
+        border-bottom: none;
+      }
+
+      .field-info {
+        flex: 1;
+      }
+
+      .field-name {
+        font-weight: 500;
+        color: #333;
+        margin-bottom: 4px;
+      }
+
+      .field-type {
+        font-size: 12px;
+        color: #666;
+        background: #f1f3f4;
+        padding: 2px 6px;
+        border-radius: 4px;
+        display: inline-block;
+      }
+
+      .field-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .field-actions button {
+        padding: 4px 8px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        background: #f8f9fa;
+        color: #666;
+      }
+
+      .field-actions button:hover {
+        background: #e9ecef;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+      }
+
+      .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+      }
+
+      .modal-content {
+        background: white;
+        width: 500px;
+        margin: 50px auto;
+        border-radius: 8px;
+        padding: 24px;
+      }
+
+      .form-group {
+        margin-bottom: 16px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 500;
+        color: #333;
+      }
+
+      .form-group input,
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+
+      .form-group textarea {
+        resize: vertical;
+        min-height: 80px;
+      }
+
+      .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Data fields</h1>
+        <div class="field-count" id="fieldCount">Loading...</div>
+        <div class="description">
+          Improve the quality of your data by choosing where certain fields
+          appear and by highlighting some as important. This includes custom
+          fields that help you tailor data to your business' needs.
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-entity="both">Lead/deal</button>
+        <button class="tab" data-entity="person">Person</button>
+        <button class="tab" data-entity="organization">Organization</button>
+        <button class="tab" data-entity="product">Product</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" onclick="openCreateFieldModal()">
+          + Custom field
+        </button>
+        <button class="btn btn-secondary">Organize fields</button>
+      </div>
+
+      <div id="fieldsContainer" class="loading">Loading fields...</div>
+    </div>
+
+    <!-- Create Field Modal -->
+    <div id="createFieldModal" class="modal">
+      <div class="modal-content">
+        <h3>Create Custom Field</h3>
+        <form id="createFieldForm">
+          <div class="form-group">
+            <label for="fieldLabel">Field Label *</label>
+            <input type="text" id="fieldLabel" name="fieldLabel" required />
+          </div>
+
+          <div class="form-group">
+            <label for="fieldName">Field Name *</label>
+            <input type="text" id="fieldName" name="fieldName" required />
+          </div>
+
+          <div class="form-group">
+            <label for="fieldType">Field Type *</label>
+            <select id="fieldType" name="fieldType" required>
+              <option value="">Select type</option>
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="currency">Currency</option>
+              <option value="date">Date</option>
+              <option value="datetime">Date & Time</option>
+              <option value="select">Select (dropdown)</option>
+              <option value="multiselect">Multi-select</option>
+              <option value="textarea">Textarea</option>
+              <option value="checkbox">Checkbox</option>
+              <option value="email">Email</option>
+              <option value="phone">Phone</option>
+              <option value="url">URL</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="entityType">Apply to *</label>
+            <select id="entityType" name="entityType" required>
+              <option value="both">Both Leads & Deals</option>
+              <option value="lead">Leads only</option>
+              <option value="deal">Deals only</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="category">Category</label>
+            <input
+              type="text"
+              id="category"
+              name="category"
+              placeholder="Ungrouped custom fields"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="description">Description</label>
+            <textarea
+              id="description"
+              name="description"
+              placeholder="Describe this field's purpose"
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="isRequired" name="isRequired" />
+              Required field
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="isImportant" name="isImportant" />
+              Important field
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="closeCreateFieldModal()"
+            >
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">Create Field</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      let currentEntityType = "both";
+
+      // Tab switching
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", (e) => {
+          document
+            .querySelectorAll(".tab")
+            .forEach((t) => t.classList.remove("active"));
+          e.target.classList.add("active");
+          currentEntityType = e.target.dataset.entity;
+          loadFields();
+        });
+      });
+
+      // Load fields from API
+      async function loadFields() {
+        try {
+          document.getElementById("fieldsContainer").innerHTML =
+            '<div class="loading">Loading fields...</div>';
+
+          const response = await fetch(
+            `/api/data-fields?entityType=${currentEntityType}`,
+            {
+              headers: {
+                Authorization: `Bearer ${
+                  localStorage.getItem("adminToken") || "your-token-here"
+                }`,
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error("Failed to load fields");
+          }
+
+          const data = await response.json();
+          displayFields(data);
+          updateFieldCount(data);
+        } catch (error) {
+          console.error("Error loading fields:", error);
+          document.getElementById("fieldsContainer").innerHTML =
+            '<div class="loading">Error loading fields. Please try again.</div>';
+        }
+      }
+
+      // Display fields in categories
+      function displayFields(data) {
+        const container = document.getElementById("fieldsContainer");
+
+        if (
+          !data.organizedCategories ||
+          data.organizedCategories.length === 0
+        ) {
+          container.innerHTML = '<div class="loading">No fields found.</div>';
+          return;
+        }
+
+        let html = "";
+
+        data.organizedCategories.forEach((category) => {
+          html += `
+                    <div class="field-category">
+                        <div class="category-header" onclick="toggleCategory('${category.categoryName}')">
+                            <div class="category-title">
+                                <span class="chevron" id="chevron-${category.categoryName}">▼</span>
+                                ${category.categoryName}
+                                <span class="category-count">${category.fieldCount}</span>
+                            </div>
+                        </div>
+                        <div class="category-content" id="content-${category.categoryName}">
+                `;
+
+          // Add fields directly in category
+          category.fields.forEach((field) => {
+            html += createFieldItem(field);
+          });
+
+          // Add field groups
+          category.fieldGroups.forEach((group) => {
+            html += `<div style="margin: 12px 0; font-weight: 500; color: #666;">${group.groupName}</div>`;
+            group.fields.forEach((field) => {
+              html += createFieldItem(field);
+            });
+          });
+
+          html += `
+                        </div>
+                    </div>
+                `;
+        });
+
+        container.innerHTML = html;
+      }
+
+      // Create individual field item HTML
+      function createFieldItem(field) {
+        const sourceClass =
+          field.fieldSource === "system"
+            ? "P"
+            : field.fieldSource === "default"
+            ? "P"
+            : "";
+
+        return `
+                <div class="field-item">
+                    <div class="field-info">
+                        <div class="field-name">
+                            ${
+                              sourceClass
+                                ? `<span style="color: #666; margin-right: 8px;">${sourceClass}</span>`
+                                : ""
+                            }
+                            ${field.fieldLabel}
+                        </div>
+                        <span class="field-type">${field.fieldType}</span>
+                        ${
+                          field.isRequired
+                            ? '<span class="field-type" style="background: #dc3545; color: white;">Required</span>'
+                            : ""
+                        }
+                        ${
+                          field.isImportant
+                            ? '<span class="field-type" style="background: #ffc107; color: #000;">Important</span>'
+                            : ""
+                        }
+                    </div>
+                    <div class="field-actions">
+                        ${
+                          field.fieldSource === "custom"
+                            ? `<button onclick="editField('${field.fieldId}')">Edit</button>
+                             <button onclick="deleteField('${field.fieldId}')">Delete</button>`
+                            : `<button onclick="editField('${field.fieldId}')">Configure</button>`
+                        }
+                    </div>
+                </div>
+            `;
+      }
+
+      // Update field count display
+      function updateFieldCount(data) {
+        const countText = data.fieldStats
+          ? `${data.fieldStats.customFieldCount}/${data.fieldStats.totalFields} custom fields used (including ${data.fieldStats.formulaFieldCount} formula fields)`
+          : `${data.customFieldCount}/${
+              data.totalFields
+            } custom fields used (including ${
+              data.formulaFieldCount || 0
+            } formula fields)`;
+
+        document.getElementById("fieldCount").textContent = countText;
+      }
+
+      // Toggle category expansion
+      function toggleCategory(categoryName) {
+        const content = document.getElementById(`content-${categoryName}`);
+        const chevron = document.getElementById(`chevron-${categoryName}`);
+
+        if (content.style.display === "none") {
+          content.style.display = "block";
+          chevron.textContent = "▼";
+        } else {
+          content.style.display = "none";
+          chevron.textContent = "▶";
+        }
+      }
+
+      // Modal functions
+      function openCreateFieldModal() {
+        document.getElementById("createFieldModal").style.display = "block";
+      }
+
+      function closeCreateFieldModal() {
+        document.getElementById("createFieldModal").style.display = "none";
+        document.getElementById("createFieldForm").reset();
+      }
+
+      // Create field form submission
+      document
+        .getElementById("createFieldForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const formData = new FormData(e.target);
+          const fieldData = {
+            fieldLabel: formData.get("fieldLabel"),
+            fieldName: formData.get("fieldName"),
+            fieldType: formData.get("fieldType"),
+            entityType: formData.get("entityType"),
+            category: formData.get("category") || "Ungrouped custom fields",
+            description: formData.get("description"),
+            isRequired: formData.has("isRequired"),
+            isImportant: formData.has("isImportant"),
+          };
+
+          try {
+            const response = await fetch("/api/data-fields", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${
+                  localStorage.getItem("adminToken") || "your-token-here"
+                }`,
+              },
+              body: JSON.stringify(fieldData),
+            });
+
+            if (response.ok) {
+              closeCreateFieldModal();
+              loadFields();
+              alert("Field created successfully!");
+            } else {
+              const error = await response.json();
+              alert("Error creating field: " + error.message);
+            }
+          } catch (error) {
+            console.error("Error creating field:", error);
+            alert("Error creating field. Please try again.");
+          }
+        });
+
+      // Field actions
+      function editField(fieldId) {
+        alert(`Edit field ${fieldId} - This would open an edit modal`);
+      }
+
+      function deleteField(fieldId) {
+        if (confirm("Are you sure you want to delete this field?")) {
+          // Implement delete API call
+          alert(`Delete field ${fieldId} - This would call the delete API`);
+        }
+      }
+
+      // Auto-generate field name from label
+      document.getElementById("fieldLabel").addEventListener("input", (e) => {
+        const label = e.target.value;
+        const fieldName = label
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, "")
+          .replace(/\s+/g, "_")
+          .substring(0, 50);
+        document.getElementById("fieldName").value = fieldName;
+      });
+
+      // Initialize
+      loadFields();
+    </script>
+  </body>
+</html>

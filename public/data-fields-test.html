@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Unified Data Fields - CRM Test</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #f8f9fa;
+      }
+      .header {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .section {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .field-category {
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        overflow: hidden;
+      }
+      .category-header {
+        background: #f8f9fa;
+        padding: 12px 16px;
+        font-weight: 600;
+        border-bottom: 1px solid #e9ecef;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .category-content {
+        padding: 16px;
+      }
+      .field-item {
+        display: flex;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #f8f9fa;
+      }
+      .field-item:last-child {
+        border-bottom: none;
+      }
+      .field-label {
+        font-weight: 500;
+        margin-right: 10px;
+        min-width: 150px;
+      }
+      .field-type {
+        background: #e9ecef;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        margin-right: 10px;
+      }
+      .field-required {
+        color: #dc3545;
+        font-size: 12px;
+      }
+      .field-important {
+        color: #fd7e14;
+        font-size: 12px;
+      }
+      .entity-tabs {
+        display: flex;
+        margin-bottom: 20px;
+      }
+      .tab {
+        padding: 10px 20px;
+        background: #e9ecef;
+        border: none;
+        cursor: pointer;
+        border-radius: 6px 6px 0 0;
+        margin-right: 2px;
+      }
+      .tab.active {
+        background: #007bff;
+        color: white;
+      }
+      .stats {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+      .stat-item {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 6px;
+        text-align: center;
+        min-width: 100px;
+      }
+      .stat-number {
+        font-size: 24px;
+        font-weight: bold;
+        color: #007bff;
+      }
+      .stat-label {
+        font-size: 12px;
+        color: #6c757d;
+        margin-top: 5px;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-right: 10px;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      .error {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+      }
+      .success {
+        background: #d4edda;
+        color: #155724;
+        padding: 10px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>🔧 Data Fields - Unified Field Management</h1>
+      <p>
+        Manage custom fields for leads, deals, persons, and organizations in one
+        place.
+      </p>
+      <div style="color: #6c757d; font-size: 14px">
+        <span id="usage-info"
+          >17/300 custom fields used (including 0/10 formula fields)</span
+        >
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="entity-tabs">
+        <button class="tab active" onclick="switchTab('lead')">
+          👤 Lead/deal
+        </button>
+        <button class="tab" onclick="switchTab('person')">🧑 Person</button>
+        <button class="tab" onclick="switchTab('organization')">
+          🏢 Organization
+        </button>
+        <button class="tab" onclick="switchTab('product')">📦 Product</button>
+      </div>
+
+      <div
+        style="
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 20px;
+        "
+      >
+        <div>
+          <button onclick="addCustomField()">+ Custom field</button>
+          <button style="background: #6c757d" onclick="organizeFields()">
+            📋 Organize fields
+          </button>
+        </div>
+        <button style="background: #28a745" onclick="loadFields()">
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div id="loading" style="text-align: center; padding: 40px">
+        Loading data fields...
+      </div>
+
+      <div id="stats" class="stats" style="display: none">
+        <div class="stat-item">
+          <div class="stat-number" id="total-fields">0</div>
+          <div class="stat-label">Total Fields</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" id="custom-fields">0</div>
+          <div class="stat-label">Custom Fields</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" id="default-fields">0</div>
+          <div class="stat-label">Default Fields</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number" id="system-fields">0</div>
+          <div class="stat-label">System Fields</div>
+        </div>
+      </div>
+
+      <div id="fields-container"></div>
+      <div id="error-container"></div>
+    </div>
+
+    <script>
+      let currentEntityType = "lead";
+      let fieldsData = {};
+
+      async function loadFields() {
+        const container = document.getElementById("fields-container");
+        const loading = document.getElementById("loading");
+        const stats = document.getElementById("stats");
+        const errorContainer = document.getElementById("error-container");
+
+        loading.style.display = "block";
+        stats.style.display = "none";
+        container.innerHTML = "";
+        errorContainer.innerHTML = "";
+
+        try {
+          const response = await fetch(
+            `/api/data-fields?entityType=${currentEntityType}`
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = await response.json();
+          fieldsData = data;
+
+          // Update stats
+          document.getElementById("total-fields").textContent =
+            data.summary.totalFields;
+          document.getElementById("custom-fields").textContent =
+            data.summary.customFields;
+          document.getElementById("default-fields").textContent =
+            data.summary.defaultFields;
+          document.getElementById("system-fields").textContent =
+            data.summary.systemFields;
+
+          // Update usage info
+          document.getElementById("usage-info").textContent =
+            data.usageInfo ||
+            `${data.summary.totalFields}/300 custom fields used`;
+
+          // Render fields by category
+          renderFieldsByCategory(data.fieldsByCategory);
+
+          loading.style.display = "none";
+          stats.style.display = "flex";
+        } catch (error) {
+          loading.style.display = "none";
+          errorContainer.innerHTML = `
+                    <div class="error">
+                        <strong>Error loading fields:</strong> ${error.message}
+                        <br><small>Make sure the server is running and the API is accessible.</small>
+                    </div>
+                `;
+        }
+      }
+
+      function renderFieldsByCategory(fieldsByCategory) {
+        const container = document.getElementById("fields-container");
+        container.innerHTML = "";
+
+        Object.entries(fieldsByCategory).forEach(([category, fields]) => {
+          const categoryDiv = document.createElement("div");
+          categoryDiv.className = "field-category";
+          categoryDiv.innerHTML = `
+                    <div class="category-header" onclick="toggleCategory('${category}')">
+                        <span>📁 ${category}</span>
+                        <span>${fields.length}</span>
+                    </div>
+                    <div class="category-content" id="category-${category.replace(
+                      /\s+/g,
+                      "-"
+                    )}">
+                        ${fields
+                          .map(
+                            (field) => `
+                            <div class="field-item">
+                                <div class="field-label">${
+                                  field.fieldLabel
+                                }</div>
+                                <div class="field-type">${field.fieldType}</div>
+                                ${
+                                  field.isRequired
+                                    ? '<span class="field-required">Required</span>'
+                                    : ""
+                                }
+                                ${
+                                  field.isImportant
+                                    ? '<span class="field-important">Important</span>'
+                                    : ""
+                                }
+                                <div style="margin-left: auto; font-size: 12px; color: #6c757d;">
+                                    ${field.fieldSource} • ${field.entityType}
+                                </div>
+                            </div>
+                        `
+                          )
+                          .join("")}
+                    </div>
+                `;
+          container.appendChild(categoryDiv);
+        });
+      }
+
+      function switchTab(entityType) {
+        currentEntityType = entityType;
+
+        // Update tab styling
+        document
+          .querySelectorAll(".tab")
+          .forEach((tab) => tab.classList.remove("active"));
+        event.target.classList.add("active");
+
+        // Load fields for new entity type
+        loadFields();
+      }
+
+      function toggleCategory(category) {
+        const content = document.getElementById(
+          `category-${category.replace(/\s+/g, "-")}`
+        );
+        content.style.display =
+          content.style.display === "none" ? "block" : "none";
+      }
+
+      function addCustomField() {
+        alert("Add Custom Field functionality - to be implemented");
+      }
+
+      function organizeFields() {
+        alert("Organize Fields functionality - to be implemented");
+      }
+
+      // Load fields when page loads
+      document.addEventListener("DOMContentLoaded", loadFields);
+    </script>
+  </body>
+</html>
