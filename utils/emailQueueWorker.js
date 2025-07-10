@@ -561,42 +561,80 @@ async function sendEmailJob(emailData) {
       console.log(`Draft email sent and updated: ${info.messageId}`);
     }
   } else {
-    // Create a new sent email
-    const savedEmail = await Email.create({
-      messageId: info.messageId,
-      inReplyTo: emailData.inReplyTo || null,
-      references: emailData.references || null,
-      sender: SENDER_EMAIL,
-      senderName: SENDER_NAME,
-      recipient: emailData.recipient,
-      cc: emailData.cc,
-      bcc: emailData.bcc,
-      subject: emailData.subject,
-      body: emailBody,
-      folder: "sent",
-      createdAt: emailData.createdAt || new Date(),
-      masterUserID: emailData.masterUserID,
-      tempMessageId: emailData.tempMessageId,
-      isDraft: false,
+    // Update the existing email record (sent from composeEmail)
+    const existingEmail = await Email.findOne({
+      where: {
+        tempMessageId: emailData.tempMessageId,
+        masterUserID: emailData.masterUserID,
+        folder: "outbox",
+      },
     });
 
-    // Save attachments if any (for user-uploaded files in compose email)
-    if (emailData.attachments && emailData.attachments.length > 0) {
-      const savedAttachments = emailData.attachments.map((file) => ({
-        emailID: savedEmail.emailID,
-        filename: file.filename,
-        filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-          file.filename
-        )}`, // Save public URL for user uploads
-        size: file.size,
-        contentType: file.contentType,
-      }));
-      await Attachment.bulkCreate(savedAttachments);
+    if (existingEmail) {
+      // Update the existing email with the real messageId and move to sent folder
+      await existingEmail.update({
+        messageId: info.messageId,
+        folder: "sent",
+        createdAt: emailData.createdAt || new Date(),
+      });
+      console.log(`Email updated and moved to sent: ${info.messageId}`);
+
+      // Save attachments if any (for user-uploaded files in compose email)
+      if (emailData.attachments && emailData.attachments.length > 0) {
+        const savedAttachments = emailData.attachments.map((file) => ({
+          emailID: existingEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`, // Save public URL for user uploads
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+        console.log(
+          `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${existingEmail.emailID}`
+        );
+      }
+    } else {
+      // Fallback: Create a new sent email if existing email not found
+      const savedEmail = await Email.create({
+        messageId: info.messageId,
+        inReplyTo: emailData.inReplyTo || null,
+        references: emailData.references || null,
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        recipient: emailData.recipient,
+        cc: emailData.cc,
+        bcc: emailData.bcc,
+        subject: emailData.subject,
+        body: emailBody,
+        folder: "sent",
+        createdAt: emailData.createdAt || new Date(),
+        masterUserID: emailData.masterUserID,
+        tempMessageId: emailData.tempMessageId,
+        isDraft: false,
+      });
+
+      // Save attachments if any (for user-uploaded files in compose email)
+      if (emailData.attachments && emailData.attachments.length > 0) {
+        const savedAttachments = emailData.attachments.map((file) => ({
+          emailID: savedEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`, // Save public URL for user uploads
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+        console.log(
+          `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${savedEmail.emailID}`
+        );
+      }
       console.log(
-        `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${savedEmail.emailID}`
+        `Fallback: New queued email sent and saved: ${info.messageId}`
       );
     }
-    console.log(`Queued email sent and saved: ${info.messageId}`);
   }
 }
 
