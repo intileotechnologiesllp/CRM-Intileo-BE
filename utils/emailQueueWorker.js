@@ -579,22 +579,7 @@ async function sendEmailJob(emailData) {
       });
       console.log(`Email updated and moved to sent: ${info.messageId}`);
 
-      // Save attachments if any (for user-uploaded files in compose email)
-      if (emailData.attachments && emailData.attachments.length > 0) {
-        const savedAttachments = emailData.attachments.map((file) => ({
-          emailID: existingEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL for user uploads
-          size: file.size,
-          contentType: file.contentType,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-        console.log(
-          `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${existingEmail.emailID}`
-        );
-      }
+      // Attachments are already saved in composeEmail, no need to save them again
     } else {
       // Fallback: Create a new sent email if existing email not found
       const savedEmail = await Email.create({
@@ -638,33 +623,6 @@ async function sendEmailJob(emailData) {
   }
 }
 
-// --- Update EMAIL_QUEUE consumer ---
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
-
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendEmailJob(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send queued email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
-      }
-    },
-    { noAck: false }
-  );
-
-  console.log("Email worker started and waiting for jobs...");
-}
 //.....................change
 
 // async function sendEmailJob(emailID) {
@@ -768,33 +726,6 @@ async function startEmailWorker() {
 
 //   console.log(`Email sent and updated: ${info.messageId}`);
 // }
-
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
-
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendEmailJob(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
-      }
-    },
-    { noAck: false }
-  );
-
-  console.log("Email worker started and waiting for jobs...");
-}
 
 async function startSyncEmailWorker() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
