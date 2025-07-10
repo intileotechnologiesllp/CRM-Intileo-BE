@@ -159,6 +159,140 @@ const Deal = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+
+    // Deal-specific system fields (moved from Lead model)
+    productName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Product or service name for this deal",
+    },
+    weightedValue: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      comment: "Weighted value based on probability and deal value",
+    },
+    lastStageChange: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date when the stage was last changed",
+    },
+    nextActivityDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date of the next scheduled activity",
+    },
+    lastActivityDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date of the last completed activity",
+    },
+    wonTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date when the deal was won",
+    },
+    lastEmailReceived: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date of the last email received from contact",
+    },
+    lastEmailSent: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date of the last email sent to contact",
+    },
+    lostTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date when the deal was lost",
+    },
+    dealClosedOn: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date when the deal was closed (won or lost)",
+    },
+
+    // Activity metrics
+    totalActivities: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      comment: "Total number of activities associated with this deal",
+    },
+    doneActivities: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      comment: "Number of completed activities",
+    },
+    activitiesToDo: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      comment: "Number of pending activities",
+    },
+    emailMessagesCount: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      comment: "Total number of email messages exchanged",
+    },
+
+    // Product and revenue fields
+    productQuantity: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "Quantity of products in this deal",
+    },
+    productAmount: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      comment: "Total amount for products in this deal",
+    },
+    MRR: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      comment: "Monthly Recurring Revenue",
+    },
+    ARR: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      comment: "Annual Recurring Revenue",
+    },
+    ACV: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      comment: "Annual Contract Value",
+    },
+
+    // Deal status fields
+    lostReason: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Reason why the deal was lost",
+    },
+    archiveStatus: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Status of archived deals",
+    },
+    probability: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+      comment: "Deal probability percentage (0-100)",
+      validate: {
+        min: 0,
+        max: 100,
+      },
+    },
+    stage: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Current stage in the sales pipeline (replaces pipelineStage)",
+    },
+
+    // Timestamps
     createdAt: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,

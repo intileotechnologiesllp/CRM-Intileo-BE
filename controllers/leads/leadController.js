@@ -213,6 +213,11 @@ exports.createLead = async (req, res) => {
       sourceOrgin, // Indicate that the lead was created manually
       SBUClass,
       numberOfReportsPrepared,
+      // Add new Pipedrive-style default fields
+      pipeline: req.body.pipeline || "Default Pipeline",
+      stage: req.body.stage || "New Lead",
+      productName: req.body.productName,
+      sourceOriginID: req.body.sourceOriginID,
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
@@ -253,18 +258,41 @@ exports.createLead = async (req, res) => {
     });
 
     // Handle custom fields if provided
+    const savedCustomFields = {};
     if (customFields && Object.keys(customFields).length > 0) {
       try {
-        for (const [fieldId, value] of Object.entries(customFields)) {
-          // Verify the custom field exists and belongs to the user
-          const customField = await CustomField.findOne({
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          // Try to find the custom field by fieldId first, then by fieldName
+          // Support both user-specific and system/default fields
+          // Now supports unified fields (entityType: "lead" or "both")
+          let customField = await CustomField.findOne({
             where: {
-              fieldId,
-              masterUserID: req.adminId,
-              entityType: "lead",
+              fieldId: fieldKey,
+              entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
               isActive: true,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+              ],
             },
           });
+
+          // If not found by fieldId, try to find by fieldName
+          if (!customField) {
+            customField = await CustomField.findOne({
+              where: {
+                fieldName: fieldKey,
+                entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+                isActive: true,
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                ],
+              },
+            });
+          }
 
           if (
             customField &&
@@ -273,17 +301,26 @@ exports.createLead = async (req, res) => {
             value !== ""
           ) {
             await CustomFieldValue.create({
-              fieldId,
+              fieldId: customField.fieldId, // Use the actual fieldId from database
               entityId: lead.leadId,
               entityType: "lead",
               value: value,
               masterUserID: req.adminId,
             });
+
+            // Store the saved custom field for response using fieldId as key
+            savedCustomFields[customField.fieldId] = {
+              fieldName: customField.fieldName,
+              fieldType: customField.fieldType,
+              value: value,
+            };
+          } else if (!customField) {
+            console.warn(`Custom field not found for key: ${fieldKey}`);
           }
         }
         console.log(
           `Saved ${
-            Object.keys(customFields).length
+            Object.keys(savedCustomFields).length
           } custom field values for lead ${lead.leadId}`
         );
       } catch (customFieldError) {
@@ -301,7 +338,18 @@ exports.createLead = async (req, res) => {
       `Lead is created by  ${req.role}`, // Description
       null // Changes logged as JSON
     );
-    res.status(201).json({ message: "Lead created successfully", lead });
+
+    // Prepare response with both default and custom fields
+    const leadResponse = {
+      ...lead.toJSON(),
+      customFields: savedCustomFields,
+    };
+
+    res.status(201).json({
+      message: "Lead created successfully",
+      lead: leadResponse,
+      customFieldsSaved: Object.keys(savedCustomFields).length,
+    });
   } catch (error) {
     console.error("Error creating lead:", error);
 
@@ -737,19 +785,26 @@ exports.getLeads = async (req, res) => {
 
     console.log("→ Query executed. Total records:", leads.count);
 
-    // Get custom field values for all leads
+    // Get custom field values for all leads (including default/system fields and unified fields)
     const leadIds = leads.rows.map((lead) => lead.leadId);
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
         entityId: leadIds,
         entityType: "lead",
-        masterUserID: req.adminId,
       },
       include: [
         {
           model: CustomField,
           as: "CustomField",
-          where: { isActive: true },
+          where: {
+            isActive: true,
+            entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
           required: true,
         },
       ],
@@ -1707,10 +1762,39 @@ exports.getAllLeadDetails = async (req, res) => {
       where: { leadId },
       order: [["startDateTime", "DESC"]],
     });
+
+    // Fetch custom fields for this lead
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: leadId,
+        entityType: "lead",
+        masterUserID: req.adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "customField",
+          attributes: ["fieldId", "fieldName", "fieldType", "isRequired"],
+        },
+      ],
+    });
+
+    // Format custom fields for response
+    const customFields = {};
+    customFieldValues.forEach((cfv) => {
+      customFields[cfv.fieldId] = {
+        fieldName: cfv.customField.fieldName,
+        fieldType: cfv.customField.fieldType,
+        isRequired: cfv.customField.isRequired,
+        value: cfv.value,
+      };
+    });
+
     res.status(200).json({
       message: "leads data fetched successfully.",
       lead,
       leadDetails,
+      customFields,
       notes: notesWithCreator,
       emails: relatedEmails,
       activities,
@@ -2051,6 +2135,7 @@ exports.getPersons = async (req, res) => {
       });
     } else {
       // 1. Fetch all persons (filtered)
+
       persons = await Person.findAll({
         where: personWhere,
         raw: true,

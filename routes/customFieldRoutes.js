@@ -16,8 +16,12 @@ router.get(
 router.get("/:entityType/groups", customFieldController.getFieldGroups);
 router.get("/:entityType/default", customFieldController.getDefaultFields);
 router.get("/:entityType/system", customFieldController.getSystemFields);
-router.put("/:fieldId", customFieldController.updateCustomField);
-router.delete("/:fieldId", customFieldController.deleteCustomField);
+router.get(
+  "/:entityType/hybrid-sections",
+  customFieldController.getHybridFieldsSections
+);
+router.post("/:fieldId", customFieldController.updateCustomField);
+router.post("/:fieldId", customFieldController.deleteCustomField);
 
 // Custom Field Value Management Routes
 router.post("/values", customFieldController.saveCustomFieldValues);
@@ -25,17 +29,19 @@ router.get(
   "/values/:entityType/:entityId",
   customFieldController.getCustomFieldValues
 );
-router.put(
+router.post(
   "/values/:entityType/:entityId",
   customFieldController.updateCustomFieldValues
 );
-router.delete("/values/:valueId", customFieldController.deleteCustomFieldValue);
+router.post("/values/:valueId", customFieldController.deleteCustomFieldValue);
 
 // Pure Custom Fields Entity Creation
 router.post(
   "/create-entity",
   customFieldController.createEntityWithCustomFields
 );
+// Alias route for entities (supports both endpoints)
+router.post("/entities", customFieldController.createEntityWithCustomFields);
 router.post(
   "/create-person",
   customFieldController.createPersonWithCustomFields
@@ -56,14 +62,21 @@ router.get(
 );
 
 // Field Organization Routes
-router.put("/:fieldId/order", customFieldController.updateFieldOrder);
-router.put("/:fieldId/category", customFieldController.updateFieldCategory);
-router.put("/:fieldId/group", customFieldController.updateFieldGroup);
-router.put("/:fieldId/summary/add", customFieldController.addFieldToSummary);
-router.put(
+router.post("/:fieldId/order", customFieldController.updateFieldOrder);
+router.post("/:fieldId/category", customFieldController.updateFieldCategory);
+router.post("/:fieldId/group", customFieldController.updateFieldGroup);
+router.post("/:fieldId/summary/add", customFieldController.addFieldToSummary);
+router.post(
   "/:fieldId/summary/remove",
   customFieldController.removeFieldFromSummary
 );
-router.put("/bulk/order", customFieldController.updateFieldDisplayOrder);
+router.post("/bulk/order", customFieldController.updateFieldDisplayOrder);
+
+// Bulk Update and Migration Routes
+router.post(
+  "/bulk/visibility",
+  customFieldController.bulkUpdateFieldVisibility
+);
+router.post("/migrate", customFieldController.migrateFieldsToNewStructure);
 
 module.exports = router;

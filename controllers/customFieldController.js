@@ -13,7 +13,6 @@ exports.createCustomField = async (req, res) => {
     fieldLabel,
     fieldType,
     entityType,
-    fieldSource,
     options,
     validationRules,
     defaultValue,
@@ -23,6 +22,15 @@ exports.createCustomField = async (req, res) => {
     fieldGroup,
     description,
     displayOrder,
+    // Additional UI form fields
+    userSpecifications,
+    editingPermissions,
+    placesWhereShown,
+    pipelineRestrictions,
+    showInAddView,
+    showInDetailView,
+    showInListView,
+    qualityRules,
   } = req.body;
 
   const masterUserID = req.adminId;
@@ -58,23 +66,92 @@ exports.createCustomField = async (req, res) => {
       });
     }
 
+    // Validate user specifications
+    if (
+      userSpecifications &&
+      userSpecifications.editingUsers === "specific" &&
+      (!userSpecifications.editingUsersList ||
+        userSpecifications.editingUsersList.length === 0)
+    ) {
+      return res.status(400).json({
+        message:
+          "editingUsersList is required when editingUsers is set to 'specific'.",
+      });
+    }
+
+    // Validate pipeline restrictions
+    if (
+      pipelineRestrictions &&
+      Array.isArray(pipelineRestrictions) &&
+      pipelineRestrictions.length === 0
+    ) {
+      return res.status(400).json({
+        message:
+          "At least one pipeline must be selected when using pipeline restrictions.",
+      });
+    }
+
+    // Process user specifications and permissions
+    const processedUserSpecs = userSpecifications || {
+      editingUsers: "all", // "all", "specific", "owner_only"
+      editingUsersList: [], // Array of user IDs if "specific"
+      viewingUsers: "all", // "all", "specific", "owner_only"
+      viewingUsersList: [], // Array of user IDs if "specific"
+    };
+
+    // Process places where shown
+    const processedPlacesShown = placesWhereShown || {
+      leadView: showInAddView !== undefined ? showInAddView : true,
+      dealView: showInDetailView !== undefined ? showInDetailView : true,
+      listView: showInListView !== undefined ? showInListView : false,
+      pipelines: pipelineRestrictions || "all", // "all" or array of pipeline IDs
+    };
+
+    // Process quality rules (merge with existing isRequired/isImportant)
+    const processedQualityRules = qualityRules || {};
+    const finalIsRequired =
+      isRequired !== undefined
+        ? isRequired
+        : processedQualityRules.required || false;
+    const finalIsImportant =
+      isImportant !== undefined
+        ? isImportant
+        : processedQualityRules.important || false;
+
     // Create the custom field
     const customField = await CustomField.create({
       fieldName: fieldName.toLowerCase().replace(/\s+/g, "_"),
       fieldLabel,
       fieldType,
       entityType,
-      fieldSource: fieldSource || "custom",
+      fieldSource: "custom", // Always custom for user-created fields
       options: options || null,
       validationRules: validationRules || null,
       defaultValue: defaultValue || null,
-      isRequired: isRequired || false,
-      isImportant: isImportant || false,
+      isRequired: finalIsRequired,
+      isImportant: finalIsImportant,
       category: category || "Details",
       fieldGroup: fieldGroup || null,
       description: description || null,
       displayOrder: displayOrder || 0,
       masterUserID,
+      // Additional UI-specific fields
+      userSpecifications: processedUserSpecs,
+      placesWhereShown: processedPlacesShown,
+      editingPermissions: editingPermissions || "all",
+      pipelineRestrictions: pipelineRestrictions || "all",
+      // Backward compatibility fields
+      showInAddView: processedPlacesShown.leadView,
+      showInDetailView: processedPlacesShown.dealView,
+      showInListView: processedPlacesShown.listView,
+      // New UI-aligned fields
+      leadView: processedPlacesShown.leadView,
+      dealView: processedPlacesShown.dealView,
+      qualityRules: {
+        required: finalIsRequired,
+        important: finalIsImportant,
+        ...processedQualityRules,
+      },
     });
 
     await historyLogger(
@@ -90,6 +167,39 @@ exports.createCustomField = async (req, res) => {
     res.status(201).json({
       message: "Custom field created successfully.",
       customField,
+      // Additional information about field configuration
+      fieldConfiguration: {
+        basicInfo: {
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          entityType: customField.entityType,
+        },
+        userSpecifications: processedUserSpecs,
+        placesWhereShown: processedPlacesShown,
+        qualityRules: {
+          required: finalIsRequired,
+          important: finalIsImportant,
+        },
+        grouping: {
+          category: customField.category,
+          fieldGroup: customField.fieldGroup,
+          displayOrder: customField.displayOrder,
+        },
+      },
+      // For UI feedback
+      uiConfiguration: {
+        showInForms: {
+          leadView: processedPlacesShown.leadView,
+          dealView: processedPlacesShown.dealView,
+          listView: processedPlacesShown.listView,
+        },
+        permissions: {
+          editingUsers: processedUserSpecs.editingUsers,
+          viewingUsers: processedUserSpecs.viewingUsers,
+        },
+        pipelines: processedPlacesShown.pipelines,
+      },
     });
   } catch (error) {
     console.error("Error creating custom field:", error);
@@ -113,7 +223,10 @@ exports.getCustomFields = async (req, res) => {
   const masterUserID = req.adminId;
 
   try {
-    let whereClause = { masterUserID };
+    let whereClause = {
+      masterUserID,
+      fieldSource: "custom", // Only get custom fields
+    };
 
     if (entityType) {
       whereClause.entityType = entityType;
@@ -133,66 +246,195 @@ exports.getCustomFields = async (req, res) => {
       ],
     });
 
-    // Organize fields into Pipedrive-style sections
+    // Organize fields into sections
     const organizedFields = {
       summary: [],
       ungroupedCustomFields: [],
-      defaultFields: [],
-      systemFields: [],
       customGroups: {},
     };
 
     const fieldCounts = {
       summary: 0,
       ungroupedCustomFields: 0,
-      defaultFields: 0,
-      systemFields: 0,
+      customGroups: 0,
     };
 
     customFields.forEach((field) => {
       const fieldObj = field.toJSON();
 
+      // Enhance field object with UI configuration and ensure new field structure
+      fieldObj.uiConfiguration = {
+        showInForms: {
+          leadView: field.leadView ?? field.showInAddView ?? false,
+          dealView: field.dealView ?? field.showInDetailView ?? false,
+          listView: field.showInListView ?? false,
+        },
+        permissions: {
+          editingUsers: field.userSpecifications?.editingUsers || "all",
+          viewingUsers: field.userSpecifications?.viewingUsers || "all",
+        },
+        pipelines: field.pipelineRestrictions || "all",
+        qualityRules: {
+          required: field.isRequired || false,
+          important: field.isImportant || false,
+          ...(field.qualityRules || {}),
+        },
+      };
+
+      // Ensure places where shown structure includes new field names
+      if (!fieldObj.placesWhereShown) {
+        fieldObj.placesWhereShown = {
+          leadView: field.leadView ?? field.showInAddView ?? false,
+          dealView: field.dealView ?? field.showInDetailView ?? false,
+          listView: field.showInListView ?? false,
+          pipelines: field.pipelineRestrictions || "all",
+        };
+      } else if (
+        !fieldObj.placesWhereShown.leadView &&
+        !fieldObj.placesWhereShown.dealView
+      ) {
+        // Update old structure to new structure
+        fieldObj.placesWhereShown = {
+          leadView:
+            fieldObj.placesWhereShown.addView ??
+            field.leadView ??
+            field.showInAddView ??
+            false,
+          dealView:
+            fieldObj.placesWhereShown.detailView ??
+            field.dealView ??
+            field.showInDetailView ??
+            false,
+          listView:
+            fieldObj.placesWhereShown.listView ?? field.showInListView ?? false,
+          pipelines:
+            fieldObj.placesWhereShown.pipelines ??
+            (field.pipelineRestrictions || "all"),
+        };
+      }
+
+      // Ensure new field names exist in the main object
+      if (fieldObj.leadView === undefined) {
+        fieldObj.leadView = field.leadView ?? field.showInAddView ?? false;
+      }
+      if (fieldObj.dealView === undefined) {
+        fieldObj.dealView = field.dealView ?? field.showInDetailView ?? false;
+      }
+
       if (field.isImportant && field.category === "Summary") {
         // Summary - Important fields marked for quick access
         organizedFields.summary.push(fieldObj);
         fieldCounts.summary++;
-      } else if (
-        field.fieldSource === "custom" &&
-        (!field.fieldGroup || field.fieldGroup === "Default")
-      ) {
-        // Ungrouped Custom Fields - Custom fields without specific groups
-        organizedFields.ungroupedCustomFields.push(fieldObj);
-        fieldCounts.ungroupedCustomFields++;
-      } else if (field.fieldSource === "default") {
-        // Default Fields - Built-in CRM fields
-        organizedFields.defaultFields.push(fieldObj);
-        fieldCounts.defaultFields++;
-      } else if (field.fieldSource === "system") {
-        // System Fields - Read-only system fields
-        organizedFields.systemFields.push(fieldObj);
-        fieldCounts.systemFields++;
-      } else if (
-        field.fieldSource === "custom" &&
-        field.fieldGroup &&
-        field.fieldGroup !== "Default"
-      ) {
+      } else if (field.fieldGroup && field.fieldGroup !== "Default") {
         // Custom Groups - User-defined field groups
         if (!organizedFields.customGroups[field.fieldGroup]) {
           organizedFields.customGroups[field.fieldGroup] = [];
         }
         organizedFields.customGroups[field.fieldGroup].push(fieldObj);
       } else {
-        // Fallback to ungrouped custom fields
+        // Ungrouped Custom Fields - Custom fields without specific groups
         organizedFields.ungroupedCustomFields.push(fieldObj);
         fieldCounts.ungroupedCustomFields++;
       }
     });
 
+    fieldCounts.customGroups = Object.keys(organizedFields.customGroups).length;
+
+    // Process custom fields for enhanced response
+    const enhancedCustomFields = customFields.map((field) => {
+      const fieldObj = field.toJSON();
+
+      // Add UI configuration for consistency with create/update responses
+      fieldObj.uiConfiguration = {
+        showInForms: {
+          leadView: field.leadView ?? field.showInAddView ?? false,
+          dealView: field.dealView ?? field.showInDetailView ?? false,
+          listView: field.showInListView ?? false,
+        },
+        permissions: {
+          editingUsers: field.userSpecifications?.editingUsers || "all",
+          viewingUsers: field.userSpecifications?.viewingUsers || "all",
+        },
+        pipelines: field.pipelineRestrictions || "all",
+        qualityRules: {
+          required: field.isRequired || false,
+          important: field.isImportant || false,
+          ...(field.qualityRules || {}),
+        },
+      };
+
+      // Ensure places where shown structure is consistent
+      if (
+        !fieldObj.placesWhereShown ||
+        (!fieldObj.placesWhereShown.leadView &&
+          !fieldObj.placesWhereShown.dealView)
+      ) {
+        fieldObj.placesWhereShown = {
+          leadView: field.leadView ?? field.showInAddView ?? false,
+          dealView: field.dealView ?? field.showInDetailView ?? false,
+          listView: field.showInListView ?? false,
+          pipelines: field.pipelineRestrictions || "all",
+        };
+      }
+
+      // Ensure new field names exist
+      fieldObj.leadView = field.leadView ?? field.showInAddView ?? false;
+      fieldObj.dealView = field.dealView ?? field.showInDetailView ?? false;
+
+      return fieldObj;
+    });
+
     res.status(200).json({
       message: "Custom fields retrieved successfully.",
-      fields: customFields,
+      customFields: enhancedCustomFields,
       organizedFields,
       fieldCounts,
+      // Summary statistics
+      statistics: {
+        totalFields: customFields.length,
+        activeFields: customFields.filter((f) => f.isActive).length,
+        requiredFields: customFields.filter((f) => f.isRequired).length,
+        importantFields: customFields.filter((f) => f.isImportant).length,
+        fieldsByType: customFields.reduce((acc, field) => {
+          acc[field.fieldType] = (acc[field.fieldType] || 0) + 1;
+          return acc;
+        }, {}),
+      },
+      // UI metadata
+      uiMetadata: {
+        supportedFieldTypes: [
+          "text",
+          "textarea",
+          "number",
+          "email",
+          "phone",
+          "url",
+          "password",
+          "select",
+          "multiselect",
+          "radio",
+          "checkbox",
+          "boolean",
+          "date",
+          "datetime",
+          "time",
+          "currency",
+          "file",
+          "user",
+          "organization",
+          "person",
+        ],
+        placesWhereShownOptions: {
+          leadView: "Show in lead creation/edit forms",
+          dealView: "Show in deal creation/edit forms",
+          listView: "Show in list/table views",
+          pipelines: "Restrict to specific pipelines",
+        },
+        permissionOptions: {
+          editingUsers: ["all", "specific", "owner_only"],
+          viewingUsers: ["all", "specific", "owner_only"],
+        },
+      },
       // Legacy support for existing code
       groupedFields: customFields.reduce((acc, field) => {
         const category = field.category || "Details";
@@ -223,7 +465,6 @@ exports.updateCustomField = async (req, res) => {
   const {
     fieldLabel,
     fieldType,
-    fieldSource,
     options,
     validationRules,
     defaultValue,
@@ -234,6 +475,15 @@ exports.updateCustomField = async (req, res) => {
     description,
     displayOrder,
     isActive,
+    // Additional UI form fields
+    userSpecifications,
+    editingPermissions,
+    placesWhereShown,
+    pipelineRestrictions,
+    showInAddView,
+    showInDetailView,
+    showInListView,
+    qualityRules,
   } = req.body;
 
   const masterUserID = req.adminId;
@@ -249,6 +499,101 @@ exports.updateCustomField = async (req, res) => {
       });
     }
 
+    // Validate user specifications if provided
+    if (
+      userSpecifications &&
+      userSpecifications.editingUsers === "specific" &&
+      (!userSpecifications.editingUsersList ||
+        userSpecifications.editingUsersList.length === 0)
+    ) {
+      return res.status(400).json({
+        message:
+          "editingUsersList is required when editingUsers is set to 'specific'.",
+      });
+    }
+
+    // Validate pipeline restrictions if provided
+    if (
+      pipelineRestrictions &&
+      Array.isArray(pipelineRestrictions) &&
+      pipelineRestrictions.length === 0
+    ) {
+      return res.status(400).json({
+        message:
+          "At least one pipeline must be selected when using pipeline restrictions.",
+      });
+    }
+
+    // Process user specifications and permissions (only if provided)
+    let processedUserSpecs;
+    if (userSpecifications) {
+      processedUserSpecs = {
+        editingUsers: userSpecifications.editingUsers || "all",
+        editingUsersList: userSpecifications.editingUsersList || [],
+        viewingUsers: userSpecifications.viewingUsers || "all",
+        viewingUsersList: userSpecifications.viewingUsersList || [],
+      };
+    }
+
+    // Process places where shown (only if provided)
+    let processedPlacesShown;
+    if (
+      placesWhereShown ||
+      showInAddView !== undefined ||
+      showInDetailView !== undefined ||
+      showInListView !== undefined ||
+      pipelineRestrictions !== undefined
+    ) {
+      processedPlacesShown = {
+        leadView:
+          showInAddView !== undefined
+            ? showInAddView
+            : placesWhereShown?.leadView ??
+              placesWhereShown?.addView ??
+              customField.leadView ??
+              customField.showInAddView,
+        dealView:
+          showInDetailView !== undefined
+            ? showInDetailView
+            : placesWhereShown?.dealView ??
+              placesWhereShown?.detailView ??
+              customField.dealView ??
+              customField.showInDetailView,
+        listView:
+          showInListView !== undefined
+            ? showInListView
+            : placesWhereShown?.listView ?? customField.showInListView,
+        pipelines:
+          pipelineRestrictions !== undefined
+            ? pipelineRestrictions
+            : placesWhereShown?.pipelines ?? customField.pipelineRestrictions,
+      };
+    }
+
+    // Process quality rules (merge with existing isRequired/isImportant)
+    let finalIsRequired = customField.isRequired;
+    let finalIsImportant = customField.isImportant;
+    let processedQualityRules = customField.qualityRules || {};
+
+    if (qualityRules) {
+      processedQualityRules = { ...processedQualityRules, ...qualityRules };
+      finalIsRequired =
+        qualityRules.required !== undefined
+          ? qualityRules.required
+          : finalIsRequired;
+      finalIsImportant =
+        qualityRules.important !== undefined
+          ? qualityRules.important
+          : finalIsImportant;
+    }
+
+    if (isRequired !== undefined) {
+      finalIsRequired = isRequired;
+    }
+    if (isImportant !== undefined) {
+      finalIsImportant = isImportant;
+    }
+
     // Store old values for history
     const oldValues = { ...customField.toJSON() };
 
@@ -256,7 +601,6 @@ exports.updateCustomField = async (req, res) => {
     await customField.update({
       fieldLabel: fieldLabel || customField.fieldLabel,
       fieldType: fieldType || customField.fieldType,
-      fieldSource: fieldSource || customField.fieldSource,
       options: options !== undefined ? options : customField.options,
       validationRules:
         validationRules !== undefined
@@ -264,10 +608,8 @@ exports.updateCustomField = async (req, res) => {
           : customField.validationRules,
       defaultValue:
         defaultValue !== undefined ? defaultValue : customField.defaultValue,
-      isRequired:
-        isRequired !== undefined ? isRequired : customField.isRequired,
-      isImportant:
-        isImportant !== undefined ? isImportant : customField.isImportant,
+      isRequired: finalIsRequired,
+      isImportant: finalIsImportant,
       category: category || customField.category,
       fieldGroup:
         fieldGroup !== undefined ? fieldGroup : customField.fieldGroup,
@@ -276,6 +618,50 @@ exports.updateCustomField = async (req, res) => {
       displayOrder:
         displayOrder !== undefined ? displayOrder : customField.displayOrder,
       isActive: isActive !== undefined ? isActive : customField.isActive,
+      // Additional UI-specific fields (only update if provided)
+      userSpecifications:
+        processedUserSpecs !== undefined
+          ? processedUserSpecs
+          : customField.userSpecifications,
+      placesWhereShown:
+        processedPlacesShown !== undefined
+          ? processedPlacesShown
+          : customField.placesWhereShown,
+      editingPermissions:
+        editingPermissions !== undefined
+          ? editingPermissions
+          : customField.editingPermissions,
+      pipelineRestrictions:
+        pipelineRestrictions !== undefined
+          ? pipelineRestrictions
+          : customField.pipelineRestrictions,
+      // Backward compatibility fields
+      showInAddView:
+        processedPlacesShown?.leadView !== undefined
+          ? processedPlacesShown.leadView
+          : customField.showInAddView,
+      showInDetailView:
+        processedPlacesShown?.dealView !== undefined
+          ? processedPlacesShown.dealView
+          : customField.showInDetailView,
+      showInListView:
+        processedPlacesShown?.listView !== undefined
+          ? processedPlacesShown.listView
+          : customField.showInListView,
+      // New UI-aligned fields
+      leadView:
+        processedPlacesShown?.leadView !== undefined
+          ? processedPlacesShown.leadView
+          : customField.leadView ?? customField.showInAddView,
+      dealView:
+        processedPlacesShown?.dealView !== undefined
+          ? processedPlacesShown.dealView
+          : customField.dealView ?? customField.showInDetailView,
+      qualityRules: {
+        required: finalIsRequired,
+        important: finalIsImportant,
+        ...processedQualityRules,
+      },
     });
 
     await historyLogger(
@@ -291,6 +677,45 @@ exports.updateCustomField = async (req, res) => {
     res.status(200).json({
       message: "Custom field updated successfully.",
       customField,
+      // Additional information about field configuration
+      fieldConfiguration: {
+        basicInfo: {
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          entityType: customField.entityType,
+        },
+        userSpecifications:
+          customField.userSpecifications || processedUserSpecs,
+        placesWhereShown: customField.placesWhereShown || processedPlacesShown,
+        qualityRules: {
+          required: finalIsRequired,
+          important: finalIsImportant,
+        },
+        grouping: {
+          category: customField.category,
+          fieldGroup: customField.fieldGroup,
+          displayOrder: customField.displayOrder,
+        },
+      },
+      // For UI feedback
+      uiConfiguration: {
+        showInForms: {
+          leadView: customField.leadView ?? customField.showInAddView,
+          dealView: customField.dealView ?? customField.showInDetailView,
+          listView: customField.showInListView,
+        },
+        permissions: {
+          editingUsers: customField.userSpecifications?.editingUsers || "all",
+          viewingUsers: customField.userSpecifications?.viewingUsers || "all",
+        },
+        pipelines: customField.pipelineRestrictions || "all",
+      },
+      // What was changed
+      changes: {
+        old: oldValues,
+        new: customField.toJSON(),
+      },
     });
   } catch (error) {
     console.error("Error updating custom field:", error);
@@ -833,65 +1258,334 @@ exports.getDefaultFields = async (req, res) => {
     // Define default fields for each entity type
     const defaultFieldsConfig = {
       lead: [
+        // Basic Lead Information
         {
           fieldName: "title",
           fieldLabel: "Title",
           fieldType: "text",
-          isRequired: true,
-        },
-        {
-          fieldName: "value",
-          fieldLabel: "Value",
-          fieldType: "currency",
           isRequired: false,
+          section: "Summary",
+          displayOrder: 1,
         },
         {
-          fieldName: "probability",
-          fieldLabel: "Probability",
-          fieldType: "number",
-          isRequired: false,
-        },
-        {
-          fieldName: "expected_close_date",
-          fieldLabel: "Expected close date",
-          fieldType: "date",
-          isRequired: false,
-        },
-        {
-          fieldName: "stage",
-          fieldLabel: "Stage",
-          fieldType: "select",
+          fieldName: "contactPerson",
+          fieldLabel: "Contact Person",
+          fieldType: "text",
           isRequired: true,
-        },
-        {
-          fieldName: "owner",
-          fieldLabel: "Owner",
-          fieldType: "select",
-          isRequired: true,
+          section: "Summary",
+          displayOrder: 2,
         },
         {
           fieldName: "organization",
           fieldLabel: "Organization",
-          fieldType: "organization",
+          fieldType: "text",
           isRequired: false,
+          section: "Summary",
+          displayOrder: 3,
         },
         {
-          fieldName: "contact_person",
-          fieldLabel: "Contact person",
-          fieldType: "person",
+          fieldName: "email",
+          fieldLabel: "Email",
+          fieldType: "email",
           isRequired: false,
+          section: "Summary",
+          displayOrder: 4,
         },
         {
-          fieldName: "label",
-          fieldLabel: "Label",
-          fieldType: "multiselect",
+          fieldName: "phone",
+          fieldLabel: "Phone",
+          fieldType: "phone",
           isRequired: false,
+          section: "Summary",
+          displayOrder: 5,
         },
         {
           fieldName: "status",
           fieldLabel: "Status",
           fieldType: "select",
-          isRequired: true,
+          isRequired: false,
+          section: "Summary",
+          displayOrder: 6,
+          options: [
+            "New",
+            "Contacted",
+            "Qualified",
+            "Proposal",
+            "Negotiation",
+            "Closed Won",
+            "Closed Lost",
+          ],
+        },
+        {
+          fieldName: "ownerId",
+          fieldLabel: "Owner ID",
+          fieldType: "number",
+          isRequired: false,
+          section: "Summary",
+          displayOrder: 7,
+        },
+        {
+          fieldName: "ownerName",
+          fieldLabel: "Owner Name",
+          fieldType: "text",
+          isRequired: false,
+          section: "Summary",
+          displayOrder: 8,
+        },
+
+        // Business Information
+        {
+          fieldName: "proposalValue",
+          fieldLabel: "Proposal Value",
+          fieldType: "currency",
+          isRequired: false,
+          section: "Business Information",
+          displayOrder: 10,
+        },
+        {
+          fieldName: "expectedCloseDate",
+          fieldLabel: "Expected Close Date",
+          fieldType: "date",
+          isRequired: false,
+          section: "Business Information",
+          displayOrder: 11,
+        },
+        {
+          fieldName: "esplProposalNo",
+          fieldLabel: "ESPL Proposal Number",
+          fieldType: "text",
+          isRequired: false,
+          section: "Business Information",
+          displayOrder: 12,
+        },
+        {
+          fieldName: "proposalSentDate",
+          fieldLabel: "Proposal Sent Date",
+          fieldType: "date",
+          isRequired: false,
+          section: "Business Information",
+          displayOrder: 13,
+        },
+        {
+          fieldName: "currency",
+          fieldLabel: "Currency",
+          fieldType: "select",
+          isRequired: false,
+          section: "Business Information",
+          displayOrder: 14,
+          options: ["USD", "EUR", "GBP", "INR", "CAD", "AUD"],
+        },
+
+        // Service Information
+        {
+          fieldName: "serviceType",
+          fieldLabel: "Service Type",
+          fieldType: "text",
+          isRequired: false,
+          section: "Service Information",
+          displayOrder: 20,
+        },
+        {
+          fieldName: "scopeOfServiceType",
+          fieldLabel: "Scope of Service Type",
+          fieldType: "text",
+          isRequired: false,
+          section: "Service Information",
+          displayOrder: 21,
+        },
+        {
+          fieldName: "SBUClass",
+          fieldLabel: "SBU Class",
+          fieldType: "text",
+          isRequired: false,
+          section: "Service Information",
+          displayOrder: 22,
+        },
+        {
+          fieldName: "sectoralSector",
+          fieldLabel: "Sectoral Sector",
+          fieldType: "text",
+          isRequired: false,
+          section: "Service Information",
+          displayOrder: 23,
+        },
+        {
+          fieldName: "numberOfReportsPrepared",
+          fieldLabel: "Number of Reports Prepared",
+          fieldType: "number",
+          isRequired: false,
+          section: "Service Information",
+          displayOrder: 24,
+        },
+
+        // Source Information
+        {
+          fieldName: "sourceChannel",
+          fieldLabel: "Source Channel",
+          fieldType: "text",
+          isRequired: false,
+          section: "Source Information",
+          displayOrder: 30,
+        },
+        {
+          fieldName: "sourceChannelID",
+          fieldLabel: "Source Channel ID",
+          fieldType: "text",
+          isRequired: false,
+          section: "Source Information",
+          displayOrder: 31,
+        },
+        {
+          fieldName: "sourceOrigin",
+          fieldLabel: "Source Origin",
+          fieldType: "text",
+          isRequired: false,
+          section: "Source Information",
+          displayOrder: 32,
+        },
+        {
+          fieldName: "sourceOriginID",
+          fieldLabel: "Source Origin ID",
+          fieldType: "text",
+          isRequired: false,
+          section: "Source Information",
+          displayOrder: 33,
+        },
+
+        // Location Information
+        {
+          fieldName: "projectLocation",
+          fieldLabel: "Project Location",
+          fieldType: "text",
+          isRequired: false,
+          section: "Location Information",
+          displayOrder: 40,
+        },
+        {
+          fieldName: "organizationCountry",
+          fieldLabel: "Organization Country",
+          fieldType: "text",
+          isRequired: false,
+          section: "Location Information",
+          displayOrder: 41,
+        },
+
+        // Additional Information
+        {
+          fieldName: "valueLabels",
+          fieldLabel: "Value Labels",
+          fieldType: "text",
+          isRequired: false,
+          section: "Additional Information",
+          displayOrder: 50,
+        },
+        {
+          fieldName: "company",
+          fieldLabel: "Company",
+          fieldType: "text",
+          isRequired: false,
+          section: "Additional Information",
+          displayOrder: 51,
+        },
+        {
+          fieldName: "visibleTo",
+          fieldLabel: "Visible To",
+          fieldType: "select",
+          isRequired: false,
+          section: "Additional Information",
+          displayOrder: 52,
+          options: ["Public", "Private", "Team", "Owner Only"],
+        },
+        {
+          fieldName: "questionShared",
+          fieldLabel: "Question Shared",
+          fieldType: "boolean",
+          isRequired: false,
+          section: "Additional Information",
+          displayOrder: 53,
+        },
+
+        // Lead Details Fields
+        {
+          fieldName: "RFP_receivedDate",
+          fieldLabel: "RFP Received Date",
+          fieldType: "date",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 60,
+        },
+        {
+          fieldName: "statusSummary",
+          fieldLabel: "Status Summary",
+          fieldType: "textarea",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 61,
+        },
+        {
+          fieldName: "responsibleId",
+          fieldLabel: "Responsible ID",
+          fieldType: "number",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 62,
+        },
+        {
+          fieldName: "responsiblePerson",
+          fieldLabel: "Responsible Person",
+          fieldType: "text",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 63,
+        },
+        {
+          fieldName: "organizationName",
+          fieldLabel: "Organization Name",
+          fieldType: "text",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 64,
+        },
+        {
+          fieldName: "source",
+          fieldLabel: "Source",
+          fieldType: "text",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 65,
+        },
+        {
+          fieldName: "personName",
+          fieldLabel: "Person Name",
+          fieldType: "text",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 66,
+        },
+        {
+          fieldName: "notes",
+          fieldLabel: "Notes",
+          fieldType: "textarea",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 67,
+        },
+        {
+          fieldName: "nextActivityDate",
+          fieldLabel: "Next Activity Date",
+          fieldType: "date",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 68,
+        },
+        {
+          fieldName: "nextActivityStatus",
+          fieldLabel: "Next Activity Status",
+          fieldType: "select",
+          isRequired: false,
+          section: "Lead Details",
+          displayOrder: 69,
+          options: ["Pending", "In Progress", "Completed", "Cancelled"],
         },
       ],
       deal: [
@@ -1956,6 +2650,597 @@ exports.getOrganizationWithCustomFields = async (req, res) => {
     console.error("Error fetching organization custom field values:", error);
     res.status(500).json({
       message: "Failed to fetch organization custom field values.",
+      error: error.message,
+    });
+  }
+};
+
+// Get custom fields organized by sections
+exports.getHybridFieldsSections = async (req, res) => {
+  const { entityType } = req.params;
+  const masterUserID = req.adminId;
+
+  try {
+    // Get all custom fields from database
+    const customFields = await CustomField.findAll({
+      where: {
+        entityType,
+        masterUserID,
+        isActive: true,
+        fieldSource: "custom",
+      },
+      order: [
+        ["category", "ASC"],
+        ["fieldGroup", "ASC"],
+        ["displayOrder", "ASC"],
+        ["fieldLabel", "ASC"],
+      ],
+    });
+
+    // Define default fields for the UI (matches your screenshot)
+    const defaultFields = [
+      { fieldName: "user", fieldLabel: "User", fieldType: "user", icon: "👤" },
+      {
+        fieldName: "pipeline",
+        fieldLabel: "Pipeline",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "stage",
+        fieldLabel: "Stage",
+        fieldType: "stage",
+        icon: "⚪",
+      },
+      {
+        fieldName: "visibleTo",
+        fieldLabel: "Visible to",
+        fieldType: "visibility",
+        icon: "👥",
+      },
+      {
+        fieldName: "productName",
+        fieldLabel: "Product name",
+        fieldType: "text",
+        icon: "abc",
+      },
+      {
+        fieldName: "sourceOrigin",
+        fieldLabel: "Source origin",
+        fieldType: "select",
+        icon: "🔽",
+      },
+      {
+        fieldName: "sourceOriginID",
+        fieldLabel: "Source origin ID",
+        fieldType: "text",
+        icon: "abc",
+      },
+      {
+        fieldName: "sourceChannel",
+        fieldLabel: "Source channel",
+        fieldType: "select",
+        icon: "🔽",
+      },
+      {
+        fieldName: "sourceChannelID",
+        fieldLabel: "Source channel ID",
+        fieldType: "text",
+        icon: "abc",
+      },
+    ];
+
+    // Define system fields for the UI (matches your screenshot)
+    const systemFields = [
+      { fieldName: "id", fieldLabel: "ID", fieldType: "number", icon: "123" },
+      {
+        fieldName: "creator",
+        fieldLabel: "Creator",
+        fieldType: "user",
+        icon: "👤",
+      },
+      {
+        fieldName: "weightedValue",
+        fieldLabel: "Weighted value",
+        fieldType: "currency",
+        icon: "💲",
+      },
+      {
+        fieldName: "status",
+        fieldLabel: "Status",
+        fieldType: "status",
+        icon: "✅",
+      },
+      {
+        fieldName: "dealCreated",
+        fieldLabel: "Deal created",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "updateTime",
+        fieldLabel: "Update time",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lastStageChange",
+        fieldLabel: "Last stage change",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "nextActivityDate",
+        fieldLabel: "Next activity date",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lastActivityDate",
+        fieldLabel: "Last activity date",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "wonTime",
+        fieldLabel: "Won time",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lastEmailReceived",
+        fieldLabel: "Last email received",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lastEmailSent",
+        fieldLabel: "Last email sent",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lostTime",
+        fieldLabel: "Lost time",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "dealClosedOn",
+        fieldLabel: "Deal closed on",
+        fieldType: "date",
+        icon: "📅",
+      },
+      {
+        fieldName: "lostReason",
+        fieldLabel: "Lost reason",
+        fieldType: "select",
+        icon: "🔽",
+      },
+      {
+        fieldName: "totalActivities",
+        fieldLabel: "Total activities",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "doneActivities",
+        fieldLabel: "Done activities",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "activitiesToDo",
+        fieldLabel: "Activities to do",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "emailMessagesCount",
+        fieldLabel: "Email messages count",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "productQuantity",
+        fieldLabel: "Product quantity",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "productAmount",
+        fieldLabel: "Product amount",
+        fieldType: "number",
+        icon: "123",
+      },
+      {
+        fieldName: "mrr",
+        fieldLabel: "MRR",
+        fieldType: "currency",
+        icon: "💲",
+      },
+      {
+        fieldName: "arr",
+        fieldLabel: "ARR",
+        fieldType: "currency",
+        icon: "💲",
+      },
+      {
+        fieldName: "acv",
+        fieldLabel: "ACV",
+        fieldType: "currency",
+        icon: "💲",
+      },
+      {
+        fieldName: "archiveStatus",
+        fieldLabel: "Archive status",
+        fieldType: "select",
+        icon: "🔽",
+      },
+      {
+        fieldName: "archiveTime",
+        fieldLabel: "Archive time",
+        fieldType: "date",
+        icon: "📅",
+      },
+    ];
+
+    // Organize custom fields into sections
+    const organizedFields = {
+      summary: [],
+      ungroupedCustomFields: [],
+      customGroups: {},
+      defaultFields: defaultFields,
+      systemFields: systemFields,
+    };
+
+    const fieldCounts = {
+      summary: 0,
+      ungroupedCustomFields: 0,
+      customGroups: 0,
+      defaultFields: defaultFields.length,
+      systemFields: systemFields.length,
+    };
+
+    // Process custom fields
+    customFields.forEach((field) => {
+      const fieldObj = field.toJSON();
+      fieldObj.source = "custom";
+
+      if (field.isImportant && field.category === "Summary") {
+        organizedFields.summary.push(fieldObj);
+        fieldCounts.summary++;
+      } else if (field.fieldGroup && field.fieldGroup !== "Default") {
+        if (!organizedFields.customGroups[field.fieldGroup]) {
+          organizedFields.customGroups[field.fieldGroup] = [];
+        }
+        organizedFields.customGroups[field.fieldGroup].push(fieldObj);
+      } else {
+        organizedFields.ungroupedCustomFields.push(fieldObj);
+        fieldCounts.ungroupedCustomFields++;
+      }
+    });
+
+    fieldCounts.customGroups = Object.keys(organizedFields.customGroups).length;
+
+    // Create sections array for the UI
+    const sections = [
+      {
+        key: "summary",
+        label: "Summary",
+        fields: organizedFields.summary,
+        count: fieldCounts.summary,
+        collapsible: true,
+        defaultCollapsed: false,
+      },
+      {
+        key: "ungroupedCustomFields",
+        label: "Ungrouped custom fields",
+        fields: organizedFields.ungroupedCustomFields,
+        count: fieldCounts.ungroupedCustomFields,
+        collapsible: true,
+        defaultCollapsed: false,
+      },
+    ];
+
+    // Add custom groups as sections
+    Object.keys(organizedFields.customGroups).forEach((groupName) => {
+      sections.push({
+        key: `customGroup_${groupName}`,
+        label: groupName,
+        fields: organizedFields.customGroups[groupName],
+        count: organizedFields.customGroups[groupName].length,
+        collapsible: true,
+        defaultCollapsed: false,
+      });
+    });
+
+    // Add default and system fields sections
+    sections.push(
+      {
+        key: "defaultFields",
+        label: "Default fields",
+        fields: organizedFields.defaultFields,
+        count: fieldCounts.defaultFields,
+        collapsible: true,
+        defaultCollapsed: true,
+        readonly: false,
+      },
+      {
+        key: "systemFields",
+        label: "System fields",
+        fields: organizedFields.systemFields,
+        count: fieldCounts.systemFields,
+        collapsible: true,
+        defaultCollapsed: true,
+        readonly: true,
+      }
+    );
+
+    res.status(200).json({
+      message: "Hybrid field sections retrieved successfully.",
+      entityType,
+      sections,
+      organizedFields,
+      fieldCounts,
+      totalFields:
+        fieldCounts.summary +
+        fieldCounts.ungroupedCustomFields +
+        Object.values(organizedFields.customGroups).reduce(
+          (acc, group) => acc + group.length,
+          0
+        ) +
+        fieldCounts.defaultFields +
+        fieldCounts.systemFields,
+    });
+  } catch (error) {
+    console.error("Error fetching hybrid field sections:", error);
+    res.status(500).json({
+      message: "Failed to fetch hybrid field sections.",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk update leadView and dealView for multiple fields
+exports.bulkUpdateFieldVisibility = async (req, res) => {
+  const { fieldUpdates } = req.body; // Array of { fieldId, leadView, dealView, listView, pipelines }
+  const masterUserID = req.adminId;
+
+  try {
+    if (
+      !fieldUpdates ||
+      !Array.isArray(fieldUpdates) ||
+      fieldUpdates.length === 0
+    ) {
+      return res.status(400).json({
+        message:
+          "fieldUpdates array is required and must contain at least one update.",
+      });
+    }
+
+    const updatedFields = [];
+    const errors = [];
+
+    for (const update of fieldUpdates) {
+      const { fieldId, leadView, dealView, listView, pipelines } = update;
+
+      if (!fieldId) {
+        errors.push(
+          `fieldId is required for update: ${JSON.stringify(update)}`
+        );
+        continue;
+      }
+
+      try {
+        const customField = await CustomField.findOne({
+          where: { fieldId, masterUserID },
+        });
+
+        if (!customField) {
+          errors.push(`Custom field with ID ${fieldId} not found.`);
+          continue;
+        }
+
+        // Store old values for history
+        const oldValues = { ...customField.toJSON() };
+
+        // Prepare the updated places where shown structure
+        const updatedPlacesShown = {
+          leadView:
+            leadView !== undefined
+              ? leadView
+              : customField.leadView ?? customField.showInAddView ?? false,
+          dealView:
+            dealView !== undefined
+              ? dealView
+              : customField.dealView ?? customField.showInDetailView ?? false,
+          listView:
+            listView !== undefined ? listView : customField.showInListView,
+          pipelines:
+            pipelines !== undefined
+              ? pipelines
+              : customField.pipelineRestrictions || "all",
+        };
+
+        // Update the field
+        await customField.update({
+          // New UI-aligned fields
+          leadView: updatedPlacesShown.leadView,
+          dealView: updatedPlacesShown.dealView,
+          showInListView: updatedPlacesShown.listView,
+          pipelineRestrictions: updatedPlacesShown.pipelines,
+          // Backward compatibility fields
+          showInAddView: updatedPlacesShown.leadView,
+          showInDetailView: updatedPlacesShown.dealView,
+          // Updated places where shown structure
+          placesWhereShown: updatedPlacesShown,
+        });
+
+        // Log the update
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "CUSTOM_FIELD_BULK_UPDATE",
+          masterUserID,
+          customField.fieldId,
+          null,
+          `Field visibility updated for "${customField.fieldLabel}"`,
+          {
+            old: {
+              leadView: oldValues.leadView ?? oldValues.showInAddView,
+              dealView: oldValues.dealView ?? oldValues.showInDetailView,
+              listView: oldValues.showInListView,
+              pipelines: oldValues.pipelineRestrictions,
+            },
+            new: updatedPlacesShown,
+          }
+        );
+
+        updatedFields.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          updatedVisibility: updatedPlacesShown,
+        });
+      } catch (error) {
+        errors.push(`Error updating field ${fieldId}: ${error.message}`);
+      }
+    }
+
+    const response = {
+      message: `Bulk update completed. Updated ${updatedFields.length} fields.`,
+      updatedFields,
+      successCount: updatedFields.length,
+      totalRequested: fieldUpdates.length,
+    };
+
+    if (errors.length > 0) {
+      response.errors = errors;
+      response.errorCount = errors.length;
+    }
+
+    const statusCode = errors.length > 0 ? 207 : 200; // 207 for partial success
+    res.status(statusCode).json(response);
+  } catch (error) {
+    console.error("Error in bulk update field visibility:", error);
+    res.status(500).json({
+      message: "Failed to bulk update field visibility.",
+      error: error.message,
+    });
+  }
+};
+
+// Migrate existing fields to use new leadView/dealView structure
+exports.migrateFieldsToNewStructure = async (req, res) => {
+  const { entityType, dryRun = false } = req.query;
+  const masterUserID = req.adminId;
+
+  try {
+    let whereClause = {
+      masterUserID,
+      fieldSource: "custom",
+    };
+
+    if (entityType) {
+      whereClause.entityType = entityType;
+    }
+
+    const customFields = await CustomField.findAll({
+      where: whereClause,
+    });
+
+    const fieldsToMigrate = [];
+    const alreadyMigrated = [];
+
+    customFields.forEach((field) => {
+      // Check if field needs migration
+      const needsMigration =
+        field.leadView === null ||
+        field.leadView === undefined ||
+        field.dealView === null ||
+        field.dealView === undefined ||
+        !field.placesWhereShown ||
+        (!field.placesWhereShown.leadView && !field.placesWhereShown.dealView);
+
+      if (needsMigration) {
+        fieldsToMigrate.push({
+          fieldId: field.fieldId,
+          fieldName: field.fieldName,
+          fieldLabel: field.fieldLabel,
+          currentState: {
+            leadView: field.leadView,
+            dealView: field.dealView,
+            showInAddView: field.showInAddView,
+            showInDetailView: field.showInDetailView,
+            showInListView: field.showInListView,
+            placesWhereShown: field.placesWhereShown,
+          },
+          proposedState: {
+            leadView: field.leadView ?? field.showInAddView ?? false,
+            dealView: field.dealView ?? field.showInDetailView ?? false,
+            listView: field.showInListView ?? false,
+            pipelines: field.pipelineRestrictions || "all",
+          },
+        });
+      } else {
+        alreadyMigrated.push({
+          fieldId: field.fieldId,
+          fieldName: field.fieldName,
+          fieldLabel: field.fieldLabel,
+        });
+      }
+    });
+
+    if (!dryRun && fieldsToMigrate.length > 0) {
+      // Perform actual migration
+      for (const fieldData of fieldsToMigrate) {
+        const customField = await CustomField.findOne({
+          where: { fieldId: fieldData.fieldId, masterUserID },
+        });
+
+        if (customField) {
+          await customField.update({
+            leadView: fieldData.proposedState.leadView,
+            dealView: fieldData.proposedState.dealView,
+            placesWhereShown: fieldData.proposedState,
+          });
+
+          await historyLogger(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "CUSTOM_FIELD_MIGRATION",
+            masterUserID,
+            customField.fieldId,
+            null,
+            `Field migrated to new leadView/dealView structure: "${customField.fieldLabel}"`,
+            {
+              old: fieldData.currentState,
+              new: fieldData.proposedState,
+            }
+          );
+        }
+      }
+    }
+
+    res.status(200).json({
+      message: dryRun
+        ? "Migration analysis completed (dry run)"
+        : `Migration completed. Updated ${fieldsToMigrate.length} fields.`,
+      totalFields: customFields.length,
+      fieldsToMigrate: fieldsToMigrate.length,
+      alreadyMigrated: alreadyMigrated.length,
+      dryRun,
+      fieldsToMigrate: dryRun ? fieldsToMigrate : undefined,
+      alreadyMigrated: dryRun ? alreadyMigrated : undefined,
+      migrationSummary: {
+        needsMigration: fieldsToMigrate.length,
+        alreadyUpToDate: alreadyMigrated.length,
+        totalProcessed: customFields.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in field migration:", error);
+    res.status(500).json({
+      message: "Failed to migrate fields to new structure.",
       error: error.message,
     });
   }

@@ -177,6 +177,34 @@ const Lead = sequelize.define("Lead", {
   dealId: {
     type: DataTypes.INTEGER,
     allowNull: true,
+    comment: "Reference to associated deal when lead is converted",
+  },
+
+  // Lead-specific tracking fields
+  sourceOriginID: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: "ID reference for the source origin",
+  },
+  leadQuality: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    comment: "Quality rating of the lead (hot, warm, cold)",
+  },
+  isQualified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: "Whether the lead has been qualified for conversion to deal",
+  },
+  qualificationDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: "Date when the lead was qualified",
+  },
+  conversionDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: "Date when the lead was converted to a deal",
   },
 });
 
