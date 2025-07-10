@@ -363,7 +363,7 @@ async function startEmailWorker() {
           if (msg !== null) {
             const emailData = JSON.parse(msg.content.toString());
             limit(() =>
-              sendQueuedEmail(emailData)
+              sendEmailJob(emailData)
                 .then(() => {
                   if (channel.connection.stream.writable) channel.ack(msg);
                 })
@@ -403,6 +403,9 @@ async function sendEmailJob(emailData) {
   let SENDER_NAME = emailData.senderName;
   let signatureBlock = "";
   let userCredential;
+
+  // Define baseURL for attachment file paths
+  const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
 
   // Fetch password if not provided
   if (!emailData.senderPassword) {
@@ -579,7 +582,6 @@ async function sendEmailJob(emailData) {
 
     // Save attachments if any (for user-uploaded files in compose email)
     if (emailData.attachments && emailData.attachments.length > 0) {
-      const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
       const savedAttachments = emailData.attachments.map((file) => ({
         emailID: savedEmail.emailID,
         filename: file.filename,
@@ -611,7 +613,7 @@ async function startEmailWorker() {
       if (msg !== null) {
         const emailData = JSON.parse(msg.content.toString());
         limit(() =>
-          sendQueuedEmail(emailData)
+          sendEmailJob(emailData)
             .then(() => channel.ack(msg))
             .catch((err) => {
               console.error("Failed to send queued email:", err);
