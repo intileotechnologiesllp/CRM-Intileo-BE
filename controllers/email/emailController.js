@@ -3547,6 +3547,17 @@ exports.composeEmail = [
         // isShared: isShared === true || isShared === "true", // ensure boolean
       };
 
+      // Save the email to database first to get emailID
+      const savedEmail = await Email.create(emailData);
+
+      // Save attachments to database for regular emails
+      if (req.files && req.files.length > 0) {
+        await saveUserUploadedAttachments(req.files, savedEmail.emailID);
+      }
+
+      // Update emailData with the actual emailID before sending to queue
+      emailData.emailID = savedEmail.emailID;
+
       await publishToQueue("EMAIL_QUEUE", emailData);
       // }
 
