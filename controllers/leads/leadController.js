@@ -47,7 +47,8 @@ exports.createLead = async (req, res) => {
     SBUClass,
     numberOfReportsPrepared,
     emailID, // Added emailID to the request body
-    customFields, // Add custom fields to request body
+    customFields,
+    value, // Add custom fields to request body
   } = req.body;
 
   console.log("Request body sourceOrgin:", sourceOrgin);
@@ -80,26 +81,25 @@ exports.createLead = async (req, res) => {
       .json({ message: "Proposal value must be positive." });
   }
 
-  // Check for duplicate email in leads (enforce CRM best practice)
-  const existingLead = await Lead.findOne({ where: { email } });
-  if (existingLead) {
-    return res.status(409).json({
-      message:
-        "A lead with this email address already exists. Each lead must have a unique email address.",
-      existingLeadId: existingLead.leadId,
-      existingLeadTitle: existingLead.title,
-    });
-  }
+  // Note: Removed email uniqueness check to allow multiple leads per contact person
+  // Each contact can have multiple projects/leads with different titles
 
-  // Check for duplicate organization in leads (enforce CRM best practice)
-  const existingOrgLead = await Lead.findOne({ where: { organization } });
-  if (existingOrgLead) {
+  // Check for duplicate combination of contactPerson, organization, AND title (allow multiple projects per contact)
+  const existingContactOrgTitleLead = await Lead.findOne({
+    where: {
+      contactPerson: contactPerson,
+      organization: organization,
+      title: title,
+    },
+  });
+  if (existingContactOrgTitleLead) {
     return res.status(409).json({
       message:
-        "A lead with this organization already exists. Each organization must be unique.",
-      existingLeadId: existingOrgLead.leadId,
-      existingLeadTitle: existingOrgLead.title,
-      existingOrganization: existingOrgLead.organization,
+        "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
+      existingLeadId: existingContactOrgTitleLead.leadId,
+      existingLeadTitle: existingContactOrgTitleLead.title,
+      existingContactPerson: existingContactOrgTitleLead.contactPerson,
+      existingOrganization: existingContactOrgTitleLead.organization,
     });
   }
   // --- End validation ---
@@ -147,14 +147,6 @@ exports.createLead = async (req, res) => {
       return res
         .status(500)
         .json({ message: "Failed to create/find organization." });
-    }
-    const duplicateByTitle = await Lead.findOne({ where: { title } });
-    const duplicateByContact = await Lead.findOne({ where: { contactPerson } });
-
-    if (duplicateByTitle || duplicateByContact) {
-      return res.status(409).json({
-        message: "A lead with this title or contact person already exists.",
-      });
     }
     // 2. Find or create Person (linked to organization)
     let personRecord = await Person.findOne({ where: { email } });
@@ -218,6 +210,7 @@ exports.createLead = async (req, res) => {
       stage: req.body.stage || "New Lead",
       productName: req.body.productName,
       sourceOriginID: req.body.sourceOriginID,
+      value,
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
