@@ -1,999 +1,2100 @@
-const amqp = require("amqplib");
-const pLimit = require("p-limit");
-// Reduce concurrency to 1 for all workers to minimize memory/connection usage
-const limit = pLimit(1);
-const { fetchRecentEmail } = require("../controllers/email/emailController");
-const {
-  fetchSyncEmails,
-} = require("../controllers/email/emailSettingController");
-const nodemailer = require("nodemailer");
-const Email = require("../models/email/emailModel");
-const Attachment = require("../models/email/attachmentModel");
-const UserCredential = require("../models/email/userCredentialModel");
-const DefaultEmail = require("../models/email/defaultEmailModel");
-const MasterUser = require("../models/master/masterUserModel");
-const { fetchInboxEmails } = require("../controllers/email/emailController");
-const { batch } = require("googleapis/build/src/apis/batch");
-const QUEUE_NAME = "email-fetch-queue";
-const SCHEDULED_QUEUE = "scheduled-email-queue";
-const QUEUE = "EMAIL_QUEUE";
-const PROVIDER_SMTP_CONFIG = {
-  gmail: {
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-  },
-  yandex: {
-    host: "smtp.yandex.com",
-    port: 465,
-    secure: true,
-  },
-  // Add more providers as needed
+const Deal = require("../../models/deals/dealsModels");
+const Lead = require("../../models/leads/leadsModel");
+const Person = require("../../models/leads/leadPersonModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
+const { Op } = require("sequelize");
+const { fn, col, literal } = require("sequelize");
+const DealDetails = require("../../models/deals/dealsDetailModel");
+const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
+const DealParticipant = require("../../models/deals/dealPartcipentsModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const DealNote = require("../../models/deals/delasNoteModel");
+const Email = require("../../models/email/emailModel");
+const Attachment = require("../../models/email/attachmentModel");
+const LeadFilter = require("../../models/leads/leadFiltersModel");
+const { convertRelativeDate } = require("../../utils/helper");
+const Activity = require("../../models/activity/activityModel");
+const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
+const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
+const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const { getProgramId } = require("../../utils/programCache");
+// Create a new deal with validation
+exports.createDeal = async (req, res) => {
+  try {
+    const dealProgramId = getProgramId("DEALS");
+    const {
+      contactPerson,
+      organization,
+      title,
+      value,
+      currency,
+      pipeline,
+      pipelineStage,
+      expectedCloseDate,
+      sourceChannel,
+      sourceChannelId,
+      serviceType,
+      proposalValue,
+      proposalCurrency,
+      esplProposalNo,
+      projectLocation,
+      organizationCountry,
+      proposalSentDate,
+      sourceRequired,
+      questionerShared,
+      sectorialSector,
+      sbuClass,
+      phone,
+      email,
+      sourceOrgin,
+      source,
+      customFields, // Add custom fields to request body
+    } = req.body;
+
+    // Validate required fields here...
+    let ownerId = req.user?.id || req.adminId || req.body.ownerId;
+
+    // Validation
+    if (!title || typeof title !== "string" || !title.trim()) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Title is required.`,
+        req.adminId
+      );
+      return res.status(400).json({ message: "Title is required." });
+    }
+    if (!email || !/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: A valid email is required.`,
+        req.adminId
+      );
+      return res.status(400).json({ message: "A valid email is required." });
+    }
+    if (!phone || !/^\+?\d{7,15}$/.test(phone)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: A valid phone number is required.`,
+        req.adminId
+      );
+      return res
+        .status(400)
+        .json({ message: "A valid phone number is required." });
+    }
+    // Find or create Person and Organization here...
+    // Check for unique title
+    const existingDeal = await Deal.findOne({ where: { title } });
+    if (existingDeal) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: A deal with this title already exists.`,
+        req.adminId
+      );
+      return res
+        .status(400)
+        .json({ message: "A deal with this title already exists." });
+    }
+    // Check for duplicate contactPerson in the deals table
+    const duplicateContactPerson = await Deal.findOne({
+      where: { contactPerson },
+    });
+    if (duplicateContactPerson) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: A deal with this contact person already exists.`,
+        req.adminId
+      );
+      return res.status(409).json({
+        message: "A deal with this contact person already exists.",
+      });
+    }
+    // 1. Set masterUserID at the top, before using it anywhere
+    const masterUserID = req.adminId;
+    // 1. Check if a matching lead exists
+
+    let existingLead = null;
+
+    // 2. If sourceOrgin is '2', require and use leadId
+    let leadId = req.body.leadId;
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      if (!leadId) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "leadId is required when sourceOrgin is 2." });
+      }
+      existingLead = await Lead.findByPk(leadId);
+      if (!existingLead) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Lead with leadId ${leadId} not found.`,
+          req.adminId
+        );
+        return res.status(404).json({ message: "Lead not found." });
+      }
+      ownerId = existingLead.ownerId; // assign, don't redeclare
+      leadId = existingLead.leadId; // assign, don't redeclare
+      // Optionally, update the lead after deal creation
+    }
+    // 1. Find or create Organization
+    let org = null;
+    if (organization) {
+      if (organization) {
+        org = await Organization.findOne({ where: { organization } });
+        if (!org) {
+          org = await Organization.create({
+            organization,
+            masterUserID, // make sure this is set
+          });
+        }
+      } else {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Organization name is required.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "Organization name is required." });
+      } // findOrCreate returns [instance, created]
+    }
+    // 2. Find or create Person
+    let person = null;
+    if (contactPerson) {
+      const masterUserID = req.adminId;
+
+      if (email) {
+        person = await Person.findOne({ where: { email } });
+        // console.log(person.personId," person found");
+
+        if (!person) {
+          person = await Person.create({
+            contactPerson,
+            email,
+            phone,
+            leadOrganizationId: org ? org.leadOrganizationId : null,
+            masterUserID,
+          });
+        }
+      } else {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Email is required for contact person.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "Email is required for contact person." });
+      }
+    }
+    if (!(person ? person.contactPerson : contactPerson)) {
+      return res.status(400).json({ message: "contactPerson is required." });
+    }
+    // Create the lead
+    console.log(person.personId, " before deal creation");
+    // Before saving to DB
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      if (!leadId) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "leadId is required when sourceOrgin is 2." });
+      }
+      existingLead = await Lead.findByPk(leadId);
+      if (!existingLead) {
+        return res.status(404).json({ message: "Lead not found." });
+      }
+      // Prevent conversion if already converted to a deal
+      if (existingLead.dealId) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: This lead is already converted to a deal.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "This lead is already converted to a deal." });
+      }
+      ownerId = existingLead.ownerId;
+      leadId = existingLead.leadId;
+    }
+    const deal = await Deal.create({
+      // contactPerson: person ? person.contactPerson : null,
+      contactPerson: person ? person.contactPerson : contactPerson,
+      organization: org ? org.organization : null,
+      personId: person ? person.personId : null,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
+      //       personId: person.personId,
+      // leadOrganizationId: org.leadOrganizationId,
+      leadId, // link to the lead if found
+      title,
+      value,
+      currency,
+      pipeline,
+      pipelineStage,
+      expectedCloseDate,
+      sourceChannel,
+      sourceChannelId,
+      serviceType,
+      proposalValue,
+      proposalCurrency,
+      esplProposalNo,
+      projectLocation,
+      organizationCountry,
+      proposalSentDate,
+      sourceRequired,
+      questionerShared,
+      sectorialSector,
+      sbuClass,
+      phone,
+      email,
+      sourceOrgin,
+      masterUserID: req.adminId, // Ensure masterUserID is set from the request
+      ownerId,
+      status: "open", // Default status
+      source,
+      // Add personId, organizationId, etc. as needed
+    });
+    let responsiblePerson = null;
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      // Use ownerId for responsible person
+      const owner = await MasterUser.findOne({
+        where: { masterUserID: ownerId },
+      });
+      responsiblePerson = owner ? owner.name : null;
+    } else {
+      // Use masterUserID for responsible person
+      const user = await MasterUser.findOne({
+        where: { masterUserID: req.adminId },
+      });
+      responsiblePerson = user ? user.name : null;
+    }
+
+    if (sourceOrgin === 0 && req.body.emailID) {
+      await Email.update(
+        { leadId: lead.leadId },
+        { where: { emailID: req.body.emailID } }
+      );
+    }
+    await DealDetails.create({
+      dealId: deal.dealId, // or deal.id depending on your PK
+      responsiblePerson,
+      ownerName: responsiblePerson, // or any other field you want to set
+      // ...other dealDetails fields if needed
+    });
+    // Optionally, update the lead with the new dealId
+    await DealStageHistory.create({
+      dealId: deal.dealId,
+      stageName: deal.pipelineStage,
+      enteredAt: deal.createdAt, // or new Date()
+    });
+    if (person || org) {
+      await DealParticipant.create({
+        dealId: deal.dealId,
+        personId: person ? person.personId : null,
+        leadOrganizationId: org ? org.leadOrganizationId : null,
+      });
+    }
+
+    if (existingLead) {
+      await existingLead.update({ dealId: deal.dealId });
+    }
+
+    // Handle custom fields
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          let customField;
+
+          // Check if it's a fieldId (numeric) or fieldName (string)
+          if (isNaN(fieldKey)) {
+            // It's a fieldName - search by fieldName
+            customField = await CustomField.findOne({
+              where: {
+                fieldName: fieldKey,
+                entityType: "deal",
+                masterUserID: req.adminId,
+                isActive: true,
+              },
+            });
+          } else {
+            // It's a fieldId - search by fieldId
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: parseInt(fieldKey),
+                entityType: "deal",
+                masterUserID: req.adminId,
+                isActive: true,
+              },
+            });
+          }
+
+          if (
+            customField &&
+            value !== null &&
+            value !== undefined &&
+            value !== ""
+          ) {
+            // Validate value based on field type
+            let processedValue = value;
+
+            if (
+              customField.fieldType === "number" &&
+              value !== null &&
+              value !== ""
+            ) {
+              processedValue = parseFloat(value);
+              if (isNaN(processedValue)) {
+                console.warn(
+                  `Invalid number value for field "${customField.fieldLabel}"`
+                );
+                continue;
+              }
+            }
+
+            if (customField.fieldType === "email" && value) {
+              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              if (!emailRegex.test(value)) {
+                console.warn(
+                  `Invalid email format for field "${customField.fieldLabel}"`
+                );
+                continue;
+              }
+            }
+
+            await CustomFieldValue.create({
+              fieldId: customField.fieldId,
+              entityId: deal.dealId,
+              entityType: "deal",
+              value:
+                typeof processedValue === "object"
+                  ? JSON.stringify(processedValue)
+                  : String(processedValue),
+              masterUserID: req.adminId,
+            });
+          }
+        }
+        console.log(
+          `Saved ${
+            Object.keys(customFields).length
+          } custom field values for deal ${deal.dealId}`
+        );
+      } catch (customFieldError) {
+        console.error("Error saving custom fields:", customFieldError);
+        // Don't fail the deal creation, just log the error
+      }
+    }
+
+    await historyLogger(
+      dealProgramId,
+      "DEAL_CREATION",
+      deal.masterUserID,
+      deal.dealId,
+      null,
+      `Deal is created by ${req.role}`,
+      null
+    );
+
+    res.status(201).json({ message: "deal created successfully", deal });
+  } catch (error) {
+    console.log("Error creating deal:", error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
 };
 
-// const limit = pLimit(5); // Limit concurrency to 5
+exports.getDeals = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      search = "",
+      pipeline,
+      pipelineStage,
+      ownerId,
+      isArchived,
+      masterUserID,
+    } = req.query;
 
-// Utility: Log memory usage for diagnostics
-function logMemoryUsage(context = "") {
-  const mem = process.memoryUsage();
-  const rss = (mem.rss / 1024 / 1024).toFixed(1);
-  const heapUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
-  const heapTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
-  const external = (mem.external / 1024 / 1024).toFixed(1);
+    const where = {};
 
-  console.log(
-    `[Memory] ${context} RSS: ${rss}MB, Heap: ${heapUsed}MB / ${heapTotal}MB, External: ${external}MB`
-  );
-
-  // Warning if memory usage is high
-  if (mem.heapUsed > 500 * 1024 * 1024) {
-    // 500MB
-    console.warn(`[Memory Warning] High heap usage: ${heapUsed}MB`);
-  }
-}
-
-// Add process-level error handling
-process.on("unhandledRejection", (reason, p) => {
-  console.error("[FATAL] Unhandled Rejection at:", p, "reason:", reason);
-  process.exit(1);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[FATAL] Uncaught Exception:", err);
-  process.exit(1);
-});
-
-// Patch all worker consumers to log memory and always close connections
-async function startWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
-
-  const connection = await amqp.connect(amqpUrl);
-  console.log("Connected to RabbitMQ");
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE_NAME, { durable: true });
-
-  // Set prefetch to 1 to ensure only one message is processed at a time
-  channel.prefetch(1);
-
-  channel.consume(
-    QUEUE_NAME,
-    async (msg) => {
-      if (msg !== null) {
-        // Enforce small batch size and log memory for fetchRecentEmail
-        const { adminId } = JSON.parse(msg.content.toString());
-        logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
-        try {
-          await limit(async () => {
-            // Pass smaller batch size to fetchRecentEmail for memory safety
-            await fetchRecentEmail(adminId, { batchSize: 5 });
-          });
-          channel.ack(msg);
-        } catch (error) {
-          console.error(
-            `Error processing email fetch for adminId ${adminId}:`,
-            error
-          );
-          channel.nack(msg, false, false); // Discard the message on error
-        } finally {
-          logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
-          // Force garbage collection
-          if (global.gc) {
-            global.gc();
-          }
-        }
-      }
-    },
-    { noAck: false }
-  );
-
-  console.log("Email fetch worker started and waiting for jobs...");
-}
-
-async function startScheduledEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
-
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
-
-  // Set prefetch to 1 to ensure only one message is processed at a time
-  channel.prefetch(1);
-
-  channel.consume(
-    SCHEDULED_QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const { emailID } = JSON.parse(msg.content.toString());
-        try {
-          const email = await Email.findByPk(emailID, {
-            include: [{ model: Attachment, as: "attachments" }],
-          });
-          if (!email) return channel.ack(msg);
-
-          // Fetch sender credentials
-          const userCredential = await UserCredential.findOne({
-            where: { masterUserID: email.masterUserID },
-          });
-          if (!userCredential) return channel.ack(msg);
-          const provider = userCredential.provider; // default to gmail
-          // Send email
-          let transporterConfig;
-          if (provider === "gmail" || provider === "yandex") {
-            const smtp = PROVIDER_SMTP_CONFIG[provider];
-            transporterConfig = {
-              host: smtp.host,
-              port: smtp.port,
-              secure: smtp.secure,
-              auth: {
-                user: userCredential.email,
-                pass: userCredential.appPassword,
-              },
-            };
-          } else if (provider === "custom") {
-            transporterConfig = {
-              host: userCredential.smtpHost,
-              port: userCredential.smtpPort,
-              secure: userCredential.smtpSecure, // true/false
-              auth: {
-                user: userCredential.email,
-                pass: userCredential.appPassword,
-              },
-            };
-          } else {
-            // fallback to gmail
-            transporterConfig = {
-              service: "gmail",
-              auth: {
-                user: userCredential.email,
-                pass: userCredential.appPassword,
-              },
-            };
-          }
-          const transporter = nodemailer.createTransport(transporterConfig);
-
-          const info = await transporter.sendMail({
-            from: userCredential.email,
-            to: email.recipient,
-            cc: email.cc,
-            bcc: email.bcc,
-            subject: email.subject,
-            text: email.body,
-            html: email.body,
-            attachments: email.attachments.map((att) => ({
-              filename: att.filename,
-              path: att.path,
-            })),
-          });
-
-          // Move email to sent
-          await email.update({
-            folder: "sent",
-            createdAt: new Date(),
-            messageId: info.messageId,
-          });
-          console.log(`Scheduled email sent: ${email.subject}`);
-
-          channel.ack(msg);
-        } catch (err) {
-          console.error("Failed to send scheduled email:", err);
-          channel.nack(msg, false, false); // Discard on error
-        }
-      }
-    },
-    { noAck: false }
-  );
-
-  console.log("Scheduled email worker started and waiting for jobs...");
-}
-
-//......................................................................
-// async function sendQueuedEmail(emailData) {
-//   // Fetch sender credentials (prefer DefaultEmail)
-//   let SENDER_EMAIL = emailData.sender;
-//   let SENDER_PASSWORD;
-//   let SENDER_NAME = emailData.senderName;
-//   let signatureBlock = "";
-//   let userCredential;
-
-//   // If you need to fetch password from DB:
-//   if (!emailData.senderPassword) {
-//     const defaultEmail = await DefaultEmail.findOne({
-//       where: { masterUserID: emailData.masterUserID, isDefault: true },
-//     });
-//     if (defaultEmail) {
-//       SENDER_PASSWORD = defaultEmail.appPassword;
-//     } else {
-//       userCredential = await UserCredential.findOne({
-//         where: { masterUserID: emailData.masterUserID },
-//       });
-//       SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
-//     }
-//   } else {
-//     SENDER_PASSWORD = emailData.senderPassword;
-//   }
-
-//   // Build signature block if needed (optional)
-//   if (!userCredential) {
-//     userCredential = await UserCredential.findOne({
-//       where: { masterUserID: emailData.masterUserID },
-//     });
-//   }
-//   if (userCredential) {
-//     if (userCredential.signatureName) {
-//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-//     }
-//     if (userCredential.signature) {
-//       signatureBlock += `${userCredential.signature}<br>`;
-//     }
-//     if (userCredential.signatureImage) {
-//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-//     }
-//   }
-
-//   let emailBody = emailData.body || "";
-//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
-//     emailBody += `<br><br>${signatureBlock}`;
-//   }
-
-//   // Prepare mail options
-//   const mailOptions = {
-//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-//     to: emailData.recipient,
-//     cc: emailData.cc,
-//     bcc: emailData.bcc,
-//     subject: emailData.subject,
-//     html: emailBody,
-//     text: emailBody,
-//     attachments: (emailData.attachments || []).map(att => ({
-//       filename: att.filename,
-//       path: att.path,
-//     })),
-//     inReplyTo: emailData.inReplyTo || undefined,
-//     references: emailData.references || undefined,
-//   };
-
-//   // Send email
-//   const transporter = nodemailer.createTransport({
-//     service: "gmail",
-//     auth: {
-//       user: SENDER_EMAIL,
-//       pass: SENDER_PASSWORD,
-//     },
-//   });
-
-//   const info = await transporter.sendMail(mailOptions);
-
-//   // Save email to DB with real messageId
-//   const savedEmail = await Email.create({
-//     messageId: info.messageId,
-//     inReplyTo: emailData.inReplyTo || null,
-//     references: emailData.references || null,
-//     sender: SENDER_EMAIL,
-//     senderName: SENDER_NAME,
-//     recipient: emailData.recipient,
-//     cc: emailData.cc,
-//     bcc: emailData.bcc,
-//     subject: emailData.subject,
-//     body: emailBody,
-//     folder: "sent",
-//     createdAt: emailData.createdAt || new Date(),
-//     masterUserID: emailData.masterUserID,
-//     tempMessageId: emailData.tempMessageId,
-//     isDraft: false,
-//     // ...any other fields you need...
-//   });
-
-//   // Save attachments if any
-//   if (emailData.attachments && emailData.attachments.length > 0) {
-//     const savedAttachments = emailData.attachments.map(file => ({
-//       emailID: savedEmail.emailID,
-//       filename: file.filename,
-//       filePath: file.path,
-//       size: file.size,
-//       contentType: file.contentType,
-//     }));
-//     await Attachment.bulkCreate(savedAttachments);
-//   }
-
-//   console.log(`Queued email sent and saved: ${info.messageId}`);
-// }
-
-// --- Update EMAIL_QUEUE consumer ---
-// async function startEmailWorker() {
-//   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-//   const connection = await amqp.connect(amqpUrl);
-//   const channel = await connection.createChannel();
-//   await channel.assertQueue(QUEUE, { durable: true });
-
-//   channel.consume(
-//     QUEUE,
-//     async (msg) => {
-//       if (msg !== null) {
-//         const emailData = JSON.parse(msg.content.toString());
-//         limit(() =>
-//           sendQueuedEmail(emailData)
-//             .then(() => channel.ack(msg))
-//             .catch((err) => {
-//               console.error("Failed to send queued email:", err);
-//               channel.nack(msg, false, false); // Discard on error
-//             })
-//         );
-//       }
-//     },
-//     { noAck: false }
-//   );
-
-//   console.log("Email worker started and waiting for jobs...");
-// }
-
-///.......................new............
-
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  let connection, channel;
-
-  async function connect() {
-    try {
-      connection = await amqp.connect(amqpUrl);
-      channel = await connection.createChannel();
-      await channel.assertQueue(QUEUE, { durable: true });
-
-      channel.consume(
-        QUEUE,
-        async (msg) => {
-          if (msg !== null) {
-            const emailData = JSON.parse(msg.content.toString());
-            limit(() =>
-              sendEmailJob(emailData)
-                .then(() => {
-                  if (channel.connection.stream.writable) channel.ack(msg);
-                })
-                .catch((err) => {
-                  console.error("Failed to send queued email:", err);
-                  if (channel.connection.stream.writable)
-                    channel.nack(msg, false, false);
-                })
-            );
-          }
-        },
-        { noAck: false }
-      );
-
-      connection.on("error", (err) => {
-        console.error("AMQP connection error:", err);
-      });
-
-      connection.on("close", () => {
-        console.error("AMQP connection closed. Reconnecting in 5s...");
-        setTimeout(connect, 5000);
-      });
-
-      console.log("Email worker started and waiting for jobs...");
-    } catch (err) {
-      console.error("Failed to connect to RabbitMQ:", err);
-      setTimeout(connect, 5000);
+    // Search by title, contactPerson, or organization
+    if (search) {
+      where[Op.or] = [
+        { title: { [Op.like]: `%${search}%` } },
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { organization: { [Op.like]: `%${search}%` } },
+      ];
     }
-  }
 
-  connect();
-}
-async function sendEmailJob(emailData) {
-  let draftEmail = null;
-  let SENDER_EMAIL = emailData.sender;
-  let SENDER_PASSWORD;
-  let SENDER_NAME = emailData.senderName;
-  let signatureBlock = "";
-  let userCredential;
+    // Filter by pipeline
+    if (pipeline) {
+      where.pipeline = pipeline;
+    }
 
-  // Define baseURL for attachment file paths
-  const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+    // Filter by pipelineStage
+    if (pipelineStage) {
+      where.pipelineStage = pipelineStage;
+    }
 
-  // Fetch password if not provided
-  if (!emailData.senderPassword) {
-    const defaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID: emailData.masterUserID, isDefault: true },
-    });
-    if (defaultEmail) {
-      SENDER_PASSWORD = defaultEmail.appPassword;
+    // Filter by ownerId
+    if (ownerId) {
+      where.ownerId = ownerId;
+    }
+
+    // Filter by masterUserID if provided
+    if (masterUserID) {
+      where.masterUserID = masterUserID;
+    }
+
+    // Add isArchived filter if provided
+    if (typeof isArchived !== "undefined") {
+      where.isArchived = isArchived === "true";
+    }
+    // --- Add this block to get checked columns ---
+    const pref = await DealColumnPreference.findOne();
+
+    let attributes = [];
+    let dealDetailsAttributes = [];
+    if (pref) {
+      const columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
+      // Get all Deal and DealDetails fields
+      const dealFields = Object.keys(Deal.rawAttributes);
+      const dealDetailsFields = DealDetails
+        ? Object.keys(DealDetails.rawAttributes)
+        : [];
+      // Split checked columns by table
+      columns
+        .filter((col) => col.check)
+        .forEach((col) => {
+          if (dealFields.includes(col.key)) attributes.push(col.key);
+          else if (dealDetailsFields.includes(col.key))
+            dealDetailsAttributes.push(col.key);
+        });
+      if (attributes.length === 0) attributes = undefined;
+      if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
+    }
+
+    // --- DYNAMIC FILTERS START HERE ---
+    if (req.query.filterId) {
+      const filter = await LeadFilter.findByPk(req.query.filterId);
+      if (filter) {
+        const filterConfig =
+          typeof filter.filterConfig === "string"
+            ? JSON.parse(filter.filterConfig)
+            : filter.filterConfig;
+
+        const { all = [], any = [] } = filterConfig;
+        const dealFields = Object.keys(Deal.rawAttributes);
+        const dealDetailsFields = DealDetails
+          ? Object.keys(DealDetails.rawAttributes)
+          : [];
+
+        let filterWhere = {};
+        let dealDetailsWhere = {};
+
+        if (all.length > 0) {
+          filterWhere[Op.and] = [];
+          dealDetailsWhere[Op.and] = [];
+          all.forEach((cond) => {
+            if (dealFields.includes(cond.field)) {
+              filterWhere[Op.and].push(buildCondition(cond));
+            } else if (dealDetailsFields.includes(cond.field)) {
+              dealDetailsWhere[Op.and].push(buildCondition(cond));
+            }
+          });
+          if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+          if (dealDetailsWhere[Op.and].length === 0)
+            delete dealDetailsWhere[Op.and];
+        }
+
+        if (any.length > 0) {
+          filterWhere[Op.or] = [];
+          dealDetailsWhere[Op.or] = [];
+          any.forEach((cond) => {
+            if (dealFields.includes(cond.field)) {
+              filterWhere[Op.or].push(buildCondition(cond));
+            } else if (dealDetailsFields.includes(cond.field)) {
+              dealDetailsWhere[Op.or].push(buildCondition(cond));
+            }
+          });
+          if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+          if (dealDetailsWhere[Op.or].length === 0)
+            delete dealDetailsWhere[Op.or];
+        }
+
+        // Merge with your existing where
+        Object.assign(where, filterWhere);
+
+        // Add DealDetails where to include
+        if (dealDetailsWhere && Object.keys(dealDetailsWhere).length > 0) {
+          // If you already have a DealDetails include, add where to it
+          let detailsInclude = {
+            model: DealDetails,
+            as: "details",
+            attributes: dealDetailsAttributes,
+            where: dealDetailsWhere,
+          };
+          include = [detailsInclude];
+        } else {
+          include = [
+            {
+              model: DealDetails,
+              as: "details",
+              attributes: dealDetailsAttributes,
+            },
+          ];
+        }
+      }
     } else {
-      userCredential = await UserCredential.findOne({
-        where: { masterUserID: emailData.masterUserID },
-      });
-      SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
+      // If no filterId, use your default include logic
+      include = [
+        {
+          model: DealDetails,
+          as: "details",
+          attributes: dealDetailsAttributes,
+        },
+      ];
     }
-  } else {
-    SENDER_PASSWORD = emailData.senderPassword;
-  }
+    // --- DYNAMIC FILTERS END HERE ---
 
-  // Build signature block if needed
-  if (!userCredential) {
-    userCredential = await UserCredential.findOne({
-      where: { masterUserID: emailData.masterUserID },
+    // const offset = (parseInt(page) - 1) * parseInt(limit);
+    // Pagination
+    const offset =
+      (parseInt(req.query.page || 1) - 1) * parseInt(req.query.limit || 10);
+    // const limit = parseInt(req.query.limit || 10);
+    // Always include dealId in attributes
+    if (attributes && !attributes.includes("dealId")) {
+      attributes.unshift("dealId");
+    }
+    if (req.role !== "admin") {
+      where[Op.or] = [{ masterUserID: req.adminId }, { ownerId: req.adminId }];
+    }
+
+    const { rows: deals, count: total } = await Deal.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [["createdAt", "DESC"]],
+      attributes, // <-- only checked columns will be returned
+      include: [
+        {
+          model: DealDetails,
+          as: "details", // Make sure your association uses this alias
+          attributes: dealDetailsAttributes,
+        },
+      ],
     });
-  }
-  if (userCredential) {
-    if (userCredential.signatureName) {
-      signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-    }
-    if (userCredential.signature) {
-      signatureBlock += `${userCredential.signature}<br>`;
-    }
-    if (userCredential.signatureImage) {
-      signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-    }
-  }
 
-  let emailBody = emailData.body || "";
-  if (signatureBlock && !emailBody.includes(signatureBlock)) {
-    emailBody += `<br><br>${signatureBlock}`;
-  }
+    // Fetch custom field values for all deals
+    const dealIds = deals.map((deal) => deal.dealId);
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityType: "deal",
+        entityId: dealIds,
+        masterUserID: req.adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          attributes: ["fieldId", "fieldName", "fieldLabel", "fieldType"],
+        },
+      ],
+    });
 
-  // Prepare mail options
-  const mailOptions = {
-    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-    to: emailData.recipient || (draftEmail && draftEmail.recipient),
-    cc: emailData.cc || (draftEmail && draftEmail.cc),
-    bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
-    subject: emailData.subject,
-    html: emailBody,
-    text: emailBody,
-    attachments: (emailData.attachments || []).map((att) => ({
-      filename: att.filename,
-      path: att.path,
-    })),
-    inReplyTo: emailData.inReplyTo || undefined,
-    references: emailData.references || undefined,
+    // Group custom field values by deal
+    const customFieldsByDeal = {};
+    customFieldValues.forEach((value) => {
+      if (!customFieldsByDeal[value.entityId]) {
+        customFieldsByDeal[value.entityId] = {};
+      }
+      customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
+        fieldId: value.fieldId,
+        fieldLabel: value.CustomField.fieldLabel,
+        fieldType: value.CustomField.fieldType,
+        value: value.value,
+      };
+    });
+
+    // Attach custom fields to each deal
+    const dealsWithCustomFields = deals.map((deal) => {
+      const dealObj = deal.toJSON();
+      dealObj.customFields = customFieldsByDeal[deal.dealId] || {};
+      return dealObj;
+    });
+
+    res.status(200).json({
+      total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: parseInt(page),
+      deals: dealsWithCustomFields,
+    });
+  } catch (error) {
+    console.log(error);
+    await logAuditTrail(
+      getProgramId("DEALS"),
+      "DEAL_FETCH",
+      req.role,
+      `Failed to fetch deals: ${error.message}`,
+      req.adminId
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// --- Helper functions (reuse from your prompt) ---
+
+const operatorMap = {
+  is: "eq",
+  "is not": "ne",
+  "is empty": "is empty",
+  "is not empty": "is not empty",
+  "is exactly or earlier than": "lte",
+  "is earlier than": "lt",
+  "is exactly or later than": "gte",
+  "is later than": "gt",
+  // Add more mappings if needed
+};
+
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
   };
 
-  // Send email
-  const provider =
-    emailData.provider ||
-    (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
-    userCredential?.provider;
-
-  let transporterConfig;
-  if (provider === "gmail" || provider === "yandex") {
-    const smtp = PROVIDER_SMTP_CONFIG[provider];
-    transporterConfig = {
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      auth: {
-        user: SENDER_EMAIL,
-        pass: SENDER_PASSWORD,
-      },
-    };
-  } else if (provider === "custom") {
-    transporterConfig = {
-      host: userCredential.smtpHost,
-      port: userCredential.smtpPort,
-      secure: userCredential.smtpSecure, // true/false
-      auth: {
-        user: SENDER_EMAIL,
-        pass: SENDER_PASSWORD,
-      },
-    };
-  } else {
-    // fallback to gmail
-    transporterConfig = {
-      service: "gmail",
-      auth: {
-        user: SENDER_EMAIL,
-        pass: SENDER_PASSWORD,
-      },
-    };
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
   }
 
-  const transporter = nodemailer.createTransport(transporterConfig);
-  // const transporter = nodemailer.createTransport({
-  //   service: "gmail",
-  //   auth: {
-  //     user: SENDER_EMAIL,
-  //     pass: SENDER_PASSWORD,
-  //   },
-  // });
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
 
-  const info = await transporter.sendMail(mailOptions);
+  // Handle date fields
+  const leadDateFields = Object.entries(Deal.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
 
-  // --- Save or update email and attachments ---
-  if (emailData.draftId) {
-    // Update the existing draft to "sent"
-    const draftEmail = await Email.findOne({
-      where: {
-        draftId: emailData.draftId,
-        masterUserID: emailData.masterUserID,
-        folder: "drafts",
-      },
-    });
-    if (draftEmail) {
-      await draftEmail.update({
-        messageId: info.messageId,
-        inReplyTo: emailData.inReplyTo,
-        references: emailData.references,
-        sender: SENDER_EMAIL,
-        senderName: SENDER_NAME,
-        recipient: emailData.recipient,
-        cc: emailData.cc,
-        bcc: emailData.bcc,
-        subject: emailData.subject,
-        body: emailBody,
-        folder: "sent",
-        createdAt: emailData.createdAt,
-        isDraft: false,
-        tempMessageId: emailData.tempMessageId,
-        // attachments: emailData.attachments,
-      });
-      // Remove old attachments
-      await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
-      // Save new attachments
-      if (emailData.attachments && emailData.attachments.length > 0) {
-        const savedAttachments = emailData.attachments.map((file) => ({
-          emailID: draftEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`,
-          // filePath: file.path,
-          size: file.size,
-          contentType: file.contentType,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-      }
-      console.log(`Draft email sent and updated: ${info.messageId}`);
+  const DealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
+
+  const allDateFields = [...leadDateFields, ...DealDetailsDateFields];
+
+  if (allDateFields.includes(cond.field)) {
+    if (cond.useExactDate) {
+      const date = new Date(cond.value);
+      if (isNaN(date.getTime())) return {};
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: date,
+        },
+      };
     }
-  } else {
-    // Update the existing email record (sent from composeEmail)
-    const existingEmail = await Email.findOne({
-      where: {
-        tempMessageId: emailData.tempMessageId,
-        masterUserID: emailData.masterUserID,
-        folder: "outbox",
-      },
-    });
+    // Otherwise, use relative date conversion
+    const dateRange = convertRelativeDate(cond.value);
+    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
 
-    if (existingEmail) {
-      // Update the existing email with the real messageId and move to sent folder
-      await existingEmail.update({
-        messageId: info.messageId,
-        folder: "sent",
-        createdAt: emailData.createdAt || new Date(),
-      });
-      console.log(`Email updated and moved to sent: ${info.messageId}`);
+    if (
+      dateRange &&
+      isValidDate(dateRange.start) &&
+      isValidDate(dateRange.end)
+    ) {
+      return {
+        [cond.field]: {
+          [Op.between]: [dateRange.start, dateRange.end],
+        },
+      };
+    }
+    if (dateRange && isValidDate(dateRange.start)) {
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: dateRange.start,
+        },
+      };
+    }
+    return {};
+  }
 
-      // Save attachments if any (for user-uploaded files in compose email)
-      if (emailData.attachments && emailData.attachments.length > 0) {
-        const savedAttachments = emailData.attachments.map((file) => ({
-          emailID: existingEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL for user uploads
-          size: file.size,
-          contentType: file.contentType,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-        console.log(
-          `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${existingEmail.emailID}`
-        );
-      }
-    } else {
-      // Fallback: Create a new sent email if existing email not found
-      const savedEmail = await Email.create({
-        messageId: info.messageId,
-        inReplyTo: emailData.inReplyTo || null,
-        references: emailData.references || null,
-        sender: SENDER_EMAIL,
-        senderName: SENDER_NAME,
-        recipient: emailData.recipient,
-        cc: emailData.cc,
-        bcc: emailData.bcc,
-        subject: emailData.subject,
-        body: emailBody,
-        folder: "sent",
-        createdAt: emailData.createdAt || new Date(),
-        masterUserID: emailData.masterUserID,
-        tempMessageId: emailData.tempMessageId,
-        isDraft: false,
-      });
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
 
-      // Save attachments if any (for user-uploaded files in compose email)
-      if (emailData.attachments && emailData.attachments.length > 0) {
-        const savedAttachments = emailData.attachments.map((file) => ({
-          emailID: savedEmail.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save public URL for user uploads
-          size: file.size,
-          contentType: file.contentType,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-        console.log(
-          `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${savedEmail.emailID}`
-        );
-      }
-      console.log(
-        `Fallback: New queued email sent and saved: ${info.messageId}`
+exports.updateDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const updateFields = { ...req.body };
+
+    // Separate DealDetails fields
+    const dealDetailsFields = {};
+    if ("statusSummary" in updateFields)
+      dealDetailsFields.statusSummary = updateFields.statusSummary;
+    if ("responsiblePerson" in updateFields)
+      dealDetailsFields.responsiblePerson = updateFields.responsiblePerson;
+    if ("rfpReceivedDate" in updateFields)
+      dealDetailsFields.rfpReceivedDate = updateFields.rfpReceivedDate;
+
+    // Remove DealDetails fields from main update
+    delete updateFields.statusSummary;
+    delete updateFields.responsiblePerson;
+    delete updateFields.rfpReceivedDate;
+
+    // Update Deal
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      await logAuditTrail(
+        getProgramId("DEALS"),
+        "DEAL_UPDATE",
+        req.role,
+        `Deal update failed: Deal with ID ${dealId} not found.`,
+        req.adminId
       );
+      return res.status(404).json({ message: "Deal not found." });
     }
-  }
-}
+    // Check if pipelineStage is changing
+    // Only check for pipelineStage if it's in the request body
+    if (
+      updateFields.pipelineStage &&
+      updateFields.pipelineStage !== deal.pipelineStage
+    ) {
+      await DealStageHistory.create({
+        dealId: deal.dealId,
+        stageName: updateFields.pipelineStage,
+        enteredAt: new Date(),
+      });
+    }
+    await deal.update({ ...updateFields });
 
-// --- Update EMAIL_QUEUE consumer ---
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
-
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendEmailJob(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send queued email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
+    // Update or create DealDetails
+    if (Object.keys(dealDetailsFields).length > 0) {
+      let dealDetails = await DealDetails.findOne({ where: { dealId } });
+      if (dealDetails) {
+        await dealDetails.update(dealDetailsFields);
+      } else {
+        await DealDetails.create({ dealId, ...dealDetailsFields });
       }
-    },
-    { noAck: false }
-  );
+    }
 
-  console.log("Email worker started and waiting for jobs...");
-}
-//.....................change
-
-// async function sendEmailJob(emailID) {
-//   // Fetch email and attachments
-//   const email = await Email.findByPk(emailID, {
-//     include: [{ model: Attachment, as: "attachments" }],
-//   });
-//   if (!email) return;
-
-//   // Fetch sender credentials (prefer DefaultEmail)
-//   let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
-//   let signatureBlock = "";
-//   let userCredential;
-//   const defaultEmail = await DefaultEmail.findOne({
-//     where: { masterUserID: email.masterUserID, isDefault: true },
-//   });
-
-//   if (defaultEmail) {
-//     SENDER_EMAIL = defaultEmail.email;
-//     SENDER_PASSWORD = defaultEmail.appPassword;
-//     SENDER_NAME = defaultEmail.senderName;
-//     if (!SENDER_NAME) {
-//       const masterUser = await MasterUser.findOne({
-//         where: { masterUserID: email.masterUserID },
-//       });
-//       SENDER_NAME = masterUser ? masterUser.name : "";
-//     }
-//         // Fetch userCredential for signature if needed
-//     userCredential = await UserCredential.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//   } else {
-//     const userCredential = await UserCredential.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//     SENDER_EMAIL = userCredential.email;
-//     SENDER_PASSWORD = userCredential.appPassword;
-//     const masterUser = await MasterUser.findOne({
-//       where: { masterUserID: email.masterUserID },
-//     });
-//     SENDER_NAME = masterUser ? masterUser.name : "";
-
-//   }
-//     // Build signature block if not already present in email.body
-//   if (userCredential) {
-//     if (userCredential.signatureName) {
-//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-//     }
-//     if (userCredential.signature) {
-//       signatureBlock += `${userCredential.signature}<br>`;
-//     }
-//     if (userCredential.signatureImage) {
-//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-//     }
-//   }
-
-//   // Only add signature if not already present in body
-//   let emailBody = email.body || "";
-//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
-//     emailBody += `<br><br>${signatureBlock}`;
-//   }
-// const inReplyToHeader = email.inReplyTo || undefined;
-// const referencesHeader = email.references || undefined;
-//   // Prepare mail options
-//   const mailOptions = {
-//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-//     to: email.recipient,
-//     cc: email.cc,
-//     bcc: email.bcc,
-//     subject: email.subject,
-//     // html: email.body,
-//     // text: email.body, // fallback
-//     html: emailBody,
-//     text: emailBody,
-//     attachments: email.attachments.map(att => ({
-//       filename: att.filename,
-//       path: att.filePath || att.path,
-//     })),
-//      inReplyTo: inReplyToHeader,
-//   references: referencesHeader,
-//   };
-
-//   // Send email
-//   const transporter = nodemailer.createTransport({
-//     service: "gmail",
-//     auth: {
-//       user: SENDER_EMAIL,
-//       pass: SENDER_PASSWORD,
-//     },
-//   });
-
-//   const info = await transporter.sendMail(mailOptions);
-
-//   // Update email as sent
-//   await email.update({
-//     folder: "sent",
-//     messageId: info.messageId,
-//     // createdAt: new Date(),
-//     isDraft: false,
-//   });
-
-//   console.log(`Email sent and updated: ${info.messageId}`);
-// }
-
-async function startEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE, { durable: true });
-
-  channel.consume(
-    QUEUE,
-    async (msg) => {
-      if (msg !== null) {
-        const emailData = JSON.parse(msg.content.toString());
-        limit(() =>
-          sendEmailJob(emailData)
-            .then(() => channel.ack(msg))
-            .catch((err) => {
-              console.error("Failed to send email:", err);
-              channel.nack(msg, false, false); // Discard on error
-            })
-        );
-      }
-    },
-    { noAck: false }
-  );
-
-  console.log("Email worker started and waiting for jobs...");
-}
-
-async function startSyncEmailWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue("SYNC_EMAIL_QUEUE", { durable: true });
-
-  // Set prefetch to 1 to ensure only one message is processed at a time
-  channel.prefetch(1);
-
-  channel.consume(
-    "SYNC_EMAIL_QUEUE",
-    async (msg) => {
-      if (msg !== null) {
-        // Expect startUID and endUID in the message for batching
-        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
-          msg.content.toString()
-        );
-        await limit(async () => {
-          try {
-            logMemoryUsage(
-              `Before syncEmails for masterUserID ${masterUserID}`
-            );
-
-            // Pass startUID and endUID to fetchSyncEmails for batch processing
-            await fetchSyncEmails(
-              {
-                adminId: masterUserID,
-                body: { syncStartDate, startUID, endUID },
-                query: { batchSize: 10 }, // Enforce small batch size
-              },
-              { status: () => ({ json: () => {} }) }
-            );
-
-            logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
-
-            // Force garbage collection
-            if (global.gc) {
-              global.gc();
-            }
-
-            channel.ack(msg);
-          } catch (err) {
-            console.error("Failed to sync emails:", err);
-            channel.nack(msg, false, false);
+    // Update all fields of Person
+    if (deal.personId) {
+      const person = await Person.findByPk(deal.personId);
+      if (person) {
+        // Only update fields that exist in the Person model
+        const personAttributes = Object.keys(Person.rawAttributes);
+        const personUpdate = {};
+        for (const key of personAttributes) {
+          if (key in req.body) {
+            personUpdate[key] = req.body[key];
           }
-        });
+        }
+        if (Object.keys(personUpdate).length > 0) {
+          await person.update(personUpdate);
+        }
       }
-    },
-    { noAck: false }
-  );
+    }
 
-  console.log("Sync email worker started and waiting for jobs...");
-}
-
-async function startFetchInboxWorker() {
-  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue("FETCH_INBOX_QUEUE", { durable: true });
-
-  // Set prefetch to 1 to ensure only one message is processed at a time
-  channel.prefetch(1);
-
-  channel.consume(
-    "FETCH_INBOX_QUEUE",
-    async (msg) => {
-      if (msg !== null) {
-        // Force a small batch size for memory safety
-        let {
-          masterUserID,
-          email,
-          appPassword,
-          batchSize,
-          page,
-          days,
-          provider,
-          imapHost,
-          imapPort,
-          imapTLS,
-          smtpHost,
-          smtpPort,
-          smtpSecure,
-          startUID,
-          endUID,
-        } = JSON.parse(msg.content.toString());
-
-        // Enforce maximum batch size to prevent memory issues
-        batchSize = Math.min(parseInt(batchSize) || 5, 5);
-
-        await limit(async () => {
-          try {
-            // Log memory usage before fetch
-            logMemoryUsage(
-              `Before fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`
-            );
-
-            // Add delay between batches to prevent overwhelming the system
-            if (page > 1) {
-              await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
-            }
-
-            // Call fetchInboxEmails logic directly, but mock req/res
-            await fetchInboxEmails(
-              {
-                adminId: masterUserID,
-                email,
-                appPassword,
-                body: {
-                  email,
-                  appPassword,
-                  provider,
-                  imapHost,
-                  imapPort,
-                  imapTLS,
-                  smtpHost,
-                  smtpPort,
-                  smtpSecure,
-                },
-                query: {
-                  batchSize,
-                  page,
-                  days,
-                  startUID,
-                  endUID,
-                },
-              },
-              {
-                status: (code) => ({
-                  json: (data) => {
-                    console.log(
-                      `Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`
-                    );
-                  },
-                }),
-              }
-            );
-
-            // Log memory usage after fetch
-            logMemoryUsage(
-              `After fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}`
-            );
-
-            // Force garbage collection after processing
-            if (global.gc) {
-              global.gc();
-              logMemoryUsage(
-                `After garbage collection for masterUserID ${masterUserID}, page ${page}`
-              );
-            }
-
-            // Additional memory cleanup
-            if (page % 10 === 0) {
-              // Every 10 batches
-              console.log(
-                `Completed ${page} batches, forcing additional cleanup...`
-              );
-              if (global.gc) {
-                global.gc();
-                global.gc(); // Double GC for thorough cleanup
-              }
-              // Small delay to let system recover
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
-
-            channel.ack(msg);
-          } catch (err) {
-            console.error(
-              `Failed to fetch inbox emails for masterUserID ${masterUserID}, page ${page}:`,
-              err
-            );
-            channel.nack(msg, false, false);
+    // Update all fields of Organization
+    if (deal.leadOrganizationId) {
+      const org = await Organization.findByPk(deal.leadOrganizationId);
+      if (org) {
+        // Only update fields that exist in the Organization model
+        const orgAttributes = Object.keys(Organization.rawAttributes);
+        const orgUpdate = {};
+        for (const key of orgAttributes) {
+          if (key in req.body) {
+            orgUpdate[key] = req.body[key];
           }
-        });
+        }
+        if (Object.keys(orgUpdate).length > 0) {
+          await org.update(orgUpdate);
+        }
       }
-    },
-    { noAck: false }
-  );
+    }
 
-  // Add connection error handling
-  connection.on("error", (err) => {
-    console.error("AMQP connection error in fetchInboxWorker:", err);
-  });
+    // Handle custom fields update
+    const { customFields } = req.body;
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          let customField;
 
-  connection.on("close", () => {
-    console.log(
-      "AMQP connection closed in fetchInboxWorker. Attempting to reconnect..."
+          // Check if it's a fieldId (numeric) or fieldName (string)
+          if (isNaN(fieldKey)) {
+            // It's a fieldName - search by fieldName
+            customField = await CustomField.findOne({
+              where: {
+                fieldName: fieldKey,
+                entityType: "deal",
+                masterUserID: req.adminId,
+                isActive: true,
+              },
+            });
+          } else {
+            // It's a fieldId - search by fieldId
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: parseInt(fieldKey),
+                entityType: "deal",
+                masterUserID: req.adminId,
+                isActive: true,
+              },
+            });
+          }
+
+          if (customField) {
+            // Validate value based on field type
+            let processedValue = value;
+
+            if (
+              customField.fieldType === "number" &&
+              value !== null &&
+              value !== ""
+            ) {
+              processedValue = parseFloat(value);
+              if (isNaN(processedValue)) {
+                console.warn(
+                  `Invalid number value for field "${customField.fieldLabel}"`
+                );
+                continue;
+              }
+            }
+
+            if (customField.fieldType === "email" && value) {
+              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              if (!emailRegex.test(value)) {
+                console.warn(
+                  `Invalid email format for field "${customField.fieldLabel}"`
+                );
+                continue;
+              }
+            }
+
+            // Find or create the field value
+            let fieldValue = await CustomFieldValue.findOne({
+              where: {
+                fieldId: customField.fieldId,
+                entityId: dealId.toString(),
+                entityType: "deal",
+                masterUserID: req.adminId,
+              },
+            });
+
+            if (fieldValue) {
+              // Update existing value
+              await fieldValue.update({
+                value:
+                  typeof processedValue === "object"
+                    ? JSON.stringify(processedValue)
+                    : String(processedValue),
+              });
+            } else {
+              // Create new value
+              await CustomFieldValue.create({
+                fieldId: customField.fieldId,
+                entityId: dealId.toString(),
+                entityType: "deal",
+                value:
+                  typeof processedValue === "object"
+                    ? JSON.stringify(processedValue)
+                    : String(processedValue),
+                masterUserID: req.adminId,
+              });
+            }
+          }
+        }
+        console.log(
+          `Updated ${
+            Object.keys(customFields).length
+          } custom field values for deal ${dealId}`
+        );
+      } catch (customFieldError) {
+        console.error("Error updating custom fields:", customFieldError);
+        // Don't fail the deal update, just log the error
+      }
+    }
+
+    // After all updates and before sending the response:
+    const updatedDeal = await Deal.findByPk(dealId, {
+      include: [
+        { model: DealDetails, as: "details" },
+        { model: Person, as: "Person" },
+        { model: Organization, as: "Organization" },
+      ],
+    });
+
+    // Calculate pipeline stage days
+    const stageHistory = await DealStageHistory.findAll({
+      where: { dealId },
+      order: [["enteredAt", "ASC"]],
+    });
+
+    const now = new Date();
+    const pipelineStages = [];
+    for (let i = 0; i < stageHistory.length; i++) {
+      const stage = stageHistory[i];
+      const nextStage = stageHistory[i + 1];
+      const start = new Date(stage.enteredAt);
+      const end = nextStage ? new Date(nextStage.enteredAt) : now;
+      const days = Math.max(
+        0,
+        Math.floor((end - start) / (1000 * 60 * 60 * 24))
+      );
+      pipelineStages.push({
+        stageName: stage.stageName,
+        days,
+      });
+    }
+    const pipelineOrder = [
+      "Qualified",
+      "Contact Made",
+      "Proposal Made",
+      "Negotiations Started",
+    ];
+
+    const stageDaysMap = new Map();
+    for (const stage of pipelineStages) {
+      if (!stageDaysMap.has(stage.stageName)) {
+        stageDaysMap.set(stage.stageName, stage.days);
+      } else {
+        stageDaysMap.set(
+          stage.stageName,
+          stageDaysMap.get(stage.stageName) + stage.days
+        );
+      }
+    }
+
+    let currentStageName = pipelineStages.length
+      ? pipelineStages[pipelineStages.length - 1].stageName
+      : null;
+
+    let pipelineStagesUnique = [];
+    if (currentStageName && pipelineOrder.includes(currentStageName)) {
+      const currentIdx = pipelineOrder.indexOf(currentStageName);
+      pipelineStagesUnique = pipelineOrder
+        .slice(0, currentIdx + 1)
+        .map((stageName) => ({
+          stageName,
+          days: stageDaysMap.get(stageName) || 0,
+        }));
+    }
+
+    //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
+    await historyLogger(
+      getProgramId("DEALS"),
+      "DEAL_UPDATE",
+      req.adminId,
+      deal.dealId,
+      null,
+      `Deal updated by ${req.role}`,
+      null
     );
-    setTimeout(() => startFetchInboxWorker(), 5000);
+    res.status(200).json({
+      message: "Deal, person, and organization updated successfully",
+      deal: updatedDeal,
+      person: updatedDeal.Person ? [updatedDeal.Person] : [],
+      organization: updatedDeal.Organization ? [updatedDeal.Organization] : [],
+      pipelineStages: pipelineStagesUnique,
+      currentStage: currentStageName,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// exports.getDealSummary = async (req, res) => {
+//   try {
+//     // 1. Per-currency summary
+//     const currencySummary = await Deal.findAll({
+//       attributes: [
+//         "currency",
+//         [fn("SUM", col("value")), "totalValue"],
+//         // Replace with your actual weighted value logic if needed
+//         [fn("SUM", col("value")), "weightedValue"],
+//         [fn("COUNT", col("dealId")), "dealCount"]
+//       ],
+//       group: ["currency"]
+//     });
+
+//     // 2. Overall summary
+//     const overall = await Deal.findAll({
+//       attributes: [
+//         [fn("SUM", col("value")), "totalValue"],
+//         [fn("SUM", col("value")), "weightedValue"],
+//         [fn("COUNT", col("dealId")), "dealCount"]
+//       ]
+//     });
+
+//     res.status(200).json({
+//       overall: overall[0],         // { totalValue, weightedValue, dealCount }
+//       currencySummary              // array of per-currency summaries
+//     });
+//   } catch (error) {
+//     console.log(error);
+
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+exports.getDealSummary = async (req, res) => {
+  try {
+    // Fetch all deals with value, currency, and pipelineStage
+    const deals = await Deal.findAll({
+      attributes: ["value", "currency", "pipelineStage"],
+      raw: true,
+    });
+
+    // Probabilities for each stage
+    const stageProbabilities = {
+      Qualified: 10,
+      "Contact Made": 25,
+      "Proposal Made": 50,
+      "Negotiations Started": 75,
+      // Add more stages as needed
+    };
+
+    // Group deals by currency
+    const currencyMap = {};
+
+    let totalValue = 0;
+    let totalWeightedValue = 0;
+    let totalDealCount = 0;
+
+    deals.forEach((deal) => {
+      const { currency, value, pipelineStage } = deal;
+      if (!currencyMap[currency]) {
+        currencyMap[currency] = {
+          totalValue: 0,
+          weightedValue: 0,
+          dealCount: 0,
+        };
+      }
+      currencyMap[currency].totalValue += value || 0;
+      currencyMap[currency].weightedValue +=
+        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
+      currencyMap[currency].dealCount += 1;
+
+      totalValue += value || 0;
+      totalWeightedValue +=
+        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
+      totalDealCount += 1;
+    });
+
+    // Format result as array
+    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
+      currency,
+      totalValue: data.totalValue,
+      weightedValue: data.weightedValue,
+      dealCount: data.dealCount,
+    }));
+
+    // Optionally, sort by totalValue descending
+    summary.sort((a, b) => b.totalValue - a.totalValue);
+
+    res.status(200).json({
+      totalValue,
+      totalWeightedValue,
+      totalDealCount,
+      summary,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.archiveDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+    await deal.update({ isArchived: true });
+    res.status(200).json({ message: "Deal archived successfully.", deal });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.unarchiveDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+    await deal.update({ isArchived: false });
+    res.status(200).json({ message: "Deal unarchived successfully.", deal });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getDealsByStage = async (req, res) => {
+  try {
+    const allStages = [
+      "Qualified",
+      "Contact Made",
+      "Proposal Made",
+      "Negotiations Started",
+      // ...add all your stages here
+    ];
+
+    const result = [];
+    let totalDeals = 0;
+
+    for (const stage of allStages) {
+      const deals = await Deal.findAll({
+        where: { pipelineStage: stage },
+        order: [["createdAt", "DESC"]],
+      });
+
+      const totalValue = deals.reduce(
+        (sum, deal) => sum + (deal.value || 0),
+        0
+      );
+      const dealCount = deals.length;
+      totalDeals += dealCount;
+
+      result.push({
+        stage,
+        totalValue,
+        dealCount,
+        deals,
+      });
+    }
+
+    res.status(200).json({
+      totalDeals,
+      stages: result,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// ...existing code...
+exports.getDealDetail = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+
+    // Email optimization parameters
+    const { emailPage = 1, emailLimit = 10 } = req.query;
+    const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+    const MAX_EMAIL_LIMIT = 50;
+    const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
+    const deal = await Deal.findByPk(dealId, {
+      include: [
+        { model: DealDetails, as: "details" },
+        { model: Person, as: "Person" },
+        { model: Organization, as: "Organization" },
+      ],
+    });
+
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    const stageHistory = await DealStageHistory.findAll({
+      where: { dealId },
+      order: [["enteredAt", "ASC"]],
+    });
+
+    const now = new Date();
+    const pipelineStages = [];
+
+    for (let i = 0; i < stageHistory.length; i++) {
+      const stage = stageHistory[i];
+      const nextStage = stageHistory[i + 1];
+      const start = new Date(stage.enteredAt);
+      const end = nextStage ? new Date(nextStage.enteredAt) : now;
+      const days = Math.max(
+        0,
+        Math.floor((end - start) / (1000 * 60 * 60 * 24))
+      );
+      pipelineStages.push({
+        stageName: stage.stageName,
+        days,
+      });
+    }
+
+    // Aggregate days per unique stage for frontend bar
+    const stageDaysMap = new Map();
+    const orderedStages = [];
+    let currentStageName = pipelineStages.length
+      ? pipelineStages[pipelineStages.length - 1].stageName
+      : null;
+
+    for (const stage of pipelineStages) {
+      if (!stageDaysMap.has(stage.stageName)) {
+        orderedStages.push(stage.stageName);
+        stageDaysMap.set(stage.stageName, stage.days);
+      } else {
+        stageDaysMap.set(
+          stage.stageName,
+          stageDaysMap.get(stage.stageName) + stage.days
+        );
+      }
+      // Stop if we've reached the current stage
+      if (stage.stageName === currentStageName) break;
+    }
+
+    // Define your pipeline order
+    const pipelineOrder = [
+      "Qualified",
+      "Contact Made",
+      "Proposal Made",
+      "Negotiations Started",
+    ];
+
+    let pipelineStagesUnique = [];
+    if (currentStageName && pipelineOrder.includes(currentStageName)) {
+      const currentIdx = pipelineOrder.indexOf(currentStageName);
+      // Always include all stages from "Qualified" up to and including the current stage
+      pipelineStagesUnique = pipelineOrder
+        .slice(0, currentIdx + 1)
+        .map((stageName) => ({
+          stageName,
+          days: stageDaysMap.get(stageName) || 0,
+        }));
+    }
+
+    // Calculate avgTimeToWon for all won deals
+    const wonDeals = await Deal.findAll({ where: { status: "won" } });
+    let avgTimeToWon = 0;
+    if (wonDeals.length) {
+      const totalDays = wonDeals.reduce((sum, d) => {
+        if (d.wonDate && d.createdAt) {
+          const days = Math.floor(
+            (d.wonDate - d.createdAt) / (1000 * 60 * 60 * 24)
+          );
+          return sum + days;
+        }
+        return sum;
+      }, 0);
+      avgTimeToWon = Math.round(totalDays / wonDeals.length);
+    }
+
+    // Overview calculations
+    const createdAt = deal.createdAt;
+    const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
+    const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
+    const inactiveDays = 0; // Placeholder until you have activities
+
+    // Send all person data
+    const personArr = deal.Person
+      ? [deal.Person.toJSON ? deal.Person.toJSON() : deal.Person]
+      : [];
+
+    // Send all organization data
+    const orgArr = deal.Organization
+      ? [
+          deal.Organization.toJSON
+            ? deal.Organization.toJSON()
+            : deal.Organization,
+        ]
+      : [];
+
+    // Flat deal object (as before)
+    const dealObj = {
+      dealId: deal.dealId,
+      title: deal.title,
+      value: deal.value,
+      pipeline: deal.pipeline,
+      pipelineStage: deal.pipelineStage,
+      status: deal.status || "open",
+      createdAt: deal.createdAt,
+      expectedCloseDate: deal.expectedCloseDate,
+      serviceType: deal.serviceType,
+      proposalValue: deal.proposalValue,
+      esplProposalNo: deal.esplProposalNo,
+      projectLocation: deal.projectLocation,
+      organizationCountry: deal.organizationCountry,
+      proposalSentDate: deal.proposalSentDate,
+      sourceOrgin: deal.sourceOrgin,
+      sourceChannel: deal.sourceChannel,
+      sourceChannelId: deal.sourceChannelId,
+      statusSummary: deal.details?.statusSummary,
+      responsiblePerson: deal.details?.responsiblePerson,
+      rfpReceivedDate: deal.details?.rfpReceivedDate,
+      wonTime: deal.details?.wonTime,
+      lostTime: deal.details?.lostTime,
+      lostReason: deal.details?.lostReason,
+      // ...other deal fields
+    };
+
+    // Fetch participants for this deal
+    const participants = await DealParticipant.findAll({
+      where: { dealId },
+      include: [
+        {
+          model: Person,
+          as: "Person",
+          attributes: ["personId", "contactPerson", "email"],
+        },
+        {
+          model: Organization,
+          as: "Organization",
+          attributes: ["leadOrganizationId", "organization", "masterUserID"],
+        },
+      ],
+    });
+
+    const participantArr = await Promise.all(
+      participants.map(async (p) => {
+        const person = p.Person;
+        const organization = p.Organization;
+
+        let closedDeals = 0,
+          openDeals = 0,
+          ownerName = null;
+
+        if (person) {
+          closedDeals = await Deal.count({
+            where: { personId: person.personId, status: "won" },
+          });
+          openDeals = await Deal.count({
+            where: { personId: person.personId, status: "open" },
+          });
+          console.log(
+            "Person found:",
+            person.contactPerson,
+            "Closed Deals:",
+            closedDeals,
+            "Open Deals:",
+            openDeals
+          );
+
+          // Use ownerId or masterUserID from organization
+          console.log(organization.masterUserID, " organization masterUserID");
+          console.log(organization, " organization");
+
+          let ownerIdToUse = organization
+            ? organization.ownerId || organization.masterUserID
+            : null;
+          console.log(ownerIdToUse, " ownerIdToUse");
+
+          if (ownerIdToUse) {
+            const owner = await MasterUser.findOne({
+              where: { masterUserID: ownerIdToUse },
+            });
+            ownerName = owner ? owner.name : null;
+          }
+        }
+
+        return {
+          name: person ? person.contactPerson : null,
+          organization: organization ? organization.organization : null,
+          email: person ? person.email : null,
+          phone: person ? person.phone : null,
+          closedDeals,
+          openDeals,
+          owner: ownerName,
+        };
+      })
+    );
+
+    // Optimized email fetching with pagination
+    // Get total email count first
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.or]: [
+          { dealId },
+          ...(deal.email
+            ? [
+                { sender: deal.email },
+                { recipient: { [Op.like]: `%${deal.email}%` } },
+              ]
+            : []),
+        ],
+      },
+    });
+
+    // Fetch emails linked to this deal with pagination and essential fields only
+    const emailsByDeal = await Email.findAll({
+      where: { dealId },
+      attributes: [
+        "emailID",
+        "messageId",
+        "sender",
+        "senderName",
+        "recipient",
+        "cc",
+        "bcc",
+        "subject",
+        "createdAt",
+        "folder",
+        "isRead",
+        "leadId",
+        "dealId",
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: Math.ceil(safeEmailLimit / 2),
+      offset: Math.floor(emailOffset / 2),
+    });
+
+    // Fetch emails by address with pagination and essential fields only
+    let emailsByAddress = [];
+    if (deal.email) {
+      emailsByAddress = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { sender: deal.email },
+            { recipient: { [Op.like]: `%${deal.email}%` } },
+          ],
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "sender",
+          "senderName",
+          "recipient",
+          "cc",
+          "bcc",
+          "subject",
+          "createdAt",
+          "folder",
+          "isRead",
+          "leadId",
+          "dealId",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(safeEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
+      });
+    }
+
+    // Merge and deduplicate emails
+    const allEmailsMap = new Map();
+    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    const allEmails = Array.from(allEmailsMap.values());
+
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
+      });
+
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
+    }
+
+    // Fetch notes for this deal with limit
+    const notes = await DealNote.findAll({
+      where: { dealId },
+      limit: 20, // Limit notes to prevent large responses
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Fetch activities for this deal with limit
+    const activities = await Activity.findAll({
+      where: { dealId },
+      limit: 20, // Limit activities to prevent large responses
+      order: [["startDateTime", "DESC"]],
+    });
+
+    // Fetch custom field values for this deal
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: req.adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: { isActive: true },
+          required: true,
+        },
+      ],
+      order: [
+        [{ model: CustomField, as: "CustomField" }, "category", "ASC"],
+        [{ model: CustomField, as: "CustomField" }, "fieldGroup", "ASC"],
+        [{ model: CustomField, as: "CustomField" }, "displayOrder", "ASC"],
+      ],
+    });
+
+    // Format custom fields
+    const formattedCustomFields = {};
+    const fieldsByCategory = {};
+    const fieldsByGroup = {};
+
+    customFieldValues.forEach((value) => {
+      const field = value.CustomField;
+      const category = field.category || "Details";
+      const fieldGroup = field.fieldGroup || "Default";
+
+      formattedCustomFields[field.fieldId] = {
+        fieldId: field.fieldId,
+        fieldName: field.fieldName,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        value: value.value,
+        options: field.options,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        category: category,
+        fieldGroup: fieldGroup,
+      };
+
+      if (!fieldsByCategory[category]) {
+        fieldsByCategory[category] = [];
+      }
+      fieldsByCategory[category].push(formattedCustomFields[field.fieldId]);
+
+      if (!fieldsByGroup[fieldGroup]) {
+        fieldsByGroup[fieldGroup] = [];
+      }
+      fieldsByGroup[fieldGroup].push(formattedCustomFields[field.fieldId]);
+    });
+
+    console.log(
+      `Deal detail: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes, ${activities.length} activities`
+    );
+
+    res.status(200).json({
+      deal: dealObj,
+      person: personArr,
+      organization: orgArr,
+      pipelineStages: pipelineStagesUnique, // Use unique stages with aggregated days
+      currentStage:
+        pipelineStages[pipelineStages.length - 1]?.stageName ||
+        deal.pipelineStage,
+      overview: {
+        dealAge,
+        avgTimeToWon,
+        inactiveDays,
+        createdAt,
+      },
+      participants: participantArr,
+      emails: optimizedEmails,
+      notes,
+      activities,
+      files,
+      customFields: {
+        values: formattedCustomFields,
+        fieldsByCategory,
+        fieldsByGroup,
+      },
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
+      },
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.deleteDeal = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const deal = await Deal.findByPk(dealId);
+
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    await deal.destroy();
+
+    res.status(200).json({ message: "Deal deleted successfully." });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.linkParticipant = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { personId } = req.body;
+
+    // Require at least personId
+    if (!dealId || !personId) {
+      return res
+        .status(400)
+        .json({ message: "dealId and personId are required." });
+    }
+
+    // Optionally, check if participant already linked
+    const exists = await DealParticipant.findOne({
+      where: { dealId, personId },
+    });
+    if (exists) {
+      return res
+        .status(409)
+        .json({ message: "Participant already linked to this deal." });
+    }
+
+    const participant = await DealParticipant.create({
+      dealId,
+      personId,
+    });
+
+    res
+      .status(201)
+      .json({ message: "Participant linked successfully.", participant });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.createNote = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { content } = req.body;
+    const createdBy = req.user?.masterUserID || req.adminId; // Adjust as per your auth
+
+    if (!content) {
+      return res.status(400).json({ message: "Note content is required." });
+    }
+
+    const note = await DealNote.create({
+      dealId,
+      content,
+      createdBy,
+    });
+
+    res.status(201).json({ message: "Note created successfully.", note });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getNotes = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const notes = await DealNote.findAll({
+      where: { dealId },
+      order: [["createdAt", "DESC"]],
+    });
+    res.status(200).json({ notes });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.saveAllDealFieldsWithCheck = async (req, res) => {
+  // Get all field names from Deal and DealDetails models
+  const dealFields = Object.keys(Deal.rawAttributes);
+  const dealDetailsFields = DealDetails
+    ? Object.keys(DealDetails.rawAttributes)
+    : [];
+  const allFieldNames = Array.from(
+    new Set([...dealFields, ...dealDetailsFields])
+  );
+
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = allFieldNames.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
   });
 
-  console.log("Inbox fetch worker started and waiting for jobs...");
-}
+  try {
+    let pref = await DealColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await DealColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res
+      .status(200)
+      .json({ message: "All deal columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all deal columns:", error);
+    res.status(500).json({ message: "Error saving all deal columns" });
+  }
+};
+exports.getDealFields = (req, res) => {
+  const fields = [
+    { key: "contactPerson", label: "Contact Person", check: false },
+    { key: "organization", label: "Organization", check: false },
+    { key: "title", label: "Title", check: false },
+    { key: "value", label: "Value", check: false },
+    { key: "currency", label: "Currency", check: false },
+    { key: "pipeline", label: "Pipeline", check: false },
+    { key: "pipelineStage", label: "Pipeline Stage", check: false },
+    { key: "label", label: "Label", check: false },
+    { key: "expectedCloseDate", label: "Expected Close Date", check: false },
+    { key: "sourceChannel", label: "Source Channel", check: false },
+    { key: "serviceType", label: "Service Type", check: false },
+    { key: "proposalValue", label: "Proposal Value", check: false },
+    { key: "proposalCurrency", label: "Proposal Currency", check: false },
+    { key: "esplProposalNo", label: "ESPL Proposal No.", check: false },
+    {
+      key: "projectLocation",
+      label: "Country of Project Location",
+      check: false,
+    },
+    { key: "organizationCountry", label: "Organization Country", check: false },
+    { key: "proposalSentDate", label: "Proposal Sent Date", check: false },
+    { key: "sourceRequired", label: "Source Required", check: false },
+    { key: "questionerShared", label: "Questioner Shared", check: false },
+    { key: "sectorialSector", label: "Sectorial Sector", check: false },
+    { key: "sbuClass", label: "SBU Class", check: false },
+    { key: "phone", label: "Phone", check: false },
+    { key: "email", label: "Email", check: false },
+    { key: "sourceOrgin", label: "Source Origin", check: false },
+    { key: "isArchived", label: "Is Archived", check: false },
+    { key: "status", label: "Status", check: false },
+    { key: "createdAt", label: "Deal Created", check: false },
+    { key: "updatedAt", label: "Updated At", check: false },
+    { key: "statusSummary", label: "Status Summary", check: false },
+    { key: "responsiblePerson", label: "Responsible Person", check: false },
+    { key: "rfpReceivedDate", label: "RFP Received Date", check: false },
+    { key: "owner", label: "Owner", check: false },
+    { key: "wonTime", label: "Won Time", check: false },
+    { key: "lostTime", label: "Lost Time", check: false },
+    { key: "scopeOfServiceType", label: "Scope of Service Type", check: false },
+    {
+      key: "countryOfOrganizationCountry",
+      label: "Country of Organization Country",
+      check: false,
+    },
+    { key: "source", label: "Source", check: false },
+    { key: "lostReason", label: "Lost Reason", check: false },
+    { key: "status", label: "Status", check: false },
+    { key: "dealClosedOn", label: "Deal Closed On", check: false },
+    { key: "nextActivityDate", label: "Next Activity Date", check: false },
+    {
+      key: "stateAndCountryProjectLocation",
+      label: "State/Country of Project Location",
+      check: false,
+    },
+  ];
 
-// In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
-// ...existing code...
+  res.status(200).json({ fields });
+};
+exports.updateDealColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
 
-startFetchInboxWorker().catch(console.error);
-startSyncEmailWorker().catch(console.error);
-startEmailWorker().catch(console.error);
-startWorker().catch(console.error);
-startScheduledEmailWorker().catch(console.error);
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
+
+  try {
+    // Find the global DealColumnPreference record
+    let pref = await DealColumnPreference.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
+    }
+
+    // Parse columns if stored as string
+    let prefColumns =
+      typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
+
+    // Update check status for matching columns
+    prefColumns = prefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    pref.columns = prefColumns;
+    await pref.save();
+    res.status(200).json({ message: "Columns updated", columns: pref.columns });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error updating columns" });
+  }
+};
+
+exports.markDealAsWon = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Update status to 'won'
+    await deal.update({ status: "won" });
+
+    // Update DealDetails: wonTime and dealClosedOn
+    const now = new Date();
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        wonTime: now,
+        dealClosedOn: now,
+      });
+    } else {
+      await DealDetails.create({
+        dealId,
+        wonTime: now,
+        dealClosedOn: now,
+      });
+    }
+
+    // Add a new entry to DealStageHistory
+    await DealStageHistory.create({
+      dealId,
+      stageName: deal.pipelineStage, // keep current stage
+      enteredAt: now,
+      note: "Marked as won",
+    });
+
+    res.status(200).json({ message: "Deal marked as won", deal });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.markDealAsLost = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { lostReason } = req.body; // Accept lostReason from request body
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    await deal.update({ status: "lost" });
+
+    // Update DealDetails: lostTime and lostReason
+    const now = new Date();
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        lostTime: now,
+        lostReason: lostReason || dealDetails.lostReason,
+      });
+    } else {
+      await DealDetails.create({
+        dealId,
+        lostTime: now,
+        lostReason: lostReason || null,
+      });
+    }
+
+    res.status(200).json({ message: "Deal marked as lost", deal });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.markDealAsOpen = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const initialStage = "Qualified"; // Set your initial pipeline stage here
+
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Update deal status and reset pipelineStage
+    await deal.update({ status: "open", pipelineStage: initialStage });
+
+    // Reset closure fields in DealDetails
+    let dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await dealDetails.update({
+        wonTime: null,
+        lostTime: null,
+        dealClosedOn: null,
+        lostReason: null,
+      });
+    }
+
+    // Add a new entry to DealStageHistory to track reopening
+    await DealStageHistory.create({
+      dealId,
+      stageName: initialStage,
+      enteredAt: new Date(),
+    });
+
+    res.status(200).json({ message: "Deal marked as open", deal });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getDealFieldsForFilter = (req, res) => {
+  const fields = [
+    { value: "dealId", label: "Deal ID" },
+    { value: "title", label: "Title" },
+    { value: "value", label: "Value" },
+    { value: "pipeline", label: "Pipeline" },
+    { value: "pipelineStage", label: "Pipeline Stage" },
+    { value: "status", label: "Status" },
+    { value: "expectedCloseDate", label: "Expected Close Date" },
+    { value: "serviceType", label: "Service Type" },
+    { value: "scopeOfServiceType", label: "Scope of Service Type" },
+    { value: "proposalValue", label: "Proposal Value" },
+    { value: "esplProposalNo", label: "ESPL Proposal No." },
+    { value: "projectLocation", label: "Project Location" },
+    { value: "organizationCountry", label: "Organization Country" },
+    { value: "proposalSentDate", label: "Proposal Sent Date" },
+    { value: "ownerId", label: "Owner" },
+    { value: "createdAt", label: "Deal Created" },
+    { value: "updatedAt", label: "Last Updated" },
+    { value: "masterUserID", label: "Creator" },
+    { value: "currency", label: "Currency" },
+    { value: "nextActivityDate", label: "Next Activity Date" },
+    { value: "responsiblePerson", label: "Responsible Person" },
+    { value: "rfpReceivedDate", label: "RFP Received Date" },
+    { value: "statusSummary", label: "Status Summary" },
+    { value: "wonTime", label: "Won Time" },
+    { value: "lostTime", label: "Lost Time" },
+    { value: "dealClosedOn", label: "Deal Closed On" },
+    { value: "lostReason", label: "Lost Reason" },
+    {
+      value: "stateAndCountryProjectLocation",
+      label: "State and Country Project Location",
+    },
+    { value: "visibleTo", label: "Visible To" },
+    { value: "archiveTime", label: "Archive Time" },
+    // ...add more as needed
+  ];
+  res.status(200).json({ fields });
+};
