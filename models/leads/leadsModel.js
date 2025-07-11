@@ -206,6 +206,10 @@ const Lead = sequelize.define("Lead", {
     allowNull: true,
     comment: "Date when the lead was converted to a deal",
   },
+  value: {
+    type: DataTypes.FLOAT,
+    allowNull: true, // Value of the lead
+  },
 });
 
 module.exports = Lead;
