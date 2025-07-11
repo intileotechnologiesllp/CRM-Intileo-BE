@@ -1861,6 +1861,37 @@ exports.getEmails = async (req, res) => {
       ];
     }
 
+    // Create base filters without cursor-based date filtering (for totalCount and unviewCount)
+    const baseFilters = { masterUserID };
+    if (folder) baseFilters.folder = folder;
+    if (isRead !== undefined) baseFilters.isRead = isRead === "true";
+    if (toMe === "true") {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+      if (userCredential) {
+        const userEmail = userCredential.email;
+        baseFilters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
+      }
+    }
+    if (trackedEmails === "true") {
+      baseFilters.isOpened = true;
+      baseFilters.isClicked = true;
+    } else {
+      if (isOpened !== undefined) baseFilters.isOpened = isOpened === "true";
+      if (isClicked !== undefined) baseFilters.isClicked = isClicked === "true";
+    }
+    if (search) {
+      baseFilters[Sequelize.Op.or] = [
+        { subject: { [Sequelize.Op.like]: `%${search}%` } },
+        { sender: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
+        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
+        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
+        { folder: { [Sequelize.Op.like]: `%${search}%` } },
+      ];
+    }
+
     // Buffer pagination logic
     let order = [["createdAt", "DESC"]];
     if (cursor) {
@@ -2002,38 +2033,6 @@ exports.getEmails = async (req, res) => {
       emailsWithAttachments.length > 0
         ? emailsWithAttachments[0].createdAt
         : null;
-
-    // Calculate total count (without cursor-based filtering)
-    // Create base filters without cursor-based date filtering
-    const baseFilters = { masterUserID };
-    if (folder) baseFilters.folder = folder;
-    if (isRead !== undefined) baseFilters.isRead = isRead === "true";
-    if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-      if (userCredential) {
-        const userEmail = userCredential.email;
-        baseFilters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
-      }
-    }
-    if (trackedEmails === "true") {
-      baseFilters.isOpened = true;
-      baseFilters.isClicked = true;
-    } else {
-      if (isOpened !== undefined) baseFilters.isOpened = isOpened === "true";
-      if (isClicked !== undefined) baseFilters.isClicked = isClicked === "true";
-    }
-    if (search) {
-      baseFilters[Sequelize.Op.or] = [
-        { subject: { [Sequelize.Op.like]: `%${search}%` } },
-        { sender: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-        { folder: { [Sequelize.Op.like]: `%${search}%` } },
-      ];
-    }
 
     // Calculate total count using base filters (without cursor date filtering)
     const totalCount = await Email.count({ where: baseFilters });
