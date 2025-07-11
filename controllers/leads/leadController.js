@@ -1828,8 +1828,10 @@ exports.getAllLeadDetails = async (req, res) => {
       leadDetails,
       customFields,
       notes: notesWithCreator,
-      emails: {
-        data: relatedEmails,
+      emails: relatedEmails, // Restored as flat array for frontend compatibility
+      activities,
+      // Include metadata as separate fields for debugging and future use
+      _emailMetadata: {
         count: relatedEmails.length,
         page: parseInt(emailPage),
         limit: maxEmailLimit,
@@ -1838,8 +1840,7 @@ exports.getAllLeadDetails = async (req, res) => {
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
       },
-      activities,
-      pagination: {
+      _pagination: {
         emailPage: parseInt(emailPage),
         emailLimit: maxEmailLimit,
         emailOffset: emailOffset,
