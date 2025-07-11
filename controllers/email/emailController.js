@@ -215,7 +215,7 @@ const cleanEmailBody = (body) => {
 
   let cleanBody = body;
 
-  // First, try to use html-to-text for better HTML conversion
+  // Use html-to-text for robust HTML conversion
   try {
     if (body.includes("<") && body.includes(">")) {
       // This looks like HTML, use html-to-text for better conversion
@@ -223,33 +223,59 @@ const cleanEmailBody = (body) => {
         wordwrap: false,
         ignoreHref: true,
         ignoreImage: true,
-        preserveNewlines: false,
+        preserveNewlines: true,
         uppercaseHeadings: false,
         hideLinkHrefIfSameAsText: true,
         noLinkBrackets: true,
-        format: {
-          text: function (elem, fn, options) {
-            return fn(elem.children, options);
+        formatters: {
+          // Custom formatter to handle VML and CSS blocks
+          vmlBlock: function (elem, walk, builder, formatOptions) {
+            return "";
+          },
+          styleBlock: function (elem, walk, builder, formatOptions) {
+            return "";
           },
         },
+        selectors: [
+          // Ignore VML and style blocks completely
+          { selector: "v\\:*", format: "skip" },
+          { selector: "o\\:*", format: "skip" },
+          { selector: "style", format: "skip" },
+          { selector: "script", format: "skip" },
+          { selector: "head", format: "skip" },
+          { selector: "title", format: "skip" },
+          { selector: "meta", format: "skip" },
+          { selector: "link", format: "skip" },
+          // Format common elements
+          { selector: "p", format: "paragraph" },
+          { selector: "br", format: "lineBreak" },
+          { selector: "div", format: "block" },
+          { selector: "span", format: "inline" },
+          { selector: "table", format: "table" },
+          { selector: "tr", format: "tableRow" },
+          { selector: "td", format: "tableCell" },
+          { selector: "th", format: "tableCell" },
+          { selector: "ul", format: "unorderedList" },
+          { selector: "ol", format: "orderedList" },
+          { selector: "li", format: "listItem" },
+        ],
       });
     }
   } catch (htmlError) {
     console.log(
-      "HTML-to-text conversion failed, falling back to regex cleanup"
+      "HTML-to-text conversion failed, falling back to regex cleanup:",
+      htmlError.message
     );
     // Fall back to regex if html-to-text fails
     cleanBody = body.replace(/<[^>]*>/g, "");
   }
 
-  // Remove VML (Vector Markup Language) content
+  // Additional cleanup for any remaining VML/CSS artifacts
   cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
   cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/\{behavior:[^}]*\}/g, "");
-
-  // Remove CSS styles
   cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
   cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{[^}]*\}/g, ""); // Remove any remaining CSS blocks
 
   // Remove HTML entities and encoded characters
   cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " ");
@@ -260,7 +286,7 @@ const cleanEmailBody = (body) => {
   // Remove quoted replies (e.g., lines starting with ">")
   cleanBody = cleanBody
     .split("\n")
-    .filter((line) => !line.startsWith(">"))
+    .filter((line) => !line.trim().startsWith(">"))
     .join("\n");
 
   // Clean up extra whitespace and special characters
@@ -274,23 +300,68 @@ const cleanEmailBody = (body) => {
 const createBodyPreview = (body, maxLength = 120) => {
   if (!body) return "";
 
-  // Remove HTML tags if present
-  let cleanBody = body.replace(/<[^>]*>/g, "");
+  let cleanBody = body;
 
-  // Remove VML (Vector Markup Language) content
+  // Use html-to-text for robust HTML conversion
+  try {
+    if (body.includes("<") && body.includes(">")) {
+      // This looks like HTML, use html-to-text for better conversion
+      cleanBody = htmlToText(body, {
+        wordwrap: false,
+        ignoreHref: true,
+        ignoreImage: true,
+        preserveNewlines: false,
+        uppercaseHeadings: false,
+        hideLinkHrefIfSameAsText: true,
+        noLinkBrackets: true,
+        formatters: {
+          // Custom formatter to handle VML and CSS blocks
+          vmlBlock: function (elem, walk, builder, formatOptions) {
+            return "";
+          },
+          styleBlock: function (elem, walk, builder, formatOptions) {
+            return "";
+          },
+        },
+        selectors: [
+          // Ignore VML and style blocks completely
+          { selector: "v\\:*", format: "skip" },
+          { selector: "o\\:*", format: "skip" },
+          { selector: "style", format: "skip" },
+          { selector: "script", format: "skip" },
+          { selector: "head", format: "skip" },
+          { selector: "title", format: "skip" },
+          { selector: "meta", format: "skip" },
+          { selector: "link", format: "skip" },
+          // Format common elements to preserve structure
+          { selector: "p", format: "paragraph" },
+          { selector: "br", format: "lineBreak" },
+          { selector: "div", format: "block" },
+          { selector: "span", format: "inline" },
+        ],
+      });
+    }
+  } catch (htmlError) {
+    console.log(
+      "HTML-to-text conversion failed in preview, falling back to regex cleanup:",
+      htmlError.message
+    );
+    // Fall back to regex if html-to-text fails
+    cleanBody = body.replace(/<[^>]*>/g, "");
+  }
+
+  // Additional cleanup for any remaining VML/CSS artifacts
   cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
   cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/\{behavior:[^}]*\}/g, "");
-
-  // Remove CSS styles and similar patterns
   cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
   cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{[^}]*\}/g, ""); // Remove any remaining CSS blocks
 
-  // Remove special characters and encoded entities
-  cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " "); // HTML entities
-  cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " "); // Escaped characters
-  cleanBody = cleanBody.replace(/v\\\*/g, ""); // VML remnants
-  cleanBody = cleanBody.replace(/o\\\*/g, ""); // VML remnants
+  // Remove HTML entities and encoded characters
+  cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " ");
+  cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " ");
+  cleanBody = cleanBody.replace(/v\\\*/g, "");
+  cleanBody = cleanBody.replace(/o\\\*/g, "");
 
   // Remove extra whitespace, newlines, and special characters
   cleanBody = cleanBody.replace(/\s+/g, " ").trim();
