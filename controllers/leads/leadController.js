@@ -1626,12 +1626,11 @@ exports.getLeadsByMasterUser = async (req, res) => {
 
 exports.getAllLeadDetails = async (req, res) => {
   const masterUserID = req.adminId;
-  // const { clientEmail } = req.body?.clientEmail;
   const { leadId } = req.params;
 
-  // if (!clientEmail) {
-  //   return res.status(400).json({ message: "clientEmail is required." });
-  // }
+  // Add pagination parameters for emails
+  const { emailPage = 1, emailLimit = 25 } = req.query;
+  const emailOffset = (emailPage - 1) * emailLimit;
 
   if (!leadId) {
     await logAuditTrail(
@@ -1664,6 +1663,10 @@ exports.getAllLeadDetails = async (req, res) => {
     // }
     const clientEmail = lead.email;
 
+    // Optimize email fetching with pagination and size limits
+    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50); // Cap at 50 emails max
+    const maxBodyLength = 1000; // Truncate email bodies to prevent large responses
+
     let emails = await Email.findAll({
       where: {
         [Op.or]: [
@@ -1671,9 +1674,31 @@ exports.getAllLeadDetails = async (req, res) => {
           { recipient: { [Op.like]: `%${clientEmail}%` } },
         ],
       },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "ASC"]],
+      attributes: [
+        "emailID",
+        "messageId",
+        "inReplyTo",
+        "references",
+        "sender",
+        "recipient",
+        "subject",
+        "createdAt",
+        "folder",
+        // Truncate body to prevent large responses
+        [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+      ],
+      include: [
+        {
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
+        },
+      ],
+      order: [["createdAt", "DESC"]], // Get most recent first
+      limit: maxEmailLimit,
+      offset: emailOffset,
     });
+
     // Filter out emails with "RE:" in subject and no inReplyTo or references
     emails = emails.filter((email) => {
       const hasRE =
@@ -1684,49 +1709,63 @@ exports.getAllLeadDetails = async (req, res) => {
       return !(hasRE && noThread);
     });
 
-    // if (!emails.length) {
-    //   return res.status(404).json({ message: "No emails found for this conversation." });
-    // }
     let emailsExist = emails.length > 0;
     if (!emailsExist) {
       emails = [];
     }
 
-    // Gather all thread IDs from these emails
+    // Simplified thread handling - only get direct replies to prevent exponential growth
     const threadIds = [];
     emails.forEach((email) => {
       if (email.messageId) threadIds.push(email.messageId);
       if (email.inReplyTo) threadIds.push(email.inReplyTo);
-      if (email.references) threadIds.push(...email.references.split(" "));
     });
     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
 
-    // Fetch all related emails in the thread (across all users)
-    let relatedEmails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          { messageId: { [Op.in]: uniqueThreadIds } },
-          { inReplyTo: { [Op.in]: uniqueThreadIds } },
+    // Fetch related emails with stricter limits
+    let relatedEmails = [];
+    if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
+      // Prevent too many thread lookups
+      relatedEmails = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { messageId: { [Op.in]: uniqueThreadIds } },
+            { inReplyTo: { [Op.in]: uniqueThreadIds } },
+          ],
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "inReplyTo",
+          "sender",
+          "recipient",
+          "subject",
+          "createdAt",
+          "folder",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [
           {
-            references: {
-              [Op.or]: uniqueThreadIds.map((id) => ({
-                [Op.like]: `%${id}%`,
-              })),
-            },
+            model: Attachment,
+            as: "attachments",
+            attributes: ["attachmentID", "filename", "size", "contentType"],
           },
         ],
-      },
-      include: [{ model: Attachment, as: "attachments" }],
-      order: [["createdAt", "DESC"]],
-    });
+        order: [["createdAt", "DESC"]],
+        limit: maxEmailLimit, // Use the same limit
+      });
 
-    // Remove duplicates by messageId
-    const seen = new Set();
-    relatedEmails = relatedEmails.filter((email) => {
-      if (seen.has(email.messageId)) return false;
-      seen.add(email.messageId);
-      return true;
-    });
+      // Remove duplicates by messageId
+      const seen = new Set();
+      relatedEmails = relatedEmails.filter((email) => {
+        if (seen.has(email.messageId)) return false;
+        seen.add(email.messageId);
+        return true;
+      });
+    } else {
+      // If too many threads, just use the original emails
+      relatedEmails = emails;
+    }
     const notes = await LeadNote.findAll({
       where: { leadId },
       order: [["createdAt", "DESC"]],
@@ -1784,14 +1823,27 @@ exports.getAllLeadDetails = async (req, res) => {
     });
 
     res.status(200).json({
-      message: "leads data fetched successfully.",
+      message: "Lead details fetched successfully.",
       lead,
       leadDetails,
       customFields,
       notes: notesWithCreator,
-      emails: relatedEmails,
+      emails: {
+        data: relatedEmails,
+        count: relatedEmails.length,
+        page: parseInt(emailPage),
+        limit: maxEmailLimit,
+        hasMore: relatedEmails.length === maxEmailLimit,
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+      },
       activities,
-      // emails: emailsExist ? relatedEmails : null // or [] if you prefer
+      pagination: {
+        emailPage: parseInt(emailPage),
+        emailLimit: maxEmailLimit,
+        emailOffset: emailOffset,
+      },
     });
   } catch (error) {
     console.error("Error fetching conversation:", error);
