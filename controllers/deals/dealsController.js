@@ -1237,6 +1237,13 @@ exports.getDealsByStage = async (req, res) => {
 exports.getDealDetail = async (req, res) => {
   try {
     const { dealId } = req.params;
+
+    // Email optimization parameters
+    const { emailPage = 1, emailLimit = 10 } = req.query;
+    const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+    const MAX_EMAIL_LIMIT = 50;
+    const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
     const deal = await Deal.findByPk(dealId, {
       include: [
         { model: DealDetails, as: "details" },
@@ -1249,26 +1256,6 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
-    //     // --- Pipeline stage days calculation ---
-    // const stageHistory = await DealStageHistory.findAll({
-    //   where: { dealId },
-    //   order: [['enteredAt', 'ASC']]
-    // });
-
-    // const now = new Date();
-    // const pipelineStages = [];
-
-    // for (let i = 0; i < stageHistory.length; i++) {
-    //   const stage = stageHistory[i];
-    //   const nextStage = stageHistory[i + 1];
-    //   const start = new Date(stage.enteredAt);
-    //   const end = nextStage ? new Date(nextStage.enteredAt) : now;
-    //   const days = Math.max(0, Math.floor((end - start) / (1000 * 60 * 60 * 24)));
-    //   pipelineStages.push({
-    //     stageName: stage.stageName,
-    //     days
-    //   });
-    // }
     const stageHistory = await DealStageHistory.findAll({
       where: { dealId },
       order: [["enteredAt", "ASC"]],
@@ -1291,8 +1278,8 @@ exports.getDealDetail = async (req, res) => {
         days,
       });
     }
+
     // Aggregate days per unique stage for frontend bar
-    // After building pipelineStages (with possible repeats)
     const stageDaysMap = new Map();
     const orderedStages = [];
     let currentStageName = pipelineStages.length
@@ -1313,11 +1300,6 @@ exports.getDealDetail = async (req, res) => {
       if (stage.stageName === currentStageName) break;
     }
 
-    // Build the array for the bar (only up to and including current stage)
-    // const pipelineStagesUnique = orderedStages.map(stageName => ({
-    //   stageName,
-    //   days: stageDaysMap.get(stageName) || 0
-    // }));
     // Define your pipeline order
     const pipelineOrder = [
       "Qualified",
@@ -1353,8 +1335,8 @@ exports.getDealDetail = async (req, res) => {
       }, 0);
       avgTimeToWon = Math.round(totalDays / wonDeals.length);
     }
-    // ...existing overview calculations...
-    // const now = new Date();
+
+    // Overview calculations
     const createdAt = deal.createdAt;
     const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
     const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
@@ -1401,6 +1383,7 @@ exports.getDealDetail = async (req, res) => {
       lostReason: deal.details?.lostReason,
       // ...other deal fields
     };
+
     // Fetch participants for this deal
     const participants = await DealParticipant.findAll({
       where: { dealId },
@@ -1417,6 +1400,7 @@ exports.getDealDetail = async (req, res) => {
         },
       ],
     });
+
     const participantArr = await Promise.all(
       participants.map(async (p) => {
         const person = p.Person;
@@ -1470,8 +1454,47 @@ exports.getDealDetail = async (req, res) => {
         };
       })
     );
-    // Fetch emails linked to this deal
-    const emailsByDeal = await Email.findAll({ where: { dealId } });
+
+    // Optimized email fetching with pagination
+    // Get total email count first
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.or]: [
+          { dealId },
+          ...(deal.email
+            ? [
+                { sender: deal.email },
+                { recipient: { [Op.like]: `%${deal.email}%` } },
+              ]
+            : []),
+        ],
+      },
+    });
+
+    // Fetch emails linked to this deal with pagination and essential fields only
+    const emailsByDeal = await Email.findAll({
+      where: { dealId },
+      attributes: [
+        "emailID",
+        "messageId",
+        "sender",
+        "senderName",
+        "recipient",
+        "cc",
+        "bcc",
+        "subject",
+        "createdAt",
+        "folder",
+        "isRead",
+        "leadId",
+        "dealId",
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: Math.ceil(safeEmailLimit / 2),
+      offset: Math.floor(emailOffset / 2),
+    });
+
+    // Fetch emails by address with pagination and essential fields only
     let emailsByAddress = [];
     if (deal.email) {
       emailsByAddress = await Email.findAll({
@@ -1481,35 +1504,103 @@ exports.getDealDetail = async (req, res) => {
             { recipient: { [Op.like]: `%${deal.email}%` } },
           ],
         },
+        attributes: [
+          "emailID",
+          "messageId",
+          "sender",
+          "senderName",
+          "recipient",
+          "cc",
+          "bcc",
+          "subject",
+          "createdAt",
+          "folder",
+          "isRead",
+          "leadId",
+          "dealId",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(safeEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
       });
     }
+
     // Merge and deduplicate emails
     const allEmailsMap = new Map();
     emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
 
-    // Fetch all attachments for these emails
-    const emailIDs = allEmails.map((email) => email.emailID);
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
     let files = [];
     if (emailIDs.length > 0) {
       files = await Attachment.findAll({
         where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
       });
-      // Optionally, attach email info to each file
+
+      // Build a map for quick email lookup
       const emailMap = new Map();
-      allEmails.forEach((email) => emailMap.set(email.emailID, email));
-      files = files.map((file) => ({
-        ...file.toJSON(),
-        email: emailMap.get(file.emailID) || null,
-      }));
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
     }
 
-    // Fetch notes for this deal
-    const notes = await DealNote.findAll({ where: { dealId } });
-    // Fetch activities for this deal
+    // Fetch notes for this deal with limit
+    const notes = await DealNote.findAll({
+      where: { dealId },
+      limit: 20, // Limit notes to prevent large responses
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Fetch activities for this deal with limit
     const activities = await Activity.findAll({
       where: { dealId },
+      limit: 20, // Limit activities to prevent large responses
       order: [["startDateTime", "DESC"]],
     });
 
@@ -1569,11 +1660,14 @@ exports.getDealDetail = async (req, res) => {
       fieldsByGroup[fieldGroup].push(formattedCustomFields[field.fieldId]);
     });
 
+    console.log(
+      `Deal detail: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes, ${activities.length} activities`
+    );
+
     res.status(200).json({
       deal: dealObj,
       person: personArr,
       organization: orgArr,
-      //pipelineStages, // [{ stageName: 'Qualified', days: 216 }, ...]
       pipelineStages: pipelineStagesUnique, // Use unique stages with aggregated days
       currentStage:
         pipelineStages[pipelineStages.length - 1]?.stageName ||
@@ -1585,7 +1679,7 @@ exports.getDealDetail = async (req, res) => {
         createdAt,
       },
       participants: participantArr,
-      emails: allEmails,
+      emails: optimizedEmails,
       notes,
       activities,
       files,
@@ -1593,6 +1687,17 @@ exports.getDealDetail = async (req, res) => {
         values: formattedCustomFields,
         fieldsByCategory,
         fieldsByGroup,
+      },
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
       },
     });
   } catch (error) {
