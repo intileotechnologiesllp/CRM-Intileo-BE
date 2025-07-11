@@ -211,12 +211,37 @@ const imapConfig = {
   },
 };
 const cleanEmailBody = (body) => {
+  if (!body) return "";
+
+  // Remove HTML tags
+  let cleanBody = body.replace(/<[^>]*>/g, "");
+
+  // Remove VML (Vector Markup Language) content
+  cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{behavior:[^}]*\}/g, "");
+
+  // Remove CSS styles
+  cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
+
+  // Remove HTML entities and encoded characters
+  cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " ");
+  cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " ");
+  cleanBody = cleanBody.replace(/v\\\*/g, "");
+  cleanBody = cleanBody.replace(/o\\\*/g, "");
+
   // Remove quoted replies (e.g., lines starting with ">")
-  return body
+  cleanBody = cleanBody
     .split("\n")
     .filter((line) => !line.startsWith(">"))
-    .join("\n")
-    .trim();
+    .join("\n");
+
+  // Clean up extra whitespace and special characters
+  cleanBody = cleanBody.replace(/[{}[\]]/g, " ");
+  cleanBody = cleanBody.replace(/\s+/g, " ").trim();
+
+  return cleanBody;
 };
 
 // Helper function to create email body preview
@@ -224,17 +249,46 @@ const createBodyPreview = (body, maxLength = 120) => {
   if (!body) return "";
 
   // Remove HTML tags if present
-  const cleanBody = body.replace(/<[^>]*>/g, "");
+  let cleanBody = body.replace(/<[^>]*>/g, "");
 
-  // Remove extra whitespace and newlines
-  const trimmedBody = cleanBody.replace(/\s+/g, " ").trim();
+  // Remove VML (Vector Markup Language) content
+  cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{behavior:[^}]*\}/g, "");
 
-  // Truncate to maxLength and add ellipsis if needed
-  if (trimmedBody.length <= maxLength) {
-    return trimmedBody;
+  // Remove CSS styles and similar patterns
+  cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
+  cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
+
+  // Remove special characters and encoded entities
+  cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " "); // HTML entities
+  cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " "); // Escaped characters
+  cleanBody = cleanBody.replace(/v\\\*/g, ""); // VML remnants
+  cleanBody = cleanBody.replace(/o\\\*/g, ""); // VML remnants
+
+  // Remove extra whitespace, newlines, and special characters
+  cleanBody = cleanBody.replace(/\s+/g, " ").trim();
+
+  // Remove any remaining curly braces and brackets
+  cleanBody = cleanBody.replace(/[{}[\]]/g, " ");
+
+  // Clean up any remaining special patterns
+  cleanBody = cleanBody.replace(/[^\w\s.,!?;:()-]/g, " ");
+
+  // Final cleanup - remove multiple spaces
+  cleanBody = cleanBody.replace(/\s+/g, " ").trim();
+
+  // If after cleaning there's no meaningful content, return empty
+  if (cleanBody.length < 3 || /^[\s\W]*$/.test(cleanBody)) {
+    return "";
   }
 
-  return trimmedBody.substring(0, maxLength).trim() + "...";
+  // Truncate to maxLength and add ellipsis if needed
+  if (cleanBody.length <= maxLength) {
+    return cleanBody;
+  }
+
+  return cleanBody.substring(0, maxLength).trim() + "...";
 };
 
 // Helper function to format date to DD-MMM-YYYY
