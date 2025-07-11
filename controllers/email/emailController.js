@@ -213,8 +213,34 @@ const imapConfig = {
 const cleanEmailBody = (body) => {
   if (!body) return "";
 
-  // Remove HTML tags
-  let cleanBody = body.replace(/<[^>]*>/g, "");
+  let cleanBody = body;
+
+  // First, try to use html-to-text for better HTML conversion
+  try {
+    if (body.includes("<") && body.includes(">")) {
+      // This looks like HTML, use html-to-text for better conversion
+      cleanBody = htmlToText(body, {
+        wordwrap: false,
+        ignoreHref: true,
+        ignoreImage: true,
+        preserveNewlines: false,
+        uppercaseHeadings: false,
+        hideLinkHrefIfSameAsText: true,
+        noLinkBrackets: true,
+        format: {
+          text: function (elem, fn, options) {
+            return fn(elem.children, options);
+          },
+        },
+      });
+    }
+  } catch (htmlError) {
+    console.log(
+      "HTML-to-text conversion failed, falling back to regex cleanup"
+    );
+    // Fall back to regex if html-to-text fails
+    cleanBody = body.replace(/<[^>]*>/g, "");
+  }
 
   // Remove VML (Vector Markup Language) content
   cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
