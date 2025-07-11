@@ -7,6 +7,7 @@ const Activity = require("./activity/activityModel");
 const Deal = require("./deals/dealsModels");
 const CustomField = require("./customFieldModel");
 const CustomFieldValue = require("./customFieldValueModel");
+const Email = require("./email/emailModel");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -66,6 +67,10 @@ CustomFieldValue.belongsTo(CustomField, {
   as: "CustomField",
 });
 
+// Email-Deal associations
+Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
+Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -75,4 +80,5 @@ module.exports = {
   Deal,
   CustomField,
   CustomFieldValue,
+  Email,
 };

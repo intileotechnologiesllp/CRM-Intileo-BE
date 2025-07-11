@@ -1761,6 +1761,8 @@ exports.getEmails = async (req, res) => {
     isShared,
     cursor, // Buffer pagination cursor (createdAt ISO string or emailID)
     direction = "next", // 'next' or 'prev'
+    dealLinkFilter, // New filter: "linked_with_deal", "linked_with_open_deal", "not_linked_with_deal"
+    contactFilter, // New filter: "from_existing_contact", "not_from_existing_contact"
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -1861,6 +1863,79 @@ exports.getEmails = async (req, res) => {
       ];
     }
 
+    // Deal linkage filter
+    let includeDeal = [];
+    if (dealLinkFilter) {
+      switch (dealLinkFilter) {
+        case "linked_with_deal":
+          // Emails linked to any deal
+          filters.dealId = { [Sequelize.Op.ne]: null };
+          break;
+        case "linked_with_open_deal":
+          // Emails linked to open deals only
+          filters.dealId = { [Sequelize.Op.ne]: null };
+          includeDeal = [
+            {
+              model: Deal,
+              as: "Deal",
+              required: true,
+              where: {
+                status: "open",
+              },
+            },
+          ];
+          break;
+        case "not_linked_with_deal":
+          // Emails not linked to any deal
+          filters.dealId = { [Sequelize.Op.or]: [null, ""] };
+          break;
+      }
+    }
+
+    // Contact filter (from existing contact)
+    let includePerson = [];
+    if (contactFilter) {
+      switch (contactFilter) {
+        case "from_existing_contact":
+          // Emails from senders who exist as contacts/persons
+          const existingContactEmails = await Person.findAll({
+            attributes: ["email"],
+            where: {
+              email: { [Sequelize.Op.ne]: null },
+            },
+          });
+          const existingEmailAddresses = existingContactEmails
+            .map((p) => p.email)
+            .filter(Boolean);
+
+          if (existingEmailAddresses.length > 0) {
+            filters.sender = { [Sequelize.Op.in]: existingEmailAddresses };
+          } else {
+            // If no contacts exist, return empty result
+            filters.sender = { [Sequelize.Op.in]: [] };
+          }
+          break;
+        case "not_from_existing_contact":
+          // Emails from senders who don't exist as contacts
+          const existingContactEmailsNot = await Person.findAll({
+            attributes: ["email"],
+            where: {
+              email: { [Sequelize.Op.ne]: null },
+            },
+          });
+          const existingEmailAddressesNot = existingContactEmailsNot
+            .map((p) => p.email)
+            .filter(Boolean);
+
+          if (existingEmailAddressesNot.length > 0) {
+            filters.sender = {
+              [Sequelize.Op.notIn]: existingEmailAddressesNot,
+            };
+          }
+          break;
+      }
+    }
+
     // Create base filters without cursor-based date filtering (for totalCount and unviewCount)
     const baseFilters = { masterUserID };
     if (folder) baseFilters.folder = folder;
@@ -1890,6 +1965,66 @@ exports.getEmails = async (req, res) => {
         { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
         { folder: { [Sequelize.Op.like]: `%${search}%` } },
       ];
+    }
+
+    // Add deal linkage filter to baseFilters
+    if (dealLinkFilter) {
+      switch (dealLinkFilter) {
+        case "linked_with_deal":
+          baseFilters.dealId = { [Sequelize.Op.ne]: null };
+          break;
+        case "linked_with_open_deal":
+          baseFilters.dealId = { [Sequelize.Op.ne]: null };
+          break;
+        case "not_linked_with_deal":
+          baseFilters.dealId = { [Sequelize.Op.or]: [null, ""] };
+          break;
+      }
+    }
+
+    // Add contact filter to baseFilters
+    if (contactFilter) {
+      switch (contactFilter) {
+        case "from_existing_contact":
+          // For baseFilters, we need to apply the same logic
+          const existingContactEmailsBase = await Person.findAll({
+            attributes: ["email"],
+            where: {
+              email: { [Sequelize.Op.ne]: null },
+            },
+          });
+          const existingEmailAddressesBase = existingContactEmailsBase
+            .map((p) => p.email)
+            .filter(Boolean);
+
+          if (existingEmailAddressesBase.length > 0) {
+            baseFilters.sender = {
+              [Sequelize.Op.in]: existingEmailAddressesBase,
+            };
+          } else {
+            // If no contacts exist, return empty result
+            baseFilters.sender = { [Sequelize.Op.in]: [] };
+          }
+          break;
+        case "not_from_existing_contact":
+          // For baseFilters, we need to apply the same logic
+          const existingContactEmailsNotBase = await Person.findAll({
+            attributes: ["email"],
+            where: {
+              email: { [Sequelize.Op.ne]: null },
+            },
+          });
+          const existingEmailAddressesNotBase = existingContactEmailsNotBase
+            .map((p) => p.email)
+            .filter(Boolean);
+
+          if (existingEmailAddressesNotBase.length > 0) {
+            baseFilters.sender = {
+              [Sequelize.Op.notIn]: existingEmailAddressesNotBase,
+            };
+          }
+          break;
+      }
     }
 
     // Buffer pagination logic
@@ -1945,11 +2080,15 @@ exports.getEmails = async (req, res) => {
 
     // Fetch emails from the database
     let emails;
+
+    // Combine includes (attachments + deals)
+    const includeModels = [...includeAttachments, ...includeDeal];
+
     if (cursor) {
       // Buffer pagination - use findAll with limit and order
       emails = await Email.findAll({
         where: filters,
-        include: includeAttachments,
+        include: includeModels,
         limit,
         order,
         attributes: essentialFields,
@@ -1960,7 +2099,7 @@ exports.getEmails = async (req, res) => {
       // Traditional offset pagination
       const { count, rows } = await Email.findAndCountAll({
         where: filters,
-        include: includeAttachments,
+        include: includeModels,
         offset,
         limit,
         order,
@@ -1991,12 +2130,55 @@ exports.getEmails = async (req, res) => {
     });
 
     // Calculate unviewCount using base filters (without cursor date filtering)
-    const unviewCount = await Email.count({
-      where: {
-        ...baseFilters,
-        isRead: false, // Count only unread emails
-      },
-    });
+    let unviewCount;
+    let totalCount;
+
+    // Handle count queries with deal linkage filter
+    if (dealLinkFilter === "linked_with_open_deal") {
+      // For open deals, we need to join with the Deal table
+      unviewCount = await Email.count({
+        where: {
+          ...baseFilters,
+          isRead: false, // Count only unread emails
+        },
+        include: [
+          {
+            model: Deal,
+            as: "Deal",
+            required: true,
+            where: {
+              status: "open",
+            },
+          },
+        ],
+        distinct: true,
+      });
+
+      totalCount = await Email.count({
+        where: baseFilters,
+        include: [
+          {
+            model: Deal,
+            as: "Deal",
+            required: true,
+            where: {
+              status: "open",
+            },
+          },
+        ],
+        distinct: true,
+      });
+    } else {
+      // For other filters, use simple count
+      unviewCount = await Email.count({
+        where: {
+          ...baseFilters,
+          isRead: false, // Count only unread emails
+        },
+      });
+
+      totalCount = await Email.count({ where: baseFilters });
+    }
 
     // Grouping logic (only for current page)
     let responseThreads;
@@ -2033,9 +2215,6 @@ exports.getEmails = async (req, res) => {
       emailsWithAttachments.length > 0
         ? emailsWithAttachments[0].createdAt
         : null;
-
-    // Calculate total count using base filters (without cursor date filtering)
-    const totalCount = await Email.count({ where: baseFilters });
 
     // Return the paginated response with threads and unviewCount
     res.status(200).json({
