@@ -46,6 +46,25 @@ exports.createPerson = async (req, res) => {
         }
       }
 
+      // Check for duplicate email if email is provided
+      if (personData.email) {
+        const existingEmailPerson = await LeadPerson.findOne({
+          where: { email: personData.email },
+          transaction,
+        });
+        if (existingEmailPerson) {
+          await transaction.rollback();
+          return res.status(409).json({
+            message: `A person with email address "${personData.email}" already exists.`,
+            existingPerson: {
+              personId: existingEmailPerson.personId,
+              contactPerson: existingEmailPerson.contactPerson,
+              email: existingEmailPerson.email,
+            },
+          });
+        }
+      }
+
       // Create the person record
       const person = await LeadPerson.create(personData, { transaction });
       const entityId = person.personId;
@@ -185,6 +204,27 @@ exports.createPerson = async (req, res) => {
     }
   } catch (error) {
     console.error("Error creating person with custom fields:", error);
+
+    // Handle database constraint violations
+    if (error.name === "SequelizeUniqueConstraintError") {
+      const field = error.errors[0]?.path || "unknown";
+      const value = error.errors[0]?.value || "unknown";
+
+      if (field === "email") {
+        return res.status(409).json({
+          message: `A person with email address "${value}" already exists.`,
+          field: "email",
+          value: value,
+        });
+      }
+
+      return res.status(409).json({
+        message: `A person with this ${field} already exists.`,
+        field: field,
+        value: value,
+      });
+    }
+
     res.status(500).json({
       message: "Failed to create person with custom fields.",
       error: error.message,
