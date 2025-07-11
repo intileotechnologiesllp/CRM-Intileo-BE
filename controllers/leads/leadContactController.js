@@ -8,8 +8,6 @@ const OrganizationNote = require("../../models/leads/organizationNoteModel");
 const PersonNote = require("../../models/leads/personNoteModel");
 const Deal = require("../../models/deals/dealsModels");
 
-
-
 exports.createPerson = async (req, res) => {
   try {
     const masterUserID = req.adminId;
@@ -30,6 +28,20 @@ exports.createPerson = async (req, res) => {
       organization, // may be undefined or empty
     } = req.body;
 
+    // Check for duplicate email (email must be unique across all persons)
+    const existingEmailPerson = await Person.findOne({ where: { email } });
+    if (existingEmailPerson) {
+      return res.status(409).json({
+        message: "A person with this email address already exists.",
+        person: {
+          personId: existingEmailPerson.personId,
+          contactPerson: existingEmailPerson.contactPerson,
+          email: existingEmailPerson.email,
+          organization: existingEmailPerson.organization,
+        },
+      });
+    }
+
     // Check for duplicate person in the same organization (or globally if no org)
     const whereClause = organization
       ? { contactPerson, organization }
@@ -38,7 +50,9 @@ exports.createPerson = async (req, res) => {
     const existingPerson = await Person.findOne({ where: whereClause });
     if (existingPerson) {
       return res.status(409).json({
-        message: "Person already exists" + (organization ? " in this organization." : "."),
+        message:
+          "Person already exists" +
+          (organization ? " in this organization." : "."),
         person: existingPerson,
       });
     }
@@ -48,7 +62,7 @@ exports.createPerson = async (req, res) => {
       // Only create/find organization if provided
       [org] = await Organization.findOrCreate({
         where: { organization },
-        defaults: { organization,masterUserID} // <-- add masterUserID here
+        defaults: { organization, masterUserID }, // <-- add masterUserID here
       });
     }
 
@@ -70,7 +84,30 @@ exports.createPerson = async (req, res) => {
     res.status(201).json({ message: "Person created successfully", person });
   } catch (error) {
     console.error("Error creating person:", error);
-    res.status(500).json({ message: "Internal server error", error });
+
+    // Handle database constraint violations
+    if (error.name === "SequelizeUniqueConstraintError") {
+      const field = error.errors[0]?.path || "unknown";
+      const value = error.errors[0]?.value || "unknown";
+
+      if (field === "email") {
+        return res.status(409).json({
+          message: `A person with email address "${value}" already exists.`,
+          field: "email",
+          value: value,
+        });
+      }
+
+      return res.status(409).json({
+        message: `A person with this ${field} already exists.`,
+        field: field,
+        value: value,
+      });
+    }
+
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
   }
 };
 
@@ -87,12 +124,10 @@ exports.createOrganization = async (req, res) => {
     // Check if organization already exists
     const existingOrg = await Organization.findOne({ where: { organization } });
     if (existingOrg) {
-      return res
-        .status(409)
-        .json({
-          message: "Organization already exists.",
-          organization: existingOrg,
-        });
+      return res.status(409).json({
+        message: "Organization already exists.",
+        organization: existingOrg,
+      });
     }
     const org = await Organization.create({
       organization,
@@ -102,15 +137,13 @@ exports.createOrganization = async (req, res) => {
       masterUserID,
       ownerId, // Set the owner ID if provided
     });
-    res
-      .status(201)
-      .json({
-        message: "Organization created successfully",
-        organization: org,
-      });
+    res.status(201).json({
+      message: "Organization created successfully",
+      organization: org,
+    });
   } catch (error) {
     console.error("Error creating organization:", error);
-    res.status(500).json({ message: "Internal server error"});
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 exports.getContactTimeline = async (req, res) => {
@@ -187,6 +220,13 @@ exports.getContactTimeline = async (req, res) => {
 };
 exports.getPersonTimeline = async (req, res) => {
   const { personId } = req.params;
+
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
   try {
     const person = await Person.findByPk(personId, {
       include: [
@@ -205,12 +245,45 @@ exports.getPersonTimeline = async (req, res) => {
     const leads = await Lead.findAll({ where: { personId } });
     const deals = await Deal.findAll({ where: { personId } });
 
-    // Fetch related emails
-    // const emails = await Email.findAll({ where: { leadId: leads.map(l => l.leadId) } });
-
-    // Fetch emails linked to leads
+    // Optimized email fetching with pagination and essential fields only
     const leadIds = leads.map((l) => l.leadId);
-    const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
+
+    // Get total email count first
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.or]: [
+          ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } },
+        ],
+      },
+    });
+
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
 
     // Fetch emails where person's email is sender or recipient
     const emailsByAddress = await Email.findAll({
@@ -220,47 +293,120 @@ exports.getPersonTimeline = async (req, res) => {
           { recipient: { [Op.like]: `%${person.email}%` } },
         ],
       },
+      attributes: [
+        "emailID",
+        "messageId",
+        "sender",
+        "senderName",
+        "recipient",
+        "cc",
+        "bcc",
+        "subject",
+        "createdAt",
+        "folder",
+        "isRead",
+        "leadId",
+        "dealId",
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: Math.ceil(safeEmailLimit / 2),
+      offset: Math.floor(emailOffset / 2),
     });
-    console.log("leadIds:", leadIds);
-    console.log("emailsByLead:", emailsByLead.length);
-    console.log("emailsByAddress:", emailsByAddress.length);
+
     // Merge and deduplicate emails
     const allEmailsMap = new Map();
     emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
 
-    // Fetch all attachments for these emails from the Attachments model
-    const emailIDs = allEmails.map((email) => email.emailID);
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
     let files = [];
     if (emailIDs.length > 0) {
       files = await Attachment.findAll({
         where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
       });
-      console.log(files.length, "files found for emails");
+
       // Build a map for quick email lookup
       const emailMap = new Map();
-      allEmails.forEach((email) => emailMap.set(email.emailID, email));
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
 
-      // Combine each attachment with its related email
-      files = files.map((file) => ({
-        ...file.toJSON(),
-        email: emailMap.get(file.emailID) || null,
-      }));
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
     }
 
     // Fetch related notes
     const notes = await LeadNote.findAll({
-      where: { leadId: leads.map((l) => l.leadId) },
+      where: { leadId: leadIds },
+      limit: 20, // Limit notes to prevent large responses
+      order: [["createdAt", "DESC"]],
     });
+
+    console.log(
+      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes`
+    );
 
     res.status(200).json({
       person,
       leads,
       deals,
-      emails: allEmails,
+      emails: optimizedEmails,
       notes,
       files,
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
+      },
     });
   } catch (error) {
     console.error("Error fetching person timeline:", error);
@@ -270,6 +416,13 @@ exports.getPersonTimeline = async (req, res) => {
 
 exports.getOrganizationTimeline = async (req, res) => {
   const { organizationId } = req.params;
+
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
   try {
     // Fetch the organization
     const organization = await Organization.findByPk(organizationId);
@@ -282,10 +435,11 @@ exports.getOrganizationTimeline = async (req, res) => {
       where: { leadOrganizationId: organizationId },
     });
     // Add array of { personId, contactPerson } to organization object
-    organization.dataValues.persons = persons.map(p => ({
+    organization.dataValues.persons = persons.map((p) => ({
       personId: p.personId,
-      contactPerson: p.contactPerson
+      contactPerson: p.contactPerson,
     }));
+
     // Fetch all leads for this organization (directly or via persons)
     const personIds = persons.map((p) => p.personId);
     const leads = await Lead.findAll({
@@ -296,24 +450,67 @@ exports.getOrganizationTimeline = async (req, res) => {
         ],
       },
     });
-    //     // Fetch all deals for this organization (directly or via persons)
-    // const deals = await Deal.findAll({
-    //   where: {
-    //     [Op.or]: [
-    //       { organizationId: organizationId }, // If you have this field
-    //       { leadOrganizationId: organizationId }, // Or this field, depending on your schema
-    //       { personId: personIds },
-    //     ],
-    //   },
-    // });
-    // const leadOrganizationId=organizationId
-const deals = await Deal.findAll({ where: { leadOrganizationId:organizationId } });
-    // Fetch all emails linked to these leads
+
+    // Fetch all deals for this organization
+    const deals = await Deal.findAll({
+      where: { leadOrganizationId: organizationId },
+    });
+
+    // Optimized email fetching with pagination
     const leadIds = leads.map((l) => l.leadId);
-    const emailsByLead = await Email.findAll({ where: { leadId: leadIds } });
+    const personEmails = persons.map((p) => p.email).filter(Boolean);
+
+    // Get total email count first
+    const emailWhereConditions = [
+      ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+      ...(personEmails.length > 0
+        ? [
+            { sender: { [Op.in]: personEmails } },
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
+            },
+          ]
+        : []),
+    ];
+
+    const totalEmailsCount =
+      emailWhereConditions.length > 0
+        ? await Email.count({
+            where: { [Op.or]: emailWhereConditions },
+          })
+        : 0;
+
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
 
     // Fetch emails where any person's email is sender or recipient
-    const personEmails = persons.map((p) => p.email).filter(Boolean);
     let emailsByAddress = [];
     if (personEmails.length > 0) {
       emailsByAddress = await Email.findAll({
@@ -329,6 +526,24 @@ const deals = await Deal.findAll({ where: { leadOrganizationId:organizationId } 
             },
           ],
         },
+        attributes: [
+          "emailID",
+          "messageId",
+          "sender",
+          "senderName",
+          "recipient",
+          "cc",
+          "bcc",
+          "subject",
+          "createdAt",
+          "folder",
+          "isRead",
+          "leadId",
+          "dealId",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(safeEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
       });
     }
 
@@ -338,36 +553,95 @@ const deals = await Deal.findAll({ where: { leadOrganizationId:organizationId } 
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
 
-    // Fetch all attachments for these emails from the Attachments model
-    const emailIDs = allEmails.map((email) => email.emailID);
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
     let files = [];
     if (emailIDs.length > 0) {
       files = await Attachment.findAll({
         where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
       });
 
       // Build a map for quick email lookup
       const emailMap = new Map();
-      allEmails.forEach((email) => emailMap.set(email.emailID, email));
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
 
-      // Combine each attachment with its related email
-      files = files.map((file) => ({
-        ...file.toJSON(),
-        email: emailMap.get(file.emailID) || null,
-      }));
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
     }
 
-    // Fetch all notes linked to these leads
-    const notes = await LeadNote.findAll({ where: { leadId: leadIds } });
+    // Fetch all notes linked to these leads with limit
+    const notes = await LeadNote.findAll({
+      where: { leadId: leadIds },
+      limit: 20, // Limit notes to prevent large responses
+      order: [["createdAt", "DESC"]],
+    });
+
+    console.log(
+      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes`
+    );
 
     res.status(200).json({
       organization,
       persons,
       leads,
       deals,
-      emails: allEmails,
+      emails: optimizedEmails,
       notes,
       files, // Attachments with related email data
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
+      },
     });
   } catch (error) {
     console.error("Error fetching organization timeline:", error);
@@ -461,12 +735,10 @@ exports.updateOrganization = async (req, res) => {
     // Update all fields provided in req.body
     await org.update(updateFields);
 
-    res
-      .status(200)
-      .json({
-        message: "Organization updated successfully",
-        organization: org,
-      });
+    res.status(200).json({
+      message: "Organization updated successfully",
+      organization: org,
+    });
   } catch (error) {
     console.error("Error updating organization:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -521,10 +793,13 @@ exports.linkPersonToOrganization = async (req, res) => {
     const person = await Person.findByPk(personId);
     if (!person) return res.status(404).json({ message: "Person not found" });
 
-    if (person.leadOrganizationId && person.leadOrganizationId !== leadOrganizationId) {
+    if (
+      person.leadOrganizationId &&
+      person.leadOrganizationId !== leadOrganizationId
+    ) {
       return res.status(400).json({
         message: "Person is already linked to another organization.",
-        currentOrganizationId: person.leadOrganizationId
+        currentOrganizationId: person.leadOrganizationId,
       });
     }
 
@@ -540,7 +815,7 @@ exports.linkPersonToOrganization = async (req, res) => {
 
     res.status(200).json({
       message: "Person linked to organization",
-      person
+      person,
     });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
@@ -557,7 +832,7 @@ exports.addPersonNote = async (req, res) => {
     const note = await PersonNote.create({
       personId,
       content,
-      createdBy: req.adminId // or req.user.id
+      createdBy: req.adminId, // or req.user.id
     });
     res.status(201).json({ message: "Note added to person", note });
   } catch (error) {
@@ -570,13 +845,13 @@ exports.addOrganizationNote = async (req, res) => {
   if (!leadOrganizationId) {
     return res.status(400).json({ message: "Organization ID is required." });
   }
-  const {content } = req.body;
+  const { content } = req.body;
   try {
     // You should have an OrganizationNote model/table
     const note = await OrganizationNote.create({
       leadOrganizationId,
       content,
-      createdBy: req.adminId
+      createdBy: req.adminId,
     });
     res.status(201).json({ message: "Note added to organization", note });
   } catch (error) {
@@ -613,9 +888,7 @@ exports.getAllContactPersons = async (req, res) => {
     const { search = "", page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const where = search
-      ? { contactPerson: { [Op.like]: `%${search}%` } }
-      : {};
+    const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
 
     // Include organization using association
     const { count, rows: persons } = await Person.findAndCountAll({
@@ -625,8 +898,8 @@ exports.getAllContactPersons = async (req, res) => {
         {
           model: Organization,
           as: "LeadOrganization", // Make sure this matches your association
-          attributes: ["leadOrganizationId", "organization"]
-        }
+          attributes: ["leadOrganizationId", "organization"],
+        },
       ],
       order: [["contactPerson", "ASC"]],
       limit: parseInt(limit),
@@ -634,16 +907,16 @@ exports.getAllContactPersons = async (req, res) => {
     });
 
     // Format response to include organization info at top level
-    const contactPersons = persons.map(person => ({
+    const contactPersons = persons.map((person) => ({
       personId: person.personId,
       contactPerson: person.contactPerson,
       email: person.email,
       organization: person.LeadOrganization
         ? {
             leadOrganizationId: person.LeadOrganization.leadOrganizationId,
-            organization: person.LeadOrganization.organization
+            organization: person.LeadOrganization.organization,
           }
-        : null
+        : null,
     }));
 
     res.status(200).json({
@@ -652,8 +925,8 @@ exports.getAllContactPersons = async (req, res) => {
         total: count,
         page: parseInt(page),
         limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit)
-      }
+        totalPages: Math.ceil(count / limit),
+      },
     });
   } catch (error) {
     console.error("Error fetching contact persons:", error);
@@ -680,9 +953,9 @@ exports.getPersonsByOrganization = async (req, res) => {
         "phone",
         "jobTitle",
         "personLabels",
-        "organization"
+        "organization",
       ],
-      order: [["contactPerson", "ASC"]]
+      order: [["contactPerson", "ASC"]],
     });
 
     // Fetch ownerName from MasterUser using organization.ownerId
@@ -695,18 +968,16 @@ exports.getPersonsByOrganization = async (req, res) => {
     }
 
     // Add ownerName to each person object
-    const personsWithOwner = persons.map(person => ({
+    const personsWithOwner = persons.map((person) => ({
       ...person.toJSON(),
-      ownerName
+      ownerName,
     }));
 
     res.status(200).json({
       organization: organization.organization,
-      persons: personsWithOwner
+      persons: personsWithOwner,
     });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
