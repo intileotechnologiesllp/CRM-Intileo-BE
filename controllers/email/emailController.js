@@ -219,6 +219,24 @@ const cleanEmailBody = (body) => {
     .trim();
 };
 
+// Helper function to create email body preview
+const createBodyPreview = (body, maxLength = 120) => {
+  if (!body) return "";
+
+  // Remove HTML tags if present
+  const cleanBody = body.replace(/<[^>]*>/g, "");
+
+  // Remove extra whitespace and newlines
+  const trimmedBody = cleanBody.replace(/\s+/g, " ").trim();
+
+  // Truncate to maxLength and add ellipsis if needed
+  if (trimmedBody.length <= maxLength) {
+    return trimmedBody;
+  }
+
+  return trimmedBody.substring(0, maxLength).trim() + "...";
+};
+
 // Helper function to format date to DD-MMM-YYYY
 const formatDateForIMAP = (date) => {
   const months = [
@@ -1763,6 +1781,7 @@ exports.getEmails = async (req, res) => {
     direction = "next", // 'next' or 'prev'
     dealLinkFilter, // New filter: "linked_with_deal", "linked_with_open_deal", "not_linked_with_deal"
     contactFilter, // New filter: "from_existing_contact", "not_from_existing_contact"
+    includeFullBody = "false", // New parameter to control body inclusion
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -2069,6 +2088,7 @@ exports.getEmails = async (req, res) => {
       "cc",
       "bcc",
       "subject",
+      "body", // Add body for preview
       "folder",
       "createdAt",
       "isRead",
@@ -2123,10 +2143,20 @@ exports.getEmails = async (req, res) => {
 
         return baseAttachment;
       });
-      return {
-        ...email.toJSON(),
-        attachments,
-      };
+
+      // Create email object with body preview
+      const emailObj = { ...email.toJSON(), attachments };
+
+      // Replace body with preview content (but keep the 'body' key name)
+      if (includeFullBody === "true") {
+        // Keep full body if explicitly requested
+        emailObj.body = emailObj.body;
+      } else {
+        // Replace body with preview content
+        emailObj.body = createBodyPreview(emailObj.body);
+      }
+
+      return emailObj;
     });
 
     // Calculate unviewCount using base filters (without cursor date filtering)
