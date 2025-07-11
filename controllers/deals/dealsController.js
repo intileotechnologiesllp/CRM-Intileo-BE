@@ -1256,69 +1256,189 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
+    // Enhanced Pipeline Stage Processing like Pipedrive
     const stageHistory = await DealStageHistory.findAll({
       where: { dealId },
       order: [["enteredAt", "ASC"]],
     });
 
     const now = new Date();
-    const pipelineStages = [];
+    const dealCreatedAt = new Date(deal.createdAt);
 
-    for (let i = 0; i < stageHistory.length; i++) {
-      const stage = stageHistory[i];
-      const nextStage = stageHistory[i + 1];
-      const start = new Date(stage.enteredAt);
-      const end = nextStage ? new Date(nextStage.enteredAt) : now;
-      const days = Math.max(
-        0,
-        Math.floor((end - start) / (1000 * 60 * 60 * 24))
-      );
-      pipelineStages.push({
-        stageName: stage.stageName,
-        days,
-      });
-    }
-
-    // Aggregate days per unique stage for frontend bar
-    const stageDaysMap = new Map();
-    const orderedStages = [];
-    let currentStageName = pipelineStages.length
-      ? pipelineStages[pipelineStages.length - 1].stageName
-      : null;
-
-    for (const stage of pipelineStages) {
-      if (!stageDaysMap.has(stage.stageName)) {
-        orderedStages.push(stage.stageName);
-        stageDaysMap.set(stage.stageName, stage.days);
-      } else {
-        stageDaysMap.set(
-          stage.stageName,
-          stageDaysMap.get(stage.stageName) + stage.days
-        );
-      }
-      // Stop if we've reached the current stage
-      if (stage.stageName === currentStageName) break;
-    }
-
-    // Define your pipeline order
+    // Define your complete pipeline order (customize as needed)
     const pipelineOrder = [
       "Qualified",
       "Contact Made",
       "Proposal Made",
       "Negotiations Started",
+      "Won",
+      "Lost",
     ];
 
-    let pipelineStagesUnique = [];
-    if (currentStageName && pipelineOrder.includes(currentStageName)) {
-      const currentIdx = pipelineOrder.indexOf(currentStageName);
-      // Always include all stages from "Qualified" up to and including the current stage
-      pipelineStagesUnique = pipelineOrder
-        .slice(0, currentIdx + 1)
-        .map((stageName) => ({
-          stageName,
-          days: stageDaysMap.get(stageName) || 0,
-        }));
+    // Initialize pipeline stages with comprehensive tracking
+    let pipelineStagesDetail = [];
+    let currentStageName = deal.pipelineStage || "Qualified";
+    let totalDealDays = Math.floor(
+      (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
+    );
+
+    // Process stage history to calculate time spent in each stage
+    if (stageHistory.length > 0) {
+      // Calculate time spent in each historical stage
+      for (let i = 0; i < stageHistory.length; i++) {
+        const stage = stageHistory[i];
+        const nextStage = stageHistory[i + 1];
+        const stageStart = new Date(stage.enteredAt);
+        const stageEnd = nextStage ? new Date(nextStage.enteredAt) : now;
+
+        // Calculate days spent in this stage
+        const daysInStage = Math.max(
+          0,
+          Math.floor((stageEnd - stageStart) / (1000 * 60 * 60 * 24))
+        );
+
+        // Calculate hours and minutes for more precision
+        const totalMinutes = Math.floor((stageEnd - stageStart) / (1000 * 60));
+        const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+        const minutes = totalMinutes % 60;
+
+        pipelineStagesDetail.push({
+          stageName: stage.stageName,
+          enteredAt: stage.enteredAt,
+          exitedAt: nextStage ? nextStage.enteredAt : null,
+          days: daysInStage,
+          hours: hours,
+          minutes: minutes,
+          totalMinutes: totalMinutes,
+          isActive: !nextStage, // Current stage if no next stage
+          stageOrder: pipelineOrder.indexOf(stage.stageName),
+        });
+      }
+
+      // Update current stage name from the last history entry
+      currentStageName = stageHistory[stageHistory.length - 1].stageName;
+    } else {
+      // If no stage history, deal is still in initial stage
+      const daysInCurrentStage = Math.floor(
+        (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
+      );
+      const totalMinutes = Math.floor((now - dealCreatedAt) / (1000 * 60));
+      const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+      const minutes = totalMinutes % 60;
+
+      pipelineStagesDetail.push({
+        stageName: currentStageName,
+        enteredAt: deal.createdAt,
+        exitedAt: null,
+        days: daysInCurrentStage,
+        hours: hours,
+        minutes: minutes,
+        totalMinutes: totalMinutes,
+        isActive: true,
+        stageOrder: pipelineOrder.indexOf(currentStageName),
+      });
     }
+
+    // Create aggregated stages map for duplicate stage handling
+    const stageDaysMap = new Map();
+    const stageDetailsMap = new Map();
+
+    pipelineStagesDetail.forEach((stage) => {
+      if (!stageDaysMap.has(stage.stageName)) {
+        stageDaysMap.set(stage.stageName, stage.days);
+        stageDetailsMap.set(stage.stageName, {
+          ...stage,
+          totalDays: stage.days,
+          visits: 1,
+          firstEntry: stage.enteredAt,
+          lastEntry: stage.enteredAt,
+        });
+      } else {
+        // Handle multiple visits to the same stage
+        const existingDays = stageDaysMap.get(stage.stageName);
+        const existingDetails = stageDetailsMap.get(stage.stageName);
+
+        stageDaysMap.set(stage.stageName, existingDays + stage.days);
+        stageDetailsMap.set(stage.stageName, {
+          ...existingDetails,
+          totalDays: existingDays + stage.days,
+          visits: existingDetails.visits + 1,
+          lastEntry: stage.enteredAt,
+          isActive: stage.isActive || existingDetails.isActive,
+        });
+      }
+    });
+
+    // Create pipeline stages for frontend (Pipedrive-like structure)
+    const currentStageIndex = pipelineOrder.indexOf(currentStageName);
+
+    const pipelineStagesUnique = pipelineOrder.map((stageName, index) => {
+      const stageData = stageDetailsMap.get(stageName);
+      const days = stageDaysMap.get(stageName) || 0;
+
+      // Determine if this stage should be shown based on current stage
+      const shouldShow = index <= currentStageIndex;
+
+      // For stages that haven't been visited but are before current stage,
+      // show them as completed with 0 days
+      const hasBeenVisited = stageDetailsMap.has(stageName);
+      const isBeforeCurrentStage = index < currentStageIndex;
+      const isCurrentStage = index === currentStageIndex;
+
+      return {
+        stageName,
+        days,
+        hours: stageData?.hours || 0,
+        minutes: stageData?.minutes || 0,
+        totalMinutes: stageData?.totalMinutes || 0,
+        isActive: stageData?.isActive || false,
+        isCurrent: isCurrentStage,
+        isPassed: isBeforeCurrentStage || (hasBeenVisited && !isCurrentStage),
+        isFuture: index > currentStageIndex,
+        visits: stageData?.visits || 0,
+        firstEntry: stageData?.firstEntry || null,
+        lastEntry: stageData?.lastEntry || null,
+        stageOrder: index,
+        hasBeenVisited,
+        shouldShow,
+        // Add percentage of total time spent
+        percentage:
+          totalDealDays > 0 ? Math.round((days / totalDealDays) * 100) : 0,
+      };
+    });
+
+    // Add pipeline insights (like Pipedrive)
+    const visitedStages = pipelineStagesUnique.filter((s) => s.hasBeenVisited);
+
+    const pipelineInsights = {
+      totalDealAge: totalDealDays,
+      currentStage: currentStageName,
+      currentStageIndex: currentStageIndex,
+      currentStageDays:
+        pipelineStagesUnique.find((s) => s.isCurrent)?.days || 0,
+      stagesCompleted: pipelineStagesUnique.filter((s) => s.isPassed).length,
+      stagesVisited: visitedStages.length,
+      totalStages: pipelineOrder.length,
+      progressPercentage: Math.round(
+        ((currentStageIndex + 1) / pipelineOrder.length) * 100
+      ),
+      stageChanges: pipelineStagesDetail.length,
+      averageDaysPerStage:
+        visitedStages.length > 0
+          ? Math.round(totalDealDays / visitedStages.length)
+          : 0,
+      // Add stage completion timeline
+      stageTimeline: pipelineStagesUnique.map((stage) => ({
+        stageName: stage.stageName,
+        status: stage.isCurrent
+          ? "current"
+          : stage.isPassed
+          ? "completed"
+          : "future",
+        days: stage.days,
+        percentage: stage.percentage,
+      })),
+    };
 
     // Calculate avgTimeToWon for all won deals
     const wonDeals = await Deal.findAll({ where: { status: "won" } });
@@ -1663,20 +1783,26 @@ exports.getDealDetail = async (req, res) => {
     console.log(
       `Deal detail: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes, ${activities.length} activities`
     );
+    console.log(
+      `Pipeline: ${currentStageName} (${pipelineInsights.currentStageDays} days), Total: ${pipelineInsights.totalDealAge} days, Progress: ${pipelineInsights.progressPercentage}%`
+    );
+    console.log(
+      `Stages:`,
+      pipelineStagesUnique.map((s) => `${s.stageName}:${s.days}d`).join(", ")
+    );
 
     res.status(200).json({
       deal: dealObj,
       person: personArr,
       organization: orgArr,
-      pipelineStages: pipelineStagesUnique, // Use unique stages with aggregated days
-      currentStage:
-        pipelineStages[pipelineStages.length - 1]?.stageName ||
-        deal.pipelineStage,
+      pipelineStages: pipelineStagesUnique, // Enhanced pipeline stages like Pipedrive (but maintains frontend compatibility)
+      currentStage: currentStageName,
       overview: {
-        dealAge,
+        dealAge: `${totalDealDays} days`,
         avgTimeToWon,
         inactiveDays,
         createdAt,
+        totalDealDays,
       },
       participants: participantArr,
       emails: optimizedEmails,
@@ -1698,6 +1824,12 @@ exports.getDealDetail = async (req, res) => {
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
+      },
+      // Enhanced pipeline data (optional for frontend to use)
+      _pipelineMetadata: {
+        pipelineStagesDetail: pipelineStagesDetail, // Detailed stage history
+        pipelineInsights: pipelineInsights, // Pipeline analytics
+        stageTimeline: pipelineInsights.stageTimeline, // Stage completion timeline
       },
     });
   } catch (error) {
