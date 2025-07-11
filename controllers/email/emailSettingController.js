@@ -608,38 +608,74 @@ exports.fetchSyncEmails = async (req, res) => {
         });
         let savedEmail;
         if (!existingEmail) {
-          savedEmail = await Email.create(emailData);
-          console.debug(
-            `[fetchSyncEmails] Email saved: ${emailData.messageId}`
-          );
+          try {
+            savedEmail = await Email.create(emailData);
+            console.debug(
+              `[fetchSyncEmails] Email saved: ${emailData.messageId}`
+            );
+          } catch (createError) {
+            console.error(
+              `[fetchSyncEmails] Error creating email ${emailData.messageId}:`,
+              createError
+            );
+            continue; // Skip this email and continue with the next one
+          }
         } else {
           console.debug(
             `[fetchSyncEmails] Email already exists: ${emailData.messageId}`
           );
           savedEmail = existingEmail;
         }
+
+        // Save attachments if they exist
+        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+          try {
+            const savedAttachments = await saveAttachments(
+              parsedEmail.attachments,
+              savedEmail.emailID
+            );
+            console.debug(
+              `[fetchSyncEmails] Saved ${savedAttachments.length} attachments for email: ${emailData.messageId}`
+            );
+          } catch (attachError) {
+            console.error(
+              `[fetchSyncEmails] Error saving attachments for email ${emailData.messageId}:`,
+              attachError
+            );
+            // Continue processing even if attachment saving fails
+          }
+        }
+
         // Fetch the full thread recursively
         if (emailData.messageId) {
-          const fullThread = await getFullThread(emailData.messageId, Email);
-          // Remove duplicates by messageId
-          const uniqueThread = [];
-          const seen = new Set();
-          for (const em of fullThread) {
-            if (!seen.has(em.messageId)) {
-              uniqueThread.push(em);
-              seen.add(em.messageId);
+          try {
+            const fullThread = await getFullThread(emailData.messageId, Email);
+            // Remove duplicates by messageId
+            const uniqueThread = [];
+            const seen = new Set();
+            for (const em of fullThread) {
+              if (!seen.has(em.messageId)) {
+                uniqueThread.push(em);
+                seen.add(em.messageId);
+              }
             }
+            // Sort by createdAt (oldest first)
+            uniqueThread.sort(
+              (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+            );
+            // Optionally, you can log the thread for debugging
+            console.debug(
+              `[fetchSyncEmails] Full thread for messageId ${emailData.messageId}:`,
+              uniqueThread.map((e) => e.messageId)
+            );
+            // You can now use uniqueThread as the full conversation
+          } catch (threadError) {
+            console.error(
+              `[fetchSyncEmails] Error processing thread for email ${emailData.messageId}:`,
+              threadError
+            );
+            // Continue processing even if thread processing fails
           }
-          // Sort by createdAt (oldest first)
-          uniqueThread.sort(
-            (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-          );
-          // Optionally, you can log the thread for debugging
-          console.debug(
-            `Full thread for messageId ${emailData.messageId}:`,
-            uniqueThread.map((e) => e.messageId)
-          );
-          // You can now use uniqueThread as the full conversation
         }
       }
     };
@@ -1264,11 +1300,9 @@ exports.downloadAttachment = async (req, res) => {
         console.debug(
           `[downloadAttachment] Attachment not found in email (after messageId search): ${filename}`
         );
-        return res
-          .status(404)
-          .json({
-            message: "Attachment not found in email (after messageId search).",
-          });
+        return res.status(404).json({
+          message: "Attachment not found in email (after messageId search).",
+        });
       }
     }
 

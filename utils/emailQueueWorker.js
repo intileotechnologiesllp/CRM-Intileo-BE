@@ -721,6 +721,11 @@ async function startSyncEmailWorker() {
         const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
           msg.content.toString()
         );
+
+        console.log(
+          `[SyncEmailWorker] Processing batch for masterUserID: ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
+        );
+
         await limit(async () => {
           try {
             logMemoryUsage(
@@ -731,13 +736,16 @@ async function startSyncEmailWorker() {
             await fetchSyncEmails(
               {
                 adminId: masterUserID,
-                body: { syncStartDate, startUID, endUID },
-                query: { batchSize: 10 }, // Enforce small batch size
+                body: { syncStartDate }, // syncStartDate goes in body
+                query: { batchSize: 10, startUID, endUID }, // startUID and endUID go in query
               },
               { status: () => ({ json: () => {} }) }
             );
 
             logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
+            console.log(
+              `[SyncEmailWorker] Successfully processed batch for masterUserID: ${masterUserID}`
+            );
 
             // Force garbage collection
             if (global.gc) {
@@ -746,7 +754,10 @@ async function startSyncEmailWorker() {
 
             channel.ack(msg);
           } catch (err) {
-            console.error("Failed to sync emails:", err);
+            console.error(
+              `[SyncEmailWorker] Failed to sync emails for masterUserID ${masterUserID}:`,
+              err
+            );
             channel.nack(msg, false, false);
           }
         });
