@@ -301,8 +301,8 @@ exports.createLead = async (req, res) => {
               masterUserID: req.adminId,
             });
 
-            // Store the saved custom field for response using fieldId as key
-            savedCustomFields[customField.fieldId] = {
+            // Store the saved custom field for response using fieldName as key
+            savedCustomFields[customField.fieldName] = {
               fieldName: customField.fieldName,
               fieldType: customField.fieldType,
               value: value,
