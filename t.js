@@ -1,1029 +1,918 @@
-const DefaultEmail = require("../../models/email/defaultEmailModel");
-const Email = require("../../models/email/emailModel");
-const { saveAttachments } = require("../../services/attachmentService");
-const UserCredential = require("../../models/email/userCredentialModel");
-const Imap = require("imap-simple");
-// const Email = require("../../models/email/emailModel");
-const { htmlToText } = require("html-to-text");
-const { simpleParser } = require("mailparser");
-const Attachment = require("../../models/email/attachmentModel");
-const { format, subDays, subMonths, subYears } = require("date-fns"); // Use date-fns for date manipulation
-const multer = require("multer");
-const path = require("path");
-const Sequelize = require("sequelize");
-const { publishToQueue } = require("../../services/rabbitmqService");
-const { Op } = require("sequelize");
-const PROVIDER_CONFIG = {
+const amqp = require("amqplib");
+const pLimit = require("p-limit");
+// Reduce concurrency to 1 for all workers to minimize memory/connection usage
+const limit = pLimit(1);
+const { fetchRecentEmail } = require("../controllers/email/emailController");
+const {
+  fetchSyncEmails,
+} = require("../controllers/email/emailSettingController");
+const nodemailer = require("nodemailer");
+const Email = require("../models/email/emailModel");
+const Attachment = require("../models/email/attachmentModel");
+const UserCredential = require("../models/email/userCredentialModel");
+const DefaultEmail = require("../models/email/defaultEmailModel");
+const MasterUser = require("../models/master/masterUserModel");
+const { fetchInboxEmails } = require("../controllers/email/emailController");
+const { batch } = require("googleapis/build/src/apis/batch");
+const QUEUE_NAME = "email-fetch-queue";
+const SCHEDULED_QUEUE = "scheduled-email-queue";
+const QUEUE = "EMAIL_QUEUE";
+const PROVIDER_SMTP_CONFIG = {
   gmail: {
-    host: "imap.gmail.com",
-    port: 993,
-    tls: true,
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
   },
   yandex: {
-    host: "imap.yandex.com",
-    port: 993,
-    tls: true,
+    host: "smtp.yandex.com",
+    port: 465,
+    secure: true,
   },
   // Add more providers as needed
 };
-// Configure storage for signature images
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/signatures/"); // Make sure this folder exists
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
-const upload = multer({ storage });
-const cleanEmailBody = (body) => {
-  // Remove quoted replies (e.g., lines starting with ">")
-  return body
-    .split("\n")
-    .filter((line) => !line.startsWith(">"))
-    .join("\n")
-    .trim();
-};
-// Helper function to format date to DD-MMM-YYYY
-const formatDateForIMAP = (date) => {
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const day = date.getDate();
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  return `${day}-${month}-${year}`;
-};
 
-exports.createOrUpdateDefaultEmail = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, senderName, isDefault, provider } = req.body; // <-- add provider here
+// const limit = pLimit(5); // Limit concurrency to 5
 
-  try {
-    // Validate input
-    if (!email || !appPassword) {
-      return res
-        .status(400)
-        .json({ message: "Email and appPassword are required." });
-    }
+// Utility: Log memory usage for diagnostics
+function logMemoryUsage(context = "") {
+  const mem = process.memoryUsage();
+  const rss = (mem.rss / 1024 / 1024).toFixed(1);
+  const heapUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
+  const heapTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
+  const external = (mem.external / 1024 / 1024).toFixed(1);
 
-    // If isDefault is true, unset isDefault for other accounts
-    if (isDefault) {
-      await DefaultEmail.update(
-        { isDefault: false },
-        { where: { masterUserID } }
-      );
-    }
-
-    // Check if the email already exists
-    const existingDefaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID, email },
-    });
-
-    const updateData = { appPassword, senderName, isDefault };
-    if (provider) updateData.provider = provider; // <-- add this line
-
-    if (existingDefaultEmail) {
-      // Update existing default email
-      await existingDefaultEmail.update(updateData);
-      return res
-        .status(200)
-        .json({ message: "Default email updated successfully." });
-    }
-
-    // Create new default email
-    await DefaultEmail.create({
-      masterUserID,
-      email,
-      appPassword,
-      senderName,
-      isDefault,
-      provider, // <-- add this line
-    });
-
-    res.status(201).json({ message: "Default email created successfully." });
-  } catch (error) {
-    console.error("Error creating or updating default email:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-exports.getDefaultEmail = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  try {
-    // Fetch the default email for the user
-    const defaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID },
-    });
-
-    if (!defaultEmail) {
-      return res.status(200).json({ message: "Default email not set." });
-    }
-
-    res.status(200).json({
-      message: "Default email fetched successfully.",
-      email: defaultEmail.email,
-      senderName: defaultEmail.senderName, // Include senderName in the response
-      appPassword: defaultEmail.appPassword,
-      isDefault: defaultEmail.isDefault, // You may want to exclude this in production
-    });
-  } catch (error) {
-    console.error("Error fetching default email:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-exports.updateDefaultEmail = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { email, appPassword, senderName, isDefault } = req.body;
-
-  try {
-    // Check if the email exists
-    const existingDefaultEmail = await DefaultEmail.findOne({
-      where: { masterUserID },
-    });
-
-    if (!existingDefaultEmail) {
-      return res.status(404).json({ message: "Default email not found." });
-    }
-
-    // If isDefault is true, unset isDefault for other accounts
-    if (isDefault) {
-      await DefaultEmail.update(
-        { isDefault: false },
-        { where: { masterUserID } }
-      );
-    }
-
-    // Prepare the fields to update
-    const updateData = {};
-    if (email) updateData.email = email;
-    if (appPassword) updateData.appPassword = appPassword;
-    if (senderName) updateData.senderName = senderName;
-    if (isDefault !== undefined) updateData.isDefault = isDefault;
-
-    // Update the default email
-    await existingDefaultEmail.update(updateData);
-
-    res.status(200).json({ message: "Default email updated successfully." });
-  } catch (error) {
-    console.error("Error updating default email:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-exports.archiveEmail = async (req, res) => {
-  const { emailId } = req.params; // Get the email ID from the request parameters
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  try {
-    // Find the email by emailId and masterUserID
-    const email = await Email.findOne({
-      where: { emailID: emailId, masterUserID },
-    });
-
-    if (!email) {
-      return res.status(404).json({ message: "Email not found." });
-    }
-
-    // Update the folder to "archive"
-    await email.update({ folder: "archive" });
-
-    res.status(200).json({ message: "Email archived successfully." });
-  } catch (error) {
-    console.error("Error archiving email:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-exports.bulkArchiveEmails = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailIds } = req.body; // Array of email IDs
-
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "emailIds must be a non-empty array." });
-  }
-
-  // Update all emails to move them to the archive folder
-  const [updatedCount] = await Email.update(
-    { folder: "archive" },
-    { where: { emailID: emailIds, masterUserID } }
+  console.log(
+    `[Memory] ${context} RSS: ${rss}MB, Heap: ${heapUsed}MB / ${heapTotal}MB, External: ${external}MB`
   );
 
-  res.status(200).json({
-    message: `${updatedCount} email(s) archived successfully.`,
-  });
-};
-
-const extractFolders = (mailboxes, parent = "") => {
-  const folders = [];
-  for (const [key, value] of Object.entries(mailboxes)) {
-    const folderName = parent ? `${parent}${value.delimiter}${key}` : key;
-    if (!value.attribs.includes("\\Noselect")) {
-      folders.push(folderName); // Add folder if it's selectable
-    }
-    if (value.children) {
-      folders.push(...extractFolders(value.children, folderName)); // Recursively add child folders
-    }
+  // Warning if memory usage is high
+  if (mem.heapUsed > 500 * 1024 * 1024) {
+    // 500MB
+    console.warn(`[Memory Warning] High heap usage: ${heapUsed}MB`);
   }
-  return folders;
-};
+}
 
-// Mapping IMAP folder names to database folder names
-const folderMapping = {
-  INBOX: "inbox",
-  "[Gmail]/Drafts": "drafts",
-  "[Gmail]/Sent Mail": "sent",
-  "[Gmail]/Trash": "archive",
-  "[Gmail]/All Mail": "inbox", // Map "All Mail" to "archive"
-};
+// Add process-level error handling
+process.on("unhandledRejection", (reason, p) => {
+  console.error("[FATAL] Unhandled Rejection at:", p, "reason:", reason);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught Exception:", err);
+  process.exit(1);
+});
 
-exports.queueSyncEmails = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { syncStartDate } = req.body;
+// Patch all worker consumers to log memory and always close connections
+async function startWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
 
-  try {
-    await publishToQueue("SYNC_EMAIL_QUEUE", { masterUserID, syncStartDate });
-    res.status(200).json({ message: "Sync job queued successfully." });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to queue sync job.", error: error.message });
-  }
-};
+  const connection = await amqp.connect(amqpUrl);
+  console.log("Connected to RabbitMQ");
+  const channel = await connection.createChannel();
+  await channel.assertQueue(QUEUE_NAME, { durable: true });
 
-exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 100, page = 1 } = req.query; // Default batchSize to 50 and page to 1
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
-  try {
-    if (inputSyncStartDate) {
-      await UserCredential.update(
-        { syncStartDate: inputSyncStartDate },
-        { where: { masterUserID } }
-      );
-    }
-    // Fetch user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
 
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-
-    const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
-    const syncStartDate = userCredential.syncStartDate || "3 days ago"; // Default to "3 days ago" if invalid
-    const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to "INBOX"
-    const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
-
-    // Parse and calculate the `sinceDate` based on syncStartDate
-    let sinceDate;
-
-    if (typeof syncStartDate === "string" && syncStartDate.includes("T")) {
-      // If syncStartDate is an ISO date string
-      sinceDate = new Date(syncStartDate);
-    } else if (syncStartDate.includes("days ago")) {
-      const days = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subDays(new Date(), days);
-    } else if (syncStartDate.includes("month")) {
-      const months = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subMonths(new Date(), months);
-    } else if (syncStartDate.includes("year")) {
-      const years = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subYears(new Date(), years);
-    } else {
-      return res.status(400).json({ message: "Invalid syncStartDate format." });
-    }
-
-    // Validate sinceDate
-    if (isNaN(sinceDate.getTime())) {
-      throw new Error("Invalid sinceDate calculated from syncStartDate.");
-    }
-
-    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
-    const humanReadableSinceDate = `${format(sinceDate, "MMMM dd, yyyy")}`;
-
-    console.log(`Fetching emails since ${humanReadableSinceDate}`);
-
-    // Connect to IMAP server
-    // const imapConfig = {
-    //   imap: {
-    //     user: userEmail,
-    //     password: userPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 30000,
-    //     tlsOptions: {
-    //       rejectUnauthorized: false,
-    //     },
-    //   },
-    // };
-    const provider = userCredential.provider || "gmail"; // default to gmail
-
-    let imapConfig;
-    if (provider === "custom") {
-      if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({
-          message: "Custom IMAP settings are missing in user credentials.",
-        });
-      }
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    } else {
-      const providerConfig = PROVIDER_CONFIG[provider];
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    }
-
-    const connection = await Imap.connect(imapConfig);
-
-    // Fetch all folders from the IMAP server
-    const mailboxes = await connection.getBoxes();
-    console.log("All folders from IMAP server:", mailboxes);
-
-    // Extract all valid folder names, including nested folders
-    const validFolders = extractFolders(mailboxes);
-    console.log("Valid folders from IMAP server:", validFolders);
-
-    // Fetch all folders if syncAllFolders is true
-    let foldersToSync = Array.isArray(syncFolders)
-      ? syncFolders
-      : [syncFolders];
-    if (syncAllFolders) {
-      console.log("Fetching all folders...");
-      foldersToSync = validFolders; // Use all valid folders
-    } else {
-      // Filter user-specified folders to include only valid folders
-      foldersToSync = foldersToSync.filter((folder) =>
-        validFolders.includes(folder)
-      );
-    }
-
-    // Debugging logs
-    console.log("User-specified folders to sync:", syncFolders);
-    console.log("Filtered folders to sync:", foldersToSync);
-
-    if (foldersToSync.length === 0) {
-      return res.status(400).json({ message: "No valid folders to sync." });
-    }
-
-    console.log("Valid folders to sync:", foldersToSync);
-
-    // Helper function to fetch emails from a specific folder
-    const fetchEmailsFromFolder = async (folderName) => {
-      console.log(`Opening folder: ${folderName}...`);
-      await connection.openBox(folderName);
-
-      console.log(`Fetching emails from folder: ${folderName}...`);
-      const searchCriteria = [["SINCE", formattedSinceDate]];
-      const fetchOptions = {
-        bodies: "",
-        struct: true,
-      };
-
-      const messages = await connection.search(searchCriteria, fetchOptions);
-
-      console.log(`Total emails found in ${folderName}: ${messages.length}`);
-
-      // Paginate emails based on batchSize and page
-      const startIndex = (page - 1) * batchSize;
-      const endIndex = startIndex + parseInt(batchSize, 10);
-      const paginatedMessages = messages.slice(startIndex, endIndex);
-
-      for (const message of paginatedMessages) {
-        const rawBodyPart = message.parts.find((part) => part.which === "");
-        const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-        if (!rawBody) {
-          console.log(`No body found for email in folder: ${folderName}.`);
-          continue;
-        }
-
-        const parsedEmail = await simpleParser(rawBody);
-
-        // Map IMAP folder name to database folder name
-        const dbFolderName = folderMapping[folderName] || "inbox"; // Default to "inbox" if no mapping exists
-        // Extract inReplyTo and references headers
-        const referencesHeader = parsedEmail.headers.get("references");
-        const references = Array.isArray(referencesHeader)
-          ? referencesHeader.join(" ") // Convert array to string
-          : referencesHeader || null;
-
-        const emailData = {
-          messageId: parsedEmail.messageId || null,
-          inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-          references,
-          sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-          senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-          recipient: parsedEmail.to
-            ? parsedEmail.to.value.map((to) => to.address).join(", ")
-            : null,
-          cc: parsedEmail.cc
-            ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-            : null,
-          bcc: parsedEmail.bcc
-            ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-            : null,
-          masterUserID: masterUserID,
-          subject: parsedEmail.subject || null,
-          body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-          folder: dbFolderName, // Use mapped folder name
-          createdAt: parsedEmail.date || new Date(),
-        };
-
-        // Save email to the database
-        const existingEmail = await Email.findOne({
-          where: { messageId: emailData.messageId },
-        });
-
-        let savedEmail;
-        if (!existingEmail) {
-          savedEmail = await Email.create(emailData);
-          console.log(`Email saved: ${emailData.messageId}`);
-        } else {
-          console.log(`Email already exists: ${emailData.messageId}`);
-          savedEmail = existingEmail;
-        }
-
-        // Fetch related emails in the same thread (like fetchRecentEmail)
-        const relatedEmails = await Email.findAll({
-          where: {
-            [Sequelize.Op.or]: [
-              { messageId: emailData.inReplyTo }, // Parent email
-              { inReplyTo: emailData.messageId }, // Replies to this email
-              {
-                references: { [Sequelize.Op.like]: `%${emailData.messageId}%` },
-              }, // Emails in the same thread
-            ],
-          },
-          order: [["createdAt", "ASC"]], // Sort by date
-        });
-        // Save related emails in the database
-        for (const relatedEmail of relatedEmails) {
-          const existingRelatedEmail = await Email.findOne({
-            where: { messageId: relatedEmail.messageId },
+  channel.consume(
+    QUEUE_NAME,
+    async (msg) => {
+      if (msg !== null) {
+        // Enforce small batch size and log memory for fetchRecentEmail
+        const { adminId } = JSON.parse(msg.content.toString());
+        logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
+        try {
+          await limit(async () => {
+            // Pass smaller batch size to fetchRecentEmail for memory safety
+            await fetchRecentEmail(adminId, { batchSize: 5 });
           });
-
-          if (!existingRelatedEmail) {
-            await Email.create(relatedEmail);
-            console.log(`Related email saved: ${relatedEmail.messageId}`);
-          } else {
-            console.log(
-              `Related email already exists: ${relatedEmail.messageId}`
-            );
+          channel.ack(msg);
+        } catch (error) {
+          console.error(
+            `Error processing email fetch for adminId ${adminId}:`,
+            error
+          );
+          channel.nack(msg, false, false); // Discard the message on error
+        } finally {
+          logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
+          // Force garbage collection
+          if (global.gc) {
+            global.gc();
           }
         }
       }
+    },
+    { noAck: false }
+  );
+
+  console.log("Email fetch worker started and waiting for jobs...");
+}
+
+async function startScheduledEmailWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+
+  const connection = await amqp.connect(amqpUrl);
+  const channel = await connection.createChannel();
+  await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
+
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
+
+  channel.consume(
+    SCHEDULED_QUEUE,
+    async (msg) => {
+      if (msg !== null) {
+        const { emailID } = JSON.parse(msg.content.toString());
+        try {
+          const email = await Email.findByPk(emailID, {
+            include: [{ model: Attachment, as: "attachments" }],
+          });
+          if (!email) return channel.ack(msg);
+
+          // Fetch sender credentials
+          const userCredential = await UserCredential.findOne({
+            where: { masterUserID: email.masterUserID },
+          });
+          if (!userCredential) return channel.ack(msg);
+          const provider = userCredential.provider; // default to gmail
+          // Send email
+          let transporterConfig;
+          if (provider === "gmail" || provider === "yandex") {
+            const smtp = PROVIDER_SMTP_CONFIG[provider];
+            transporterConfig = {
+              host: smtp.host,
+              port: smtp.port,
+              secure: smtp.secure,
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          } else if (provider === "custom") {
+            transporterConfig = {
+              host: userCredential.smtpHost,
+              port: userCredential.smtpPort,
+              secure: userCredential.smtpSecure, // true/false
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          } else {
+            // fallback to gmail
+            transporterConfig = {
+              service: "gmail",
+              auth: {
+                user: userCredential.email,
+                pass: userCredential.appPassword,
+              },
+            };
+          }
+          const transporter = nodemailer.createTransport(transporterConfig);
+
+          const info = await transporter.sendMail({
+            from: userCredential.email,
+            to: email.recipient,
+            cc: email.cc,
+            bcc: email.bcc,
+            subject: email.subject,
+            text: email.body,
+            html: email.body,
+            attachments: email.attachments.map((att) => ({
+              filename: att.filename,
+              path: att.path,
+            })),
+          });
+
+          // Move email to sent
+          await email.update({
+            folder: "sent",
+            createdAt: new Date(),
+            messageId: info.messageId,
+          });
+          console.log(`Scheduled email sent: ${email.subject}`);
+
+          channel.ack(msg);
+        } catch (err) {
+          console.error("Failed to send scheduled email:", err);
+          channel.nack(msg, false, false); // Discard on error
+        }
+      }
+    },
+    { noAck: false }
+  );
+
+  console.log("Scheduled email worker started and waiting for jobs...");
+}
+
+//......................................................................
+// async function sendQueuedEmail(emailData) {
+//   // Fetch sender credentials (prefer DefaultEmail)
+//   let SENDER_EMAIL = emailData.sender;
+//   let SENDER_PASSWORD;
+//   let SENDER_NAME = emailData.senderName;
+//   let signatureBlock = "";
+//   let userCredential;
+
+//   // If you need to fetch password from DB:
+//   if (!emailData.senderPassword) {
+//     const defaultEmail = await DefaultEmail.findOne({
+//       where: { masterUserID: emailData.masterUserID, isDefault: true },
+//     });
+//     if (defaultEmail) {
+//       SENDER_PASSWORD = defaultEmail.appPassword;
+//     } else {
+//       userCredential = await UserCredential.findOne({
+//         where: { masterUserID: emailData.masterUserID },
+//       });
+//       SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
+//     }
+//   } else {
+//     SENDER_PASSWORD = emailData.senderPassword;
+//   }
+
+//   // Build signature block if needed (optional)
+//   if (!userCredential) {
+//     userCredential = await UserCredential.findOne({
+//       where: { masterUserID: emailData.masterUserID },
+//     });
+//   }
+//   if (userCredential) {
+//     if (userCredential.signatureName) {
+//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+//     }
+//     if (userCredential.signature) {
+//       signatureBlock += `${userCredential.signature}<br>`;
+//     }
+//     if (userCredential.signatureImage) {
+//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+//     }
+//   }
+
+//   let emailBody = emailData.body || "";
+//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
+//     emailBody += `<br><br>${signatureBlock}`;
+//   }
+
+//   // Prepare mail options
+//   const mailOptions = {
+//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+//     to: emailData.recipient,
+//     cc: emailData.cc,
+//     bcc: emailData.bcc,
+//     subject: emailData.subject,
+//     html: emailBody,
+//     text: emailBody,
+//     attachments: (emailData.attachments || []).map(att => ({
+//       filename: att.filename,
+//       path: att.path,
+//     })),
+//     inReplyTo: emailData.inReplyTo || undefined,
+//     references: emailData.references || undefined,
+//   };
+
+//   // Send email
+//   const transporter = nodemailer.createTransport({
+//     service: "gmail",
+//     auth: {
+//       user: SENDER_EMAIL,
+//       pass: SENDER_PASSWORD,
+//     },
+//   });
+
+//   const info = await transporter.sendMail(mailOptions);
+
+//   // Save email to DB with real messageId
+//   const savedEmail = await Email.create({
+//     messageId: info.messageId,
+//     inReplyTo: emailData.inReplyTo || null,
+//     references: emailData.references || null,
+//     sender: SENDER_EMAIL,
+//     senderName: SENDER_NAME,
+//     recipient: emailData.recipient,
+//     cc: emailData.cc,
+//     bcc: emailData.bcc,
+//     subject: emailData.subject,
+//     body: emailBody,
+//     folder: "sent",
+//     createdAt: emailData.createdAt || new Date(),
+//     masterUserID: emailData.masterUserID,
+//     tempMessageId: emailData.tempMessageId,
+//     isDraft: false,
+//     // ...any other fields you need...
+//   });
+
+//   // Save attachments if any
+//   if (emailData.attachments && emailData.attachments.length > 0) {
+//     const savedAttachments = emailData.attachments.map(file => ({
+//       emailID: savedEmail.emailID,
+//       filename: file.filename,
+//       filePath: file.path,
+//       size: file.size,
+//       contentType: file.contentType,
+//     }));
+//     await Attachment.bulkCreate(savedAttachments);
+//   }
+
+//   console.log(`Queued email sent and saved: ${info.messageId}`);
+// }
+
+// --- Update EMAIL_QUEUE consumer ---
+// async function startEmailWorker() {
+//   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+//   const connection = await amqp.connect(amqpUrl);
+//   const channel = await connection.createChannel();
+//   await channel.assertQueue(QUEUE, { durable: true });
+
+//   channel.consume(
+//     QUEUE,
+//     async (msg) => {
+//       if (msg !== null) {
+//         const emailData = JSON.parse(msg.content.toString());
+//         limit(() =>
+//           sendQueuedEmail(emailData)
+//             .then(() => channel.ack(msg))
+//             .catch((err) => {
+//               console.error("Failed to send queued email:", err);
+//               channel.nack(msg, false, false); // Discard on error
+//             })
+//         );
+//       }
+//     },
+//     { noAck: false }
+//   );
+
+//   console.log("Email worker started and waiting for jobs...");
+// }
+
+///.......................new............
+
+async function startEmailWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  let connection, channel;
+
+  async function connect() {
+    try {
+      connection = await amqp.connect(amqpUrl);
+      channel = await connection.createChannel();
+      await channel.assertQueue(QUEUE, { durable: true });
+
+      channel.consume(
+        QUEUE,
+        async (msg) => {
+          if (msg !== null) {
+            const emailData = JSON.parse(msg.content.toString());
+            limit(() =>
+              sendEmailJob(emailData)
+                .then(() => {
+                  if (channel.connection.stream.writable) channel.ack(msg);
+                })
+                .catch((err) => {
+                  console.error("Failed to send queued email:", err);
+                  if (channel.connection.stream.writable)
+                    channel.nack(msg, false, false);
+                })
+            );
+          }
+        },
+        { noAck: false }
+      );
+
+      connection.on("error", (err) => {
+        console.error("AMQP connection error:", err);
+      });
+
+      connection.on("close", () => {
+        console.error("AMQP connection closed. Reconnecting in 5s...");
+        setTimeout(connect, 5000);
+      });
+
+      console.log("Email worker started and waiting for jobs...");
+    } catch (err) {
+      console.error("Failed to connect to RabbitMQ:", err);
+      setTimeout(connect, 5000);
+    }
+  }
+
+  connect();
+}
+async function sendEmailJob(emailData) {
+  let draftEmail = null;
+  let SENDER_EMAIL = emailData.sender;
+  let SENDER_PASSWORD;
+  let SENDER_NAME = emailData.senderName;
+  let signatureBlock = "";
+  let userCredential;
+
+  // Define baseURL for attachment file paths
+  const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
+
+  // Fetch password if not provided
+  if (!emailData.senderPassword) {
+    const defaultEmail = await DefaultEmail.findOne({
+      where: { masterUserID: emailData.masterUserID, isDefault: true },
+    });
+    if (defaultEmail) {
+      SENDER_PASSWORD = defaultEmail.appPassword;
+    } else {
+      userCredential = await UserCredential.findOne({
+        where: { masterUserID: emailData.masterUserID },
+      });
+      SENDER_PASSWORD = userCredential ? userCredential.appPassword : "";
+    }
+  } else {
+    SENDER_PASSWORD = emailData.senderPassword;
+  }
+
+  // Build signature block if needed
+  if (!userCredential) {
+    userCredential = await UserCredential.findOne({
+      where: { masterUserID: emailData.masterUserID },
+    });
+  }
+  if (userCredential) {
+    if (userCredential.signatureName) {
+      signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+    }
+    if (userCredential.signature) {
+      signatureBlock += `${userCredential.signature}<br>`;
+    }
+    if (userCredential.signatureImage) {
+      signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+    }
+  }
+
+  let emailBody = emailData.body || "";
+  if (signatureBlock && !emailBody.includes(signatureBlock)) {
+    emailBody += `<br><br>${signatureBlock}`;
+  }
+
+  // Prepare mail options
+  const mailOptions = {
+    from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+    to: emailData.recipient || (draftEmail && draftEmail.recipient),
+    cc: emailData.cc || (draftEmail && draftEmail.cc),
+    bcc: emailData.bcc || (draftEmail && draftEmail.bcc),
+    subject: emailData.subject,
+    html: emailBody,
+    text: emailBody,
+    attachments: (emailData.attachments || []).map((att) => ({
+      filename: att.filename,
+      path: att.path,
+    })),
+    inReplyTo: emailData.inReplyTo || undefined,
+    references: emailData.references || undefined,
+  };
+
+  // Send email
+  const provider =
+    emailData.provider ||
+    (typeof defaultEmail !== "undefined" && defaultEmail?.provider) ||
+    userCredential?.provider;
+
+  let transporterConfig;
+  if (provider === "gmail" || provider === "yandex") {
+    const smtp = PROVIDER_SMTP_CONFIG[provider];
+    transporterConfig = {
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
     };
-
-    // Fetch emails from specified folders
-    for (const folder of foldersToSync) {
-      await fetchEmailsFromFolder(folder);
-    }
-
-    connection.end();
-    console.log("IMAP connection closed.");
-
-    res.status(200).json({
-      message: "Fetched and saved emails from specified folders.",
-      sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
-      batchSize: parseInt(batchSize, 10),
-      page: parseInt(page, 10),
-    });
-  } catch (error) {
-    console.error("Error fetching emails:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-exports.fetchsyncdata = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
-
-  try {
-    // Fetch the user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-
-    res.status(200).json({
-      message: "User credentials fetched successfully.",
-      credential: userCredential, // Return all fields from the UserCredential model
-    });
-  } catch (error) {
-    console.error("Error fetching user credentials:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-// Example restore API
-exports.restoreEmails = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailIds } = req.body; // Array of email IDs
-
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "emailIds must be a non-empty array." });
+  } else if (provider === "custom") {
+    transporterConfig = {
+      host: userCredential.smtpHost,
+      port: userCredential.smtpPort,
+      secure: userCredential.smtpSecure, // true/false
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
+    };
+  } else {
+    // fallback to gmail
+    transporterConfig = {
+      service: "gmail",
+      auth: {
+        user: SENDER_EMAIL,
+        pass: SENDER_PASSWORD,
+      },
+    };
   }
 
-  // Restore all emails in trash to inbox (or originalFolder if you store it)
-  const [updatedCount] = await Email.update(
-    { folder: "inbox" }, // Or use originalFolder if you store it
-    { where: { emailID: emailIds, masterUserID, folder: "trash" } }
-  );
+  const transporter = nodemailer.createTransport(transporterConfig);
+  // const transporter = nodemailer.createTransport({
+  //   service: "gmail",
+  //   auth: {
+  //     user: SENDER_EMAIL,
+  //     pass: SENDER_PASSWORD,
+  //   },
+  // });
 
-  res
-    .status(200)
-    .json({ message: `${updatedCount} email(s) restored from trash.` });
-};
+  const info = await transporter.sendMail(mailOptions);
 
-exports.permanentlyDeleteEmails = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailIds } = req.body;
-
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "emailIds must be a non-empty array." });
-  }
-
-  const deletedCount = await Email.destroy({
-    where: { emailID: emailIds, masterUserID, folder: "trash" },
-  });
-
-  res
-    .status(200)
-    .json({ message: `${deletedCount} email(s) permanently deleted.` });
-};
-
-exports.markAsUnread = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailIds } = req.body;
-
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "emailIds must be a non-empty array." });
-  }
-
-  const [updatedCount] = await Email.update(
-    { isRead: false },
-    { where: { emailID: emailIds, masterUserID } }
-  );
-
-  res
-    .status(200)
-    .json({ message: `${updatedCount} email(s) marked as unread.` });
-};
-
-exports.updateSignature = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { signature, signatureName } = req.body;
-  let signatureImage = req.body.signatureImage;
-
-  // If an image was uploaded, use its path as the image URL
-  if (req.file) {
-    signatureImage = `${
-      process.env.LOCALHOST_URL || "http://localhost:3056"
-    }/uploads/signatures/${req.file.filename}`;
-  }
-
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-    await userCredential.update({ signature, signatureName, signatureImage });
-    res.status(200).json({ message: "Signature updated successfully." });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to update signature.", error: error.message });
-  }
-};
-
-exports.markAsRead = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailIds } = req.body;
-
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "emailIds must be a non-empty array." });
-  }
-
-  const [updatedCount] = await Email.update(
-    { isRead: true },
-    { where: { emailID: emailIds, masterUserID } }
-  );
-
-  res.status(200).json({ message: `${updatedCount} email(s) marked as read.` });
-};
-
-exports.updateEmailSharing = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { emailId } = req.params; // Email ID from URL
-  const { isShared } = req.body; // Boolean value in request body
-
-  try {
-    const email = await Email.findOne({
-      where: { emailID: emailId, masterUserID },
-    });
-
-    if (!email) {
-      return res.status(404).json({ message: "Email not found." });
-    }
-
-    await email.update({ isShared: isShared === true || isShared === "true" });
-
-    res.status(200).json({
-      message: `Email sharing updated successfully.`,
-      email: {
-        emailID: email.emailID,
-        isShared: email.isShared,
+  // --- Save or update email and attachments ---
+  if (emailData.draftId) {
+    // Update the existing draft to "sent"
+    const draftEmail = await Email.findOne({
+      where: {
+        draftId: emailData.draftId,
+        masterUserID: emailData.masterUserID,
+        folder: "drafts",
       },
     });
-  } catch (error) {
-    console.error("Error updating email sharing:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-exports.setSmartBcc = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { smartBcc } = req.body;
-
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
+    if (draftEmail) {
+      await draftEmail.update({
+        messageId: info.messageId,
+        inReplyTo: emailData.inReplyTo,
+        references: emailData.references,
+        sender: SENDER_EMAIL,
+        senderName: SENDER_NAME,
+        recipient: emailData.recipient,
+        cc: emailData.cc,
+        bcc: emailData.bcc,
+        subject: emailData.subject,
+        body: emailBody,
+        folder: "sent",
+        createdAt: emailData.createdAt,
+        isDraft: false,
+        tempMessageId: emailData.tempMessageId,
+        // attachments: emailData.attachments,
+      });
+      // Remove old attachments
+      await Attachment.destroy({ where: { emailID: draftEmail.emailID } });
+      // Save new attachments
+      if (emailData.attachments && emailData.attachments.length > 0) {
+        const savedAttachments = emailData.attachments.map((file) => ({
+          emailID: draftEmail.emailID,
+          filename: file.filename,
+          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+            file.filename
+          )}`,
+          // filePath: file.path,
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        await Attachment.bulkCreate(savedAttachments);
+      }
+      console.log(`Draft email sent and updated: ${info.messageId}`);
     }
-    await userCredential.update({ smartBcc });
-    res.status(200).json({ message: "Smart BCC updated successfully." });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to update Smart BCC.", error: error.message });
-  }
-};
-exports.updateBlockedAddress = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { blockedEmail } = req.body; // comma-separated string or array
-
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
+  } else {
+    // Create a new sent email (no existing email to update since we don't save in composeEmail anymore)
+    const savedEmail = await Email.create({
+      messageId: info.messageId,
+      inReplyTo: emailData.inReplyTo || null,
+      references: emailData.references || null,
+      sender: SENDER_EMAIL,
+      senderName: SENDER_NAME,
+      recipient: emailData.recipient,
+      cc: emailData.cc,
+      bcc: emailData.bcc,
+      subject: emailData.subject,
+      body: emailBody,
+      folder: "sent",
+      createdAt: emailData.createdAt || new Date(),
+      masterUserID: emailData.masterUserID,
+      tempMessageId: emailData.tempMessageId,
+      isDraft: false,
     });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
+
+    // Save attachments if any (for user-uploaded files in compose email)
+    if (emailData.attachments && emailData.attachments.length > 0) {
+      const savedAttachments = emailData.attachments.map((file) => ({
+        emailID: savedEmail.emailID,
+        filename: file.filename,
+        filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
+          file.filename
+        )}`, // Save public URL for user uploads
+        size: file.size,
+        contentType: file.contentType,
+      }));
+      await Attachment.bulkCreate(savedAttachments);
+      console.log(
+        `Saved ${savedAttachments.length} user-uploaded attachment files for email: ${savedEmail.emailID}`
+      );
     }
-
-    // If blockedEmail is an array, join to string
-    let blockedEmailStr = blockedEmail;
-    if (Array.isArray(blockedEmail)) {
-      blockedEmailStr = blockedEmail.join(",");
-    }
-
-    await userCredential.update({ blockedEmail: blockedEmailStr });
-    res
-      .status(200)
-      .json({ message: "Blocked address list updated successfully." });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to update blocked address.",
-      error: error.message,
-    });
+    console.log(`Email sent and saved: ${info.messageId}`);
   }
-};
-exports.removeBlockedAddress = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailToRemove } = req.body; // The email address to remove
+}
 
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
+//.....................change
 
-    // Ensure blockedEmail is always an array
-    let blockedList = [];
-    if (Array.isArray(userCredential.blockedEmail)) {
-      blockedList = userCredential.blockedEmail;
-    } else if (
-      typeof userCredential.blockedEmail === "string" &&
-      userCredential.blockedEmail.length > 0
-    ) {
-      // Fallback for legacy comma-separated string
-      blockedList = userCredential.blockedEmail
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
-    }
+// async function sendEmailJob(emailID) {
+//   // Fetch email and attachments
+//   const email = await Email.findByPk(emailID, {
+//     include: [{ model: Attachment, as: "attachments" }],
+//   });
+//   if (!email) return;
 
-    // Remove the email (case-insensitive, trimmed)
-    const updatedList = blockedList
-      .map((e) => e.trim().toLowerCase())
-      .filter((email) => email !== emailToRemove.trim().toLowerCase());
+//   // Fetch sender credentials (prefer DefaultEmail)
+//   let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
+//   let signatureBlock = "";
+//   let userCredential;
+//   const defaultEmail = await DefaultEmail.findOne({
+//     where: { masterUserID: email.masterUserID, isDefault: true },
+//   });
 
-    await userCredential.update({ blockedEmail: updatedList });
+//   if (defaultEmail) {
+//     SENDER_EMAIL = defaultEmail.email;
+//     SENDER_PASSWORD = defaultEmail.appPassword;
+//     SENDER_NAME = defaultEmail.senderName;
+//     if (!SENDER_NAME) {
+//       const masterUser = await MasterUser.findOne({
+//         where: { masterUserID: email.masterUserID },
+//       });
+//       SENDER_NAME = masterUser ? masterUser.name : "";
+//     }
+//         // Fetch userCredential for signature if needed
+//     userCredential = await UserCredential.findOne({
+//       where: { masterUserID: email.masterUserID },
+//     });
+//   } else {
+//     const userCredential = await UserCredential.findOne({
+//       where: { masterUserID: email.masterUserID },
+//     });
+//     SENDER_EMAIL = userCredential.email;
+//     SENDER_PASSWORD = userCredential.appPassword;
+//     const masterUser = await MasterUser.findOne({
+//       where: { masterUserID: email.masterUserID },
+//     });
+//     SENDER_NAME = masterUser ? masterUser.name : "";
 
-    res.status(200).json({
-      message:
-        updatedList.length < blockedList.length
-          ? "Blocked address removed successfully."
-          : "Email not found in blocked list.",
-      blockedEmail: updatedList,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to remove blocked address.",
-      error: error.message,
-    });
-  }
-};
-exports.getSignature = async (req, res) => {
-  const masterUserID = req.adminId;
+//   }
+//     // Build signature block if not already present in email.body
+//   if (userCredential) {
+//     if (userCredential.signatureName) {
+//       signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
+//     }
+//     if (userCredential.signature) {
+//       signatureBlock += `${userCredential.signature}<br>`;
+//     }
+//     if (userCredential.signatureImage) {
+//       signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
+//     }
+//   }
 
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
+//   // Only add signature if not already present in body
+//   let emailBody = email.body || "";
+//   if (signatureBlock && !emailBody.includes(signatureBlock)) {
+//     emailBody += `<br><br>${signatureBlock}`;
+//   }
+// const inReplyToHeader = email.inReplyTo || undefined;
+// const referencesHeader = email.references || undefined;
+//   // Prepare mail options
+//   const mailOptions = {
+//     from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
+//     to: email.recipient,
+//     cc: email.cc,
+//     bcc: email.bcc,
+//     subject: email.subject,
+//     // html: email.body,
+//     // text: email.body, // fallback
+//     html: emailBody,
+//     text: emailBody,
+//     attachments: email.attachments.map(att => ({
+//       filename: att.filename,
+//       path: att.filePath || att.path,
+//     })),
+//      inReplyTo: inReplyToHeader,
+//   references: referencesHeader,
+//   };
 
-    res.status(200).json({
-      message: "Signature data fetched successfully.",
-      signature: userCredential.signature,
-      signatureName: userCredential.signatureName,
-      signatureImage: userCredential.signatureImage,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to fetch signature data.",
-      error: error.message,
-    });
-  }
-};
-exports.getBlockedAddress = async (req, res) => {
-  const masterUserID = req.adminId;
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-    res.status(200).json({
-      message: "Blocked addresses fetched successfully.",
-      blockedEmail: userCredential.blockedEmail,
-    });
-  } catch (error) {
-    res.status(500).json({
-      message: "Failed to fetch blocked addresses.",
-      error: error.message,
-    });
-  }
-};
-exports.getSmartBcc = async (req, res) => {
-  const masterUserID = req.adminId;
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-    res.status(200).json({
-      message: "Smart BCC fetched successfully.",
-      smartBcc: userCredential.smartBcc,
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to fetch Smart BCC.", error: error.message });
-  }
-};
+//   // Send email
+//   const transporter = nodemailer.createTransport({
+//     service: "gmail",
+//     auth: {
+//       user: SENDER_EMAIL,
+//       pass: SENDER_PASSWORD,
+//     },
+//   });
 
-// GET /api/emails/autocomplete?search=abc&page=1&limit=10
-exports.getEmailAutocomplete = async (req, res) => {
-  const { search = "", page = 1, limit = 50 } = req.query;
-  const offset = (parseInt(page) - 1) * parseInt(limit);
+//   const info = await transporter.sendMail(mailOptions);
 
-  try {
-    const where = search ? { recipient: { [Op.like]: `%${search}%` } } : {};
+//   // Update email as sent
+//   await email.update({
+//     folder: "sent",
+//     messageId: info.messageId,
+//     // createdAt: new Date(),
+//     isDraft: false,
+//   });
 
-    // Find distinct emails for auto-complete
-    const { rows, count } = await Email.findAndCountAll({
-      attributes: [
-        [
-          Email.sequelize.fn("DISTINCT", Email.sequelize.col("recipient")),
-          "email",
-        ],
-      ],
-      where,
-      limit: parseInt(limit),
-      offset,
-      order: [["recipient", "ASC"]],
-    });
+//   console.log(`Email sent and updated: ${info.messageId}`);
+// }
 
-    // Map to just email strings
-    const emails = rows.map((row) => row.get("email"));
+async function startSyncEmailWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  const connection = await amqp.connect(amqpUrl);
+  const channel = await connection.createChannel();
+  await channel.assertQueue("SYNC_EMAIL_QUEUE", { durable: true });
 
-    res.status(200).json({
-      emails,
-      total: count,
-      page: parseInt(page),
-      limit: parseInt(limit),
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to fetch emails.", error: error.message });
-  }
-};
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
 
-exports.downloadAttachment = async (req, res) => {
-  const { emailID, filename } = req.params;
-  const masterUserID = req.adminId;
-  console.log(emailID, filename, masterUserID);
+  channel.consume(
+    "SYNC_EMAIL_QUEUE",
+    async (msg) => {
+      if (msg !== null) {
+        // Expect startUID and endUID in the message for batching
+        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
+          msg.content.toString()
+        );
 
-  try {
-    // Find the email and attachment metadata
-    const email = await Email.findOne({ where: { emailID} });
-    if (!email) return res.status(404).json({ message: "Email not found." });
+        console.log(
+          `[SyncEmailWorker] Processing batch for masterUserID: ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
+        );
 
-    const attachmentMeta = await Attachment.findOne({
-      where: { emailID, filename },
-    });
-    if (!attachmentMeta)
-      return res.status(404).json({ message: "Attachment not found." });
+        await limit(async () => {
+          try {
+            logMemoryUsage(
+              `Before syncEmails for masterUserID ${masterUserID}`
+            );
 
-    // Fetch user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    if (!userCredential)
-      return res.status(404).json({ message: "User credentials not found." });
+            // Pass startUID and endUID to fetchSyncEmails for batch processing
+            await fetchSyncEmails(
+              {
+                adminId: masterUserID,
+                body: { syncStartDate }, // syncStartDate goes in body
+                query: { batchSize: 10, startUID, endUID }, // startUID and endUID go in query
+              },
+              { status: () => ({ json: () => {} }) }
+            );
 
-    // Connect to IMAP and fetch the email
-    // const imapConfig = {
-    //   imap: {
-    //     user: userCredential.email,
-    //     password: userCredential.appPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 30000,
-    //     tlsOptions: { rejectUnauthorized: false },
-    //   },
-    // };
-    const provider = userCredential.provider || "gmail"; // default to gmail
+            logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
+            console.log(
+              `[SyncEmailWorker] Successfully processed batch for masterUserID: ${masterUserID}`
+            );
 
-    let imapConfig;
-    if (provider === "custom") {
-      if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({
-          message: "Custom IMAP settings are missing in user credentials.",
+            // Force garbage collection
+            if (global.gc) {
+              global.gc();
+            }
+
+            channel.ack(msg);
+          } catch (err) {
+            console.error(
+              `[SyncEmailWorker] Failed to sync emails for masterUserID ${masterUserID}:`,
+              err
+            );
+            channel.nack(msg, false, false);
+          }
         });
       }
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    } else {
-      const providerConfig = PROVIDER_CONFIG[provider];
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    }
+    },
+    { noAck: false }
+  );
 
-    const connection = await Imap.connect(imapConfig);
-    await connection.openBox(email.folder);
+  console.log("Sync email worker started and waiting for jobs...");
+}
 
-    // Search for the email by messageId
-    const searchCriteria = [["HEADER", "MESSAGE-ID", email.messageId]];
-    const fetchOptions = { bodies: "", struct: true };
-    const messages = await connection.search(searchCriteria, fetchOptions);
+async function startFetchInboxWorker() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  const connection = await amqp.connect(amqpUrl);
+  const channel = await connection.createChannel();
+  await channel.assertQueue("FETCH_INBOX_QUEUE", { durable: true });
 
-    if (!messages.length) {
-      connection.end();
-      return res.status(404).json({ message: "Email not found on server." });
-    }
+  // Set prefetch to 1 to ensure only one message is processed at a time
+  channel.prefetch(1);
 
-    // Parse the email and find the attachment
-    const rawBodyPart = messages[0].parts.find((part) => part.which === "");
-    const rawBody = rawBodyPart ? rawBodyPart.body : null;
-    const parsedEmail = await simpleParser(rawBody);
+  channel.consume(
+    "FETCH_INBOX_QUEUE",
+    async (msg) => {
+      if (msg !== null) {
+        // Force a small batch size for memory safety
+        let {
+          masterUserID,
+          email,
+          appPassword,
+          batchSize,
+          page,
+          days,
+          provider,
+          imapHost,
+          imapPort,
+          imapTLS,
+          smtpHost,
+          smtpPort,
+          smtpSecure,
+          startUID,
+          endUID,
+        } = JSON.parse(msg.content.toString());
 
-    const attachment = parsedEmail.attachments.find(
-      (att) => att.filename === filename
+        // Enforce maximum batch size to prevent memory issues
+        batchSize = Math.min(parseInt(batchSize) || 5, 5);
+
+        await limit(async () => {
+          try {
+            // Log memory usage before fetch
+            logMemoryUsage(
+              `Before fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`
+            );
+
+            // Add delay between batches to prevent overwhelming the system
+            if (page > 1) {
+              await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
+            }
+
+            // Call fetchInboxEmails logic directly, but mock req/res
+            await fetchInboxEmails(
+              {
+                adminId: masterUserID,
+                email,
+                appPassword,
+                body: {
+                  email,
+                  appPassword,
+                  provider,
+                  imapHost,
+                  imapPort,
+                  imapTLS,
+                  smtpHost,
+                  smtpPort,
+                  smtpSecure,
+                },
+                query: {
+                  batchSize,
+                  page,
+                  days,
+                  startUID,
+                  endUID,
+                },
+              },
+              {
+                status: (code) => ({
+                  json: (data) => {
+                    console.log(
+                      `Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`
+                    );
+                  },
+                }),
+              }
+            );
+
+            // Log memory usage after fetch
+            logMemoryUsage(
+              `After fetchInboxEmails batch for masterUserID ${masterUserID}, page ${page}`
+            );
+
+            // Force garbage collection after processing
+            if (global.gc) {
+              global.gc();
+              logMemoryUsage(
+                `After garbage collection for masterUserID ${masterUserID}, page ${page}`
+              );
+            }
+
+            // Additional memory cleanup
+            if (page % 10 === 0) {
+              // Every 10 batches
+              console.log(
+                `Completed ${page} batches, forcing additional cleanup...`
+              );
+              if (global.gc) {
+                global.gc();
+                global.gc(); // Double GC for thorough cleanup
+              }
+              // Small delay to let system recover
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+
+            channel.ack(msg);
+          } catch (err) {
+            console.error(
+              `Failed to fetch inbox emails for masterUserID ${masterUserID}, page ${page}:`,
+              err
+            );
+            channel.nack(msg, false, false);
+          }
+        });
+      }
+    },
+    { noAck: false }
+  );
+
+  // Add connection error handling
+  connection.on("error", (err) => {
+    console.error("AMQP connection error in fetchInboxWorker:", err);
+  });
+
+  connection.on("close", () => {
+    console.log(
+      "AMQP connection closed in fetchInboxWorker. Attempting to reconnect..."
     );
-    if (!attachment) {
-      connection.end();
-      return res
-        .status(404)
-        .json({ message: "Attachment not found in email." });
-    }
+    setTimeout(() => startFetchInboxWorker(), 5000);
+  });
 
-    // Send the attachment as a download
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${attachment.filename}"`
-    );
-    res.setHeader("Content-Type", attachment.contentType);
-    res.send(attachment.content);
+  console.log("Inbox fetch worker started and waiting for jobs...");
+}
 
-    connection.end();
-  } catch (error) {
-    console.error("Error downloading attachment:", error);
-    res.status(500).json({
-      message: "Failed to download attachment.",
-      error: error.message,
-    });
-  }
-};
-exports.markAsUnreadSingle = async (req, res) => {
-  const masterUserID = req.adminId;
-  const { emailID } = req.params;
+// In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
+// ...existing code...
 
-  if (!emailID) {
-    return res.status(400).json({ message: "emailID is required." });
-  }
-
-  try {
-    const [updatedCount] = await Email.update(
-      { isRead: false },
-      { where: { emailID, masterUserID } }
-    );
-
-    if (updatedCount === 0) {
-      return res
-        .status(404)
-        .json({ message: "Email not found or already unread." });
-    }
-
-    res.status(200).json({ message: "Email marked as unread." });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Failed to mark as unread.", error: error.message });
-  }
-};
+startFetchInboxWorker().catch(console.error);
+startSyncEmailWorker().catch(console.error);
+startEmailWorker().catch(console.error);
+startWorker().catch(console.error);
+startScheduledEmailWorker().catch(console.error);
