@@ -135,7 +135,7 @@ const CustomField = sequelize.define(
     },
     // Visibility fields for UI display
     showInAddView: {
-      type: DataTypes.BOOLEAN,  
+      type: DataTypes.BOOLEAN,
       defaultValue: false,
       comment: "Legacy field - whether to show in add/create forms",
     },
@@ -148,6 +148,11 @@ const CustomField = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
       comment: "Whether to show in list/table views",
+    },
+    check: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment: "Whether this field is checked/selected in column preferences",
     },
     // New visibility fields
     leadView: {

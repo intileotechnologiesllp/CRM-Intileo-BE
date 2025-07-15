@@ -152,7 +152,7 @@ exports.createLead = async (req, res) => {
     let personRecord = await Person.findOne({ where: { email } });
     if (!personRecord) {
       personRecord = await Person.create({
-        contactPerson: contactPerson,
+        contactPerson,
         email,
         phone,
         leadOrganizationId: orgRecord.leadOrganizationId,
@@ -531,15 +531,22 @@ exports.getLeads = async (req, res) => {
 
     //................................................................//filter
     if (filterId) {
+      console.log("Processing filter with filterId:", filterId);
+
       // Fetch the saved filter
       const filter = await LeadFilter.findByPk(filterId);
       if (!filter) {
         return res.status(404).json({ message: "Filter not found." });
       }
+
+      console.log("Found filter:", filter.filterName);
+
       const filterConfig =
         typeof filter.filterConfig === "string"
           ? JSON.parse(filter.filterConfig)
           : filter.filterConfig;
+
+      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
 
       const { all = [], any = [] } = filterConfig;
       const leadFields = Object.keys(Lead.rawAttributes);
@@ -551,22 +558,42 @@ exports.getLeads = async (req, res) => {
       let leadDetailsWhere = {};
       let personWhere = {};
       let organizationWhere = {};
+      let customFieldsConditions = { all: [], any: [] };
+
+      console.log("Available lead fields:", leadFields);
+      console.log("Available leadDetails fields:", leadDetailsFields);
+      console.log("Available person fields:", personFields);
+      console.log("Available organization fields:", organizationFields);
 
       // --- Your new filter logic for all ---
       if (all.length > 0) {
+        console.log("Processing 'all' conditions:", all);
+
         filterWhere[Op.and] = [];
         leadDetailsWhere[Op.and] = [];
         personWhere[Op.and] = [];
         organizationWhere[Op.and] = [];
         all.forEach((cond) => {
+          console.log("Processing condition:", cond);
+
           if (leadFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in Lead fields`);
             filterWhere[Op.and].push(buildCondition(cond));
           } else if (leadDetailsFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in LeadDetails fields`);
             leadDetailsWhere[Op.and].push(buildCondition(cond));
           } else if (personFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in Person fields`);
             personWhere[Op.and].push(buildCondition(cond));
           } else if (organizationFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in Organization fields`);
             organizationWhere[Op.and].push(buildCondition(cond));
+          } else {
+            console.log(
+              `Field '${cond.field}' NOT found in standard fields, treating as custom field`
+            );
+            // Handle custom fields
+            customFieldsConditions.all.push(cond);
           }
         });
         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
@@ -592,6 +619,9 @@ exports.getLeads = async (req, res) => {
             personWhere[Op.or].push(buildCondition(cond));
           } else if (organizationFields.includes(cond.field)) {
             organizationWhere[Op.or].push(buildCondition(cond));
+          } else {
+            // Handle custom fields
+            customFieldsConditions.any.push(cond);
           }
         });
         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
@@ -708,6 +738,93 @@ exports.getLeads = async (req, res) => {
         "→ Updated include with LeadDetails where:",
         JSON.stringify(leadDetailsWhere)
       );
+
+      // Handle custom field filtering
+      if (
+        customFieldsConditions.all.length > 0 ||
+        customFieldsConditions.any.length > 0
+      ) {
+        console.log(
+          "Processing custom field conditions:",
+          customFieldsConditions
+        );
+
+        // Debug: Show all custom fields in the database
+        const allCustomFields = await CustomField.findAll({
+          where: {
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "entityType",
+            "fieldSource",
+            "isActive",
+          ],
+        });
+
+        console.log(
+          "All custom fields in database:",
+          allCustomFields.map((f) => ({
+            fieldId: f.fieldId,
+            fieldName: f.fieldName,
+            entityType: f.entityType,
+            fieldSource: f.fieldSource,
+            isActive: f.isActive,
+          }))
+        );
+
+        const customFieldFilters = await buildCustomFieldFilters(
+          customFieldsConditions,
+          req.adminId
+        );
+
+        console.log("Built custom field filters:", customFieldFilters);
+
+        if (customFieldFilters.length > 0) {
+          // Apply custom field filtering by finding leads that match the custom field conditions
+          const matchingLeadIds = await getLeadIdsByCustomFieldFilters(
+            customFieldFilters,
+            req.adminId
+          );
+
+          console.log(
+            "Matching lead IDs from custom field filtering:",
+            matchingLeadIds
+          );
+
+          if (matchingLeadIds.length > 0) {
+            // If we already have other conditions, combine them
+            if (filterWhere[Op.and]) {
+              filterWhere[Op.and].push({
+                leadId: { [Op.in]: matchingLeadIds },
+              });
+            } else if (filterWhere[Op.or]) {
+              filterWhere[Op.and] = [
+                { [Op.or]: filterWhere[Op.or] },
+                { leadId: { [Op.in]: matchingLeadIds } },
+              ];
+              delete filterWhere[Op.or];
+            } else {
+              filterWhere.leadId = { [Op.in]: matchingLeadIds };
+            }
+          } else {
+            // No leads match the custom field conditions, so return empty result
+            console.log("No matching leads found, setting empty result");
+            filterWhere.leadId = { [Op.in]: [] };
+          }
+        } else {
+          console.log(
+            "No custom field filters found, possibly field not found"
+          );
+        }
+
+        whereClause = filterWhere;
+      }
     } else {
       // Standard search/filter logic
       if (isArchived !== undefined)
@@ -779,6 +896,7 @@ exports.getLeads = async (req, res) => {
     console.log("→ Query executed. Total records:", leads.count);
 
     // Get custom field values for all leads (including default/system fields and unified fields)
+    // Only include custom fields where check is true
     const leadIds = leads.rows.map((lead) => lead.leadId);
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
@@ -791,6 +909,7 @@ exports.getLeads = async (req, res) => {
           as: "CustomField",
           where: {
             isActive: true,
+            check: true, // Only include custom fields where check is true
             entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
             [Op.or]: [
               { masterUserID: req.adminId },
@@ -987,21 +1106,360 @@ exports.getLeads = async (req, res) => {
   }
 };
 
-// --- Helper functions (reuse from your prompt) ---
+// Helper function to build condition for regular fields
+function buildCondition(condition) {
+  const { field, operator, value } = condition;
 
-const operatorMap = {
-  is: "eq",
-  "is not": "ne",
-  "is empty": "is empty",
-  "is not empty": "is not empty",
-  "is exactly or earlier than": "lte",
-  "is earlier than": "lt",
-  "is exactly or later than": "gte",
-  "is later than": "gt",
-  // Add more mappings if needed
-};
+  // Handle date conversion if needed
+  let processedValue = value;
+  if (typeof value === "string" && value.includes("days ago")) {
+    processedValue = convertRelativeDate(value);
+  }
 
-function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+    between: Op.between,
+    notBetween: Op.notBetween,
+  };
+
+  let mappedOperator = operator;
+
+  // Map operator names to internal operators
+  const operatorMap = {
+    is: "eq",
+    "is not": "ne",
+    "is empty": "isEmpty",
+    "is not empty": "isNotEmpty",
+    contains: "like",
+    "does not contain": "notLike",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt",
+    equals: "eq",
+    "not equals": "ne",
+    "greater than": "gt",
+    "greater than or equal": "gte",
+    "less than": "lt",
+    "less than or equal": "lte",
+  };
+
+  if (operatorMap[mappedOperator]) {
+    mappedOperator = operatorMap[mappedOperator];
+  }
+
+  // Handle special cases
+  if (mappedOperator === "isEmpty") {
+    return { [field]: { [Op.is]: null } };
+  }
+
+  if (mappedOperator === "isNotEmpty") {
+    return { [field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  if (mappedOperator === "like") {
+    return { [field]: { [Op.like]: `%${processedValue}%` } };
+  }
+
+  if (mappedOperator === "notLike") {
+    return { [field]: { [Op.notLike]: `%${processedValue}%` } };
+  }
+
+  if (mappedOperator === "in" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.in]: processedValue } };
+  }
+
+  if (mappedOperator === "notIn" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.notIn]: processedValue } };
+  }
+
+  if (mappedOperator === "between" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.between]: processedValue } };
+  }
+
+  if (mappedOperator === "notBetween" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.notBetween]: processedValue } };
+  }
+
+  // Default condition
+  return { [field]: { [ops[mappedOperator] || Op.eq]: processedValue } };
+}
+
+// Helper functions for custom field filtering
+async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
+  const filters = [];
+
+  // Handle 'all' conditions (AND logic)
+  if (customFieldsConditions.all.length > 0) {
+    for (const cond of customFieldsConditions.all) {
+      console.log("Processing 'all' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          isActive: true,
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'all' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "all",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'all' condition:", cond.field);
+      }
+    }
+  }
+
+  // Handle 'any' conditions (OR logic) - any condition can be met
+  if (customFieldsConditions.any.length > 0) {
+    for (const cond of customFieldsConditions.any) {
+      console.log("Processing 'any' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          isActive: true,
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'any' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "any",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'any' condition:", cond.field);
+      }
+    }
+  }
+
+  return filters;
+}
+
+async function getLeadIdsByCustomFieldFilters(
+  customFieldFilters,
+  masterUserID
+) {
+  if (customFieldFilters.length === 0) return [];
+
+  const allFilters = customFieldFilters.filter((f) => f.logicType === "all");
+  const anyFilters = customFieldFilters.filter((f) => f.logicType === "any");
+
+  let leadIds = [];
+
+  // Handle 'all' filters (AND logic) - all conditions must be met
+  if (allFilters.length > 0) {
+    let allConditionLeadIds = null;
+
+    for (const filter of allFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      console.log(
+        "Searching for custom field values with condition:",
+        whereCondition
+      );
+      console.log("Filter fieldId:", filter.fieldId);
+      console.log("Filter condition:", filter.condition);
+
+      // Search for custom field values with the right entity type
+      // For lead filtering, we want to find all entity types that could be related to leads
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          entityType: "lead", // Start with just lead entity type for debugging
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      console.log(
+        "Found custom field values:",
+        customFieldValues.map((cfv) => ({
+          entityId: cfv.entityId,
+          entityType: cfv.entityType,
+          value: cfv.value,
+        }))
+      );
+
+      let currentLeadIds = [];
+
+      // If the entity type is 'lead', use entityId directly
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "lead") {
+          currentLeadIds.push(cfv.entityId);
+        }
+      }
+
+      // Remove duplicates
+      currentLeadIds = [...new Set(currentLeadIds)];
+      console.log("Current lead IDs for filter:", currentLeadIds);
+
+      if (allConditionLeadIds === null) {
+        allConditionLeadIds = currentLeadIds;
+      } else {
+        // Intersection - only keep leads that match all conditions
+        allConditionLeadIds = allConditionLeadIds.filter((id) =>
+          currentLeadIds.includes(id)
+        );
+      }
+    }
+
+    leadIds = allConditionLeadIds || [];
+  }
+
+  // Handle 'any' filters (OR logic) - any condition can be met
+  if (anyFilters.length > 0) {
+    let anyConditionLeadIds = [];
+
+    for (const filter of anyFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          entityType: "lead", // Start with just lead entity type for debugging
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      let currentLeadIds = [];
+
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "lead") {
+          currentLeadIds.push(cfv.entityId);
+        }
+      }
+
+      currentLeadIds = [...new Set(currentLeadIds)];
+      anyConditionLeadIds = [...anyConditionLeadIds, ...currentLeadIds];
+    }
+
+    // Remove duplicates
+    anyConditionLeadIds = [...new Set(anyConditionLeadIds)];
+
+    if (leadIds.length > 0) {
+      // If we have both 'all' and 'any' conditions, combine them with AND logic
+      leadIds = leadIds.filter((id) => anyConditionLeadIds.includes(id));
+    } else {
+      leadIds = anyConditionLeadIds;
+    }
+  }
+
+  console.log("Final lead IDs from custom field filtering:", leadIds);
+  return leadIds;
+}
+
+function buildCustomFieldCondition(condition, fieldId) {
   const ops = {
     eq: Op.eq,
     ne: Op.ne,
@@ -1019,82 +1477,46 @@ function buildCondition(cond) {
     isNotEmpty: Op.not,
   };
 
-  let operator = cond.operator;
+  let operator = condition.operator;
+
+  // Map operator names to internal operators
+  const operatorMap = {
+    is: "eq",
+    "is not": "ne",
+    "is empty": "isEmpty",
+    "is not empty": "isNotEmpty",
+    contains: "like",
+    "does not contain": "notLike",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt",
+  };
+
   if (operatorMap[operator]) {
     operator = operatorMap[operator];
   }
 
   // Handle "is empty" and "is not empty"
-  if (operator === "is empty") {
-    return { [cond.field]: { [Op.is]: null } };
+  if (operator === "isEmpty") {
+    return { value: { [Op.is]: null } };
   }
-  if (operator === "is not empty") {
-    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle date fields
-  const leadDateFields = Object.entries(Lead.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const personDateFields = Object.entries(Person.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const organizationDateFields = Object.entries(Organization.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const allDateFields = [
-    ...leadDateFields,
-    ...leadDetailsDateFields,
-    ...personDateFields,
-    ...organizationDateFields,
-  ];
-
-  if (allDateFields.includes(cond.field)) {
-    if (cond.useExactDate) {
-      const date = new Date(cond.value);
-      if (isNaN(date.getTime())) return {};
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: date,
-        },
-      };
-    }
-    // Otherwise, use relative date conversion
-    const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
-
-    if (
-      dateRange &&
-      isValidDate(dateRange.start) &&
-      isValidDate(dateRange.end)
-    ) {
-      return {
-        [cond.field]: {
-          [Op.between]: [dateRange.start, dateRange.end],
-        },
-      };
-    }
-    if (dateRange && isValidDate(dateRange.start)) {
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: dateRange.start,
-        },
-      };
-    }
-    return {};
+  if (operator === "isNotEmpty") {
+    return { value: { [Op.not]: null, [Op.ne]: "" } };
   }
 
-  // Default
+  // Handle "contains" and "does not contain" for text fields
+  if (operator === "like") {
+    return { value: { [Op.like]: `%${condition.value}%` } };
+  }
+  if (operator === "notLike") {
+    return { value: { [Op.notLike]: `%${condition.value}%` } };
+  }
+
+  // Default condition
   return {
-    [cond.field]: {
-      [ops[operator] || Op.eq]: cond.value,
+    value: {
+      [ops[operator] || Op.eq]: condition.value,
     },
   };
 }
@@ -1121,19 +1543,26 @@ exports.updateLead = async (req, res) => {
     const leadDetailsData = {};
     const personData = {};
     const organizationData = {};
+    const customFields = {};
 
     for (const key in updateObj) {
+      if (key === "customFields") {
+        // Handle nested customFields object (backward compatibility)
+        Object.assign(customFields, updateObj[key]);
+        continue;
+      }
+
       if (leadFields.includes(key)) {
         leadData[key] = updateObj[key];
-      }
-      if (personFields.includes(key)) {
+      } else if (personFields.includes(key)) {
         personData[key] = updateObj[key];
-      }
-      if (organizationFields.includes(key)) {
+      } else if (organizationFields.includes(key)) {
         organizationData[key] = updateObj[key];
-      }
-      if (leadDetailsFields.includes(key)) {
+      } else if (leadDetailsFields.includes(key)) {
         leadDetailsData[key] = updateObj[key];
+      } else {
+        // If the key doesn't match any model field, treat it as a custom field
+        customFields[key] = updateObj[key];
       }
     }
 
@@ -1141,6 +1570,7 @@ exports.updateLead = async (req, res) => {
     console.log("leadDetailsData:", leadDetailsData);
     console.log("personData:", personData);
     console.log("organizationData:", organizationData);
+    console.log("customFields:", customFields);
 
     // Update Lead
     const lead = await Lead.findByPk(leadId);
@@ -1289,6 +1719,110 @@ exports.updateLead = async (req, res) => {
       leadDetails = await LeadDetails.create(leadDetailsData);
       console.log("LeadDetails created:", leadDetails.toJSON());
     }
+
+    // Handle custom fields if provided
+    const savedCustomFields = {};
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        console.log("Processing custom fields for update:", customFields);
+
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          // Try to find the custom field by fieldName first, then by fieldId
+          let customField = null;
+
+          // First try to find by fieldName
+          customField = await CustomField.findOne({
+            where: {
+              fieldName: fieldKey,
+              entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+              isActive: true,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+              ],
+            },
+          });
+
+          // If not found by fieldName, try by fieldId
+          if (!customField) {
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: fieldKey,
+                entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+                isActive: true,
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                ],
+              },
+            });
+          }
+
+          if (customField) {
+            console.log(
+              `Found custom field: ${customField.fieldName} (ID: ${customField.fieldId})`
+            );
+
+            // Check if custom field value already exists
+            const existingValue = await CustomFieldValue.findOne({
+              where: {
+                fieldId: customField.fieldId,
+                entityId: leadId,
+                entityType: "lead",
+              },
+            });
+
+            if (existingValue) {
+              // Update existing value
+              if (value !== null && value !== undefined && value !== "") {
+                await existingValue.update({ value: value });
+                console.log(
+                  `Updated custom field value for ${customField.fieldName}: ${value}`
+                );
+                savedCustomFields[customField.fieldName] = {
+                  label: customField.fieldLabel,
+                  value: value,
+                  type: customField.fieldType,
+                  isImportant: customField.isImportant,
+                };
+              } else {
+                // Delete the value if it's empty
+                await existingValue.destroy();
+                console.log(
+                  `Deleted custom field value for ${customField.fieldName}`
+                );
+              }
+            } else {
+              // Create new value
+              if (value !== null && value !== undefined && value !== "") {
+                await CustomFieldValue.create({
+                  fieldId: customField.fieldId,
+                  entityId: leadId,
+                  entityType: "lead",
+                  value: value,
+                });
+                console.log(
+                  `Created custom field value for ${customField.fieldName}: ${value}`
+                );
+                savedCustomFields[customField.fieldName] = {
+                  label: customField.fieldLabel,
+                  value: value,
+                  type: customField.fieldType,
+                  isImportant: customField.isImportant,
+                };
+              }
+            }
+          } else {
+            console.log(`Custom field not found: ${fieldKey}`);
+          }
+        }
+      } catch (customFieldError) {
+        console.error("Error processing custom fields:", customFieldError);
+        // Don't fail the entire update if custom fields fail
+      }
+    }
     // // --- Send email if owner changed ---
     // if (ownerChanged && newOwner && newOwner.email) {
     //   // You should have a sendEmail utility function
@@ -1313,15 +1847,24 @@ exports.updateLead = async (req, res) => {
             ? orgRecord.leadOrganizationId
             : lead.leadOrganizationId,
           personId: personRecord ? personRecord.personId : lead.personId,
+          customFields: savedCustomFields,
         },
       } // Changes logged as JSON
     );
+
+    // Prepare response with updated lead and custom fields
+    const leadResponse = {
+      ...lead.toJSON(),
+      customFields: savedCustomFields,
+    };
+
     res.status(200).json({
       message: "Lead updated successfully",
-      lead,
+      lead: leadResponse,
       leadDetails,
       person: personRecord,
       organization: orgRecord,
+      customFieldsUpdated: Object.keys(savedCustomFields).length,
     });
   } catch (error) {
     console.error("Error updating lead:", error);
