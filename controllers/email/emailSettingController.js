@@ -38,12 +38,47 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 const cleanEmailBody = (body) => {
+  if (!body) return "";
+
+  // First, use html-to-text for comprehensive HTML-to-text conversion
+  const cleanText = htmlToText(body, {
+    wordwrap: false,
+    ignoreHref: true,
+    ignoreImage: true,
+    uppercaseHeadings: false,
+    preserveNewlines: false,
+    selectors: [
+      // Remove VML (Vector Markup Language) content
+      { selector: 'v\\:*', format: 'skip' },
+      { selector: 'o\\:*', format: 'skip' },
+      // Remove style tags and their content
+      { selector: 'style', format: 'skip' },
+      // Remove script tags and their content
+      { selector: 'script', format: 'skip' },
+      // Remove tracking pixels and small images
+      { selector: 'img[width="1"]', format: 'skip' },
+      { selector: 'img[height="1"]', format: 'skip' },
+      // Keep important content as text
+      { selector: 'a', options: { ignoreHref: true } },
+      { selector: 'div', format: 'block' },
+      { selector: 'p', format: 'block' },
+      { selector: 'br', format: 'lineBreak' },
+    ],
+  });
+
   // Remove quoted replies (e.g., lines starting with ">")
-  return body
+  const withoutQuotes = cleanText
     .split("\n")
     .filter((line) => !line.startsWith(">"))
-    .join("\n")
+    .join("\n");
+
+  // Additional cleanup for any remaining HTML entities or special characters
+  const finalClean = withoutQuotes
+    .replace(/&[a-zA-Z0-9#]+;/g, " ") // HTML entities
+    .replace(/\s+/g, " ") // Multiple spaces
     .trim();
+
+  return finalClean;
 };
 // Helper function to format date to DD-MMM-YYYY
 const formatDateForIMAP = (date) => {
@@ -1300,9 +1335,11 @@ exports.downloadAttachment = async (req, res) => {
         console.debug(
           `[downloadAttachment] Attachment not found in email (after messageId search): ${filename}`
         );
-        return res.status(404).json({
-          message: "Attachment not found in email (after messageId search).",
-        });
+        return res
+          .status(404)
+          .json({
+            message: "Attachment not found in email (after messageId search).",
+          });
       }
     }
 
