@@ -333,33 +333,80 @@ exports.createDeal = async (req, res) => {
     }
 
     // Handle custom fields
+    const savedCustomFields = {};
+    console.log("=== CUSTOM FIELDS DEBUG ===");
+    console.log("customFields received:", customFields);
+    console.log("customFields type:", typeof customFields);
+    console.log(
+      "customFields keys:",
+      customFields ? Object.keys(customFields) : "No keys"
+    );
+    console.log("req.adminId:", req.adminId);
+    console.log("deal.dealId:", deal ? deal.dealId : "Deal not created yet");
+
+    // Check if CustomField and CustomFieldValue models are loaded
+    console.log("CustomField model available:", typeof CustomField);
+    console.log("CustomFieldValue model available:", typeof CustomFieldValue);
+
     if (customFields && Object.keys(customFields).length > 0) {
       try {
+        console.log(
+          "Processing",
+          Object.keys(customFields).length,
+          "custom fields"
+        );
+
         for (const [fieldKey, value] of Object.entries(customFields)) {
+          console.log(`\n--- Processing field: ${fieldKey} = ${value} ---`);
           let customField;
 
           // Check if it's a fieldId (numeric) or fieldName (string)
           if (isNaN(fieldKey)) {
             // It's a fieldName - search by fieldName
+            console.log("Searching by fieldName:", fieldKey);
             customField = await CustomField.findOne({
               where: {
                 fieldName: fieldKey,
-                entityType: "deal",
-                masterUserID: req.adminId,
+                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
                 isActive: true,
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                ],
               },
             });
           } else {
             // It's a fieldId - search by fieldId
+            console.log("Searching by fieldId:", parseInt(fieldKey));
             customField = await CustomField.findOne({
               where: {
                 fieldId: parseInt(fieldKey),
-                entityType: "deal",
-                masterUserID: req.adminId,
+                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
                 isActive: true,
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                ],
               },
             });
           }
+
+          console.log(
+            "CustomField found:",
+            customField
+              ? {
+                  fieldId: customField.fieldId,
+                  fieldName: customField.fieldName,
+                  fieldType: customField.fieldType,
+                  entityType: customField.entityType,
+                  isActive: customField.isActive,
+                  masterUserID: customField.masterUserID,
+                  fieldSource: customField.fieldSource,
+                }
+              : "NOT FOUND"
+          );
 
           if (
             customField &&
@@ -394,6 +441,17 @@ exports.createDeal = async (req, res) => {
               }
             }
 
+            console.log("Creating CustomFieldValue:", {
+              fieldId: customField.fieldId,
+              entityId: deal.dealId,
+              entityType: "deal",
+              value:
+                typeof processedValue === "object"
+                  ? JSON.stringify(processedValue)
+                  : String(processedValue),
+              masterUserID: req.adminId,
+            });
+
             await CustomFieldValue.create({
               fieldId: customField.fieldId,
               entityId: deal.dealId,
@@ -404,17 +462,35 @@ exports.createDeal = async (req, res) => {
                   : String(processedValue),
               masterUserID: req.adminId,
             });
+
+            // Store the saved custom field for response using fieldName as key
+            savedCustomFields[customField.fieldName] = {
+              fieldName: customField.fieldName,
+              fieldType: customField.fieldType,
+              value: processedValue,
+            };
+
+            console.log(
+              "✅ Custom field saved successfully:",
+              customField.fieldName
+            );
+          } else if (!customField) {
+            console.warn(`❌ Custom field not found for key: ${fieldKey}`);
+          } else {
+            console.warn(`❌ Invalid value for field ${fieldKey}:`, value);
           }
         }
         console.log(
-          `Saved ${
-            Object.keys(customFields).length
+          `🎉 Saved ${
+            Object.keys(savedCustomFields).length
           } custom field values for deal ${deal.dealId}`
         );
       } catch (customFieldError) {
-        console.error("Error saving custom fields:", customFieldError);
+        console.error("❌ Error saving custom fields:", customFieldError);
         // Don't fail the deal creation, just log the error
       }
+    } else {
+      console.log("❌ No custom fields provided or empty customFields object");
     }
 
     await historyLogger(
@@ -427,7 +503,17 @@ exports.createDeal = async (req, res) => {
       null
     );
 
-    res.status(201).json({ message: "deal created successfully", deal });
+    // Prepare response with both default and custom fields
+    const dealResponse = {
+      ...deal.toJSON(),
+      customFields: savedCustomFields,
+    };
+
+    res.status(201).json({
+      message: "deal created successfully",
+      deal: dealResponse,
+      customFieldsSaved: Object.keys(savedCustomFields).length,
+    });
   } catch (error) {
     console.log("Error creating deal:", error);
 
@@ -436,250 +522,883 @@ exports.createDeal = async (req, res) => {
 };
 
 exports.getDeals = async (req, res) => {
+  const {
+    page = 1,
+    limit = 20,
+    search,
+    sortBy = "createdAt",
+    order = "DESC",
+    pipeline,
+    pipelineStage,
+    ownerId,
+    masterUserID,
+    isArchived,
+    filterId,
+  } = req.query;
+
+  const offset = (page - 1) * limit;
+
   try {
-    const {
-      page = 1,
-      limit = 50,
-      search = "",
-      pipeline,
-      pipelineStage,
-      ownerId,
-      isArchived,
-      masterUserID,
-    } = req.query;
+    // Build the base where clause
+    let where = {};
 
-    const where = {};
-
-    // Search by title, contactPerson, or organization
-    if (search) {
-      where[Op.or] = [
-        { title: { [Op.like]: `%${search}%` } },
-        { contactPerson: { [Op.like]: `%${search}%` } },
-        { organization: { [Op.like]: `%${search}%` } },
-      ];
-    }
-
-    // Filter by pipeline
-    if (pipeline) {
-      where.pipeline = pipeline;
-    }
-
-    // Filter by pipelineStage
-    if (pipelineStage) {
-      where.pipelineStage = pipelineStage;
-    }
-
-    // Filter by ownerId
-    if (ownerId) {
-      where.ownerId = ownerId;
-    }
-
-    // Filter by masterUserID if provided
-    if (masterUserID) {
-      where.masterUserID = masterUserID;
-    }
-
-    // Add isArchived filter if provided
-    if (typeof isArchived !== "undefined") {
-      where.isArchived = isArchived === "true";
-    }
-    // --- Add this block to get checked columns ---
+    // --- Handle column preferences ---
     const pref = await DealColumnPreference.findOne();
-
     let attributes = [];
     let dealDetailsAttributes = [];
-    if (pref) {
+
+    if (pref && pref.columns) {
       const columns =
         typeof pref.columns === "string"
           ? JSON.parse(pref.columns)
           : pref.columns;
+
       // Get all Deal and DealDetails fields
       const dealFields = Object.keys(Deal.rawAttributes);
       const dealDetailsFields = DealDetails
         ? Object.keys(DealDetails.rawAttributes)
         : [];
-      // Split checked columns by table
-      columns
-        .filter((col) => col.check)
-        .forEach((col) => {
-          if (dealFields.includes(col.key)) attributes.push(col.key);
-          else if (dealDetailsFields.includes(col.key))
-            dealDetailsAttributes.push(col.key);
-        });
+
+      // Filter checked columns by table
+      const checkedColumns = columns.filter((col) => col.check);
+
+      dealFields.forEach((field) => {
+        const col = checkedColumns.find((c) => c.key === field);
+        if (col) attributes.push(field);
+      });
+
+      dealDetailsFields.forEach((field) => {
+        const col = checkedColumns.find((c) => c.key === field);
+        if (col) dealDetailsAttributes.push(field);
+      });
+
+      // Always include dealId for relationships
+      if (!attributes.includes("dealId")) {
+        attributes.unshift("dealId");
+      }
+
       if (attributes.length === 0) attributes = undefined;
       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
     }
 
-    // --- DYNAMIC FILTERS START HERE ---
-    if (req.query.filterId) {
-      const filter = await LeadFilter.findByPk(req.query.filterId);
-      if (filter) {
-        const filterConfig =
-          typeof filter.filterConfig === "string"
-            ? JSON.parse(filter.filterConfig)
-            : filter.filterConfig;
+    // --- Handle dynamic filtering ---
+    let include = [];
+    let customFieldsConditions = { all: [], any: [] };
 
-        const { all = [], any = [] } = filterConfig;
-        const dealFields = Object.keys(Deal.rawAttributes);
-        const dealDetailsFields = DealDetails
-          ? Object.keys(DealDetails.rawAttributes)
-          : [];
+    if (filterId) {
+      console.log("Processing filter with filterId:", filterId);
 
-        let filterWhere = {};
-        let dealDetailsWhere = {};
+      // Fetch the saved filter
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
 
-        if (all.length > 0) {
-          filterWhere[Op.and] = [];
-          dealDetailsWhere[Op.and] = [];
-          all.forEach((cond) => {
-            if (dealFields.includes(cond.field)) {
-              filterWhere[Op.and].push(buildCondition(cond));
-            } else if (dealDetailsFields.includes(cond.field)) {
-              dealDetailsWhere[Op.and].push(buildCondition(cond));
-            }
-          });
-          if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-          if (dealDetailsWhere[Op.and].length === 0)
-            delete dealDetailsWhere[Op.and];
+      console.log("Found filter:", filter.filterName);
+
+      const filterConfig =
+        typeof filter.filterConfig === "string"
+          ? JSON.parse(filter.filterConfig)
+          : filter.filterConfig;
+
+      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
+
+      const { all = [], any = [] } = filterConfig;
+      const dealFields = Object.keys(Deal.rawAttributes);
+      const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
+
+      let filterWhere = {};
+      let dealDetailsWhere = {};
+
+      console.log("Available deal fields:", dealFields);
+      console.log("Available dealDetails fields:", dealDetailsFields);
+
+      // Process 'all' conditions (AND logic)
+      if (all.length > 0) {
+        console.log("Processing 'all' conditions:", all);
+
+        filterWhere[Op.and] = [];
+        dealDetailsWhere[Op.and] = [];
+
+        all.forEach((cond) => {
+          console.log("Processing condition:", cond);
+
+          if (dealFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in Deal fields`);
+            filterWhere[Op.and].push(buildCondition(cond));
+          } else if (dealDetailsFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in DealDetails fields`);
+            dealDetailsWhere[Op.and].push(buildCondition(cond));
+          } else {
+            console.log(
+              `Field '${cond.field}' NOT found in standard fields, treating as custom field`
+            );
+            // Handle custom fields
+            customFieldsConditions.all.push(cond);
+          }
+        });
+
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+        if (dealDetailsWhere[Op.and].length === 0)
+          delete dealDetailsWhere[Op.and];
+      }
+
+      // Process 'any' conditions (OR logic)
+      if (any.length > 0) {
+        console.log("Processing 'any' conditions:", any);
+
+        filterWhere[Op.or] = [];
+        dealDetailsWhere[Op.or] = [];
+
+        any.forEach((cond) => {
+          if (dealFields.includes(cond.field)) {
+            filterWhere[Op.or].push(buildCondition(cond));
+          } else if (dealDetailsFields.includes(cond.field)) {
+            dealDetailsWhere[Op.or].push(buildCondition(cond));
+          } else {
+            // Handle custom fields
+            customFieldsConditions.any.push(cond);
+          }
+        });
+
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+        if (dealDetailsWhere[Op.or].length === 0)
+          delete dealDetailsWhere[Op.or];
+      }
+
+      // Apply masterUserID filtering logic for filters
+      if (req.role === "admin") {
+        // Admin can filter by specific masterUserID or see all deals
+        if (masterUserID && masterUserID !== "all") {
+          if (filterWhere[Op.or]) {
+            // If there's already an Op.or condition from filters, combine properly
+            filterWhere[Op.and] = [
+              { [Op.or]: filterWhere[Op.or] },
+              {
+                [Op.or]: [
+                  { masterUserID: masterUserID },
+                  { ownerId: masterUserID },
+                ],
+              },
+            ];
+            delete filterWhere[Op.or];
+          } else {
+            filterWhere[Op.or] = [
+              { masterUserID: masterUserID },
+              { ownerId: masterUserID },
+            ];
+          }
         }
+      } else {
+        // Non-admin users: filter by their own deals or specific user if provided
+        const userId =
+          masterUserID && masterUserID !== "all" ? masterUserID : req.adminId;
 
-        if (any.length > 0) {
-          filterWhere[Op.or] = [];
-          dealDetailsWhere[Op.or] = [];
-          any.forEach((cond) => {
-            if (dealFields.includes(cond.field)) {
-              filterWhere[Op.or].push(buildCondition(cond));
-            } else if (dealDetailsFields.includes(cond.field)) {
-              dealDetailsWhere[Op.or].push(buildCondition(cond));
-            }
-          });
-          if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-          if (dealDetailsWhere[Op.or].length === 0)
-            delete dealDetailsWhere[Op.or];
-        }
-
-        // Merge with your existing where
-        Object.assign(where, filterWhere);
-
-        // Add DealDetails where to include
-        if (dealDetailsWhere && Object.keys(dealDetailsWhere).length > 0) {
-          // If you already have a DealDetails include, add where to it
-          let detailsInclude = {
-            model: DealDetails,
-            as: "details",
-            attributes: dealDetailsAttributes,
-            where: dealDetailsWhere,
-          };
-          include = [detailsInclude];
-        } else {
-          include = [
-            {
-              model: DealDetails,
-              as: "details",
-              attributes: dealDetailsAttributes,
-            },
+        if (filterWhere[Op.or]) {
+          // If there's already an Op.or condition from filters, combine properly
+          filterWhere[Op.and] = [
+            { [Op.or]: filterWhere[Op.or] },
+            { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
           ];
+          delete filterWhere[Op.or];
+        } else {
+          filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
         }
       }
+
+      // Add DealDetails include with filtering
+      if (Object.keys(dealDetailsWhere).length > 0) {
+        include.push({
+          model: DealDetails,
+          as: "details",
+          where: dealDetailsWhere,
+          required: true,
+          attributes: dealDetailsAttributes,
+        });
+      } else if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
+        include.push({
+          model: DealDetails,
+          as: "details",
+          required: false,
+          attributes: dealDetailsAttributes,
+        });
+      }
+
+      // Handle custom field filtering
+      if (
+        customFieldsConditions.all.length > 0 ||
+        customFieldsConditions.any.length > 0
+      ) {
+        console.log(
+          "Processing custom field conditions:",
+          customFieldsConditions
+        );
+
+        // Debug: Show all custom fields in the database
+        const allCustomFields = await CustomField.findAll({
+          where: {
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "entityType",
+            "fieldSource",
+            "isActive",
+            "masterUserID",
+          ],
+        });
+
+        console.log(
+          "All custom fields in database:",
+          allCustomFields.map((f) => ({
+            fieldId: f.fieldId,
+            fieldName: f.fieldName,
+            entityType: f.entityType,
+            fieldSource: f.fieldSource,
+            isActive: f.isActive,
+            masterUserID: f.masterUserID,
+          }))
+        );
+
+        const customFieldFilters = await buildCustomFieldFilters(
+          customFieldsConditions,
+          req.adminId
+        );
+        console.log("Built custom field filters:", customFieldFilters);
+
+        if (customFieldFilters.length > 0) {
+          // Apply custom field filtering by finding deals that match the custom field conditions
+          const matchingDealIds = await getDealIdsByCustomFieldFilters(
+            customFieldFilters,
+            req.adminId
+          );
+
+          console.log(
+            "Matching deal IDs from custom field filtering:",
+            matchingDealIds
+          );
+
+          if (matchingDealIds.length > 0) {
+            // If we already have other conditions, combine them
+            if (filterWhere[Op.and]) {
+              filterWhere[Op.and].push({
+                dealId: { [Op.in]: matchingDealIds },
+              });
+            } else if (filterWhere[Op.or]) {
+              filterWhere[Op.and] = [
+                { [Op.or]: filterWhere[Op.or] },
+                { dealId: { [Op.in]: matchingDealIds } },
+              ];
+              delete filterWhere[Op.or];
+            } else {
+              filterWhere.dealId = { [Op.in]: matchingDealIds };
+            }
+          } else {
+            // No deals match the custom field conditions, so return empty result
+            console.log(
+              "No matching deals found for custom field filters, setting empty result"
+            );
+            filterWhere.dealId = { [Op.in]: [] };
+          }
+        } else {
+          // Custom field conditions exist but no valid filters were built (field not found)
+          console.log(
+            "Custom field conditions exist but no valid filters found, setting empty result"
+          );
+          filterWhere.dealId = { [Op.in]: [] };
+        }
+      }
+
+      where = filterWhere;
     } else {
-      // If no filterId, use your default include logic
-      include = [
-        {
+      // --- Standard filtering without filterId ---
+      // Handle masterUserID filtering based on role
+      if (req.role !== "admin") {
+        where[Op.or] = [
+          { masterUserID: req.adminId },
+          { ownerId: req.adminId },
+        ];
+      } else if (masterUserID && masterUserID !== "all") {
+        where[Op.or] = [
+          { masterUserID: masterUserID },
+          { ownerId: masterUserID },
+        ];
+      }
+
+      // Basic search functionality
+      if (search) {
+        where[Op.or] = [
+          { title: { [Op.like]: `%${search}%` } },
+          { contactPerson: { [Op.like]: `%${search}%` } },
+          { organization: { [Op.like]: `%${search}%` } },
+        ];
+      }
+
+      // Filter by pipeline
+      if (pipeline) {
+        where.pipeline = pipeline;
+      }
+
+      // Filter by pipelineStage
+      if (pipelineStage) {
+        where.pipelineStage = pipelineStage;
+      }
+
+      // Filter by ownerId
+      if (ownerId) {
+        where.ownerId = ownerId;
+      }
+
+      // Add isArchived filter if provided
+      if (typeof isArchived !== "undefined") {
+        where.isArchived = isArchived === "true";
+      }
+
+      // Add default DealDetails include if not added by filtering
+      if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
+        include.push({
           model: DealDetails,
           as: "details",
           attributes: dealDetailsAttributes,
-        },
-      ];
+          required: false,
+        });
+      }
     }
-    // --- DYNAMIC FILTERS END HERE ---
 
-    // const offset = (parseInt(page) - 1) * parseInt(limit);
-    // Pagination
-    const offset =
-      (parseInt(req.query.page || 1) - 1) * parseInt(req.query.limit || 10);
-    // const limit = parseInt(req.query.limit || 10);
-    // Always include dealId in attributes
-    if (attributes && !attributes.includes("dealId")) {
-      attributes.unshift("dealId");
-    }
-    if (req.role !== "admin") {
-      where[Op.or] = [{ masterUserID: req.adminId }, { ownerId: req.adminId }];
-    }
+    console.log("→ Final where clause:", JSON.stringify(where, null, 2));
+    console.log("→ Final include:", JSON.stringify(include, null, 2));
 
     const { rows: deals, count: total } = await Deal.findAndCountAll({
       where,
       limit: parseInt(limit),
       offset,
-      order: [["createdAt", "DESC"]],
-      attributes, // <-- only checked columns will be returned
-      include: [
-        {
-          model: DealDetails,
-          as: "details", // Make sure your association uses this alias
-          attributes: dealDetailsAttributes,
-        },
-      ],
+      order: [[sortBy, order.toUpperCase()]],
+      attributes,
+      include,
     });
+
+    console.log("→ Query executed. Total records:", total);
 
     // Fetch custom field values for all deals
     const dealIds = deals.map((deal) => deal.dealId);
+
+    console.log("→ Fetching custom fields for dealIds:", dealIds);
+    console.log("→ Current user adminId:", req.adminId);
+
+    // First, let's check if there are any custom field values for these deals
+    const allCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityType: "deal",
+        entityId: dealIds,
+      },
+      attributes: [
+        "fieldId",
+        "entityId",
+        "entityType",
+        "value",
+        "masterUserID",
+      ],
+    });
+
+    console.log(
+      "→ All custom field values for these deals:",
+      allCustomFieldValues.length
+    );
+    allCustomFieldValues.forEach((value) => {
+      console.log(
+        `  - Deal ${value.entityId}: Field ${value.fieldId} = ${value.value} (MasterUserID: ${value.masterUserID})`
+      );
+    });
+
+    // Now check custom fields that match our criteria and have dealCheck = true
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        isActive: true,
+        entityType: { [Op.in]: ["deal", "both", "lead"] },
+        dealCheck: true, // Only include custom fields where dealCheck is true
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { fieldSource: "default" },
+          { fieldSource: "system" },
+        ],
+      },
+      attributes: [
+        "fieldId",
+        "fieldName",
+        "entityType",
+        "fieldSource",
+        "masterUserID",
+        "isActive",
+        "dealCheck",
+      ],
+    });
+
+    console.log(
+      "→ Available custom fields with dealCheck=true:",
+      allCustomFields.length
+    );
+    allCustomFields.forEach((field) => {
+      console.log(
+        `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, dealCheck: ${field.dealCheck})`
+      );
+    });
+
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
         entityType: "deal",
         entityId: dealIds,
-        masterUserID: req.adminId,
       },
       include: [
         {
           model: CustomField,
           as: "CustomField",
-          attributes: ["fieldId", "fieldName", "fieldLabel", "fieldType"],
+          where: {
+            isActive: true,
+            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+            dealCheck: true, // Only include custom fields where dealCheck is true
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          required: true,
         },
       ],
     });
 
-    // Group custom field values by deal
+    console.log("→ Found custom field values:", customFieldValues.length);
+
+    console.log("→ Found custom field values:", customFieldValues.length);
+
+    // Group custom field values by dealId
     const customFieldsByDeal = {};
     customFieldValues.forEach((value) => {
       if (!customFieldsByDeal[value.entityId]) {
         customFieldsByDeal[value.entityId] = {};
       }
       customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
-        fieldId: value.fieldId,
-        fieldLabel: value.CustomField.fieldLabel,
-        fieldType: value.CustomField.fieldType,
+        label: value.CustomField.fieldLabel,
         value: value.value,
+        type: value.CustomField.fieldType,
+        isImportant: value.CustomField.isImportant,
       };
+    });
+
+    console.log(
+      "→ Grouped custom fields by deal:",
+      Object.keys(customFieldsByDeal).length,
+      "deals have custom fields"
+    );
+
+    // Debug each deal's custom fields
+    Object.keys(customFieldsByDeal).forEach((dealId) => {
+      console.log(
+        `  - Deal ${dealId} has custom fields:`,
+        Object.keys(customFieldsByDeal[dealId])
+      );
     });
 
     // Attach custom fields to each deal
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
-      dealObj.customFields = customFieldsByDeal[deal.dealId] || {};
+
+      // Flatten dealDetails into the main deal object if present
+      if (dealObj.details) {
+        Object.assign(dealObj, dealObj.details);
+        delete dealObj.details;
+      }
+
+      // Add custom fields
+      dealObj.customFields = customFieldsByDeal[dealObj.dealId] || {};
+
       return dealObj;
     });
 
     res.status(200).json({
-      total,
+      message: "Deals fetched successfully",
+      totalRecords: total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
       deals: dealsWithCustomFields,
+      role: req.role,
     });
   } catch (error) {
-    console.log(error);
-    await logAuditTrail(
-      getProgramId("DEALS"),
-      "DEAL_FETCH",
-      req.role,
-      `Failed to fetch deals: ${error.message}`,
-      req.adminId
-    );
+    console.error("Error fetching deals:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// --- Helper functions (reuse from your prompt) ---
+// Helper functions for custom field filtering
+async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
+  const filters = [];
 
+  // Handle 'all' conditions (AND logic)
+  if (customFieldsConditions.all.length > 0) {
+    for (const cond of customFieldsConditions.all) {
+      console.log("Processing 'all' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+          isActive: true,
+          dealCheck: true, // Only include custom fields where dealCheck is true
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+            isActive: true,
+            dealCheck: true, // Only include custom fields where dealCheck is true
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'all' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "all",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'all' condition:", cond.field);
+      }
+    }
+  }
+
+  // Handle 'any' conditions (OR logic) - any condition can be met
+  if (customFieldsConditions.any.length > 0) {
+    for (const cond of customFieldsConditions.any) {
+      console.log("Processing 'any' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+          isActive: true,
+          dealCheck: true, // Only include custom fields where dealCheck is true
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+            isActive: true,
+            dealCheck: true, // Only include custom fields where dealCheck is true
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'any' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "any",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'any' condition:", cond.field);
+      }
+    }
+  }
+
+  return filters;
+}
+
+async function getDealIdsByCustomFieldFilters(
+  customFieldFilters,
+  masterUserID
+) {
+  if (customFieldFilters.length === 0) return [];
+
+  const allFilters = customFieldFilters.filter((f) => f.logicType === "all");
+  const anyFilters = customFieldFilters.filter((f) => f.logicType === "any");
+
+  let dealIds = [];
+
+  // Handle 'all' filters (AND logic) - all conditions must be met
+  if (allFilters.length > 0) {
+    let allConditionDealIds = null;
+
+    for (const filter of allFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      console.log(
+        "Searching for custom field values with condition:",
+        whereCondition
+      );
+      console.log("Filter fieldId:", filter.fieldId);
+      console.log("Filter condition:", filter.condition);
+
+      // Search for custom field values - handle different entity types
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          // Look for values in both deal and lead entity types since some fields might be unified
+          entityType: { [Op.in]: ["deal", "lead"] },
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      console.log("Found custom field values:", customFieldValues.length);
+      customFieldValues.forEach((cfv) => {
+        console.log(
+          `  - EntityType: ${cfv.entityType}, EntityId: ${cfv.entityId}, Value: ${cfv.value}`
+        );
+      });
+
+      let currentDealIds = [];
+
+      // Process each custom field value
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "deal") {
+          // Direct deal association
+          currentDealIds.push(cfv.entityId);
+        } else if (cfv.entityType === "lead") {
+          // Lead association - need to find corresponding deal
+          // Since leads can be converted to deals, we need to find deals that have this leadId
+          try {
+            const dealsFromLead = await Deal.findAll({
+              where: { leadId: cfv.entityId },
+              attributes: ["dealId"],
+            });
+
+            dealsFromLead.forEach((deal) => {
+              currentDealIds.push(deal.dealId);
+            });
+
+            console.log(
+              `  - Found ${dealsFromLead.length} deals from lead ${cfv.entityId}`
+            );
+          } catch (error) {
+            console.error("Error finding deals from lead:", error);
+          }
+        }
+      }
+
+      // Remove duplicates
+      currentDealIds = [...new Set(currentDealIds)];
+      console.log("Current deal IDs for filter:", currentDealIds);
+
+      if (allConditionDealIds === null) {
+        allConditionDealIds = currentDealIds;
+      } else {
+        // Intersection - only keep deals that match all conditions
+        allConditionDealIds = allConditionDealIds.filter((id) =>
+          currentDealIds.includes(id)
+        );
+      }
+    }
+
+    dealIds = allConditionDealIds || [];
+  }
+
+  // Handle 'any' filters (OR logic) - any condition can be met
+  if (anyFilters.length > 0) {
+    let anyConditionDealIds = [];
+
+    for (const filter of anyFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          entityType: { [Op.in]: ["deal", "lead"] }, // Look for values in both deal and lead entity types
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      let currentDealIds = [];
+
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "deal") {
+          currentDealIds.push(cfv.entityId);
+        } else if (cfv.entityType === "lead") {
+          // Lead association - need to find corresponding deal
+          try {
+            const dealsFromLead = await Deal.findAll({
+              where: { leadId: cfv.entityId },
+              attributes: ["dealId"],
+            });
+
+            dealsFromLead.forEach((deal) => {
+              currentDealIds.push(deal.dealId);
+            });
+          } catch (error) {
+            console.error("Error finding deals from lead:", error);
+          }
+        }
+      }
+
+      currentDealIds = [...new Set(currentDealIds)];
+      anyConditionDealIds = [...anyConditionDealIds, ...currentDealIds];
+    }
+
+    // Remove duplicates
+    anyConditionDealIds = [...new Set(anyConditionDealIds)];
+
+    if (dealIds.length > 0) {
+      // If we have both 'all' and 'any' conditions, combine them with AND logic
+      dealIds = dealIds.filter((id) => anyConditionDealIds.includes(id));
+    } else {
+      dealIds = anyConditionDealIds;
+    }
+  }
+
+  console.log("Final deal IDs from custom field filtering:", dealIds);
+  return dealIds;
+}
+
+function buildCustomFieldCondition(condition, fieldId) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = condition.operator;
+
+  // Map operator names to internal operators
+  const operatorMap = {
+    is: "eq",
+    "is not": "ne",
+    "is empty": "isEmpty",
+    "is not empty": "isNotEmpty",
+    contains: "like",
+    "does not contain": "notLike",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt",
+  };
+
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "isEmpty") {
+    return { value: { [Op.is]: null } };
+  }
+  if (operator === "isNotEmpty") {
+    return { value: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle "contains" and "does not contain" for text fields
+  if (operator === "like") {
+    return { value: { [Op.like]: `%${condition.value}%` } };
+  }
+  if (operator === "notLike") {
+    return { value: { [Op.notLike]: `%${condition.value}%` } };
+  }
+
+  // Default condition
+  return {
+    value: {
+      [ops[operator] || Op.eq]: condition.value,
+    },
+  };
+}
+
+// Operator label to backend key mapping
 const operatorMap = {
   is: "eq",
   "is not": "ne",
@@ -692,6 +1411,7 @@ const operatorMap = {
   // Add more mappings if needed
 };
 
+// Helper to build a single condition
 function buildCondition(cond) {
   const ops = {
     eq: Op.eq,
@@ -724,15 +1444,15 @@ function buildCondition(cond) {
   }
 
   // Handle date fields
-  const leadDateFields = Object.entries(Deal.rawAttributes)
+  const dealDateFields = Object.entries(Deal.rawAttributes)
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
-  const DealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
+  const dealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
-  const allDateFields = [...leadDateFields, ...DealDetailsDateFields];
+  const allDateFields = [...dealDateFields, ...dealDetailsDateFields];
 
   if (allDateFields.includes(cond.field)) {
     if (cond.useExactDate) {
@@ -766,20 +1486,34 @@ function buildCondition(cond) {
         },
       };
     }
-    return {};
   }
 
-  // Default
+  // Handle "contains" for text fields
+  if (operator === "like") {
+    return { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+  }
+
+  // Default condition
   return {
     [cond.field]: {
       [ops[operator] || Op.eq]: cond.value,
     },
   };
 }
-
 exports.updateDeal = async (req, res) => {
   try {
     const { dealId } = req.params;
+
+    // Debug: Log the complete request body
+    console.log("=== UPDATE DEAL REQUEST DEBUG ===");
+    console.log("dealId:", dealId);
+    console.log("req.body:", JSON.stringify(req.body, null, 2));
+    console.log("req.body type:", typeof req.body);
+    console.log("req.body keys:", Object.keys(req.body));
+    console.log("req.adminId:", req.adminId);
+    console.log("req.role:", req.role);
+    console.log("req.user:", req.user);
+
     const updateFields = { ...req.body };
 
     // Separate DealDetails fields
@@ -868,106 +1602,164 @@ exports.updateDeal = async (req, res) => {
       }
     }
 
-    // Handle custom fields update
-    const { customFields } = req.body;
-    if (customFields && Object.keys(customFields).length > 0) {
+    // Handle custom fields update - Check for custom fields directly in req.body
+    let updatedCustomFields = {};
+
+    console.log("=== CUSTOM FIELDS UPDATE DEBUG ===");
+    console.log("req.adminId:", req.adminId);
+    console.log("dealId:", dealId);
+
+    // Get all available custom fields for this user
+    const availableCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
+        isActive: true,
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { fieldSource: "default" },
+          { fieldSource: "system" },
+        ],
+      },
+    });
+
+    console.log(
+      "Available custom fields:",
+      availableCustomFields.map((f) => f.fieldName)
+    );
+
+    if (availableCustomFields.length > 0) {
       try {
-        for (const [fieldKey, value] of Object.entries(customFields)) {
-          let customField;
+        // Check each available custom field to see if it's in the request body
+        for (const customField of availableCustomFields) {
+          const fieldName = customField.fieldName;
 
-          // Check if it's a fieldId (numeric) or fieldName (string)
-          if (isNaN(fieldKey)) {
-            // It's a fieldName - search by fieldName
-            customField = await CustomField.findOne({
-              where: {
-                fieldName: fieldKey,
-                entityType: "deal",
-                masterUserID: req.adminId,
-                isActive: true,
-              },
+          // Check if this field is in the request body
+          if (fieldName in req.body) {
+            const value = req.body[fieldName];
+
+            console.log(`\n--- Processing field: ${fieldName} = ${value} ---`);
+            console.log("CustomField found:", {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              fieldType: customField.fieldType,
+              entityType: customField.entityType,
+              isActive: customField.isActive,
+              masterUserID: customField.masterUserID,
+              fieldSource: customField.fieldSource,
             });
-          } else {
-            // It's a fieldId - search by fieldId
-            customField = await CustomField.findOne({
-              where: {
-                fieldId: parseInt(fieldKey),
-                entityType: "deal",
-                masterUserID: req.adminId,
-                isActive: true,
-              },
-            });
-          }
 
-          if (customField) {
-            // Validate value based on field type
-            let processedValue = value;
+            if (value !== null && value !== undefined) {
+              // Validate value based on field type
+              let processedValue = value;
 
-            if (
-              customField.fieldType === "number" &&
-              value !== null &&
-              value !== ""
-            ) {
-              processedValue = parseFloat(value);
-              if (isNaN(processedValue)) {
-                console.warn(
-                  `Invalid number value for field "${customField.fieldLabel}"`
-                );
-                continue;
+              if (
+                customField.fieldType === "number" &&
+                value !== null &&
+                value !== ""
+              ) {
+                processedValue = parseFloat(value);
+                if (isNaN(processedValue)) {
+                  console.warn(
+                    `Invalid number value for field "${customField.fieldLabel}"`
+                  );
+                  continue;
+                }
               }
-            }
 
-            if (customField.fieldType === "email" && value) {
-              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-              if (!emailRegex.test(value)) {
-                console.warn(
-                  `Invalid email format for field "${customField.fieldLabel}"`
-                );
-                continue;
+              if (customField.fieldType === "email" && value) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(value)) {
+                  console.warn(
+                    `Invalid email format for field "${customField.fieldLabel}"`
+                  );
+                  continue;
+                }
               }
-            }
 
-            // Find or create the field value
-            let fieldValue = await CustomFieldValue.findOne({
-              where: {
+              // Handle empty values (allow clearing fields)
+              if (value === "" || value === null) {
+                processedValue = null;
+              }
+
+              console.log("Processing custom field value:", {
                 fieldId: customField.fieldId,
-                entityId: dealId.toString(),
-                entityType: "deal",
-                masterUserID: req.adminId,
-              },
-            });
-
-            if (fieldValue) {
-              // Update existing value
-              await fieldValue.update({
-                value:
-                  typeof processedValue === "object"
-                    ? JSON.stringify(processedValue)
-                    : String(processedValue),
+                fieldName: customField.fieldName,
+                dealId: dealId,
+                processedValue: processedValue,
+                originalValue: value,
               });
+
+              // Find or create the field value
+              let fieldValue = await CustomFieldValue.findOne({
+                where: {
+                  fieldId: customField.fieldId,
+                  entityId: dealId,
+                  entityType: "deal",
+                },
+              });
+
+              if (fieldValue) {
+                // Update existing value
+                if (processedValue === null || processedValue === "") {
+                  // Delete the field value if it's being cleared
+                  await fieldValue.destroy();
+                  console.log(
+                    `✅ Deleted custom field value for: ${customField.fieldName}`
+                  );
+                } else {
+                  await fieldValue.update({
+                    value:
+                      typeof processedValue === "object"
+                        ? JSON.stringify(processedValue)
+                        : String(processedValue),
+                  });
+                  console.log(
+                    `✅ Updated custom field value for: ${customField.fieldName}`
+                  );
+                }
+              } else if (processedValue !== null && processedValue !== "") {
+                // Create new value only if it's not empty
+                await CustomFieldValue.create({
+                  fieldId: customField.fieldId,
+                  entityId: dealId,
+                  entityType: "deal",
+                  value:
+                    typeof processedValue === "object"
+                      ? JSON.stringify(processedValue)
+                      : String(processedValue),
+                  masterUserID: req.adminId,
+                });
+                console.log(
+                  `✅ Created new custom field value for: ${customField.fieldName}`
+                );
+              }
+
+              // Store the updated custom field for response
+              updatedCustomFields[customField.fieldName] = {
+                fieldName: customField.fieldName,
+                fieldType: customField.fieldType,
+                value: processedValue,
+              };
+
+              // Remove the custom field from updateFields to prevent it from being updated in the main Deal table
+              delete updateFields[fieldName];
             } else {
-              // Create new value
-              await CustomFieldValue.create({
-                fieldId: customField.fieldId,
-                entityId: dealId.toString(),
-                entityType: "deal",
-                value:
-                  typeof processedValue === "object"
-                    ? JSON.stringify(processedValue)
-                    : String(processedValue),
-                masterUserID: req.adminId,
-              });
+              console.warn(`❌ Invalid value for field ${fieldName}:`, value);
             }
           }
         }
+
         console.log(
-          `Updated ${
-            Object.keys(customFields).length
+          `🎉 Updated ${
+            Object.keys(updatedCustomFields).length
           } custom field values for deal ${dealId}`
         );
       } catch (customFieldError) {
-        console.error("Error updating custom fields:", customFieldError);
+        console.error("❌ Error updating custom fields:", customFieldError);
         // Don't fail the deal update, just log the error
       }
+    } else {
+      console.log("❌ No custom fields available for this user");
     }
 
     // After all updates and before sending the response:
@@ -1045,13 +1837,21 @@ exports.updateDeal = async (req, res) => {
       `Deal updated by ${req.role}`,
       null
     );
+
+    // Prepare response with updated custom fields
+    const dealResponse = {
+      ...updatedDeal.toJSON(),
+      customFields: updatedCustomFields,
+    };
+
     res.status(200).json({
       message: "Deal, person, and organization updated successfully",
-      deal: updatedDeal,
+      deal: dealResponse,
       person: updatedDeal.Person ? [updatedDeal.Person] : [],
       organization: updatedDeal.Organization ? [updatedDeal.Organization] : [],
       pipelineStages: pipelineStagesUnique,
       currentStage: currentStageName,
+      customFieldsUpdated: Object.keys(updatedCustomFields).length,
     });
   } catch (error) {
     console.log(error);
@@ -1974,68 +2774,119 @@ exports.saveAllDealFieldsWithCheck = async (req, res) => {
     res.status(500).json({ message: "Error saving all deal columns" });
   }
 };
-exports.getDealFields = (req, res) => {
-  const fields = [
-    { key: "contactPerson", label: "Contact Person", check: false },
-    { key: "organization", label: "Organization", check: false },
-    { key: "title", label: "Title", check: false },
-    { key: "value", label: "Value", check: false },
-    { key: "currency", label: "Currency", check: false },
-    { key: "pipeline", label: "Pipeline", check: false },
-    { key: "pipelineStage", label: "Pipeline Stage", check: false },
-    { key: "label", label: "Label", check: false },
-    { key: "expectedCloseDate", label: "Expected Close Date", check: false },
-    { key: "sourceChannel", label: "Source Channel", check: false },
-    { key: "serviceType", label: "Service Type", check: false },
-    { key: "proposalValue", label: "Proposal Value", check: false },
-    { key: "proposalCurrency", label: "Proposal Currency", check: false },
-    { key: "esplProposalNo", label: "ESPL Proposal No.", check: false },
-    {
-      key: "projectLocation",
-      label: "Country of Project Location",
-      check: false,
-    },
-    { key: "organizationCountry", label: "Organization Country", check: false },
-    { key: "proposalSentDate", label: "Proposal Sent Date", check: false },
-    { key: "sourceRequired", label: "Source Required", check: false },
-    { key: "questionerShared", label: "Questioner Shared", check: false },
-    { key: "sectorialSector", label: "Sectorial Sector", check: false },
-    { key: "sbuClass", label: "SBU Class", check: false },
-    { key: "phone", label: "Phone", check: false },
-    { key: "email", label: "Email", check: false },
-    { key: "sourceOrgin", label: "Source Origin", check: false },
-    { key: "isArchived", label: "Is Archived", check: false },
-    { key: "status", label: "Status", check: false },
-    { key: "createdAt", label: "Deal Created", check: false },
-    { key: "updatedAt", label: "Updated At", check: false },
-    { key: "statusSummary", label: "Status Summary", check: false },
-    { key: "responsiblePerson", label: "Responsible Person", check: false },
-    { key: "rfpReceivedDate", label: "RFP Received Date", check: false },
-    { key: "owner", label: "Owner", check: false },
-    { key: "wonTime", label: "Won Time", check: false },
-    { key: "lostTime", label: "Lost Time", check: false },
-    { key: "scopeOfServiceType", label: "Scope of Service Type", check: false },
-    {
-      key: "countryOfOrganizationCountry",
-      label: "Country of Organization Country",
-      check: false,
-    },
-    { key: "source", label: "Source", check: false },
-    { key: "lostReason", label: "Lost Reason", check: false },
-    { key: "status", label: "Status", check: false },
-    { key: "dealClosedOn", label: "Deal Closed On", check: false },
-    { key: "nextActivityDate", label: "Next Activity Date", check: false },
-    {
-      key: "stateAndCountryProjectLocation",
-      label: "State/Country of Project Location",
-      check: false,
-    },
-  ];
+exports.getDealFields = async (req, res) => {
+  try {
+    // Get deal column preferences
+    const pref = await DealColumnPreference.findOne({ where: {} });
 
-  res.status(200).json({ fields });
+    let columns = [];
+    if (pref) {
+      // Parse columns if it's a string
+      columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig =
+          typeof col.filterConfig === "string"
+            ? JSON.parse(col.filterConfig)
+            : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for deals (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+            "dealCheck", // Add dealCheck field
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+        // Continue without custom fields if there's an error
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Format custom fields for column preferences
+    const customFieldColumns = customFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false, // Include check field for leads
+      dealCheck: field.dealCheck || false, // Include dealCheck field for deals
+    }));
+
+    // Check if custom fields already exist in preferences and sync their dealCheck status
+    customFieldColumns.forEach((customCol) => {
+      const existingCol = columns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        // Keep the dealCheck value from database, don't override it
+        // existingCol.check is for leads, customCol.dealCheck is for deals
+        existingCol.dealCheck = customCol.dealCheck;
+      }
+    });
+
+    // Merge regular columns with custom field columns
+    const allColumns = [...columns, ...customFieldColumns];
+
+    // Remove duplicates (custom fields might already be in preferences)
+    const uniqueColumns = [];
+    const seenKeys = new Set();
+
+    allColumns.forEach((col) => {
+      if (!seenKeys.has(col.key)) {
+        seenKeys.add(col.key);
+        uniqueColumns.push(col);
+      }
+    });
+
+    res.status(200).json({
+      columns: uniqueColumns,
+      customFieldsCount: customFields.length,
+      totalColumns: uniqueColumns.length,
+      regularColumns: columns.length,
+    });
+  } catch (error) {
+    console.error("Error fetching deal fields:", error);
+    res.status(500).json({ message: "Error fetching deal fields" });
+  }
 };
 exports.updateDealColumnChecks = async (req, res) => {
-  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  // Expecting: { columns: [ { key: "columnName", check: true/false, dealCheck: true/false }, ... ] }
   const { columns } = req.body;
 
   if (!Array.isArray(columns)) {
@@ -2043,6 +2894,10 @@ exports.updateDealColumnChecks = async (req, res) => {
   }
 
   try {
+    console.log("=== UPDATE DEAL COLUMN CHECKS DEBUG ===");
+    console.log("Incoming columns:", JSON.stringify(columns, null, 2));
+    console.log("adminId:", req.adminId);
+
     // Find the global DealColumnPreference record
     let pref = await DealColumnPreference.findOne();
     if (!pref) {
@@ -2055,20 +2910,259 @@ exports.updateDealColumnChecks = async (req, res) => {
         ? JSON.parse(pref.columns)
         : pref.columns;
 
-    // Update check status for matching columns
+    // Get custom fields to validate incoming custom field columns
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+            "dealCheck", // Add dealCheck field
+          ],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    }
+
+    console.log("Found custom fields:", customFields.length);
+    console.log(
+      "Custom field names:",
+      customFields.map((f) => f.fieldName)
+    );
+
+    // Create a map of custom field names for quick lookup
+    const customFieldMap = {};
+    customFields.forEach((field) => {
+      customFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
+    });
+
+    console.log("Custom field map keys:", Object.keys(customFieldMap));
+
+    // Update check and dealCheck status for existing columns
     prefColumns = prefColumns.map((col) => {
       const found = columns.find((c) => c.key === col.key);
       if (found) {
-        return { ...col, check: !!found.check };
+        return {
+          ...col,
+          check: found.check !== undefined ? !!found.check : col.check,
+          dealCheck:
+            found.dealCheck !== undefined ? !!found.dealCheck : col.dealCheck,
+        };
       }
       return col;
     });
 
+    // Handle new custom field columns that don't exist in preferences yet
+    const existingKeys = new Set(prefColumns.map((col) => col.key));
+
+    columns.forEach((incomingCol) => {
+      // If this column doesn't exist in preferences but is a custom field, add it
+      if (
+        !existingKeys.has(incomingCol.key) &&
+        customFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = customFieldMap[incomingCol.key];
+        prefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: incomingCol.check !== undefined ? !!incomingCol.check : false,
+          dealCheck:
+            incomingCol.dealCheck !== undefined
+              ? !!incomingCol.dealCheck
+              : false,
+        });
+      }
+    });
+
+    // Update check and dealCheck fields in CustomField table for custom fields
+    // 'check' field is for leads, 'dealCheck' field is for deals
+    const customFieldUpdates = [];
+
+    console.log("Processing custom field updates...");
+    columns.forEach((incomingCol) => {
+      console.log(`Processing column: ${incomingCol.key}`);
+
+      if (customFieldMap[incomingCol.key]) {
+        console.log(`Found custom field mapping for: ${incomingCol.key}`);
+
+        const customField = customFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+
+        if (customField) {
+          console.log(
+            `Found custom field in database: ${customField.fieldName}, current check: ${customField.check}, current dealCheck: ${customField.dealCheck}`
+          );
+
+          const updates = {};
+
+          // Update check field if provided (for leads)
+          if (
+            incomingCol.check !== undefined &&
+            customField.check !== !!incomingCol.check
+          ) {
+            updates.check = !!incomingCol.check;
+            console.log(`Will update check field to: ${updates.check}`);
+          }
+
+          // Update dealCheck field if provided (for deals)
+          if (
+            incomingCol.dealCheck !== undefined &&
+            customField.dealCheck !== !!incomingCol.dealCheck
+          ) {
+            updates.dealCheck = !!incomingCol.dealCheck;
+            console.log(`Will update dealCheck field to: ${updates.dealCheck}`);
+          }
+
+          // Only add to updates if there are changes
+          if (Object.keys(updates).length > 0) {
+            customFieldUpdates.push({
+              fieldId: customField.fieldId,
+              updates: updates,
+            });
+            console.log(
+              `Added update for fieldId: ${customField.fieldId}`,
+              updates
+            );
+          } else {
+            console.log(`No changes needed for field: ${incomingCol.key}`);
+          }
+        } else {
+          console.log(
+            `Custom field not found in database for: ${incomingCol.key}`
+          );
+        }
+      } else {
+        console.log(`No custom field mapping found for: ${incomingCol.key}`);
+      }
+    });
+
+    console.log(
+      "Total custom field updates to process:",
+      customFieldUpdates.length
+    );
+
+    // Perform bulk update of CustomField check and dealCheck values
+    // 'check' field affects leads, 'dealCheck' field affects deals
+    if (customFieldUpdates.length > 0) {
+      console.log("Executing custom field updates...");
+
+      for (const update of customFieldUpdates) {
+        console.log(`Updating fieldId ${update.fieldId} with:`, update.updates);
+
+        // First, let's check what record we're trying to update
+        const existingRecord = await CustomField.findOne({
+          where: { fieldId: update.fieldId },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "masterUserID",
+            "fieldSource",
+            "check",
+            "dealCheck",
+          ],
+        });
+
+        console.log(
+          `Current record for fieldId ${update.fieldId}:`,
+          existingRecord ? existingRecord.toJSON() : "NOT FOUND"
+        );
+
+        const result = await CustomField.update(update.updates, {
+          where: {
+            fieldId: update.fieldId,
+            // Make the WHERE clause more flexible - either the user owns it OR it's a default/system field
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" }, // Add custom fields that might belong to this user
+            ],
+          },
+        });
+
+        console.log(`Update result for fieldId ${update.fieldId}:`, result);
+
+        // If no rows were updated, try a more relaxed update
+        if (result[0] === 0) {
+          console.log(
+            `No rows updated with restrictive WHERE clause, trying more relaxed update...`
+          );
+
+          const relaxedResult = await CustomField.update(update.updates, {
+            where: {
+              fieldId: update.fieldId,
+              // Only check fieldId - less restrictive
+            },
+          });
+
+          console.log(
+            `Relaxed update result for fieldId ${update.fieldId}:`,
+            relaxedResult
+          );
+        }
+      }
+
+      console.log(
+        `Updated ${customFieldUpdates.length} custom field check/dealCheck values`
+      );
+    } else {
+      console.log("No custom field updates to process");
+    }
+
+    // Save updated preferences
     pref.columns = prefColumns;
     await pref.save();
-    res.status(200).json({ message: "Columns updated", columns: pref.columns });
+
+    res.status(200).json({
+      message: "Deal columns updated",
+      columns: pref.columns,
+      customFieldsUpdated: customFieldUpdates.length,
+      totalColumns: prefColumns.length,
+      updatedFields: {
+        checkUpdates: customFieldUpdates.filter(
+          (u) => u.updates.check !== undefined
+        ).length,
+        dealCheckUpdates: customFieldUpdates.filter(
+          (u) => u.updates.dealCheck !== undefined
+        ).length,
+      },
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Error updating deal columns:", error);
     res.status(500).json({ message: "Error updating columns" });
   }
 };
