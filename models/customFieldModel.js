@@ -152,7 +152,14 @@ const CustomField = sequelize.define(
     check: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
-      comment: "Whether this field is checked/selected in column preferences",
+      comment:
+        "Whether this field is checked/selected in column preferences for leads",
+    },
+    dealCheck: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment:
+        "Whether this field is checked/selected in column preferences for deals",
     },
     // New visibility fields
     leadView: {
