@@ -6,6 +6,58 @@ const { logAuditTrail } = require("../utils/auditTrailLogger");
 const PROGRAMS = require("../utils/programConstants");
 const historyLogger = require("../utils/historyLogger").logHistory;
 
+// Utility function to validate field types and entity types
+const validateFieldAndEntityTypes = (fieldType, entityType) => {
+  const allowedFieldTypes = [
+    "text",
+    "textarea",
+    "number",
+    "decimal",
+    "email",
+    "phone",
+    "url",
+    "date",
+    "datetime",
+    "select",
+    "multiselect",
+    "checkbox",
+    "radio",
+    "file",
+    "currency",
+    "organization",
+    "person",
+  ];
+
+  const allowedEntityTypes = [
+    "lead",
+    "deal",
+    "both",
+    "person",
+    "organization",
+    "activity",
+  ];
+
+  const errors = [];
+
+  if (fieldType && !allowedFieldTypes.includes(fieldType)) {
+    errors.push(
+      `Invalid fieldType "${fieldType}". Allowed values are: ${allowedFieldTypes.join(
+        ", "
+      )}.`
+    );
+  }
+
+  if (entityType && !allowedEntityTypes.includes(entityType)) {
+    errors.push(
+      `Invalid entityType "${entityType}". Allowed values are: ${allowedEntityTypes.join(
+        ", "
+      )}.`
+    );
+  }
+
+  return errors;
+};
+
 // Create a new custom field
 exports.createCustomField = async (req, res) => {
   const {
@@ -36,10 +88,39 @@ exports.createCustomField = async (req, res) => {
   const masterUserID = req.adminId;
 
   try {
+    // Debug: Log the incoming request data
+    console.log(
+      "CreateCustomField - Request body:",
+      JSON.stringify(req.body, null, 2)
+    );
+    console.log("CreateCustomField - fieldType:", fieldType);
+    console.log("CreateCustomField - entityType:", entityType);
+
     // Validate required fields (fieldLabel is now optional)
     if (!fieldName || !fieldType || !entityType) {
       return res.status(400).json({
         message: "fieldName, fieldType, and entityType are required.",
+      });
+    }
+
+    // Validate fieldType and entityType against allowed values
+    const validationErrors = validateFieldAndEntityTypes(fieldType, entityType);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        message: validationErrors.join(" "),
+      });
+    }
+
+    // Validate field lengths to prevent truncation
+    if (fieldName && fieldName.length > 100) {
+      return res.status(400).json({
+        message: "fieldName cannot exceed 100 characters.",
+      });
+    }
+
+    if (fieldLabel && fieldLabel.length > 150) {
+      return res.status(400).json({
+        message: "fieldLabel cannot exceed 150 characters.",
       });
     }
 
@@ -152,6 +233,11 @@ exports.createCustomField = async (req, res) => {
         ...processedQualityRules,
       },
     });
+
+    console.log(
+      "CreateCustomField - Successfully created:",
+      customField.fieldId
+    );
 
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
@@ -731,6 +817,16 @@ exports.updateCustomField = async (req, res) => {
       return res.status(404).json({
         message: "Custom field not found.",
       });
+    }
+
+    // Validate fieldType if provided
+    if (fieldType) {
+      const validationErrors = validateFieldAndEntityTypes(fieldType, null);
+      if (validationErrors.length > 0) {
+        return res.status(400).json({
+          message: validationErrors.join(" "),
+        });
+      }
     }
 
     // Validate user specifications if provided
