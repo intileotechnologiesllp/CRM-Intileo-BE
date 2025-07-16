@@ -288,6 +288,25 @@ exports.createCustomField = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating custom field:", error);
+
+    // Handle specific database errors
+    if (error.code === "WARN_DATA_TRUNCATED") {
+      console.error("Data truncation error details:", {
+        errno: error.errno,
+        sqlState: error.sqlState,
+        sqlMessage: error.sqlMessage,
+        sql: error.sql,
+      });
+
+      return res.status(400).json({
+        message: "Data validation error: " + error.sqlMessage,
+        details:
+          "Please check that all field values are within allowed limits and types.",
+        validationTip:
+          "Ensure fieldType is one of the allowed values and field lengths are within limits.",
+      });
+    }
+
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_CREATION",

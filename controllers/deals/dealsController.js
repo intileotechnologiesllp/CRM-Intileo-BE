@@ -56,68 +56,140 @@ exports.createDeal = async (req, res) => {
     // Validate required fields here...
     let ownerId = req.user?.id || req.adminId || req.body.ownerId;
 
-    // Validation
-    if (!title || typeof title !== "string" || !title.trim()) {
+    // --- Enhanced validation similar to createLead ---
+    // Validate required fields
+    if (!contactPerson || !organization || !title || !email) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
         req.role,
-        `Deal creation failed: Title is required.`,
+        `Deal creation failed: contactPerson, organization, title, and email are required.`,
         req.adminId
       );
-      return res.status(400).json({ message: "Title is required." });
+      return res.status(400).json({
+        message: "contactPerson, organization, title, and email are required.",
+      });
     }
-    if (!email || !/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email)) {
+
+    // Validate contactPerson
+    if (typeof contactPerson !== "string" || !contactPerson.trim()) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
         req.role,
-        `Deal creation failed: A valid email is required.`,
+        `Deal creation failed: contactPerson must be a non-empty string.`,
         req.adminId
       );
-      return res.status(400).json({ message: "A valid email is required." });
+      return res.status(400).json({
+        message: "contactPerson must be a non-empty string.",
+      });
     }
-    if (!phone || !/^\+?\d{7,15}$/.test(phone)) {
+
+    // Validate organization
+    if (typeof organization !== "string" || !organization.trim()) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
         req.role,
-        `Deal creation failed: A valid phone number is required.`,
+        `Deal creation failed: organization must be a non-empty string.`,
         req.adminId
       );
-      return res
-        .status(400)
-        .json({ message: "A valid phone number is required." });
+      return res.status(400).json({
+        message: "organization must be a non-empty string.",
+      });
+    }
+
+    // Validate title
+    if (typeof title !== "string" || !title.trim()) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: title must be a non-empty string.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "title must be a non-empty string.",
+      });
+    }
+
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Invalid email format.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Invalid email format.",
+      });
+    }
+
+    // Validate phone if provided
+    if (phone && !/^\+?\d{7,15}$/.test(phone)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Invalid phone number format.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Invalid phone number format.",
+      });
+    }
+
+    // Validate proposalValue if provided
+    if (proposalValue && proposalValue < 0) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Proposal value must be positive.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Proposal value must be positive.",
+      });
+    }
+
+    // Validate value if provided
+    if (value && value < 0) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Deal value must be positive.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Deal value must be positive.",
+      });
     }
     // Find or create Person and Organization here...
-    // Check for unique title
-    const existingDeal = await Deal.findOne({ where: { title } });
-    if (existingDeal) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: A deal with this title already exists.`,
-        req.adminId
-      );
-      return res
-        .status(400)
-        .json({ message: "A deal with this title already exists." });
-    }
-    // Check for duplicate contactPerson in the deals table
-    const duplicateContactPerson = await Deal.findOne({
-      where: { contactPerson },
+    // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
+    const existingContactOrgTitleDeal = await Deal.findOne({
+      where: {
+        contactPerson: contactPerson,
+        organization: organization,
+        title: title,
+      },
     });
-    if (duplicateContactPerson) {
+    if (existingContactOrgTitleDeal) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
         req.role,
-        `Deal creation failed: A deal with this contact person already exists.`,
+        `Deal creation failed: A deal with this exact combination of contact person, organization, and title already exists.`,
         req.adminId
       );
       return res.status(409).json({
-        message: "A deal with this contact person already exists.",
+        message:
+          "A deal with this exact combination of contact person, organization, and title already exists. Please use a different title for a new deal with the same contact.",
+        existingDealId: existingContactOrgTitleDeal.dealId,
+        existingDealTitle: existingContactOrgTitleDeal.title,
       });
     }
     // 1. Set masterUserID at the top, before using it anywhere
@@ -159,60 +231,29 @@ exports.createDeal = async (req, res) => {
     // 1. Find or create Organization
     let org = null;
     if (organization) {
-      if (organization) {
-        org = await Organization.findOne({ where: { organization } });
-        if (!org) {
-          org = await Organization.create({
-            organization,
-            masterUserID, // make sure this is set
-          });
-        }
-      } else {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: Organization name is required.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "Organization name is required." });
-      } // findOrCreate returns [instance, created]
+      org = await Organization.findOne({ where: { organization } });
+      if (!org) {
+        org = await Organization.create({
+          organization,
+          masterUserID, // make sure this is set
+        });
+      }
     }
     // 2. Find or create Person
     let person = null;
     if (contactPerson) {
       const masterUserID = req.adminId;
 
-      if (email) {
-        person = await Person.findOne({ where: { email } });
-        // console.log(person.personId," person found");
-
-        if (!person) {
-          person = await Person.create({
-            contactPerson,
-            email,
-            phone,
-            leadOrganizationId: org ? org.leadOrganizationId : null,
-            masterUserID,
-          });
-        }
-      } else {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: Email is required for contact person.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "Email is required for contact person." });
+      person = await Person.findOne({ where: { email } });
+      if (!person) {
+        person = await Person.create({
+          contactPerson,
+          email,
+          phone,
+          leadOrganizationId: org ? org.leadOrganizationId : null,
+          masterUserID,
+        });
       }
-    }
-    if (!(person ? person.contactPerson : contactPerson)) {
-      return res.status(400).json({ message: "contactPerson is required." });
     }
     // Create the lead
     console.log(person.personId, " before deal creation");
