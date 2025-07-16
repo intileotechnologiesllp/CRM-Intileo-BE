@@ -216,7 +216,7 @@ exports.getActivities = async (req, res) => {
           };
         }
         break;
-      case "todo":
+      case "To-do":
         where.isDone = false;
         where.startDateTime = { [Op.gte]: now.toDate() };
         break;
