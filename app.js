@@ -34,6 +34,7 @@ const dealRoutes = require("./routes/deals/dealsRoutes.js"); // Import deal rout
 const activityRoutes = require("./routes/activity/activityRoutes.js"); // Import activity routes
 const insightRoutes = require("./routes/insight/insightRoutes.js"); // Import insight routes
 const customFieldRoutes = require("./routes/customFieldRoutes.js"); // Import custom field routes
+const globalSearchRoutes = require("./routes/globalSearchRoutes.js"); // Import global search routes
 
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
@@ -88,12 +89,13 @@ app.use("/api/lead-contacts", leadContactsRoutes); // Register lead contacts rou
 app.use("/api/deals", dealRoutes); // Register deal routes
 app.use("/api/activities", activityRoutes); // Register activity routes
 app.use("/api/insights", insightRoutes); // Register insight routes
+app.use("/api/search", globalSearchRoutes); // Register global search routes
 app.use("/api/custom-fields", customFieldRoutes); // Register custom field routes
 app.use("/api/persons", personRoutes); // Register person routes
 app.use("/api/organizations-new", organizationRoutesNew); // Register organization routes (new)
 app.use("/api/persons", personRoutes); // Register person routes
 app.use("/api/organizations-new", organizationRoutesNew); // Register new organization routes
-
+app.use("/api/global-search", globalSearchRoutes); // Register global search routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
