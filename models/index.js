@@ -72,6 +72,10 @@ CustomFieldValue.belongsTo(CustomField, {
 Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
 Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
 
+// Email-Lead associations
+Email.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
+Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
+
 module.exports = {
   Lead,
   LeadDetails,

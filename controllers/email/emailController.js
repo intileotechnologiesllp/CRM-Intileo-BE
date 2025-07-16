@@ -16,10 +16,7 @@ const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
 const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
-const Lead = require("../../models/leads/leadsModel");
-const Deal = require("../../models/deals/dealsModels");
-const Person = require("../../models/leads/leadPersonModel");
-const Organization = require("../../models/leads/leadOrganizationModel");
+const { Lead, Deal, Person, Organization } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { log } = require("console");
@@ -2260,8 +2257,92 @@ exports.getEmails = async (req, res) => {
     // Fetch emails from the database
     let emails;
 
-    // Combine includes (attachments + deals)
-    const includeModels = [...includeAttachments, ...includeDeal];
+    // Add Lead and Deal includes to get related information
+    const includeLeadDeal = [
+      {
+        model: Lead,
+        as: "Lead",
+        required: false,
+        attributes: [
+          "leadId",
+          "title",
+          "value",
+          "status",
+          "personId",
+          "leadOrganizationId",
+        ],
+        include: [
+          {
+            model: Person,
+            as: "LeadPerson",
+            required: false,
+            attributes: [
+              "personId",
+              "contactPerson",
+              "email",
+              "phone",
+              "jobTitle",
+            ],
+          },
+          {
+            model: Organization,
+            as: "LeadOrganization",
+            required: false,
+            attributes: [
+              "leadOrganizationId",
+              "organization",
+              "address",
+              "organizationLabels",
+            ],
+          },
+        ],
+      },
+      {
+        model: Deal,
+        as: "Deal",
+        required: false,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "status",
+          "personId",
+          "leadOrganizationId",
+        ],
+        include: [
+          {
+            model: Person,
+            as: "Person",
+            required: false,
+            attributes: [
+              "personId",
+              "contactPerson",
+              "email",
+              "phone",
+              "jobTitle",
+            ],
+          },
+          {
+            model: Organization,
+            as: "Organization",
+            required: false,
+            attributes: [
+              "leadOrganizationId",
+              "organization",
+              "address",
+              "organizationLabels",
+            ],
+          },
+        ],
+      },
+    ];
+
+    // Combine includes (attachments + deals + leads)
+    const includeModels = [
+      ...includeAttachments,
+      ...includeDeal,
+      ...includeLeadDeal,
+    ];
 
     if (cursor) {
       // Buffer pagination - use findAll with limit and order
@@ -2303,7 +2384,7 @@ exports.getEmails = async (req, res) => {
         return baseAttachment;
       });
 
-      // Create email object with body preview
+      // Create email object with body preview, attachments, leads, and deals
       const emailObj = { ...email.toJSON(), attachments };
 
       // Replace body with preview content (but keep the 'body' key name)
@@ -2314,6 +2395,12 @@ exports.getEmails = async (req, res) => {
         // Replace body with preview content
         emailObj.body = createBodyPreview(emailObj.body);
       }
+
+      // The emailObj now includes:
+      // - Lead information (if linkedId exists) with Person and Organization details
+      // - Deal information (if dealId exists) with Person and Organization details
+      // - Attachments information
+      // - All email fields
 
       return emailObj;
     });

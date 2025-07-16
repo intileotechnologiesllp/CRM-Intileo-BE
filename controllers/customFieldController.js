@@ -36,11 +36,10 @@ exports.createCustomField = async (req, res) => {
   const masterUserID = req.adminId;
 
   try {
-    // Validate required fields
-    if (!fieldName || !fieldLabel || !fieldType || !entityType) {
+    // Validate required fields (fieldLabel is now optional)
+    if (!fieldName || !fieldType || !entityType) {
       return res.status(400).json({
-        message:
-          "fieldName, fieldLabel, fieldType, and entityType are required.",
+        message: "fieldName, fieldType, and entityType are required.",
       });
     }
 
@@ -121,7 +120,7 @@ exports.createCustomField = async (req, res) => {
     // Create the custom field
     const customField = await CustomField.create({
       fieldName: fieldName.toLowerCase().replace(/\s+/g, "_"),
-      fieldLabel,
+      fieldLabel: fieldLabel || fieldName, // Use fieldName as fallback if fieldLabel is not provided
       fieldType,
       entityType,
       fieldSource: "custom", // Always custom for user-created fields
@@ -160,7 +159,7 @@ exports.createCustomField = async (req, res) => {
       masterUserID,
       customField.fieldId,
       null,
-      `Custom field "${fieldLabel}" created for ${entityType}`,
+      `Custom field "${customField.fieldLabel}" created for ${entityType}`,
       null
     );
 
