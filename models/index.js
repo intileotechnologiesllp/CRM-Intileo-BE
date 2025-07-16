@@ -8,6 +8,7 @@ const Deal = require("./deals/dealsModels");
 const CustomField = require("./customFieldModel");
 const CustomFieldValue = require("./customFieldValueModel");
 const Email = require("./email/emailModel");
+const RecentSearch = require("./recentSearchModel");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -81,4 +82,5 @@ module.exports = {
   CustomField,
   CustomFieldValue,
   Email,
+  RecentSearch,
 };
