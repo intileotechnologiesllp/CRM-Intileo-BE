@@ -1064,7 +1064,7 @@ exports.getDeals = async (req, res) => {
 
     res.status(200).json({
       message: "Deals fetched successfully",
-      totalRecords: total,
+      totalDeals: total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
       deals: dealsWithCustomFields,
