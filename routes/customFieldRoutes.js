@@ -20,8 +20,8 @@ router.get(
   "/:entityType/hybrid-sections",
   customFieldController.getHybridFieldsSections
 );
-router.post("/:fieldId", customFieldController.updateCustomField);
-router.post("/:fieldId", customFieldController.deleteCustomField);
+router.post("/edit/:fieldId", customFieldController. updateCustomField);
+router.post("/delete/:fieldId", customFieldController.deleteCustomField);
 
 // Custom Field Value Management Routes
 router.post("/values", customFieldController.saveCustomFieldValues);
