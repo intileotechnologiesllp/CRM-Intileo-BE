@@ -198,6 +198,35 @@ exports.createCustomField = async (req, res) => {
         ? isImportant
         : processedQualityRules.important || false;
 
+    // Create compact JSON objects to prevent packet size issues
+    const compactQualityRules = {
+      required: finalIsRequired,
+      important: finalIsImportant,
+    };
+
+    const compactUserSpecs = {
+      editingUsers: processedUserSpecs.editingUsers || "all",
+      editingUsersList: Array.isArray(processedUserSpecs.editingUsersList)
+        ? processedUserSpecs.editingUsersList
+        : [],
+      viewingUsers: processedUserSpecs.viewingUsers || "all",
+      viewingUsersList: Array.isArray(processedUserSpecs.viewingUsersList)
+        ? processedUserSpecs.viewingUsersList
+        : [],
+    };
+
+    const compactPlacesShown = {
+      leadView: Boolean(processedPlacesShown.leadView),
+      dealView: Boolean(processedPlacesShown.dealView),
+      listView: Boolean(processedPlacesShown.listView),
+      pipelines:
+        processedPlacesShown.pipelines === "all"
+          ? "all"
+          : Array.isArray(processedPlacesShown.pipelines)
+          ? processedPlacesShown.pipelines
+          : "all",
+    };
+
     // Create the custom field
     const customField = await CustomField.create({
       fieldName: fieldName.toLowerCase().replace(/\s+/g, "_"),
@@ -215,23 +244,19 @@ exports.createCustomField = async (req, res) => {
       description: description || null,
       displayOrder: displayOrder || 0,
       masterUserID,
-      // Additional UI-specific fields
-      userSpecifications: processedUserSpecs,
-      placesWhereShown: processedPlacesShown,
+      // Additional UI-specific fields - use compact versions
+      userSpecifications: compactUserSpecs,
+      placesWhereShown: compactPlacesShown,
       editingPermissions: editingPermissions || "all",
       pipelineRestrictions: pipelineRestrictions || "all",
       // Backward compatibility fields
-      showInAddView: processedPlacesShown.leadView,
-      showInDetailView: processedPlacesShown.dealView,
-      showInListView: processedPlacesShown.listView,
+      showInAddView: compactPlacesShown.leadView,
+      showInDetailView: compactPlacesShown.dealView,
+      showInListView: compactPlacesShown.listView,
       // New UI-aligned fields
-      leadView: processedPlacesShown.leadView,
-      dealView: processedPlacesShown.dealView,
-      qualityRules: {
-        required: finalIsRequired,
-        important: finalIsImportant,
-        ...processedQualityRules,
-      },
+      leadView: compactPlacesShown.leadView,
+      dealView: compactPlacesShown.dealView,
+      qualityRules: compactQualityRules,
     });
 
     console.log(
@@ -260,12 +285,9 @@ exports.createCustomField = async (req, res) => {
           fieldType: customField.fieldType,
           entityType: customField.entityType,
         },
-        userSpecifications: processedUserSpecs,
-        placesWhereShown: processedPlacesShown,
-        qualityRules: {
-          required: finalIsRequired,
-          important: finalIsImportant,
-        },
+        userSpecifications: compactUserSpecs,
+        placesWhereShown: compactPlacesShown,
+        qualityRules: compactQualityRules,
         grouping: {
           category: customField.category,
           fieldGroup: customField.fieldGroup,
@@ -275,15 +297,15 @@ exports.createCustomField = async (req, res) => {
       // For UI feedback
       uiConfiguration: {
         showInForms: {
-          leadView: processedPlacesShown.leadView,
-          dealView: processedPlacesShown.dealView,
-          listView: processedPlacesShown.listView,
+          leadView: compactPlacesShown.leadView,
+          dealView: compactPlacesShown.dealView,
+          listView: compactPlacesShown.listView,
         },
         permissions: {
-          editingUsers: processedUserSpecs.editingUsers,
-          viewingUsers: processedUserSpecs.viewingUsers,
+          editingUsers: compactUserSpecs.editingUsers,
+          viewingUsers: compactUserSpecs.viewingUsers,
         },
-        pipelines: processedPlacesShown.pipelines,
+        pipelines: compactPlacesShown.pipelines,
       },
     });
   } catch (error) {
@@ -924,6 +946,15 @@ exports.updateCustomField = async (req, res) => {
     let finalIsImportant = customField.isImportant;
     let processedQualityRules = customField.qualityRules || {};
 
+    // Parse existing qualityRules if it's a string
+    if (typeof processedQualityRules === "string") {
+      try {
+        processedQualityRules = JSON.parse(processedQualityRules);
+      } catch (e) {
+        processedQualityRules = {};
+      }
+    }
+
     if (qualityRules) {
       processedQualityRules = { ...processedQualityRules, ...qualityRules };
       finalIsRequired =
@@ -946,6 +977,39 @@ exports.updateCustomField = async (req, res) => {
     // Store old values for history
     const oldValues = { ...customField.toJSON() };
 
+    // Prepare compact JSON objects to prevent packet size issues
+    const compactQualityRules = {
+      required: finalIsRequired,
+      important: finalIsImportant,
+    };
+
+    const compactPlacesShown = processedPlacesShown
+      ? {
+          leadView: Boolean(processedPlacesShown.leadView),
+          dealView: Boolean(processedPlacesShown.dealView),
+          listView: Boolean(processedPlacesShown.listView),
+          pipelines:
+            processedPlacesShown.pipelines === "all"
+              ? "all"
+              : Array.isArray(processedPlacesShown.pipelines)
+              ? processedPlacesShown.pipelines
+              : "all",
+        }
+      : null;
+
+    const compactUserSpecs = processedUserSpecs
+      ? {
+          editingUsers: processedUserSpecs.editingUsers || "all",
+          editingUsersList: Array.isArray(processedUserSpecs.editingUsersList)
+            ? processedUserSpecs.editingUsersList
+            : [],
+          viewingUsers: processedUserSpecs.viewingUsers || "all",
+          viewingUsersList: Array.isArray(processedUserSpecs.viewingUsersList)
+            ? processedUserSpecs.viewingUsersList
+            : [],
+        }
+      : null;
+
     // Update the field
     await customField.update({
       fieldLabel: fieldLabel || customField.fieldLabel,
@@ -967,14 +1031,14 @@ exports.updateCustomField = async (req, res) => {
       displayOrder:
         displayOrder !== undefined ? displayOrder : customField.displayOrder,
       isActive: isActive !== undefined ? isActive : customField.isActive,
-      // Additional UI-specific fields (only update if provided)
+      // Additional UI-specific fields (only update if provided) - use compact versions
       userSpecifications:
-        processedUserSpecs !== undefined
-          ? processedUserSpecs
+        compactUserSpecs !== null
+          ? compactUserSpecs
           : customField.userSpecifications,
       placesWhereShown:
-        processedPlacesShown !== undefined
-          ? processedPlacesShown
+        compactPlacesShown !== null
+          ? compactPlacesShown
           : customField.placesWhereShown,
       editingPermissions:
         editingPermissions !== undefined
@@ -1006,11 +1070,7 @@ exports.updateCustomField = async (req, res) => {
         processedPlacesShown?.dealView !== undefined
           ? processedPlacesShown.dealView
           : customField.dealView ?? customField.showInDetailView,
-      qualityRules: {
-        required: finalIsRequired,
-        important: finalIsImportant,
-        ...processedQualityRules,
-      },
+      qualityRules: compactQualityRules,
     });
 
     await historyLogger(
@@ -3558,7 +3618,166 @@ exports.bulkUpdateFieldVisibility = async (req, res) => {
   }
 };
 
-// Migrate existing fields to use new leadView/dealView structure
+// Clean up corrupted JSON data in custom fields
+exports.cleanupCorruptedData = async (req, res) => {
+  const { dryRun = false } = req.query;
+  const masterUserID = req.adminId;
+
+  try {
+    const customFields = await CustomField.findAll({
+      where: { masterUserID },
+    });
+
+    const corruptedFields = [];
+    const cleanedFields = [];
+
+    for (const field of customFields) {
+      let needsCleanup = false;
+      const cleanedData = {};
+
+      // Check and clean qualityRules
+      if (typeof field.qualityRules === "string") {
+        try {
+          const parsed = JSON.parse(field.qualityRules);
+          if (typeof parsed === "object" && !Array.isArray(parsed)) {
+            cleanedData.qualityRules = {
+              required: field.isRequired || false,
+              important: field.isImportant || false,
+            };
+          } else {
+            needsCleanup = true;
+            cleanedData.qualityRules = {
+              required: field.isRequired || false,
+              important: field.isImportant || false,
+            };
+          }
+        } catch (e) {
+          needsCleanup = true;
+          cleanedData.qualityRules = {
+            required: field.isRequired || false,
+            important: field.isImportant || false,
+          };
+        }
+      } else if (Array.isArray(field.qualityRules)) {
+        // If it's an array (corrupted), reset it
+        needsCleanup = true;
+        cleanedData.qualityRules = {
+          required: field.isRequired || false,
+          important: field.isImportant || false,
+        };
+      }
+
+      // Check and clean userSpecifications
+      if (typeof field.userSpecifications === "string") {
+        try {
+          const parsed = JSON.parse(field.userSpecifications);
+          if (typeof parsed === "object" && !Array.isArray(parsed)) {
+            cleanedData.userSpecifications = {
+              editingUsers: parsed.editingUsers || "all",
+              editingUsersList: Array.isArray(parsed.editingUsersList)
+                ? parsed.editingUsersList
+                : [],
+              viewingUsers: parsed.viewingUsers || "all",
+              viewingUsersList: Array.isArray(parsed.viewingUsersList)
+                ? parsed.viewingUsersList
+                : [],
+            };
+          } else {
+            needsCleanup = true;
+            cleanedData.userSpecifications = {
+              editingUsers: "all",
+              editingUsersList: [],
+              viewingUsers: "all",
+              viewingUsersList: [],
+            };
+          }
+        } catch (e) {
+          needsCleanup = true;
+          cleanedData.userSpecifications = {
+            editingUsers: "all",
+            editingUsersList: [],
+            viewingUsers: "all",
+            viewingUsersList: [],
+          };
+        }
+      }
+
+      // Check and clean placesWhereShown
+      if (typeof field.placesWhereShown === "string") {
+        try {
+          const parsed = JSON.parse(field.placesWhereShown);
+          if (typeof parsed === "object" && !Array.isArray(parsed)) {
+            cleanedData.placesWhereShown = {
+              leadView: Boolean(parsed.leadView || field.showInAddView),
+              dealView: Boolean(parsed.dealView || field.showInDetailView),
+              listView: Boolean(parsed.listView || field.showInListView),
+              pipelines: parsed.pipelines || "all",
+            };
+          } else {
+            needsCleanup = true;
+            cleanedData.placesWhereShown = {
+              leadView: Boolean(field.showInAddView),
+              dealView: Boolean(field.showInDetailView),
+              listView: Boolean(field.showInListView),
+              pipelines: "all",
+            };
+          }
+        } catch (e) {
+          needsCleanup = true;
+          cleanedData.placesWhereShown = {
+            leadView: Boolean(field.showInAddView),
+            dealView: Boolean(field.showInDetailView),
+            listView: Boolean(field.showInListView),
+            pipelines: "all",
+          };
+        }
+      }
+
+      // Check and clean pipelineRestrictions
+      if (typeof field.pipelineRestrictions === "string") {
+        try {
+          const parsed = JSON.parse(field.pipelineRestrictions);
+          cleanedData.pipelineRestrictions = parsed;
+        } catch (e) {
+          needsCleanup = true;
+          cleanedData.pipelineRestrictions = "all";
+        }
+      }
+
+      if (needsCleanup) {
+        corruptedFields.push({
+          fieldId: field.fieldId,
+          fieldName: field.fieldName,
+          fieldLabel: field.fieldLabel,
+          issues: Object.keys(cleanedData),
+        });
+
+        if (!dryRun) {
+          await field.update(cleanedData);
+          cleanedFields.push(field.fieldId);
+        }
+      }
+    }
+
+    res.status(200).json({
+      message: dryRun
+        ? `Found ${corruptedFields.length} corrupted fields (dry run)`
+        : `Cleaned up ${cleanedFields.length} corrupted fields`,
+      totalFields: customFields.length,
+      corruptedFields: corruptedFields.length,
+      cleanedFields: cleanedFields.length,
+      dryRun,
+      corruptedFieldsDetails: dryRun ? corruptedFields : undefined,
+    });
+  } catch (error) {
+    console.error("Error cleaning up corrupted data:", error);
+    res.status(500).json({
+      message: "Failed to clean up corrupted data.",
+      error: error.message,
+    });
+  }
+};
+
 exports.migrateFieldsToNewStructure = async (req, res) => {
   const { entityType, dryRun = false } = req.query;
   const masterUserID = req.adminId;
