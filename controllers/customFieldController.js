@@ -1023,47 +1023,115 @@ exports.updateCustomField = async (req, res) => {
       { old: oldValues, new: customField.toJSON() }
     );
 
+    // Parse JSON fields for proper response
+    const responseCustomField = customField.toJSON();
+
+    // Parse userSpecifications if it's a string
+    if (typeof responseCustomField.userSpecifications === "string") {
+      try {
+        responseCustomField.userSpecifications = JSON.parse(
+          responseCustomField.userSpecifications
+        );
+      } catch (e) {
+        responseCustomField.userSpecifications = {};
+      }
+    }
+
+    // Parse qualityRules if it's a string or incorrectly formatted
+    if (typeof responseCustomField.qualityRules === "string") {
+      try {
+        responseCustomField.qualityRules = JSON.parse(
+          responseCustomField.qualityRules
+        );
+      } catch (e) {
+        responseCustomField.qualityRules = {
+          required: finalIsRequired,
+          important: finalIsImportant,
+        };
+      }
+    } else if (
+      Array.isArray(responseCustomField.qualityRules) ||
+      typeof responseCustomField.qualityRules === "object"
+    ) {
+      // If it's an array (corrupted) or object, reset it
+      responseCustomField.qualityRules = {
+        required: finalIsRequired,
+        important: finalIsImportant,
+        ...processedQualityRules,
+      };
+    }
+
+    // Parse pipelineRestrictions if it's a string
+    if (typeof responseCustomField.pipelineRestrictions === "string") {
+      try {
+        responseCustomField.pipelineRestrictions = JSON.parse(
+          responseCustomField.pipelineRestrictions
+        );
+      } catch (e) {
+        responseCustomField.pipelineRestrictions = "all";
+      }
+    }
+
+    // Parse placesWhereShown if it's a string
+    if (typeof responseCustomField.placesWhereShown === "string") {
+      try {
+        responseCustomField.placesWhereShown = JSON.parse(
+          responseCustomField.placesWhereShown
+        );
+      } catch (e) {
+        responseCustomField.placesWhereShown = processedPlacesShown || {
+          leadView: customField.leadView ?? customField.showInAddView,
+          dealView: customField.dealView ?? customField.showInDetailView,
+          listView: customField.showInListView,
+          pipelines: "all",
+        };
+      }
+    }
+
     res.status(200).json({
       message: "Custom field updated successfully.",
-      customField,
+      customField: responseCustomField,
       // Additional information about field configuration
       fieldConfiguration: {
         basicInfo: {
-          fieldName: customField.fieldName,
-          fieldLabel: customField.fieldLabel,
-          fieldType: customField.fieldType,
-          entityType: customField.entityType,
+          fieldName: responseCustomField.fieldName,
+          fieldLabel: responseCustomField.fieldLabel,
+          fieldType: responseCustomField.fieldType,
+          entityType: responseCustomField.entityType,
         },
         userSpecifications:
-          customField.userSpecifications || processedUserSpecs,
-        placesWhereShown: customField.placesWhereShown || processedPlacesShown,
-        qualityRules: {
-          required: finalIsRequired,
-          important: finalIsImportant,
-        },
+          responseCustomField.userSpecifications || processedUserSpecs,
+        placesWhereShown:
+          responseCustomField.placesWhereShown || processedPlacesShown,
+        qualityRules: responseCustomField.qualityRules,
         grouping: {
-          category: customField.category,
-          fieldGroup: customField.fieldGroup,
-          displayOrder: customField.displayOrder,
+          category: responseCustomField.category,
+          fieldGroup: responseCustomField.fieldGroup,
+          displayOrder: responseCustomField.displayOrder,
         },
       },
       // For UI feedback
       uiConfiguration: {
         showInForms: {
-          leadView: customField.leadView ?? customField.showInAddView,
-          dealView: customField.dealView ?? customField.showInDetailView,
-          listView: customField.showInListView,
+          leadView:
+            responseCustomField.leadView ?? responseCustomField.showInAddView,
+          dealView:
+            responseCustomField.dealView ??
+            responseCustomField.showInDetailView,
+          listView: responseCustomField.showInListView,
         },
         permissions: {
-          editingUsers: customField.userSpecifications?.editingUsers || "all",
-          viewingUsers: customField.userSpecifications?.viewingUsers || "all",
+          editingUsers:
+            responseCustomField.userSpecifications?.editingUsers || "all",
+          viewingUsers:
+            responseCustomField.userSpecifications?.viewingUsers || "all",
         },
-        pipelines: customField.pipelineRestrictions || "all",
+        pipelines: responseCustomField.pipelineRestrictions || "all",
       },
       // What was changed
       changes: {
         old: oldValues,
-        new: customField.toJSON(),
+        new: responseCustomField,
       },
     });
   } catch (error) {
