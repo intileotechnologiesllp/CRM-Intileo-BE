@@ -2840,3 +2840,868 @@ exports.getPersons = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Bulk edit leads functionality
+exports.bulkEditLeads = async (req, res) => {
+  const { leadIds, updateData } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  if (!updateData || Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      message: "updateData must contain at least one field to update",
+    });
+  }
+
+  console.log("Bulk edit request:", { leadIds, updateData });
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_UPDATE",
+        null,
+        "Access denied. You do not have permission to bulk edit leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk edit leads.",
+      });
+    }
+
+    // Get all columns for different models
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+    const personFields = Object.keys(Person.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    // Split the update data by model
+    const leadData = {};
+    const leadDetailsData = {};
+    const personData = {};
+    const organizationData = {};
+    const customFields = {};
+
+    for (const key in updateData) {
+      if (key === "customFields") {
+        Object.assign(customFields, updateData[key]);
+        continue;
+      }
+
+      if (leadFields.includes(key)) {
+        leadData[key] = updateData[key];
+      } else if (personFields.includes(key)) {
+        personData[key] = updateData[key];
+      } else if (organizationFields.includes(key)) {
+        organizationData[key] = updateData[key];
+      } else if (leadDetailsFields.includes(key)) {
+        leadDetailsData[key] = updateData[key];
+      } else {
+        // Treat as custom field
+        customFields[key] = updateData[key];
+      }
+    }
+
+    console.log("Processed update data:", {
+      leadData,
+      leadDetailsData,
+      personData,
+      organizationData,
+      customFields,
+    });
+
+    // Find leads to update
+    let whereClause = { leadId: { [Op.in]: leadIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToUpdate = await Lead.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: LeadDetails,
+          as: "details",
+          required: false,
+        },
+        {
+          model: Person,
+          as: "LeadPerson",
+          required: false,
+        },
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        },
+      ],
+    });
+
+    if (leadsToUpdate.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to update or you don't have permission to edit them",
+      });
+    }
+
+    console.log(`Found ${leadsToUpdate.length} leads to update`);
+
+    const updateResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead
+    for (const lead of leadsToUpdate) {
+      try {
+        console.log(`Processing lead ${lead.leadId}`);
+
+        // Track if owner is being changed
+        let ownerChanged = false;
+        let newOwner = null;
+        if (updateData.ownerId && updateData.ownerId !== lead.ownerId) {
+          ownerChanged = true;
+          newOwner = await MasterUser.findByPk(updateData.ownerId);
+        }
+
+        // Update Lead table
+        if (Object.keys(leadData).length > 0) {
+          await lead.update(leadData);
+          console.log(`Updated lead ${lead.leadId} with:`, leadData);
+        }
+
+        // Update LeadDetails table
+        if (Object.keys(leadDetailsData).length > 0) {
+          let leadDetails = await LeadDetails.findOne({
+            where: { leadId: lead.leadId },
+          });
+
+          if (leadDetails) {
+            await leadDetails.update(leadDetailsData);
+          } else {
+            await LeadDetails.create({
+              leadId: lead.leadId,
+              ...leadDetailsData,
+            });
+          }
+          console.log(
+            `Updated lead details for ${lead.leadId}:`,
+            leadDetailsData
+          );
+        }
+
+        // Update Person table
+        if (Object.keys(personData).length > 0 && lead.personId) {
+          const person = await Person.findByPk(lead.personId);
+          if (person) {
+            await person.update(personData);
+            console.log(`Updated person ${lead.personId}:`, personData);
+          }
+        }
+
+        // Update Organization table
+        if (
+          Object.keys(organizationData).length > 0 &&
+          lead.leadOrganizationId
+        ) {
+          const organization = await Organization.findByPk(
+            lead.leadOrganizationId
+          );
+          if (organization) {
+            await organization.update(organizationData);
+            console.log(
+              `Updated organization ${lead.leadOrganizationId}:`,
+              organizationData
+            );
+          }
+        }
+
+        // Handle custom fields
+        const savedCustomFields = {};
+        if (customFields && Object.keys(customFields).length > 0) {
+          for (const [fieldKey, value] of Object.entries(customFields)) {
+            try {
+              // Find custom field by fieldId first, then by fieldName
+              let customField = await CustomField.findOne({
+                where: {
+                  fieldId: fieldKey,
+                  entityType: { [Op.in]: ["lead", "both"] },
+                  isActive: true,
+                  [Op.or]: [
+                    { masterUserID: req.adminId },
+                    { fieldSource: "default" },
+                    { fieldSource: "system" },
+                  ],
+                },
+              });
+
+              if (!customField) {
+                customField = await CustomField.findOne({
+                  where: {
+                    fieldName: fieldKey,
+                    entityType: { [Op.in]: ["lead", "both"] },
+                    isActive: true,
+                    [Op.or]: [
+                      { masterUserID: req.adminId },
+                      { fieldSource: "default" },
+                      { fieldSource: "system" },
+                    ],
+                  },
+                });
+              }
+
+              if (
+                customField &&
+                value !== null &&
+                value !== undefined &&
+                value !== ""
+              ) {
+                // Check if custom field value already exists
+                const existingValue = await CustomFieldValue.findOne({
+                  where: {
+                    fieldId: customField.fieldId,
+                    entityId: lead.leadId,
+                    entityType: "lead",
+                  },
+                });
+
+                if (existingValue) {
+                  await existingValue.update({ value: value });
+                } else {
+                  await CustomFieldValue.create({
+                    fieldId: customField.fieldId,
+                    entityId: lead.leadId,
+                    entityType: "lead",
+                    value: value,
+                    masterUserID: req.adminId,
+                  });
+                }
+
+                savedCustomFields[customField.fieldName] = {
+                  fieldName: customField.fieldName,
+                  fieldType: customField.fieldType,
+                  value: value,
+                };
+              }
+            } catch (customFieldError) {
+              console.error(
+                `Error updating custom field ${fieldKey} for lead ${lead.leadId}:`,
+                customFieldError
+              );
+            }
+          }
+        }
+
+        // Send email notification if owner changed
+        if (ownerChanged && newOwner && newOwner.email) {
+          try {
+            const assigner = await MasterUser.findByPk(req.adminId);
+            if (assigner && assigner.email) {
+              await sendEmail(assigner.email, {
+                from: assigner.email,
+                to: newOwner.email,
+                subject: "You have been assigned a new lead",
+                text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+              });
+            }
+          } catch (emailError) {
+            console.error(
+              `Error sending email notification for lead ${lead.leadId}:`,
+              emailError
+            );
+          }
+        }
+
+        // Log audit trail for successful update
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UPDATE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk updated by ${req.role}`,
+          { updateData }
+        );
+
+        updateResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+          customFields: savedCustomFields,
+        });
+      } catch (leadError) {
+        console.error(`Error updating lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UPDATE",
+          req.adminId,
+          `Error updating lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        updateResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToUpdate.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      updateResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found or no permission to edit",
+      });
+    });
+
+    console.log("Bulk update results:", updateResults);
+
+    res.status(200).json({
+      message: "Bulk edit operation completed",
+      results: updateResults,
+      summary: {
+        total: leadIds.length,
+        successful: updateResults.successful.length,
+        failed: updateResults.failed.length,
+        skipped: updateResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk edit leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_UPDATE",
+      null,
+      "Error in bulk edit leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk delete leads functionality
+exports.bulkDeleteLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk delete request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_DELETE",
+        null,
+        "Access denied. You do not have permission to bulk delete leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk delete leads.",
+      });
+    }
+
+    // Find leads to delete
+    let whereClause = { leadId: { [Op.in]: leadIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToDelete = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "masterUserID",
+      ],
+    });
+
+    if (leadsToDelete.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to delete or you don't have permission to delete them",
+      });
+    }
+
+    console.log(`Found ${leadsToDelete.length} leads to delete`);
+
+    const deleteResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for deletion
+    for (const lead of leadsToDelete) {
+      try {
+        console.log(`Deleting lead ${lead.leadId}`);
+
+        // Delete related data first
+        // Delete custom field values
+        await CustomFieldValue.destroy({
+          where: {
+            entityId: lead.leadId,
+            entityType: "lead",
+          },
+        });
+
+        // Delete lead notes
+        await LeadNote.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Delete lead details
+        await LeadDetails.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Update emails to remove leadId association
+        await Email.update(
+          { leadId: null },
+          { where: { leadId: lead.leadId } }
+        );
+
+        // Delete the lead
+        await Lead.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Log audit trail for successful deletion
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_DELETE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk deleted by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        deleteResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error deleting lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_DELETE",
+          req.adminId,
+          `Error deleting lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        deleteResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToDelete.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      deleteResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found or no permission to delete",
+      });
+    });
+
+    console.log("Bulk delete results:", deleteResults);
+
+    res.status(200).json({
+      message: "Bulk delete operation completed",
+      results: deleteResults,
+      summary: {
+        total: leadIds.length,
+        successful: deleteResults.successful.length,
+        failed: deleteResults.failed.length,
+        skipped: deleteResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk delete leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_DELETE",
+      null,
+      "Error in bulk delete leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk delete",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk archive leads functionality
+exports.bulkArchiveLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk archive request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_ARCHIVE",
+        null,
+        "Access denied. You do not have permission to bulk archive leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk archive leads.",
+      });
+    }
+
+    // Find leads to archive
+    let whereClause = {
+      leadId: { [Op.in]: leadIds },
+      isArchived: false, // Only archive non-archived leads
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToArchive = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "isArchived",
+      ],
+    });
+
+    if (leadsToArchive.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to archive or you don't have permission to archive them",
+      });
+    }
+
+    console.log(`Found ${leadsToArchive.length} leads to archive`);
+
+    const archiveResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for archiving
+    for (const lead of leadsToArchive) {
+      try {
+        console.log(`Archiving lead ${lead.leadId}`);
+
+        // Update the lead to set isArchived = true and archiveTime
+        await Lead.update(
+          {
+            isArchived: true,
+            archiveTime: new Date(),
+          },
+          {
+            where: { leadId: lead.leadId },
+          }
+        );
+
+        // Log audit trail for successful archiving
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_ARCHIVE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk archived by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        archiveResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error archiving lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_ARCHIVE",
+          req.adminId,
+          `Error archiving lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        archiveResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToArchive.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      archiveResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found, already archived, or no permission to archive",
+      });
+    });
+
+    console.log("Bulk archive results:", archiveResults);
+
+    res.status(200).json({
+      message: "Bulk archive operation completed",
+      results: archiveResults,
+      summary: {
+        total: leadIds.length,
+        successful: archiveResults.successful.length,
+        failed: archiveResults.failed.length,
+        skipped: archiveResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk archive leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_ARCHIVE",
+      null,
+      "Error in bulk archive leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk archive",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk unarchive leads functionality
+exports.bulkUnarchiveLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk unarchive request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_UNARCHIVE",
+        null,
+        "Access denied. You do not have permission to bulk unarchive leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk unarchive leads.",
+      });
+    }
+
+    // Find leads to unarchive
+    let whereClause = {
+      leadId: { [Op.in]: leadIds },
+      isArchived: true, // Only unarchive archived leads
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToUnarchive = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "isArchived",
+      ],
+    });
+
+    if (leadsToUnarchive.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to unarchive or you don't have permission to unarchive them",
+      });
+    }
+
+    console.log(`Found ${leadsToUnarchive.length} leads to unarchive`);
+
+    const unarchiveResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for unarchiving
+    for (const lead of leadsToUnarchive) {
+      try {
+        console.log(`Unarchiving lead ${lead.leadId}`);
+
+        // Update the lead to set isArchived = false
+        await Lead.update(
+          {
+            isArchived: false,
+            archiveTime: null,
+          },
+          {
+            where: { leadId: lead.leadId },
+          }
+        );
+
+        // Log audit trail for successful unarchiving
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UNARCHIVE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk unarchived by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        unarchiveResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error unarchiving lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UNARCHIVE",
+          req.adminId,
+          `Error unarchiving lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        unarchiveResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToUnarchive.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      unarchiveResults.skipped.push({
+        leadId: leadId,
+        reason:
+          "Lead not found, already unarchived, or no permission to unarchive",
+      });
+    });
+
+    console.log("Bulk unarchive results:", unarchiveResults);
+
+    res.status(200).json({
+      message: "Bulk unarchive operation completed",
+      results: unarchiveResults,
+      summary: {
+        total: leadIds.length,
+        successful: unarchiveResults.successful.length,
+        failed: unarchiveResults.failed.length,
+        skipped: unarchiveResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk unarchive leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_UNARCHIVE",
+      null,
+      "Error in bulk unarchive leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk unarchive",
+      error: error.message,
+    });
+  }
+};
