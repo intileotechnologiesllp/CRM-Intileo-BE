@@ -20,14 +20,39 @@ router.post("/delete/:leadId", verifyToken, leadController.deleteLead);
 
 router.get("/get", verifyToken, leadController.getLeads);
 router.post("/updateLables", verifyToken, leadController.updateAllLabels);
-router.put("/update-custom-fields/:leadId", verifyToken, leadController.updateLeadCustomFields);
-router.get("/get-general-users", verifyToken, leadController.getNonAdminMasterUserNames);
+router.put(
+  "/update-custom-fields/:leadId",
+  verifyToken,
+  leadController.updateLeadCustomFields
+);
+router.get(
+  "/get-general-users",
+  verifyToken,
+  leadController.getNonAdminMasterUserNames
+);
 router.post("/by-master-user", leadController.getLeadsByMasterUser);
-router.get("/get-All-lead-details/:leadId", verifyToken, leadController.getAllLeadDetails);
+router.get(
+  "/get-All-lead-details/:leadId",
+  verifyToken,
+  leadController.getAllLeadDetails
+);
 router.post("/add-lead-note/:leadId", verifyToken, leadController.addLeadNote);
-router.get("/delete-lead-note/:noteId", verifyToken, leadController.deleteLeadNote);
-router.post("/update-lead-note/:noteId", verifyToken, leadController.updateLeadNote);
-router.get("/get-persons",verifyToken, leadController.getPersons);
+router.get(
+  "/delete-lead-note/:noteId",
+  verifyToken,
+  leadController.deleteLeadNote
+);
+router.post(
+  "/update-lead-note/:noteId",
+  verifyToken,
+  leadController.updateLeadNote
+);
+router.get("/get-persons", verifyToken, leadController.getPersons);
 
+// Bulk operations
+router.post("/bulk-edit", verifyToken, leadController.bulkEditLeads);
+router.post("/bulk-delete", verifyToken, leadController.bulkDeleteLeads);
+router.post("/bulk-archive", verifyToken, leadController.bulkArchiveLeads);
+router.post("/bulk-unarchive", verifyToken, leadController.bulkUnarchiveLeads);
 
 module.exports = router;
