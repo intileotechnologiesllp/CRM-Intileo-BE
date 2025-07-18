@@ -559,8 +559,8 @@ exports.getCustomFields = async (req, res) => {
 
       // Check if it's a custom field or default field
       if (field.fieldId) {
-        // Custom field - use existing processing logic
-        fieldObj = field.toJSON();
+        // Custom field - already a plain object from .map(f => f.toJSON())
+        fieldObj = field;
       } else {
         // Default field - create simple object
         fieldObj = {
