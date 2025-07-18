@@ -867,3 +867,620 @@ exports.updateAllLeadsNextActivity = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Bulk edit activities functionality
+exports.bulkEditActivities = async (req, res) => {
+  const { activityIds, updateData } = req.body;
+
+  // Validate input
+  if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
+    return res.status(400).json({
+      message: "activityIds must be a non-empty array",
+    });
+  }
+
+  if (!updateData || Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      message: "updateData must contain at least one field to update",
+    });
+  }
+
+  console.log("Bulk edit activities request:", { activityIds, updateData });
+
+  try {
+    // Find activities to update
+    let whereClause = { activityId: { [Op.in]: activityIds } };
+
+    // Apply role-based filtering - only admin can edit all activities
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { assignedTo: req.adminId },
+      ];
+    }
+
+    const activitiesToUpdate = await Activity.findAll({
+      where: whereClause,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "startDateTime",
+        "endDateTime",
+        "assignedTo",
+        "leadId",
+        "dealId",
+        "personId",
+        "leadOrganizationId",
+        "isDone",
+      ],
+    });
+
+    if (activitiesToUpdate.length === 0) {
+      return res.status(404).json({
+        message:
+          "No activities found to update or you don't have permission to edit them",
+      });
+    }
+
+    console.log(`Found ${activitiesToUpdate.length} activities to update`);
+
+    const updateResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // If guests is present and is an array, stringify it
+    if (updateData.guests && Array.isArray(updateData.guests)) {
+      updateData.guests = JSON.stringify(updateData.guests);
+    }
+
+    // Process each activity
+    for (const activity of activitiesToUpdate) {
+      try {
+        console.log(`Processing activity ${activity.activityId}`);
+
+        // Handle person and organization updates if needed
+        let contactPerson = null;
+        let email = null;
+        let organization = null;
+
+        // If personId is being updated or contact person info is being updated
+        if (
+          updateData.personId ||
+          updateData.contactPerson ||
+          updateData.email
+        ) {
+          const personId = updateData.personId || activity.personId;
+          if (personId) {
+            const person = await Person.findByPk(personId);
+            if (person) {
+              contactPerson = person.contactPerson;
+              email = person.email;
+            }
+          }
+        }
+
+        // If leadOrganizationId is being updated or organization info is being updated
+        if (updateData.leadOrganizationId || updateData.organization) {
+          const orgId =
+            updateData.leadOrganizationId || activity.leadOrganizationId;
+          if (orgId) {
+            const org = await Organizations.findByPk(orgId);
+            if (org) {
+              organization = org.organization;
+            }
+          }
+        }
+
+        // Prepare the update data with additional fields
+        const finalUpdateData = {
+          ...updateData,
+          ...(contactPerson && { contactPerson }),
+          ...(email && { email }),
+          ...(organization && { organization }),
+        };
+
+        // Update the activity
+        await activity.update(finalUpdateData);
+
+        // Update next activity date for the lead if this activity is linked to a lead
+        // and if the update affects scheduling
+        if (
+          activity.leadId &&
+          (updateData.startDateTime ||
+            updateData.isDone !== undefined ||
+            updateData.leadId)
+        ) {
+          await updateNextActivityForLead(activity.leadId);
+
+          // If leadId was changed, also update the previous lead
+          if (updateData.leadId && updateData.leadId !== activity.leadId) {
+            await updateNextActivityForLead(activity.leadId);
+          }
+        }
+
+        updateResults.successful.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          startDateTime: activity.startDateTime,
+          endDateTime: activity.endDateTime,
+          assignedTo: activity.assignedTo,
+        });
+
+        console.log(`Updated activity ${activity.activityId}`);
+      } catch (activityError) {
+        console.error(
+          `Error updating activity ${activity.activityId}:`,
+          activityError
+        );
+
+        updateResults.failed.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          error: activityError.message,
+        });
+      }
+    }
+
+    // Check for activities that were requested but not found
+    const foundActivityIds = activitiesToUpdate.map(
+      (activity) => activity.activityId
+    );
+    const notFoundActivityIds = activityIds.filter(
+      (id) => !foundActivityIds.includes(id)
+    );
+
+    notFoundActivityIds.forEach((activityId) => {
+      updateResults.skipped.push({
+        activityId: activityId,
+        reason: "Activity not found or no permission to edit",
+      });
+    });
+
+    console.log("Bulk update results:", updateResults);
+
+    res.status(200).json({
+      message: "Bulk edit operation completed",
+      results: updateResults,
+      summary: {
+        total: activityIds.length,
+        successful: updateResults.successful.length,
+        failed: updateResults.failed.length,
+        skipped: updateResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk edit activities:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk delete activities functionality
+exports.bulkDeleteActivities = async (req, res) => {
+  const { activityIds } = req.body;
+
+  // Validate input
+  if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
+    return res.status(400).json({
+      message: "activityIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk delete activities request:", activityIds);
+
+  try {
+    // Find activities to delete
+    let whereClause = { activityId: { [Op.in]: activityIds } };
+
+    // Apply role-based filtering - only admin can delete all activities
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { assignedTo: req.adminId },
+      ];
+    }
+
+    const activitiesToDelete = await Activity.findAll({
+      where: whereClause,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "startDateTime",
+        "assignedTo",
+        "leadId",
+      ],
+    });
+
+    if (activitiesToDelete.length === 0) {
+      return res.status(404).json({
+        message:
+          "No activities found to delete or you don't have permission to delete them",
+      });
+    }
+
+    console.log(`Found ${activitiesToDelete.length} activities to delete`);
+
+    const deleteResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each activity for deletion
+    for (const activity of activitiesToDelete) {
+      try {
+        console.log(`Deleting activity ${activity.activityId}`);
+
+        const leadId = activity.leadId;
+
+        // Delete the activity
+        await Activity.destroy({
+          where: { activityId: activity.activityId },
+        });
+
+        // Update next activity date for the lead if this activity was linked to a lead
+        if (leadId) {
+          await updateNextActivityForLead(leadId);
+        }
+
+        deleteResults.successful.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          startDateTime: activity.startDateTime,
+          assignedTo: activity.assignedTo,
+        });
+
+        console.log(`Deleted activity ${activity.activityId}`);
+      } catch (activityError) {
+        console.error(
+          `Error deleting activity ${activity.activityId}:`,
+          activityError
+        );
+
+        deleteResults.failed.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          error: activityError.message,
+        });
+      }
+    }
+
+    // Check for activities that were requested but not found
+    const foundActivityIds = activitiesToDelete.map(
+      (activity) => activity.activityId
+    );
+    const notFoundActivityIds = activityIds.filter(
+      (id) => !foundActivityIds.includes(id)
+    );
+
+    notFoundActivityIds.forEach((activityId) => {
+      deleteResults.skipped.push({
+        activityId: activityId,
+        reason: "Activity not found or no permission to delete",
+      });
+    });
+
+    console.log("Bulk delete results:", deleteResults);
+
+    res.status(200).json({
+      message: "Bulk delete operation completed",
+      results: deleteResults,
+      summary: {
+        total: activityIds.length,
+        successful: deleteResults.successful.length,
+        failed: deleteResults.failed.length,
+        skipped: deleteResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk delete activities:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk delete",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk mark activities as done/undone
+exports.bulkMarkActivities = async (req, res) => {
+  const { activityIds, isDone } = req.body;
+
+  // Validate input
+  if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
+    return res.status(400).json({
+      message: "activityIds must be a non-empty array",
+    });
+  }
+
+  if (typeof isDone !== "boolean") {
+    return res.status(400).json({
+      message: "isDone must be a boolean value",
+    });
+  }
+
+  console.log("Bulk mark activities request:", { activityIds, isDone });
+
+  try {
+    // Find activities to mark
+    let whereClause = { activityId: { [Op.in]: activityIds } };
+
+    // Apply role-based filtering - only admin can mark all activities
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { assignedTo: req.adminId },
+      ];
+    }
+
+    const activitiesToMark = await Activity.findAll({
+      where: whereClause,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "startDateTime",
+        "assignedTo",
+        "leadId",
+        "isDone",
+      ],
+    });
+
+    if (activitiesToMark.length === 0) {
+      return res.status(404).json({
+        message:
+          "No activities found to mark or you don't have permission to mark them",
+      });
+    }
+
+    console.log(
+      `Found ${activitiesToMark.length} activities to mark as ${
+        isDone ? "done" : "undone"
+      }`
+    );
+
+    const markResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each activity for marking
+    for (const activity of activitiesToMark) {
+      try {
+        console.log(
+          `Marking activity ${activity.activityId} as ${
+            isDone ? "done" : "undone"
+          }`
+        );
+
+        const leadId = activity.leadId;
+
+        // Update the activity done status
+        await Activity.update(
+          { isDone: isDone },
+          { where: { activityId: activity.activityId } }
+        );
+
+        // Update next activity date for the lead if this activity was linked to a lead
+        if (leadId) {
+          await updateNextActivityForLead(leadId);
+        }
+
+        markResults.successful.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          startDateTime: activity.startDateTime,
+          assignedTo: activity.assignedTo,
+          previousStatus: activity.isDone,
+          newStatus: isDone,
+        });
+
+        console.log(
+          `Marked activity ${activity.activityId} as ${
+            isDone ? "done" : "undone"
+          }`
+        );
+      } catch (activityError) {
+        console.error(
+          `Error marking activity ${activity.activityId}:`,
+          activityError
+        );
+
+        markResults.failed.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          error: activityError.message,
+        });
+      }
+    }
+
+    // Check for activities that were requested but not found
+    const foundActivityIds = activitiesToMark.map(
+      (activity) => activity.activityId
+    );
+    const notFoundActivityIds = activityIds.filter(
+      (id) => !foundActivityIds.includes(id)
+    );
+
+    notFoundActivityIds.forEach((activityId) => {
+      markResults.skipped.push({
+        activityId: activityId,
+        reason: "Activity not found or no permission to mark",
+      });
+    });
+
+    console.log("Bulk mark results:", markResults);
+
+    res.status(200).json({
+      message: `Bulk mark as ${isDone ? "done" : "undone"} operation completed`,
+      results: markResults,
+      summary: {
+        total: activityIds.length,
+        successful: markResults.successful.length,
+        failed: markResults.failed.length,
+        skipped: markResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk mark activities:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk mark",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk reassign activities to different users
+exports.bulkReassignActivities = async (req, res) => {
+  const { activityIds, assignedTo } = req.body;
+
+  // Validate input
+  if (!activityIds || !Array.isArray(activityIds) || activityIds.length === 0) {
+    return res.status(400).json({
+      message: "activityIds must be a non-empty array",
+    });
+  }
+
+  if (!assignedTo) {
+    return res.status(400).json({
+      message: "assignedTo is required",
+    });
+  }
+
+  console.log("Bulk reassign activities request:", { activityIds, assignedTo });
+
+  try {
+    // Find activities to reassign
+    let whereClause = { activityId: { [Op.in]: activityIds } };
+
+    // Apply role-based filtering - only admin can reassign all activities
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { assignedTo: req.adminId },
+      ];
+    }
+
+    const activitiesToReassign = await Activity.findAll({
+      where: whereClause,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "startDateTime",
+        "assignedTo",
+        "leadId",
+      ],
+    });
+
+    if (activitiesToReassign.length === 0) {
+      return res.status(404).json({
+        message:
+          "No activities found to reassign or you don't have permission to reassign them",
+      });
+    }
+
+    console.log(
+      `Found ${activitiesToReassign.length} activities to reassign to ${assignedTo}`
+    );
+
+    const reassignResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each activity for reassignment
+    for (const activity of activitiesToReassign) {
+      try {
+        console.log(
+          `Reassigning activity ${activity.activityId} from ${activity.assignedTo} to ${assignedTo}`
+        );
+
+        const leadId = activity.leadId;
+
+        // Update the activity assigned user
+        await Activity.update(
+          { assignedTo: assignedTo },
+          { where: { activityId: activity.activityId } }
+        );
+
+        // Update next activity date for the lead if this activity was linked to a lead
+        if (leadId) {
+          await updateNextActivityForLead(leadId);
+        }
+
+        reassignResults.successful.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          startDateTime: activity.startDateTime,
+          fromUser: activity.assignedTo,
+          toUser: assignedTo,
+        });
+
+        console.log(
+          `Reassigned activity ${activity.activityId} to ${assignedTo}`
+        );
+      } catch (activityError) {
+        console.error(
+          `Error reassigning activity ${activity.activityId}:`,
+          activityError
+        );
+
+        reassignResults.failed.push({
+          activityId: activity.activityId,
+          type: activity.type,
+          subject: activity.subject,
+          error: activityError.message,
+        });
+      }
+    }
+
+    // Check for activities that were requested but not found
+    const foundActivityIds = activitiesToReassign.map(
+      (activity) => activity.activityId
+    );
+    const notFoundActivityIds = activityIds.filter(
+      (id) => !foundActivityIds.includes(id)
+    );
+
+    notFoundActivityIds.forEach((activityId) => {
+      reassignResults.skipped.push({
+        activityId: activityId,
+        reason: "Activity not found or no permission to reassign",
+      });
+    });
+
+    console.log("Bulk reassign results:", reassignResults);
+
+    res.status(200).json({
+      message: `Bulk reassign to ${assignedTo} operation completed`,
+      results: reassignResults,
+      summary: {
+        total: activityIds.length,
+        successful: reassignResults.successful.length,
+        failed: reassignResults.failed.length,
+        skipped: reassignResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk reassign activities:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk reassign",
+      error: error.message,
+    });
+  }
+};
