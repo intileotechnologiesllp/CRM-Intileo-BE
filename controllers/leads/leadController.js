@@ -24,6 +24,15 @@ const CustomFieldValue = require("../../models/customFieldValueModel");
 const { sendEmail } = require("../../utils/emailSend");
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
+  // Only use these fields as standard fields for root-level custom field extraction
+  const standardFields = [
+    "title",
+    "ownerId",
+    "sourceChannel",
+    "sourceChannelID",
+  ];
+
+  // Extract standard fields
   const {
     contactPerson,
     organization,
@@ -46,10 +55,22 @@ exports.createLead = async (req, res) => {
     sourceOrgin,
     SBUClass,
     numberOfReportsPrepared,
-    emailID, // Added emailID to the request body
-    customFields,
-    value, // Add custom fields to request body
+    emailID,
+    customFields: customFieldsFromBody,
+    value,
+    pipeline,
+    stage,
+    productName,
+    sourceOriginID,
   } = req.body;
+
+  // Collect custom fields from root level (not in standardFields)
+  let customFields = { ...(customFieldsFromBody || {}) };
+  for (const key in req.body) {
+    if (!standardFields.includes(key)) {
+      customFields[key] = req.body[key];
+    }
+  }
 
   console.log("Request body sourceOrgin:", sourceOrgin);
 
