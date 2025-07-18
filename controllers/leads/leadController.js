@@ -971,8 +971,14 @@ exports.getLeads = async (req, res) => {
         delete leadObj.details;
       }
 
-      // Add custom fields
-      leadObj.customFields = customFieldsByLead[leadObj.leadId] || {};
+      // Add custom fields directly to the lead object (not wrapped in customFields)
+      const customFields = customFieldsByLead[leadObj.leadId] || {};
+      Object.entries(customFields).forEach(([fieldName, fieldData]) => {
+        leadObj[fieldName] = fieldData.value;
+      });
+
+      // Keep the customFields property for backward compatibility (optional)
+      leadObj.customFields = customFields;
 
       return leadObj;
     });
