@@ -4655,3 +4655,456 @@ exports.deleteAllEmailsForUser = async (req, res) => {
     });
   }
 };
+
+// Bulk email operations
+exports.bulkEditEmails = async (req, res) => {
+  const { emailIds, updateData } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({
+      message: "emailIds must be a non-empty array",
+    });
+  }
+
+  if (!updateData || Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      message: "updateData must contain at least one field to update",
+    });
+  }
+
+  console.log("Bulk edit emails request:", { emailIds, updateData });
+
+  try {
+    // Find emails to update (only user's own emails)
+    const emailsToUpdate = await Email.findAll({
+      where: {
+        emailID: { [Sequelize.Op.in]: emailIds },
+        masterUserID: masterUserID,
+      },
+    });
+
+    if (emailsToUpdate.length === 0) {
+      return res.status(404).json({
+        message:
+          "No emails found to update or you don't have permission to edit them",
+      });
+    }
+
+    console.log(`Found ${emailsToUpdate.length} emails to update`);
+
+    const updateResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each email
+    for (const email of emailsToUpdate) {
+      try {
+        console.log(`Processing email ${email.emailID}`);
+
+        // Update the email
+        await email.update(updateData);
+
+        updateResults.successful.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          sender: email.sender,
+          folder: email.folder,
+        });
+
+        console.log(`Updated email ${email.emailID}`);
+      } catch (emailError) {
+        console.error(`Error updating email ${email.emailID}:`, emailError);
+
+        updateResults.failed.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          error: emailError.message,
+        });
+      }
+    }
+
+    // Check for emails that were requested but not found
+    const foundEmailIds = emailsToUpdate.map((email) => email.emailID);
+    const notFoundEmailIds = emailIds.filter(
+      (id) => !foundEmailIds.includes(id)
+    );
+
+    notFoundEmailIds.forEach((emailId) => {
+      updateResults.skipped.push({
+        emailID: emailId,
+        reason: "Email not found or no permission to edit",
+      });
+    });
+
+    console.log("Bulk update results:", updateResults);
+
+    res.status(200).json({
+      message: "Bulk edit operation completed",
+      results: updateResults,
+      summary: {
+        total: emailIds.length,
+        successful: updateResults.successful.length,
+        failed: updateResults.failed.length,
+        skipped: updateResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk edit emails:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk delete emails
+exports.bulkDeleteEmails = async (req, res) => {
+  const { emailIds } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({
+      message: "emailIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk delete emails request:", emailIds);
+
+  try {
+    // Find emails to delete (only user's own emails)
+    const emailsToDelete = await Email.findAll({
+      where: {
+        emailID: { [Sequelize.Op.in]: emailIds },
+        masterUserID: masterUserID,
+      },
+      attributes: ["emailID", "subject", "sender", "folder"],
+    });
+
+    if (emailsToDelete.length === 0) {
+      return res.status(404).json({
+        message:
+          "No emails found to delete or you don't have permission to delete them",
+      });
+    }
+
+    console.log(`Found ${emailsToDelete.length} emails to delete`);
+
+    const deleteResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each email for deletion
+    for (const email of emailsToDelete) {
+      try {
+        console.log(`Deleting email ${email.emailID}`);
+
+        // Delete attachments first
+        await Attachment.destroy({
+          where: { emailID: email.emailID },
+        });
+
+        // Delete the email
+        await Email.destroy({
+          where: { emailID: email.emailID },
+        });
+
+        deleteResults.successful.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          sender: email.sender,
+          folder: email.folder,
+        });
+
+        console.log(`Deleted email ${email.emailID}`);
+      } catch (emailError) {
+        console.error(`Error deleting email ${email.emailID}:`, emailError);
+
+        deleteResults.failed.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          error: emailError.message,
+        });
+      }
+    }
+
+    // Check for emails that were requested but not found
+    const foundEmailIds = emailsToDelete.map((email) => email.emailID);
+    const notFoundEmailIds = emailIds.filter(
+      (id) => !foundEmailIds.includes(id)
+    );
+
+    notFoundEmailIds.forEach((emailId) => {
+      deleteResults.skipped.push({
+        emailID: emailId,
+        reason: "Email not found or no permission to delete",
+      });
+    });
+
+    console.log("Bulk delete results:", deleteResults);
+
+    res.status(200).json({
+      message: "Bulk delete operation completed",
+      results: deleteResults,
+      summary: {
+        total: emailIds.length,
+        successful: deleteResults.successful.length,
+        failed: deleteResults.failed.length,
+        skipped: deleteResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk delete emails:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk delete",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk mark emails as read/unread
+exports.bulkMarkEmails = async (req, res) => {
+  const { emailIds, isRead } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({
+      message: "emailIds must be a non-empty array",
+    });
+  }
+
+  if (typeof isRead !== "boolean") {
+    return res.status(400).json({
+      message: "isRead must be a boolean value",
+    });
+  }
+
+  console.log("Bulk mark emails request:", { emailIds, isRead });
+
+  try {
+    // Find emails to mark (only user's own emails)
+    const emailsToMark = await Email.findAll({
+      where: {
+        emailID: { [Sequelize.Op.in]: emailIds },
+        masterUserID: masterUserID,
+      },
+      attributes: ["emailID", "subject", "sender", "folder", "isRead"],
+    });
+
+    if (emailsToMark.length === 0) {
+      return res.status(404).json({
+        message:
+          "No emails found to mark or you don't have permission to mark them",
+      });
+    }
+
+    console.log(
+      `Found ${emailsToMark.length} emails to mark as ${
+        isRead ? "read" : "unread"
+      }`
+    );
+
+    const markResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each email for marking
+    for (const email of emailsToMark) {
+      try {
+        console.log(
+          `Marking email ${email.emailID} as ${isRead ? "read" : "unread"}`
+        );
+
+        // Update the email read status
+        await Email.update(
+          { isRead: isRead },
+          { where: { emailID: email.emailID } }
+        );
+
+        markResults.successful.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          sender: email.sender,
+          folder: email.folder,
+          previousStatus: email.isRead,
+          newStatus: isRead,
+        });
+
+        console.log(
+          `Marked email ${email.emailID} as ${isRead ? "read" : "unread"}`
+        );
+      } catch (emailError) {
+        console.error(`Error marking email ${email.emailID}:`, emailError);
+
+        markResults.failed.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          error: emailError.message,
+        });
+      }
+    }
+
+    // Check for emails that were requested but not found
+    const foundEmailIds = emailsToMark.map((email) => email.emailID);
+    const notFoundEmailIds = emailIds.filter(
+      (id) => !foundEmailIds.includes(id)
+    );
+
+    notFoundEmailIds.forEach((emailId) => {
+      markResults.skipped.push({
+        emailID: emailId,
+        reason: "Email not found or no permission to mark",
+      });
+    });
+
+    console.log("Bulk mark results:", markResults);
+
+    res.status(200).json({
+      message: `Bulk mark as ${isRead ? "read" : "unread"} operation completed`,
+      results: markResults,
+      summary: {
+        total: emailIds.length,
+        successful: markResults.successful.length,
+        failed: markResults.failed.length,
+        skipped: markResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk mark emails:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk mark",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk move emails to folder
+exports.bulkMoveEmails = async (req, res) => {
+  const { emailIds, targetFolder } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+    return res.status(400).json({
+      message: "emailIds must be a non-empty array",
+    });
+  }
+
+  if (!targetFolder || typeof targetFolder !== "string") {
+    return res.status(400).json({
+      message: "targetFolder must be a non-empty string",
+    });
+  }
+
+  // Validate folder name
+  const validFolders = ["inbox", "sent", "drafts", "trash", "archive"];
+  if (!validFolders.includes(targetFolder.toLowerCase())) {
+    return res.status(400).json({
+      message: `targetFolder must be one of: ${validFolders.join(", ")}`,
+    });
+  }
+
+  console.log("Bulk move emails request:", { emailIds, targetFolder });
+
+  try {
+    // Find emails to move (only user's own emails)
+    const emailsToMove = await Email.findAll({
+      where: {
+        emailID: { [Sequelize.Op.in]: emailIds },
+        masterUserID: masterUserID,
+      },
+      attributes: ["emailID", "subject", "sender", "folder"],
+    });
+
+    if (emailsToMove.length === 0) {
+      return res.status(404).json({
+        message:
+          "No emails found to move or you don't have permission to move them",
+      });
+    }
+
+    console.log(
+      `Found ${emailsToMove.length} emails to move to ${targetFolder}`
+    );
+
+    const moveResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each email for moving
+    for (const email of emailsToMove) {
+      try {
+        console.log(
+          `Moving email ${email.emailID} from ${email.folder} to ${targetFolder}`
+        );
+
+        // Update the email folder
+        await Email.update(
+          { folder: targetFolder },
+          { where: { emailID: email.emailID } }
+        );
+
+        moveResults.successful.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          sender: email.sender,
+          fromFolder: email.folder,
+          toFolder: targetFolder,
+        });
+
+        console.log(`Moved email ${email.emailID} to ${targetFolder}`);
+      } catch (emailError) {
+        console.error(`Error moving email ${email.emailID}:`, emailError);
+
+        moveResults.failed.push({
+          emailID: email.emailID,
+          subject: email.subject,
+          error: emailError.message,
+        });
+      }
+    }
+
+    // Check for emails that were requested but not found
+    const foundEmailIds = emailsToMove.map((email) => email.emailID);
+    const notFoundEmailIds = emailIds.filter(
+      (id) => !foundEmailIds.includes(id)
+    );
+
+    notFoundEmailIds.forEach((emailId) => {
+      moveResults.skipped.push({
+        emailID: emailId,
+        reason: "Email not found or no permission to move",
+      });
+    });
+
+    console.log("Bulk move results:", moveResults);
+
+    res.status(200).json({
+      message: `Bulk move to ${targetFolder} operation completed`,
+      results: moveResults,
+      summary: {
+        total: emailIds.length,
+        successful: moveResults.successful.length,
+        failed: moveResults.failed.length,
+        skipped: moveResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk move emails:", error);
+    res.status(500).json({
+      message: "Internal server error during bulk move",
+      error: error.message,
+    });
+  }
+};

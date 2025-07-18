@@ -1,10 +1,146 @@
 const CustomField = require("../models/customFieldModel");
 const CustomFieldValue = require("../models/customFieldValueModel");
+const Deal = require("../models/deals/dealsModels");
+const Lead = require("../models/leads/leadsModel");
 const { Op } = require("sequelize");
 const sequelize = require("../config/db");
 const { logAuditTrail } = require("../utils/auditTrailLogger");
 const PROGRAMS = require("../utils/programConstants");
 const historyLogger = require("../utils/historyLogger").logHistory;
+
+// Helper function to extract default fields from Sequelize model
+// Helper function to extract specific default fields from database models
+const getDefaultFieldsFromModels = (entityType) => {
+  const specificFields = {
+    // Fields from your screenshot that exist in database models
+    leads: [
+      {
+        fieldName: "title",
+        fieldLabel: "Title",
+        fieldType: "text",
+        dbColumn: "title",
+        isRequired: false,
+        entityType: "leads",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "ownerId",
+        fieldLabel: "Owner",
+        fieldType: "number",
+        dbColumn: "ownerId",
+        isRequired: false,
+        entityType: "leads",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "sourceChannel",
+        fieldLabel: "Source channel",
+        fieldType: "text",
+        dbColumn: "sourceChannel",
+        isRequired: false,
+        entityType: "leads",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "sourceChannelID",
+        fieldLabel: "Source channel ID",
+        fieldType: "text",
+        dbColumn: "sourceChannelID",
+        isRequired: false,
+        entityType: "leads",
+        isActive: true,
+        isDefault: true,
+      },
+    ],
+    deals: [
+      {
+        fieldName: "title",
+        fieldLabel: "Title",
+        fieldType: "text",
+        dbColumn: "title",
+        isRequired: true,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "ownerId",
+        fieldLabel: "Owner",
+        fieldType: "number",
+        dbColumn: "ownerId",
+        isRequired: true,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "pipeline",
+        fieldLabel: "Pipeline",
+        fieldType: "text",
+        dbColumn: "pipeline",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "pipelineStage",
+        fieldLabel: "Stage",
+        fieldType: "text",
+        dbColumn: "pipelineStage",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "productName",
+        fieldLabel: "Product name",
+        fieldType: "text",
+        dbColumn: "productName",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "sourceOrgin",
+        fieldLabel: "Source origin",
+        fieldType: "text",
+        dbColumn: "sourceOrgin",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "sourceChannel",
+        fieldLabel: "Source channel",
+        fieldType: "text",
+        dbColumn: "sourceChannel",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        fieldName: "sourceChannelId",
+        fieldLabel: "Source channel ID",
+        fieldType: "text",
+        dbColumn: "sourceChannelId",
+        isRequired: false,
+        entityType: "deals",
+        isActive: true,
+        isDefault: true,
+      },
+    ],
+  };
+
+  return specificFields[entityType] || [];
+};
 
 // Utility function to validate field types and entity types
 const validateFieldAndEntityTypes = (fieldType, entityType) => {
@@ -345,7 +481,7 @@ exports.createCustomField = async (req, res) => {
 
 // Get all custom fields for an entity type
 exports.getCustomFields = async (req, res) => {
-  const { entityType, includeInactive } = req.query;
+  const { entityType, includeInactive, includeDefaults = "true" } = req.query;
   const masterUserID = req.adminId;
 
   try {
@@ -375,10 +511,38 @@ exports.getCustomFields = async (req, res) => {
       ],
     });
 
+    // Get specific default fields from database models if requested
+    let defaultFields = [];
+    if (includeDefaults === "true" && entityType) {
+      switch (entityType) {
+        case "deal":
+        case "deals":
+          defaultFields = getDefaultFieldsFromModels("deals");
+          break;
+        case "lead":
+        case "leads":
+          defaultFields = getDefaultFieldsFromModels("leads");
+          break;
+        case "both":
+          defaultFields = [
+            ...getDefaultFieldsFromModels("deals"),
+            ...getDefaultFieldsFromModels("leads"),
+          ];
+          break;
+      }
+    }
+
+    // Combine custom fields with default fields
+    const allFields = [
+      ...customFields.map((f) => f.toJSON()),
+      ...defaultFields,
+    ];
+
     // Organize fields into sections
     const organizedFields = {
       summary: [],
       ungroupedCustomFields: [],
+      defaultFields: [],
       customGroups: {},
     };
 
@@ -386,129 +550,169 @@ exports.getCustomFields = async (req, res) => {
       summary: 0,
       ungroupedCustomFields: 0,
       customGroups: 0,
+      defaultFields: 0,
+      customFields: 0,
     };
 
-    customFields.forEach((field) => {
-      const fieldObj = field.toJSON();
+    allFields.forEach((field) => {
+      let fieldObj;
 
-      // Parse JSON fields that might be stored as strings
-      const parsedUserSpecs = (() => {
-        try {
-          return typeof field.userSpecifications === "string"
-            ? JSON.parse(field.userSpecifications)
-            : field.userSpecifications || {};
-        } catch (e) {
-          return {};
-        }
-      })();
+      // Check if it's a custom field or default field
+      if (field.fieldId) {
+        // Custom field - use existing processing logic
+        fieldObj = field.toJSON();
+      } else {
+        // Default field - create simple object
+        fieldObj = {
+          fieldName: field.fieldName,
+          fieldLabel: field.fieldLabel,
+          fieldType: field.fieldType,
+          dbColumn: field.dbColumn,
+          isRequired: field.isRequired,
+          isDefault: true,
+          isActive: true,
+          entityType: field.entityType || entityType,
+        };
+      }
 
-      const parsedQualityRules = (() => {
-        try {
-          return typeof field.qualityRules === "string"
-            ? JSON.parse(field.qualityRules)
-            : field.qualityRules || {};
-        } catch (e) {
-          return {};
-        }
-      })();
+      // Parse JSON fields that might be stored as strings (only for custom fields)
+      if (field.fieldId) {
+        const parsedUserSpecs = (() => {
+          try {
+            return typeof field.userSpecifications === "string"
+              ? JSON.parse(field.userSpecifications)
+              : field.userSpecifications || {};
+          } catch (e) {
+            return {};
+          }
+        })();
 
-      const parsedPipelineRestrictions = (() => {
-        try {
-          return typeof field.pipelineRestrictions === "string"
-            ? JSON.parse(field.pipelineRestrictions)
-            : field.pipelineRestrictions || "all";
-        } catch (e) {
-          return "all";
-        }
-      })();
+        const parsedQualityRules = (() => {
+          try {
+            return typeof field.qualityRules === "string"
+              ? JSON.parse(field.qualityRules)
+              : field.qualityRules || {};
+          } catch (e) {
+            return {};
+          }
+        })();
 
-      const parsedPlacesWhereShown = (() => {
-        try {
-          return typeof field.placesWhereShown === "string"
-            ? JSON.parse(field.placesWhereShown)
-            : field.placesWhereShown || {};
-        } catch (e) {
-          return {};
-        }
-      })();
+        const parsedPipelineRestrictions = (() => {
+          try {
+            return typeof field.pipelineRestrictions === "string"
+              ? JSON.parse(field.pipelineRestrictions)
+              : field.pipelineRestrictions || "all";
+          } catch (e) {
+            return "all";
+          }
+        })();
 
-      // Update fieldObj with parsed values
-      fieldObj.userSpecifications = parsedUserSpecs;
-      fieldObj.qualityRules = parsedQualityRules;
-      fieldObj.pipelineRestrictions = parsedPipelineRestrictions;
-      fieldObj.placesWhereShown = parsedPlacesWhereShown;
+        const parsedPlacesWhereShown = (() => {
+          try {
+            return typeof field.placesWhereShown === "string"
+              ? JSON.parse(field.placesWhereShown)
+              : field.placesWhereShown || {};
+          } catch (e) {
+            return {};
+          }
+        })();
 
-      // Enhance field object with UI configuration and ensure new field structure
-      fieldObj.uiConfiguration = {
-        showInForms: {
-          leadView: field.leadView ?? field.showInAddView ?? false,
-          dealView: field.dealView ?? field.showInDetailView ?? false,
-          listView: field.showInListView ?? false,
-        },
-        permissions: {
-          editingUsers: parsedUserSpecs.editingUsers || "all",
-          viewingUsers: parsedUserSpecs.viewingUsers || "all",
-        },
-        pipelines: parsedPipelineRestrictions,
-        qualityRules: {
-          required: field.isRequired || false,
-          important: field.isImportant || false,
-          ...parsedQualityRules,
-        },
-      };
+        // Update fieldObj with parsed values
+        fieldObj.userSpecifications = parsedUserSpecs;
+        fieldObj.qualityRules = parsedQualityRules;
+        fieldObj.pipelineRestrictions = parsedPipelineRestrictions;
+        fieldObj.placesWhereShown = parsedPlacesWhereShown;
 
-      // Ensure places where shown structure includes new field names
-      if (
-        !fieldObj.placesWhereShown ||
-        Object.keys(fieldObj.placesWhereShown).length === 0
-      ) {
-        fieldObj.placesWhereShown = {
-          leadView: field.leadView ?? field.showInAddView ?? false,
-          dealView: field.dealView ?? field.showInDetailView ?? false,
-          listView: field.showInListView ?? false,
+        // Enhance field object with UI configuration and ensure new field structure
+        fieldObj.uiConfiguration = {
+          showInForms: {
+            leadView: field.leadView ?? field.showInAddView ?? false,
+            dealView: field.dealView ?? field.showInDetailView ?? false,
+            listView: field.showInListView ?? false,
+          },
+          permissions: {
+            editingUsers: parsedUserSpecs.editingUsers || "all",
+            viewingUsers: parsedUserSpecs.viewingUsers || "all",
+          },
           pipelines: parsedPipelineRestrictions,
+          qualityRules: {
+            required: field.isRequired || false,
+            important: field.isImportant || false,
+            ...parsedQualityRules,
+          },
         };
-      } else if (
-        !fieldObj.placesWhereShown.leadView &&
-        !fieldObj.placesWhereShown.dealView
-      ) {
-        // Update old structure to new structure
-        fieldObj.placesWhereShown = {
-          leadView:
-            fieldObj.placesWhereShown.addView ??
-            field.leadView ??
-            field.showInAddView ??
-            false,
-          dealView:
-            fieldObj.placesWhereShown.detailView ??
-            field.dealView ??
-            field.showInDetailView ??
-            false,
-          listView:
-            fieldObj.placesWhereShown.listView ?? field.showInListView ?? false,
-          pipelines:
-            fieldObj.placesWhereShown.pipelines ?? parsedPipelineRestrictions,
-        };
+
+        // Ensure places where shown structure includes new field names
+        if (
+          !fieldObj.placesWhereShown ||
+          Object.keys(fieldObj.placesWhereShown).length === 0
+        ) {
+          fieldObj.placesWhereShown = {
+            leadView: field.leadView ?? field.showInAddView ?? false,
+            dealView: field.dealView ?? field.showInDetailView ?? false,
+            listView: field.showInListView ?? false,
+            pipelines: parsedPipelineRestrictions,
+          };
+        } else if (
+          !fieldObj.placesWhereShown.leadView &&
+          !fieldObj.placesWhereShown.dealView
+        ) {
+          // Update old structure to new structure
+          fieldObj.placesWhereShown = {
+            leadView:
+              fieldObj.placesWhereShown.addView ??
+              field.leadView ??
+              field.showInAddView ??
+              false,
+            dealView:
+              fieldObj.placesWhereShown.detailView ??
+              field.dealView ??
+              field.showInDetailView ??
+              false,
+            listView:
+              fieldObj.placesWhereShown.listView ??
+              field.showInListView ??
+              false,
+            pipelines:
+              fieldObj.placesWhereShown.pipelines ?? parsedPipelineRestrictions,
+          };
+        }
+
+        // Ensure new field names exist in the main object
+        if (fieldObj.leadView === undefined) {
+          fieldObj.leadView = field.leadView ?? field.showInAddView ?? false;
+        }
+        if (fieldObj.dealView === undefined) {
+          fieldObj.dealView = field.dealView ?? field.showInDetailView ?? false;
+        }
+
+        fieldObj.isDefault = false;
+      } else {
+        // Default field doesn't need parsing
+        fieldObj.isDefault = true;
       }
 
-      // Ensure new field names exist in the main object
-      if (fieldObj.leadView === undefined) {
-        fieldObj.leadView = field.leadView ?? field.showInAddView ?? false;
-      }
-      if (fieldObj.dealView === undefined) {
-        fieldObj.dealView = field.dealView ?? field.showInDetailView ?? false;
+      // Count fields by type
+      if (fieldObj.isDefault) {
+        fieldCounts.defaultFields = (fieldCounts.defaultFields || 0) + 1;
+      } else {
+        fieldCounts.customFields = (fieldCounts.customFields || 0) + 1;
       }
 
-      if (field.isImportant && field.category === "Summary") {
+      // Categorize fields
+      if (fieldObj.isDefault) {
+        // Add to default fields section
+        organizedFields.defaultFields.push(fieldObj);
+      } else if (fieldObj.isImportant && field.category === "Summary") {
         // Summary - Important fields marked for quick access
         organizedFields.summary.push(fieldObj);
         fieldCounts.summary++;
-      } else if (field.fieldGroup && field.fieldGroup !== "Default") {
+      } else if (fieldObj.fieldGroup && fieldObj.fieldGroup !== "Default") {
         // Custom Groups - User-defined field groups
-        if (!organizedFields.customGroups[field.fieldGroup]) {
-          organizedFields.customGroups[field.fieldGroup] = [];
+        if (!organizedFields.customGroups[fieldObj.fieldGroup]) {
+          organizedFields.customGroups[fieldObj.fieldGroup] = [];
         }
-        organizedFields.customGroups[field.fieldGroup].push(fieldObj);
+        organizedFields.customGroups[fieldObj.fieldGroup].push(fieldObj);
       } else {
         // Ungrouped Custom Fields - Custom fields without specific groups
         organizedFields.ungroupedCustomFields.push(fieldObj);
@@ -518,284 +722,23 @@ exports.getCustomFields = async (req, res) => {
 
     fieldCounts.customGroups = Object.keys(organizedFields.customGroups).length;
 
-    // Process custom fields for enhanced response
-    const enhancedCustomFields = customFields.map((field) => {
-      const fieldObj = field.toJSON();
-
-      // Parse JSON fields that might be stored as strings
-      const parsedUserSpecs = (() => {
-        try {
-          return typeof field.userSpecifications === "string"
-            ? JSON.parse(field.userSpecifications)
-            : field.userSpecifications || {};
-        } catch (e) {
-          return {};
-        }
-      })();
-
-      const parsedQualityRules = (() => {
-        try {
-          return typeof field.qualityRules === "string"
-            ? JSON.parse(field.qualityRules)
-            : field.qualityRules || {};
-        } catch (e) {
-          return {};
-        }
-      })();
-
-      const parsedPipelineRestrictions = (() => {
-        try {
-          return typeof field.pipelineRestrictions === "string"
-            ? JSON.parse(field.pipelineRestrictions)
-            : field.pipelineRestrictions || "all";
-        } catch (e) {
-          return "all";
-        }
-      })();
-
-      const parsedPlacesWhereShown = (() => {
-        try {
-          return typeof field.placesWhereShown === "string"
-            ? JSON.parse(field.placesWhereShown)
-            : field.placesWhereShown || {};
-        } catch (e) {
-          return {};
-        }
-      })();
-
-      // Update fieldObj with parsed values
-      fieldObj.userSpecifications = parsedUserSpecs;
-      fieldObj.qualityRules = parsedQualityRules;
-      fieldObj.pipelineRestrictions = parsedPipelineRestrictions;
-      fieldObj.placesWhereShown = parsedPlacesWhereShown;
-
-      // Add UI configuration for consistency with create/update responses
-      fieldObj.uiConfiguration = {
-        showInForms: {
-          leadView: field.leadView ?? field.showInAddView ?? false,
-          dealView: field.dealView ?? field.showInDetailView ?? false,
-          listView: field.showInListView ?? false,
-        },
-        permissions: {
-          editingUsers: parsedUserSpecs.editingUsers || "all",
-          viewingUsers: parsedUserSpecs.viewingUsers || "all",
-        },
-        pipelines: parsedPipelineRestrictions,
-        qualityRules: {
-          required: field.isRequired || false,
-          important: field.isImportant || false,
-          ...parsedQualityRules,
-        },
-      };
-
-      // Ensure places where shown structure is consistent
-      if (
-        !fieldObj.placesWhereShown ||
-        Object.keys(fieldObj.placesWhereShown).length === 0
-      ) {
-        fieldObj.placesWhereShown = {
-          leadView: field.leadView ?? field.showInAddView ?? false,
-          dealView: field.dealView ?? field.showInDetailView ?? false,
-          listView: field.showInListView ?? false,
-          pipelines: parsedPipelineRestrictions,
-        };
-      }
-
-      // Ensure new field names exist
-      fieldObj.leadView = field.leadView ?? field.showInAddView ?? false;
-      fieldObj.dealView = field.dealView ?? field.showInDetailView ?? false;
-
-      return fieldObj;
-    });
+    // Create enhanced response with both custom and default fields
+    const allProcessedFields = [
+      ...organizedFields.defaultFields,
+      ...organizedFields.summary,
+      ...organizedFields.ungroupedCustomFields,
+      ...Object.values(organizedFields.customGroups).flat(),
+    ];
 
     res.status(200).json({
       message: "Custom fields retrieved successfully.",
-      customFields: enhancedCustomFields,
-      // organizedFields,
-      fieldCounts,
-      // // Summary statistics
-      // statistics: {
-      //   totalFields: customFields.length,
-      //   activeFields: customFields.filter((f) => f.isActive).length,
-      //   requiredFields: customFields.filter((f) => f.isRequired).length,
-      //   importantFields: customFields.filter((f) => f.isImportant).length,
-      //   fieldsByType: customFields.reduce((acc, field) => {
-      //     acc[field.fieldType] = (acc[field.fieldType] || 0) + 1;
-      //     return acc;
-      //   }, {}),
-      // },
-      // UI metadata
-      // uiMetadata: {
-      //   supportedFieldTypes: [
-      //     "text",
-      //     "textarea",
-      //     "number",
-      //     "decimal",
-      //     "email",
-      //     "phone",
-      //     "url",
-      //     "date",
-      //     "datetime",
-      //     "select",
-      //     "multiselect",
-      //     "checkbox",
-      //     "radio",
-      //     "file",
-      //     "currency",
-      //     "organization",
-      //     "person",
-      //   ],
-      //   fieldTypeDetails: {
-      //     text: {
-      //       label: "Text",
-      //       description: "Single line text input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     textarea: {
-      //       label: "Textarea",
-      //       description: "Multi-line text input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     number: {
-      //       label: "Number",
-      //       description: "Whole number input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     decimal: {
-      //       label: "Decimal",
-      //       description: "Decimal number input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     email: {
-      //       label: "Email",
-      //       description: "Email address input with validation",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     phone: {
-      //       label: "Phone",
-      //       description: "Phone number input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     url: {
-      //       label: "URL",
-      //       description: "Website URL input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     date: {
-      //       label: "Date",
-      //       description: "Date picker",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     datetime: {
-      //       label: "Date & Time",
-      //       description: "Date and time picker",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     select: {
-      //       label: "Single Select",
-      //       description: "Dropdown with single selection",
-      //       supportsOptions: true,
-      //       supportsValidation: true,
-      //       requiresOptions: true,
-      //     },
-      //     multiselect: {
-      //       label: "Multi Select",
-      //       description: "Dropdown with multiple selections",
-      //       supportsOptions: true,
-      //       supportsValidation: true,
-      //       requiresOptions: true,
-      //     },
-      //     checkbox: {
-      //       label: "Checkbox",
-      //       description: "Single checkbox (true/false)",
-      //       supportsOptions: false,
-      //       supportsValidation: false,
-      //     },
-      //     radio: {
-      //       label: "Radio Button",
-      //       description: "Radio button group",
-      //       supportsOptions: true,
-      //       supportsValidation: true,
-      //       requiresOptions: true,
-      //     },
-      //     file: {
-      //       label: "File Upload",
-      //       description: "File upload field",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     currency: {
-      //       label: "Currency",
-      //       description: "Currency amount input",
-      //       supportsOptions: false,
-      //       supportsValidation: true,
-      //     },
-      //     organization: {
-      //       label: "Organization",
-      //       description: "Link to organization entity",
-      //       supportsOptions: false,
-      //       supportsValidation: false,
-      //     },
-      //     person: {
-      //       label: "Person",
-      //       description: "Link to person entity",
-      //       supportsOptions: false,
-      //       supportsValidation: false,
-      //     },
-      //   },
-      //   placesWhereShownOptions: {
-      //     leadView: "Show in lead creation/edit forms",
-      //     dealView: "Show in deal creation/edit forms",
-      //     listView: "Show in list/table views",
-      //     pipelines: "Restrict to specific pipelines",
-      //   },
-      //   permissionOptions: {
-      //     editingUsers: ["all", "specific", "owner_only"],
-      //     viewingUsers: ["all", "specific", "owner_only"],
-      //   },
-      //   categoryOptions: [
-      //     "Summary",
-      //     "Details",
-      //     "Business Information",
-      //     "Contact Information",
-      //     "Location Information",
-      //     "Service Information",
-      //     "Source Information",
-      //     "Additional Information",
-      //     "Lead Details",
-      //     "Custom",
-      //   ],
-      //   validationRulesOptions: {
-      //     required: "Field is required",
-      //     minLength: "Minimum length validation",
-      //     maxLength: "Maximum length validation",
-      //     pattern: "Regular expression pattern",
-      //     unique: "Field value must be unique",
-      //     email: "Valid email format",
-      //     url: "Valid URL format",
-      //     phone: "Valid phone number format",
-      //     dateRange: "Date must be within range",
-      //     numberRange: "Number must be within range",
-      //   },
-      //   qualityRulesOptions: {
-      //     required: "Mark field as required",
-      //     important: "Mark field as important/summary",
-      //     unique: "Ensure field value is unique",
-      //     minLength: "Minimum character length",
-      //     maxLength: "Maximum character length",
-      //     pattern: "Custom validation pattern",
-      //     customMessage: "Custom validation message",
-      //   },
-      // },
+      customFields: organizedFields.summary.concat(
+        organizedFields.ungroupedCustomFields,
+        ...Object.values(organizedFields.customGroups).flat()
+      ),
+      defaultFields: organizedFields.defaultFields,
+      fieldCounts: fieldCounts,
+      organizedFields: organizedFields,
       // Legacy support for existing code
       groupedFields: customFields.reduce((acc, field) => {
         const category = field.category || "Details";

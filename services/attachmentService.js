@@ -9,34 +9,90 @@ const saveAttachments = async (attachments, emailID) => {
 
   for (const attachment of attachments) {
     try {
-      // Validate that the attachment has a filename
-      if (!attachment.filename) {
-        console.warn("Skipping attachment with missing filename:", attachment);
-        continue; // Skip this attachment
+      // Generate a filename if missing, based on content type
+      let filename = attachment.filename;
+      if (!filename) {
+        // Generate default filename based on content type
+        const timestamp = Date.now();
+        const partId = attachment.partId || "unknown";
+
+        switch (attachment.contentType) {
+          case "text/calendar":
+            filename = `calendar-invite-${timestamp}-${partId}.ics`;
+            break;
+          case "application/pdf":
+            filename = `attachment-${timestamp}-${partId}.pdf`;
+            break;
+          case "application/vnd.ms-excel":
+          case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            filename = `spreadsheet-${timestamp}-${partId}.xlsx`;
+            break;
+          case "application/msword":
+          case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            filename = `document-${timestamp}-${partId}.docx`;
+            break;
+          case "image/jpeg":
+            filename = `image-${timestamp}-${partId}.jpg`;
+            break;
+          case "image/png":
+            filename = `image-${timestamp}-${partId}.png`;
+            break;
+          case "image/gif":
+            filename = `image-${timestamp}-${partId}.gif`;
+            break;
+          case "text/plain":
+            filename = `text-${timestamp}-${partId}.txt`;
+            break;
+          case "text/html":
+            filename = `html-${timestamp}-${partId}.html`;
+            break;
+          case "application/json":
+            filename = `data-${timestamp}-${partId}.json`;
+            break;
+          case "application/xml":
+          case "text/xml":
+            filename = `xml-${timestamp}-${partId}.xml`;
+            break;
+          case "application/zip":
+            filename = `archive-${timestamp}-${partId}.zip`;
+            break;
+          case "application/x-zip-compressed":
+            filename = `archive-${timestamp}-${partId}.zip`;
+            break;
+          case "application/octet-stream":
+            filename = `binary-${timestamp}-${partId}.bin`;
+            break;
+          default:
+            // For unknown types, use the content type to create a filename
+            const extension = attachment.contentType.split("/")[1] || "unknown";
+            filename = `attachment-${timestamp}-${partId}.${extension}`;
+        }
+
+        console.log(
+          `Generated filename for attachment without filename: ${filename} (contentType: ${attachment.contentType})`
+        );
       }
 
       console.log(
-        `Processing attachment metadata: ${attachment.filename}, size: ${attachment.size}, contentType: ${attachment.contentType}`
+        `Processing attachment metadata: ${filename}, size: ${attachment.size}, contentType: ${attachment.contentType}`
       );
 
       // Check if the attachment already exists in the database
       const existingAttachment = await Attachment.findOne({
         where: {
           emailID,
-          filename: attachment.filename, // Ensure uniqueness by emailID and filename
+          filename: filename, // Ensure uniqueness by emailID and filename
         },
       });
 
       if (!existingAttachment) {
         // Save only attachment metadata to database (no file saving)
-        console.log(
-          `Saving attachment metadata to database: ${attachment.filename}`
-        );
+        console.log(`Saving attachment metadata to database: ${filename}`);
 
         // Prepare attachment data (metadata only)
         const attachmentData = {
           emailID,
-          filename: attachment.filename,
+          filename: filename,
           contentType: attachment.contentType,
           size: attachment.size,
           filePath: null, // No file path since we're not saving files
@@ -46,16 +102,16 @@ const saveAttachments = async (attachments, emailID) => {
         const savedAttachment = await Attachment.create(attachmentData);
         savedAttachments.push(savedAttachment);
         console.log(
-          `Attachment metadata saved to database: ${attachment.filename}, ID: ${savedAttachment.attachmentID}`
+          `Attachment metadata saved to database: ${filename}, ID: ${savedAttachment.attachmentID}`
         );
       } else {
-        console.log(
-          `Attachment metadata already exists: ${attachment.filename}`
-        );
+        console.log(`Attachment metadata already exists: ${filename}`);
       }
     } catch (error) {
       console.error(
-        `Error processing attachment metadata: ${attachment.filename}`,
+        `Error processing attachment metadata: ${
+          attachment.filename || "unknown"
+        }`,
         error
       );
     }
