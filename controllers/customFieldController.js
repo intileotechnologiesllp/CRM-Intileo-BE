@@ -156,6 +156,7 @@ const validateFieldAndEntityTypes = (fieldType, entityType) => {
     "datetime",
     "select",
     "multiselect",
+    "singleselect", // Single option selection (alias for select)
     "checkbox",
     "radio",
     "file",
@@ -276,7 +277,10 @@ exports.createCustomField = async (req, res) => {
     }
 
     // Validate field type specific requirements
-    if (["select", "multiselect", "radio"].includes(fieldType) && !options) {
+    if (
+      ["select", "multiselect", "singleselect", "radio"].includes(fieldType) &&
+      !options
+    ) {
       return res.status(400).json({
         message: `Options are required for ${fieldType} field type.`,
       });
