@@ -30,6 +30,7 @@ const CustomField = sequelize.define(
         "datetime",
         "select",
         "multiselect",
+        "singleselect",
         "checkbox",
         "radio",
         "file",
