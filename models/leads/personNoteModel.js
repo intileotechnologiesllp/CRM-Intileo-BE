@@ -1,6 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-  const PersonNote = sequelize.define("PersonNote", {
+const PersonNote = sequelize.define(
+  "PersonNote",
+  {
     noteId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -9,7 +11,7 @@ const sequelize = require("../../config/db");
     personId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "LeadPeople", key: "personId" },
+      references: { model: "leadpeople", key: "personId" },
       onDelete: "CASCADE",
     },
     content: {
@@ -19,16 +21,21 @@ const sequelize = require("../../config/db");
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "MasterUsers", key: "masterUserID" },
+      references: { model: "masterusers", key: "masterUserID" },
     },
-  }, {
+  },
+  {
     tableName: "PersonNotes",
     timestamps: true,
-  });
+  }
+);
 
-  PersonNote.associate = (models) => {
-    PersonNote.belongsTo(models.Person, { foreignKey: "personId", as: "person" });
-    PersonNote.belongsTo(models.MasterUser, { foreignKey: "createdBy", as: "creator" });
-  };
+PersonNote.associate = (models) => {
+  PersonNote.belongsTo(models.Person, { foreignKey: "personId", as: "person" });
+  PersonNote.belongsTo(models.MasterUser, {
+    foreignKey: "createdBy",
+    as: "creator",
+  });
+};
 
 module.exports = PersonNote;

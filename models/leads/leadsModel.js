@@ -226,8 +226,8 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.INTEGER,
     allowNull: true,
     references: {
-      model: "VisibilityGroups",
-      key: "groupId",
+      model: "visibility_groups",
+      key: "id",
     },
     comment: "Reference to the owner's visibility group",
   },

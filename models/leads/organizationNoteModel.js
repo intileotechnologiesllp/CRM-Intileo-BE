@@ -1,6 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-  const OrganizationNote = sequelize.define("OrganizationNote", {
+const OrganizationNote = sequelize.define(
+  "OrganizationNote",
+  {
     noteId: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -9,7 +11,7 @@ const sequelize = require("../../config/db");
     leadOrganizationId: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "LeadOrganizations", key: "leadOrganizationId" },
+      references: { model: "leadorganizations", key: "leadOrganizationId" },
       onDelete: "CASCADE",
     },
     content: {
@@ -19,19 +21,24 @@ const sequelize = require("../../config/db");
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: "MasterUsers", key: "masterUserID" },
+      references: { model: "masterusers", key: "masterUserID" },
     },
-  }, {
+  },
+  {
     tableName: "OrganizationNotes",
     timestamps: true,
+  }
+);
+
+OrganizationNote.associate = (models) => {
+  OrganizationNote.belongsTo(models.Organization, {
+    foreignKey: "leadOrganizationId",
+    as: "organization",
   });
+  OrganizationNote.belongsTo(models.MasterUser, {
+    foreignKey: "createdBy",
+    as: "creator",
+  });
+};
 
-  OrganizationNote.associate = (models) => {
-    OrganizationNote.belongsTo(models.Organization, { foreignKey: "leadOrganizationId", as: "organization" });
-    OrganizationNote.belongsTo(models.MasterUser, { foreignKey: "createdBy", as: "creator" });
-  };
-
-  
-
-
-  module.exports = OrganizationNote;
+module.exports = OrganizationNote;

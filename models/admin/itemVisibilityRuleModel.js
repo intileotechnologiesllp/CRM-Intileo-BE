@@ -13,8 +13,8 @@ const ItemVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "VisibilityGroups",
-        key: "groupId",
+        model: "visibility_groups",
+        key: "id",
       },
     },
     entityType: {
@@ -32,7 +32,7 @@ const ItemVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "MasterUsers",
+        model: "masterusers",
         key: "masterUserID",
       },
     },

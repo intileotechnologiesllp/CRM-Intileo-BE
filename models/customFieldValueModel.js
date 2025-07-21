@@ -42,7 +42,7 @@ const CustomFieldValue = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "MasterUsers",
+        model: "masterusers",
         key: "masterUserID",
       },
     },

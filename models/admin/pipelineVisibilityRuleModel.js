@@ -13,8 +13,8 @@ const PipelineVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "VisibilityGroups",
-        key: "groupId",
+        model: "visibility_groups",
+        key: "id",
       },
     },
     pipelineId: {
@@ -29,7 +29,7 @@ const PipelineVisibilityRule = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "MasterUsers",
+        model: "masterusers",
         key: "masterUserID",
       },
     },
