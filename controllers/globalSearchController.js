@@ -233,15 +233,63 @@ exports.globalSearch = async (req, res) => {
         console.log("Searching for:", searchQuery);
         console.log("Admin ID for people search:", req.adminId);
 
+        // First, let's check what people data exists for this user
+        const allPeople = await Person.findAll({
+          where: { masterUserID: req.adminId },
+          attributes: [
+            "personId",
+            "contactPerson",
+            "email",
+            "phone",
+            "jobTitle",
+            "organization",
+            "notes",
+          ],
+          limit: 5,
+        });
+
+        console.log(
+          "All people for this user (first 5):",
+          allPeople.map((p) => ({
+            personId: p.personId,
+            contactPerson: p.contactPerson,
+            email: p.email,
+            phone: p.phone,
+            jobTitle: p.jobTitle,
+            organization: p.organization,
+            notes: p.notes,
+          }))
+        );
+
+        // Use case-insensitive search for text fields (MySQL compatible)
         const peopleSearchConditions = {
           [Op.or]: [
-            { contactPerson: { [Op.like]: `%${searchQuery}%` } },
-            { email: { [Op.like]: `%${searchQuery}%` } },
+            sequelize.where(
+              sequelize.fn("LOWER", sequelize.col("contactPerson")),
+              "LIKE",
+              `%${searchQuery.toLowerCase()}%`
+            ),
+            sequelize.where(
+              sequelize.fn("LOWER", sequelize.col("email")),
+              "LIKE",
+              `%${searchQuery.toLowerCase()}%`
+            ),
             { phone: { [Op.like]: `%${searchQuery}%` } },
-            { jobTitle: { [Op.like]: `%${searchQuery}%` } },
-            { organization: { [Op.like]: `%${searchQuery}%` } },
-            { notes: { [Op.like]: `%${searchQuery}%` } },
-            // Removed fields that don't exist: designation, department, city, country
+            sequelize.where(
+              sequelize.fn("LOWER", sequelize.col("jobTitle")),
+              "LIKE",
+              `%${searchQuery.toLowerCase()}%`
+            ),
+            sequelize.where(
+              sequelize.fn("LOWER", sequelize.col("organization")),
+              "LIKE",
+              `%${searchQuery.toLowerCase()}%`
+            ),
+            sequelize.where(
+              sequelize.fn("LOWER", sequelize.col("notes")),
+              "LIKE",
+              `%${searchQuery.toLowerCase()}%`
+            ),
           ],
           masterUserID: req.adminId,
         };
@@ -251,47 +299,118 @@ exports.globalSearch = async (req, res) => {
           JSON.stringify(peopleSearchConditions, null, 2)
         );
 
-        const people = await Person.findAll({
+        // Try search without includes first (simpler approach)
+        let people = await Person.findAll({
           where: peopleSearchConditions,
-          include: [
-            {
-              model: Organization,
-              as: "LeadOrganization", // Fixed: Use correct alias
-              attributes: ["leadOrganizationId", "organization"],
-              required: false,
-            },
+          attributes: [
+            "personId",
+            "contactPerson",
+            "email",
+            "phone",
+            "jobTitle",
+            "organization",
+            "notes",
+            "createdAt",
+            "updatedAt",
+            "leadOrganizationId", // Include for potential organization lookup
           ],
           limit: parseInt(limit),
           offset: parseInt(offset),
           order: [["updatedAt", "DESC"]],
         });
 
+        console.log("People search query executed successfully");
         console.log("People found:", people.length);
-        console.log(
-          "People data:",
-          people.map((p) => ({
-            id: p.personId,
-            contactPerson: p.contactPerson,
-            email: p.email,
-            masterUserID: p.masterUserID,
-          }))
-        );
+
+        if (people.length > 0) {
+          console.log(
+            "People data:",
+            people.map((p) => ({
+              id: p.personId,
+              contactPerson: p.contactPerson,
+              email: p.email,
+              phone: p.phone,
+              jobTitle: p.jobTitle,
+              organization: p.organization,
+              notes: p.notes,
+              masterUserID: p.masterUserID,
+            }))
+          );
+        } else {
+          console.log("No people found matching the search criteria");
+
+          // Let's try a simpler search to see if data exists
+          const simplePeopleSearch = await Person.findAll({
+            where: {
+              masterUserID: req.adminId,
+              contactPerson: { [Op.iLike]: `%${searchQuery}%` },
+            },
+            limit: 3,
+          });
+
+          console.log(
+            "Simple contactPerson search results:",
+            simplePeopleSearch.length
+          );
+          if (simplePeopleSearch.length > 0) {
+            console.log(
+              "Simple search found:",
+              simplePeopleSearch.map((p) => ({
+                personId: p.personId,
+                contactPerson: p.contactPerson,
+                masterUserID: p.masterUserID,
+              }))
+            );
+          }
+        }
+
+        // For organizations, do a separate query if needed
+        const organizationLookup = {};
+        if (people.length > 0) {
+          const orgIds = people
+            .filter((p) => p.leadOrganizationId)
+            .map((p) => p.leadOrganizationId);
+
+          if (orgIds.length > 0) {
+            try {
+              const organizations = await Organization.findAll({
+                where: { leadOrganizationId: { [Op.in]: orgIds } },
+                attributes: ["leadOrganizationId", "organization"],
+              });
+
+              organizations.forEach((org) => {
+                organizationLookup[org.leadOrganizationId] = org;
+              });
+
+              console.log(
+                "Organization lookup completed:",
+                Object.keys(organizationLookup).length
+              );
+            } catch (orgError) {
+              console.warn("Organization lookup failed:", orgError.message);
+            }
+          }
+        }
 
         results.results.people = people.map((person) => ({
           id: person.personId,
-          personId: person.personId, // Add explicit personId field
+          personId: person.personId,
           type: "person",
           title: person.contactPerson,
-          subtitle: person.jobTitle || person.organization || "Contact", // Use existing fields
+          subtitle: person.jobTitle || person.organization || "Contact",
           email: person.email,
           phone: person.phone,
-          organization: person.LeadOrganization
+          jobTitle: person.jobTitle,
+          organization: organizationLookup[person.leadOrganizationId]
             ? {
-                name: person.LeadOrganization.organization,
-                id: person.LeadOrganization.leadOrganizationId,
+                name: organizationLookup[person.leadOrganizationId]
+                  .organization,
+                id: person.leadOrganizationId,
               }
+            : person.organization
+            ? { name: person.organization }
             : null,
-          location: null, // Removed as city/country don't exist
+          location: null,
           createdAt: person.createdAt,
           updatedAt: person.updatedAt,
           matchedFields: getMatchedFields(person, searchQuery, [
@@ -301,15 +420,54 @@ exports.globalSearch = async (req, res) => {
             "jobTitle",
             "organization",
             "notes",
-            // Removed non-existent fields
           ]),
         }));
 
         results.summary.people = people.length;
+
+        console.log("People search completed successfully");
+        console.log("Final people results count:", people.length);
+        console.log("Final people summary:", results.summary.people);
       } catch (error) {
         console.error("Error searching people:", error);
         console.error("Error details:", error.message);
         console.error("Error stack:", error.stack);
+
+        // Fallback: try the most basic search possible
+        try {
+          console.log("Attempting fallback basic people search...");
+          const basicPeople = await Person.findAll({
+            where: {
+              masterUserID: req.adminId,
+              contactPerson: { [Op.like]: `%${searchQuery}%` },
+            },
+            limit: parseInt(limit),
+          });
+
+          results.results.people = basicPeople.map((person) => ({
+            id: person.personId,
+            personId: person.personId,
+            type: "person",
+            title: person.contactPerson,
+            subtitle: "Contact",
+            email: person.email,
+            phone: person.phone,
+            createdAt: person.createdAt,
+            updatedAt: person.updatedAt,
+            matchedFields: ["contactPerson"],
+          }));
+
+          results.summary.people = basicPeople.length;
+          console.log(
+            "Fallback search successful:",
+            basicPeople.length,
+            "results"
+          );
+        } catch (fallbackError) {
+          console.error("Fallback search also failed:", fallbackError.message);
+          results.results.people = [];
+          results.summary.people = 0;
+        }
       }
     }
 
@@ -1258,6 +1416,134 @@ exports.cleanupRecentSearches = async (req, res) => {
     res.status(500).json({
       message: "Error during recent search cleanup",
       error: error.message,
+    });
+  }
+};
+
+// Test endpoint for debugging person search issues
+exports.testPersonSearch = async (req, res) => {
+  try {
+    const { searchTerm = "john", adminId } = req.query;
+    const userAdminId = adminId || req.adminId;
+
+    console.log("=== PERSON SEARCH TEST ===");
+    console.log("Search term:", searchTerm);
+    console.log("Admin ID:", userAdminId);
+
+    // Test 1: Check database connection
+    const { sequelize } = require("../models");
+
+    // Test 2: Count total people
+    const totalPeople = await Person.count({
+      where: { masterUserID: userAdminId },
+    });
+
+    // Test 3: Get sample people
+    const samplePeople = await Person.findAll({
+      where: { masterUserID: userAdminId },
+      limit: 5,
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "organization",
+      ],
+    });
+
+    // Test 4: Basic search
+    const basicSearch = await Person.findAll({
+      where: {
+        masterUserID: userAdminId,
+        contactPerson: { [Op.like]: `%${searchTerm}%` },
+      },
+      limit: 10,
+    });
+
+    // Test 5: Case-insensitive search (if database supports it)
+    let caseInsensitiveSearch = [];
+    try {
+      caseInsensitiveSearch = await Person.findAll({
+        where: {
+          masterUserID: userAdminId,
+          contactPerson: { [Op.iLike]: `%${searchTerm}%` },
+        },
+        limit: 10,
+      });
+    } catch (iLikeError) {
+      console.log("iLike not supported, trying LOWER function");
+      // Fallback for databases that don't support iLike
+      try {
+        caseInsensitiveSearch = await Person.findAll({
+          where: {
+            masterUserID: userAdminId,
+            [Op.where]: [
+              sequelize.fn("LOWER", sequelize.col("contactPerson")),
+              { [Op.like]: `%${searchTerm.toLowerCase()}%` },
+            ],
+          },
+          limit: 10,
+        });
+      } catch (lowerError) {
+        console.log("LOWER function also failed, using basic search");
+        caseInsensitiveSearch = basicSearch;
+      }
+    }
+
+    // Test 6: Multiple field search
+    const multiFieldSearch = await Person.findAll({
+      where: {
+        masterUserID: userAdminId,
+        [Op.or]: [
+          { contactPerson: { [Op.like]: `%${searchTerm}%` } },
+          { email: { [Op.like]: `%${searchTerm}%` } },
+          { organization: { [Op.like]: `%${searchTerm}%` } },
+        ],
+      },
+      limit: 10,
+    });
+
+    res.json({
+      testResults: {
+        totalPeople,
+        samplePeople: samplePeople.map((p) => ({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+          email: p.email,
+          organization: p.organization,
+        })),
+        basicSearch: basicSearch.length,
+        caseInsensitiveSearch: caseInsensitiveSearch.length,
+        multiFieldSearch: multiFieldSearch.length,
+        basicSearchResults: basicSearch.map((p) => ({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+          email: p.email,
+        })),
+        caseInsensitiveSearchResults: caseInsensitiveSearch.map((p) => ({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+          email: p.email,
+        })),
+        multiFieldSearchResults: multiFieldSearch.map((p) => ({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+          email: p.email,
+          organization: p.organization,
+        })),
+      },
+      searchConfig: {
+        searchTerm,
+        adminId: userAdminId,
+        databaseDialect: "mysql",
+      },
+    });
+  } catch (error) {
+    console.error("Person search test error:", error);
+    res.status(500).json({
+      error: error.message,
+      stack: error.stack,
     });
   }
 };
