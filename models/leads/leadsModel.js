@@ -44,7 +44,6 @@ const Lead = sequelize.define("Lead", {
   organization: {
     type: DataTypes.STRING,
     allowNull: true, // Organization name
-    unique: true, // Ensure organization uniqueness at database level
   },
   title: {
     type: DataTypes.STRING,
@@ -83,7 +82,6 @@ const Lead = sequelize.define("Lead", {
   email: {
     type: DataTypes.STRING,
     allowNull: true, // Email address of the person
-    unique: true, // Ensure email uniqueness at database level
     validate: {
       isEmail: true, // Ensure valid email format
     },

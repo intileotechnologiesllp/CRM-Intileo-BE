@@ -149,7 +149,7 @@ app.get("/track/click", async (req, res) => {
 
 // Sync database
 sequelize
-  .sync({ alter: false }) // Use `alter: true` to update the schema without dropping tables
+  .sync({ alter: false, force: false }) // Don't alter existing tables for deployment safety
   .then(() => console.log("Database synced successfully"))
   .catch((err) => console.error("Error syncing database:", err));
 
