@@ -30,6 +30,13 @@ router.delete(
   globalSearchController.cleanupRecentSearches
 );
 
+// Cleanup empty searches endpoint
+router.delete(
+  "/recent/empty",
+  verifyToken,
+  globalSearchController.cleanupEmptySearches
+);
+
 // Clear recent searches endpoints
 router.delete(
   "/recent",
