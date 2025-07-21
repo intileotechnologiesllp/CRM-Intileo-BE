@@ -51,7 +51,7 @@ exports.createDeal = async (req, res) => {
       email,
       sourceOrgin,
       source,
-      customFields, // Add custom fields to request body
+      // Custom fields will be processed from remaining req.body fields
     } = req.body;
 
     // Validate required fields here...
@@ -344,9 +344,9 @@ exports.createDeal = async (req, res) => {
       responsiblePerson = user ? user.name : null;
     }
 
-    if (sourceOrgin === 0 && req.body.emailID) {
+    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
       await Email.update(
-        { leadId: lead.leadId },
+        { dealId: deal.dealId },
         { where: { emailID: req.body.emailID } }
       );
     }
@@ -374,15 +374,40 @@ exports.createDeal = async (req, res) => {
       await existingLead.update({ dealId: deal.dealId });
     }
 
-    // Handle custom fields
+    // Handle custom fields - extract from req.body directly
     const savedCustomFields = {};
+
+    // Define standard Deal model fields that should not be treated as custom fields
+    // const standardDealFields = [
+    //   'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline',
+    //   'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'sourceChannelId',
+    //   'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo',
+    //   'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired',
+    //   'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email',
+    //   'sourceOrgin', 'source', 'leadId', 'ownerId', 'emailID'
+    // ];
+    const standardDealFields = [
+      "title",
+      "ownerId",
+      "sourceChannel",
+      "sourceChannelID",
+    ];
+
+    // Extract potential custom fields from req.body
+    const potentialCustomFields = {};
+    for (const [key, value] of Object.entries(req.body)) {
+      if (
+        !standardDealFields.includes(key) &&
+        value !== null &&
+        value !== undefined &&
+        value !== ""
+      ) {
+        potentialCustomFields[key] = value;
+      }
+    }
+
     console.log("=== CUSTOM FIELDS DEBUG ===");
-    console.log("customFields received:", customFields);
-    console.log("customFields type:", typeof customFields);
-    console.log(
-      "customFields keys:",
-      customFields ? Object.keys(customFields) : "No keys"
-    );
+    console.log("Potential custom fields extracted:", potentialCustomFields);
     console.log("req.adminId:", req.adminId);
     console.log("deal.dealId:", deal ? deal.dealId : "Deal not created yet");
 
@@ -390,15 +415,15 @@ exports.createDeal = async (req, res) => {
     console.log("CustomField model available:", typeof CustomField);
     console.log("CustomFieldValue model available:", typeof CustomFieldValue);
 
-    if (customFields && Object.keys(customFields).length > 0) {
+    if (Object.keys(potentialCustomFields).length > 0) {
       try {
         console.log(
           "Processing",
-          Object.keys(customFields).length,
-          "custom fields"
+          Object.keys(potentialCustomFields).length,
+          "potential custom fields"
         );
 
-        for (const [fieldKey, value] of Object.entries(customFields)) {
+        for (const [fieldKey, value] of Object.entries(potentialCustomFields)) {
           console.log(`\n--- Processing field: ${fieldKey} = ${value} ---`);
           let customField;
 
@@ -532,7 +557,7 @@ exports.createDeal = async (req, res) => {
         // Don't fail the deal creation, just log the error
       }
     } else {
-      console.log("❌ No custom fields provided or empty customFields object");
+      console.log("❌ No potential custom fields found in request body");
     }
 
     await historyLogger(
@@ -2031,7 +2056,6 @@ exports.unarchiveDeal = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
 
 exports.getDealsByStage = async (req, res) => {
   try {
