@@ -37,7 +37,7 @@ const Pipeline = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "master_users",
+        model: "masterusers",
         key: "masterUserID",
       },
     },

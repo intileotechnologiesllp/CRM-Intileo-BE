@@ -12,7 +12,7 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: "MasterUsers", // Table name for MasterUser
+      model: "masterusers", // Table name for MasterUser
       key: "masterUserID",
     },
     onDelete: "CASCADE",
@@ -31,7 +31,7 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     allowNull: false,
     defaultValue: {}, // Default to an empty object
   },
-  
+
   createdById: {
     type: DataTypes.INTEGER,
     allowNull: false, // Admin ID who assigned the permission
@@ -40,12 +40,11 @@ const MasterUserPrivileges = sequelize.define("MasterUserPrivileges", {
     type: DataTypes.STRING,
     allowNull: false, // Role of the creator (e.g., "admin")
   },
-  mode:{
+  mode: {
     type: DataTypes.STRING,
     allowNull: true,
-  }
+  },
 });
-
 
 // Define associations
 // Program.hasOne(MasterUserPrivileges, {

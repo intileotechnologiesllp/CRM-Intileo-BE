@@ -11,7 +11,7 @@ const Attachment = sequelize.define("Attachment", {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: "Emails", // Name of the Email table
+      model: "emails", // Name of the Email table
       key: "emailID",
     },
     onDelete: "CASCADE", // Delete attachments if the associated email is deleted
@@ -32,10 +32,10 @@ const Attachment = sequelize.define("Attachment", {
     type: DataTypes.STRING, // Path to the file in the storage system
     allowNull: true,
   },
-  masterUserID:{
+  masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: true,
-  }
+  },
 });
 
 module.exports = Attachment;

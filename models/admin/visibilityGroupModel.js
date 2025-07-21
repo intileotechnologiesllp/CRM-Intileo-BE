@@ -21,15 +21,15 @@ const VisibilityGroup = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
-        model: "VisibilityGroups",
-        key: "groupId",
+        model: "visibility_groups",
+        key: "id",
       },
     },
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "MasterUsers",
+        model: "masterusers",
         key: "masterUserID",
       },
     },
