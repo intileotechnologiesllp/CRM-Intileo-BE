@@ -14,7 +14,7 @@ const ItemVisibilityRule = sequelize.define(
       allowNull: false,
       references: {
         model: "visibility_groups",
-        key: "id",
+        key: "groupId",
       },
     },
     entityType: {

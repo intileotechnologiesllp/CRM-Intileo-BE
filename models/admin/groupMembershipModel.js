@@ -14,7 +14,7 @@ const GroupMembership = sequelize.define(
       allowNull: false,
       references: {
         model: "visibility_groups",
-        key: "id",
+        key: "groupId",
       },
     },
     userId: {
