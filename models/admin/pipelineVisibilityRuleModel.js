@@ -14,7 +14,7 @@ const PipelineVisibilityRule = sequelize.define(
       allowNull: false,
       references: {
         model: "visibility_groups",
-        key: "id",
+        key: "groupId",
       },
     },
     pipelineId: {

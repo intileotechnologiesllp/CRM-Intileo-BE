@@ -22,7 +22,7 @@ const VisibilityGroup = sequelize.define(
       allowNull: true,
       references: {
         model: "visibility_groups",
-        key: "id",
+        key: "groupId",
       },
     },
     masterUserID: {
