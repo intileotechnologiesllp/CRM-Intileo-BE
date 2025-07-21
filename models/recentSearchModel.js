@@ -24,6 +24,11 @@ const RecentSearch = sequelize.define(
       defaultValue: 0,
       comment: "Number of results returned for this search",
     },
+    searchResults: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: "JSON string containing the search results for quick access",
+    },
     masterUserID: {
       type: DataTypes.INTEGER,
       allowNull: false,

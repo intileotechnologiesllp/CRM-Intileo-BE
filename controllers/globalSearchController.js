@@ -19,6 +19,7 @@ exports.globalSearch = async (req, res) => {
       limit = 10,
       offset = 0,
       includeInactive = false,
+      saveEmptySearches = false, // New parameter to control saving searches with no results
     } = req.query;
 
     if (!searchTerm || searchTerm.trim().length < 2) {
@@ -598,6 +599,7 @@ exports.globalSearch = async (req, res) => {
       limit: parseInt(limit),
       offset: parseInt(offset),
       includeInactive: includeInactive,
+      saveEmptySearches: saveEmptySearches,
       executionTime: Date.now() - Date.now(), // This would be calculated properly
       hasMore: results.totalResults >= parseInt(limit),
     };
@@ -606,13 +608,25 @@ exports.globalSearch = async (req, res) => {
     console.log("Total results:", results.totalResults);
     console.log("Results by type:", results.summary);
 
-    // Save recent search (async, don't wait for it)
-    saveRecentSearch(
-      req.adminId,
-      searchQuery,
-      searchTypes,
-      results.totalResults
-    );
+    // Only save recent search if there are actual results OR if saveEmptySearches is enabled
+    const shouldSaveSearch =
+      results.totalResults > 0 ||
+      saveEmptySearches === "true" ||
+      saveEmptySearches === true;
+
+    if (shouldSaveSearch) {
+      saveRecentSearch(
+        req.adminId,
+        searchQuery,
+        searchTypes,
+        results.totalResults,
+        results // Pass the full results object
+      );
+    } else {
+      console.log(
+        "No results found and saveEmptySearches is disabled - not saving to recent searches"
+      );
+    }
 
     res.status(200).json(results);
   } catch (error) {
@@ -648,7 +662,8 @@ async function saveRecentSearch(
   adminId,
   searchTerm,
   searchTypes,
-  resultsCount
+  resultsCount,
+  searchResults = null
 ) {
   try {
     // Check if this exact search was already performed recently (within last hour)
@@ -662,11 +677,27 @@ async function saveRecentSearch(
       },
     });
 
+    // Prepare results data for storage (limit to prevent database overflow)
+    const resultsData = searchResults
+      ? {
+          summary: searchResults.summary,
+          results: {
+            deals: searchResults.results.deals.slice(0, 5), // Store only top 5 results per type
+            people: searchResults.results.people.slice(0, 5),
+            organizations: searchResults.results.organizations.slice(0, 5),
+            leads: searchResults.results.leads.slice(0, 5),
+            activities: searchResults.results.activities.slice(0, 3),
+            emails: searchResults.results.emails.slice(0, 3),
+          },
+        }
+      : null;
+
     if (recentSearch) {
       // Update existing recent search
       await recentSearch.update({
         searchTypes: JSON.stringify(searchTypes),
         resultsCount: resultsCount,
+        searchResults: resultsData ? JSON.stringify(resultsData) : null,
         searchedAt: new Date(),
       });
     } else {
@@ -676,6 +707,7 @@ async function saveRecentSearch(
         searchTerm: searchTerm,
         searchTypes: JSON.stringify(searchTypes),
         resultsCount: resultsCount,
+        searchResults: resultsData ? JSON.stringify(resultsData) : null,
         searchedAt: new Date(),
       });
     }
@@ -812,17 +844,31 @@ exports.getSearchSuggestions = async (req, res) => {
 // Get recent searches
 exports.getRecentSearches = async (req, res) => {
   try {
-    const { limit = 10 } = req.query;
+    const {
+      limit = 10,
+      includeEmptySearches = false, // New parameter to include/exclude searches with 0 results
+    } = req.query;
 
     console.log("=== GET RECENT SEARCHES ===");
     console.log("Admin ID:", req.adminId);
     console.log("Limit:", limit);
+    console.log("Include empty searches:", includeEmptySearches);
+
+    // Build where condition
+    const whereCondition = {
+      masterUserID: req.adminId,
+    };
+
+    // Exclude searches with zero results unless explicitly requested
+    if (includeEmptySearches !== "true" && includeEmptySearches !== true) {
+      whereCondition.resultsCount = {
+        [Op.gt]: 0,
+      };
+    }
 
     // Get recent searches for the current user
     const recentSearches = await RecentSearch.findAll({
-      where: {
-        masterUserID: req.adminId,
-      },
+      where: whereCondition,
       order: [["searchedAt", "DESC"]],
       limit: parseInt(limit),
       attributes: [
@@ -830,6 +876,7 @@ exports.getRecentSearches = async (req, res) => {
         "searchTerm",
         "searchTypes",
         "resultsCount",
+        "searchResults",
         "searchedAt",
       ],
     });
@@ -837,18 +884,58 @@ exports.getRecentSearches = async (req, res) => {
     console.log("Recent searches found:", recentSearches.length);
 
     // Format the response
-    const formattedSearches = recentSearches.map((search) => ({
-      id: search.id,
-      searchTerm: search.searchTerm,
-      searchTypes: Array.isArray(search.searchTypes)
-        ? search.searchTypes
-        : search.searchTypes
-        ? JSON.parse(search.searchTypes)
-        : ["all"],
-      resultsCount: search.resultsCount,
-      searchedAt: search.searchedAt,
-      timeAgo: getTimeAgo(search.searchedAt),
-    }));
+    const formattedSearches = recentSearches.map((search) => {
+      // Parse search results if they exist
+      let parsedResults = null;
+      if (search.searchResults) {
+        try {
+          parsedResults = JSON.parse(search.searchResults);
+        } catch (error) {
+          console.warn(
+            "Failed to parse search results for search ID:",
+            search.id
+          );
+        }
+      }
+
+      // Parse searchTypes properly
+      let parsedSearchTypes = ["all"];
+      if (search.searchTypes) {
+        try {
+          // If it's already an array, use it as is
+          if (Array.isArray(search.searchTypes)) {
+            parsedSearchTypes = search.searchTypes;
+          }
+          // If it's a string, try to parse it as JSON
+          else if (typeof search.searchTypes === "string") {
+            parsedSearchTypes = JSON.parse(search.searchTypes);
+          }
+        } catch (error) {
+          console.warn(
+            "Failed to parse search types for search ID:",
+            search.id,
+            "Value:",
+            search.searchTypes
+          );
+          // Fallback to default
+          parsedSearchTypes = ["all"];
+        }
+      }
+
+      return {
+        id: search.id,
+        searchTerm: search.searchTerm,
+        searchTypes: parsedSearchTypes,
+        resultsCount: search.resultsCount,
+        searchResults: parsedResults,
+        searchedAt: search.searchedAt,
+        timeAgo: getTimeAgo(search.searchedAt),
+        // Add quick access URLs for top results
+        quickResults: parsedResults
+          ? generateQuickResults(parsedResults)
+          : null,
+      };
+    });
 
     // Group by date for better UX
     const groupedSearches = groupSearchesByDate(formattedSearches);
@@ -860,6 +947,7 @@ exports.getRecentSearches = async (req, res) => {
       metadata: {
         adminId: req.adminId,
         limit: parseInt(limit),
+        includeEmptySearches: includeEmptySearches,
         hasMore: recentSearches.length >= parseInt(limit),
       },
     });
@@ -871,6 +959,74 @@ exports.getRecentSearches = async (req, res) => {
     });
   }
 };
+
+// Helper function to generate quick results for navigation
+function generateQuickResults(searchResults) {
+  const quickResults = [];
+
+  // Add top 3 results from each category
+  const categories = [
+    "deals",
+    "people",
+    "organizations",
+    "leads",
+    "activities",
+    "emails",
+  ];
+
+  categories.forEach((category) => {
+    if (
+      searchResults.results[category] &&
+      searchResults.results[category].length > 0
+    ) {
+      searchResults.results[category].slice(0, 3).forEach((item) => {
+        quickResults.push({
+          id: item.id,
+          type: item.type || category.slice(0, -1), // Remove 's' from category name
+          title: item.title,
+          subtitle: item.subtitle,
+          // Generate navigation URL based on type
+          navigationUrl: generateNavigationUrl(
+            item.type || category.slice(0, -1),
+            item.id
+          ),
+          category: category,
+          icon: getIconForType(item.type || category.slice(0, -1)),
+        });
+      });
+    }
+  });
+
+  return quickResults.slice(0, 10); // Limit to top 10 quick results
+}
+
+// Helper function to generate navigation URLs
+function generateNavigationUrl(type, id) {
+  const baseUrls = {
+    deal: `/deals/${id}`,
+    person: `/people/${id}`,
+    organization: `/organizations/${id}`,
+    lead: `/leads/${id}`,
+    activity: `/activities/${id}`,
+    email: `/emails/${id}`,
+  };
+
+  return baseUrls[type] || `/${type}s/${id}`;
+}
+
+// Helper function to get icons for different types
+function getIconForType(type) {
+  const icons = {
+    deal: "💼",
+    person: "👤",
+    organization: "🏢",
+    lead: "🎯",
+    activity: "📅",
+    email: "✉️",
+  };
+
+  return icons[type] || "📄";
+}
 
 // Helper function to get time ago string
 function getTimeAgo(date) {
@@ -1069,6 +1225,36 @@ exports.getRecentSearchStats = async (req, res) => {
     console.error("Get recent search stats error:", error);
     res.status(500).json({
       message: "Error getting recent search statistics",
+      error: error.message,
+    });
+  }
+};
+
+// Clean up searches with zero results
+exports.cleanupEmptySearches = async (req, res) => {
+  try {
+    console.log("=== CLEANUP EMPTY SEARCHES ===");
+    console.log("Admin ID:", req.adminId);
+
+    // Remove searches with zero results for the current user
+    const deleted = await RecentSearch.destroy({
+      where: {
+        masterUserID: req.adminId,
+        resultsCount: 0,
+      },
+    });
+
+    console.log("Deleted empty searches:", deleted);
+
+    res.status(200).json({
+      message: "Empty searches cleaned up successfully",
+      deletedCount: deleted,
+      adminId: req.adminId,
+    });
+  } catch (error) {
+    console.error("Cleanup empty searches error:", error);
+    res.status(500).json({
+      message: "Error cleaning up empty searches",
       error: error.message,
     });
   }
