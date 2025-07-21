@@ -49,4 +49,11 @@ router.delete(
   globalSearchController.clearRecentSearches
 );
 
+// Test endpoint for debugging person search
+router.get(
+  "/test-person",
+  verifyToken,
+  globalSearchController.testPersonSearch
+);
+
 module.exports = router;
