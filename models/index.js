@@ -5,6 +5,8 @@ const Organization = require("./leads/leadOrganizationModel");
 const MasterUser = require("./master/masterUserModel");
 const Activity = require("./activity/activityModel");
 const Deal = require("./deals/dealsModels");
+const Pipeline = require("./deals/pipelineModel");
+const PipelineStage = require("./deals/pipelineStageModel");
 const CustomField = require("./customFieldModel");
 const CustomFieldValue = require("./customFieldValueModel");
 const Email = require("./email/emailModel");
@@ -76,6 +78,22 @@ Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
 Email.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
 Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
 
+// Pipeline associations
+Pipeline.hasMany(PipelineStage, {
+  foreignKey: "pipelineId",
+  as: "stages",
+  onDelete: "CASCADE",
+});
+PipelineStage.belongsTo(Pipeline, { foreignKey: "pipelineId", as: "pipeline" });
+
+// Deal-Pipeline associations
+Deal.belongsTo(Pipeline, { foreignKey: "pipelineId", as: "pipelineData" });
+Pipeline.hasMany(Deal, { foreignKey: "pipelineId", as: "deals" });
+
+// Deal-PipelineStage associations
+Deal.belongsTo(PipelineStage, { foreignKey: "stageId", as: "stageData" });
+PipelineStage.hasMany(Deal, { foreignKey: "stageId", as: "deals" });
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -83,6 +101,8 @@ module.exports = {
   Organization,
   Activity,
   Deal,
+  Pipeline,
+  PipelineStage,
   CustomField,
   CustomFieldValue,
   Email,

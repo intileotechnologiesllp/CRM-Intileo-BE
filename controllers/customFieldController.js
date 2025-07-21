@@ -2,6 +2,8 @@ const CustomField = require("../models/customFieldModel");
 const CustomFieldValue = require("../models/customFieldValueModel");
 const Deal = require("../models/deals/dealsModels");
 const Lead = require("../models/leads/leadsModel");
+const Pipeline = require("../models/deals/pipelineModel");
+const PipelineStage = require("../models/deals/pipelineStageModel");
 const { Op } = require("sequelize");
 const sequelize = require("../config/db");
 const { logAuditTrail } = require("../utils/auditTrailLogger");
@@ -10,7 +12,51 @@ const historyLogger = require("../utils/historyLogger").logHistory;
 
 // Helper function to extract default fields from Sequelize model
 // Helper function to extract specific default fields from database models
-const getDefaultFieldsFromModels = (entityType) => {
+const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
+  // Get pipeline options if dealing with deals
+  let pipelineOptions = [];
+  let stageOptions = [];
+
+  if (entityType === "deals" && masterUserID) {
+    try {
+      const pipelines = await Pipeline.findAll({
+        where: { masterUserID, isActive: true },
+        include: [
+          {
+            model: PipelineStage,
+            as: "stages",
+            where: { isActive: true },
+            required: false,
+            order: [["stageOrder", "ASC"]],
+          },
+        ],
+        order: [
+          ["isDefault", "DESC"],
+          ["displayOrder", "ASC"],
+        ],
+      });
+
+      pipelineOptions = pipelines.map((p) => ({
+        value: p.pipelineId,
+        label: p.pipelineName,
+        isDefault: p.isDefault,
+      }));
+
+      stageOptions = pipelines.reduce((stages, pipeline) => {
+        const pipelineStages = pipeline.stages.map((s) => ({
+          value: s.stageId,
+          label: s.stageName,
+          pipelineId: s.pipelineId,
+          probability: s.probability,
+          stageOrder: s.stageOrder,
+        }));
+        return [...stages, ...pipelineStages];
+      }, []);
+    } catch (error) {
+      console.log("Error fetching pipeline options:", error.message);
+    }
+  }
+
   const specificFields = {
     // Fields from your screenshot that exist in database models
     leads: [
@@ -159,22 +205,24 @@ const getDefaultFieldsFromModels = (entityType) => {
       {
         fieldName: "pipeline",
         fieldLabel: "Pipeline",
-        fieldType: "text",
-        dbColumn: "pipeline",
+        fieldType: "select",
+        dbColumn: "pipelineId",
         isRequired: false,
         entityType: "deals",
         isActive: true,
         isDefault: true,
+        options: pipelineOptions,
       },
       {
         fieldName: "pipelineStage",
         fieldLabel: "Stage",
-        fieldType: "text",
-        dbColumn: "pipelineStage",
+        fieldType: "select",
+        dbColumn: "stageId",
         isRequired: false,
         entityType: "deals",
         isActive: true,
         isDefault: true,
+        options: stageOptions,
       },
       {
         fieldName: "productName",
@@ -452,17 +500,48 @@ exports.createCustomField = async (req, res) => {
     }
 
     // Check if field name already exists for this entity type and user
-    const existingField = await CustomField.findOne({
+    const normalizedFieldName = fieldName.toLowerCase().replace(/\s+/g, "_");
+
+    // Check against existing custom fields
+    const existingCustomField = await CustomField.findOne({
       where: {
-        fieldName: fieldName.toLowerCase().replace(/\s+/g, "_"),
-        entityType,
+        fieldName: normalizedFieldName,
+        entityType: {
+          [Op.in]: [entityType, "both"], // Check both specific entity type and "both"
+        },
         masterUserID,
       },
     });
 
-    if (existingField) {
+    if (existingCustomField) {
       return res.status(409).json({
-        message: `A custom field with name "${fieldName}" already exists for ${entityType}.`,
+        message: `A custom field with name "${fieldName}" already exists for ${entityType} entity type.`,
+        details: `Field "${fieldName}" is already defined for this entity type. Please choose a different name.`,
+        conflictingField: {
+          fieldName: existingCustomField.fieldName,
+          fieldLabel: existingCustomField.fieldLabel,
+          entityType: existingCustomField.entityType,
+        },
+      });
+    }
+
+    // Check against default fields to prevent conflicts
+    const defaultFields = getDefaultFieldsFromModels(entityType);
+    const conflictingDefaultField = defaultFields.find(
+      (field) => field.fieldName.toLowerCase() === normalizedFieldName
+    );
+
+    if (conflictingDefaultField) {
+      return res.status(409).json({
+        message: `Cannot create custom field "${fieldName}" as it conflicts with a default field.`,
+        details: `The field name "${fieldName}" is already used by a default field for ${entityType} entity type.`,
+        conflictingField: {
+          fieldName: conflictingDefaultField.fieldName,
+          fieldLabel: conflictingDefaultField.fieldLabel,
+          entityType: conflictingDefaultField.entityType,
+          isDefault: true,
+        },
+        suggestion: `Please choose a different field name that doesn't conflict with default fields.`,
       });
     }
 
@@ -711,20 +790,29 @@ exports.getCustomFields = async (req, res) => {
       switch (entityType) {
         case "deal":
         case "deals":
-          defaultFields = getDefaultFieldsFromModels("deals");
+          defaultFields = await getDefaultFieldsFromModels(
+            "deals",
+            masterUserID
+          );
           break;
         case "lead":
         case "leads":
-          defaultFields = getDefaultFieldsFromModels("leads");
+          defaultFields = await getDefaultFieldsFromModels(
+            "leads",
+            masterUserID
+          );
           break;
         case "person":
         case "persons":
-          defaultFields = getDefaultFieldsFromModels("person");
+          defaultFields = await getDefaultFieldsFromModels(
+            "person",
+            masterUserID
+          );
           break;
         case "both":
           defaultFields = [
-            ...getDefaultFieldsFromModels("deals"),
-            ...getDefaultFieldsFromModels("leads"),
+            ...(await getDefaultFieldsFromModels("deals", masterUserID)),
+            ...(await getDefaultFieldsFromModels("leads", masterUserID)),
           ];
           break;
       }
@@ -4031,6 +4119,72 @@ exports.migrateFieldsToNewStructure = async (req, res) => {
     console.error("Error in field migration:", error);
     res.status(500).json({
       message: "Failed to migrate fields to new structure.",
+      error: error.message,
+    });
+  }
+};
+
+// Get pipeline and stage options for custom field dropdowns
+exports.getPipelineOptions = async (req, res) => {
+  const masterUserID = req.adminId;
+
+  try {
+    const pipelines = await Pipeline.findAll({
+      where: { masterUserID, isActive: true },
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+      order: [
+        ["isDefault", "DESC"],
+        ["displayOrder", "ASC"],
+      ],
+    });
+
+    const pipelineOptions = pipelines.map((p) => ({
+      value: p.pipelineId,
+      label: p.pipelineName,
+      isDefault: p.isDefault,
+      color: p.color,
+    }));
+
+    const stageOptions = pipelines.reduce((stages, pipeline) => {
+      const pipelineStages = pipeline.stages.map((s) => ({
+        value: s.stageId,
+        label: s.stageName,
+        pipelineId: s.pipelineId,
+        pipelineName: pipeline.pipelineName,
+        probability: s.probability,
+        stageOrder: s.stageOrder,
+        color: s.color,
+      }));
+      return [...stages, ...pipelineStages];
+    }, []);
+
+    res.status(200).json({
+      message: "Pipeline options retrieved successfully.",
+      pipelines: pipelineOptions,
+      stages: stageOptions,
+      pipelineStageMapping: pipelines.map((p) => ({
+        pipelineId: p.pipelineId,
+        pipelineName: p.pipelineName,
+        stages: p.stages.map((s) => ({
+          stageId: s.stageId,
+          stageName: s.stageName,
+          probability: s.probability,
+          stageOrder: s.stageOrder,
+        })),
+      })),
+    });
+  } catch (error) {
+    console.error("Error fetching pipeline options:", error);
+    res.status(500).json({
+      message: "Failed to fetch pipeline options.",
       error: error.message,
     });
   }

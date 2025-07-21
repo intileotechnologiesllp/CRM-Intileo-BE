@@ -20,8 +20,98 @@ const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote
 const Deal = require("../../models/deals/dealsModels"); // Import Deal model
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
+const {
+  VisibilityGroup,
+  GroupMembership,
+  ItemVisibilityRule,
+} = require("../../models/admin/visibilityAssociations");
 
 const { sendEmail } = require("../../utils/emailSend");
+
+// Helper function to get user's visibility permissions for leads
+async function getUserLeadVisibilityPermissions(userId, userRole) {
+  if (userRole === "admin") {
+    return {
+      canCreate: true,
+      canView: "all",
+      canEdit: "all",
+      canDelete: "all",
+      defaultVisibility: "everyone",
+      userGroup: null,
+    };
+  }
+
+  try {
+    const membership = await GroupMembership.findOne({
+      where: {
+        userId,
+        isActive: true,
+      },
+      include: [
+        {
+          model: VisibilityGroup,
+          as: "group",
+          where: { isActive: true },
+        },
+      ],
+    });
+
+    if (!membership) {
+      return {
+        canCreate: false,
+        canView: "owner_only",
+        canEdit: "owner_only",
+        canDelete: "owner_only",
+        defaultVisibility: "owner_only",
+        userGroup: null,
+      };
+    }
+
+    const leadVisibilityRule = await ItemVisibilityRule.findOne({
+      where: {
+        groupId: membership.groupId,
+        entityType: "leads",
+        isActive: true,
+      },
+    });
+
+    if (!leadVisibilityRule) {
+      return {
+        canCreate: true,
+        canView: "owner_only",
+        canEdit: "owner_only",
+        canDelete: "owner_only",
+        defaultVisibility: "item_owners_visibility_group",
+        userGroup: membership.group,
+      };
+    }
+
+    return {
+      canCreate: leadVisibilityRule.canCreate,
+      canView: leadVisibilityRule.canView
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      canEdit: leadVisibilityRule.canEdit
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      canDelete: leadVisibilityRule.canDelete
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      defaultVisibility: leadVisibilityRule.defaultVisibility,
+      userGroup: membership.group,
+    };
+  } catch (error) {
+    console.error("Error getting user visibility permissions:", error);
+    return {
+      canCreate: false,
+      canView: "owner_only",
+      canEdit: "owner_only",
+      canDelete: "owner_only",
+      defaultVisibility: "owner_only",
+      userGroup: null,
+    };
+  }
+}
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
   // Only use these fields as standard fields for root-level custom field extraction
@@ -128,14 +218,7 @@ exports.createLead = async (req, res) => {
   console.log(req.role, "role of the user............");
 
   try {
-    // Ensure only admins can create leads
-    // if (req.user.role !== "admin") {
-    //   return res
-    //     .status(403)
-    //     .json({ message: "Access denied. Only admins can create leads." });
-    // }
-
-    // Create the lead with the masterUserID from the authenticated user
+    // Check if user can create leads based on visibility rules
     if (!["admin", "general", "master"].includes(req.role)) {
       await logAuditTrail(
         PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
@@ -147,6 +230,54 @@ exports.createLead = async (req, res) => {
       return res.status(403).json({
         message: "Access denied. You do not have permission to create leads.",
       });
+    }
+
+    // Get user's visibility group and check lead creation permissions
+    let userGroup = null;
+    let leadVisibilityRule = null;
+
+    if (req.role !== "admin") {
+      // Get user's current group membership
+      const membership = await GroupMembership.findOne({
+        where: {
+          userId: req.adminId,
+          isActive: true,
+        },
+        include: [
+          {
+            model: VisibilityGroup,
+            as: "group",
+            where: { isActive: true },
+          },
+        ],
+      });
+
+      if (membership) {
+        userGroup = membership.group;
+
+        // Check if user's group has permission to create leads
+        leadVisibilityRule = await ItemVisibilityRule.findOne({
+          where: {
+            groupId: userGroup.groupId,
+            entityType: "leads",
+            isActive: true,
+          },
+        });
+
+        if (leadVisibilityRule && !leadVisibilityRule.canCreate) {
+          await logAuditTrail(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "LEAD_CREATION",
+            req.adminId,
+            "Access denied. Your visibility group does not have permission to create leads.",
+            null
+          );
+          return res.status(403).json({
+            message:
+              "Access denied. Your visibility group does not have permission to create leads.",
+          });
+        }
+      }
     }
 
     // 1. Find or create Organization
@@ -199,6 +330,16 @@ exports.createLead = async (req, res) => {
       where: { masterUserID: req.adminId },
     });
     const ownerName = owner ? owner.name : null;
+
+    // Determine visibility level based on user's group settings or request
+    let visibilityLevel = req.body.visibilityLevel;
+    if (!visibilityLevel && leadVisibilityRule) {
+      visibilityLevel = leadVisibilityRule.defaultVisibility;
+    }
+    if (!visibilityLevel) {
+      visibilityLevel = "item_owners_visibility_group"; // Default fallback
+    }
+
     const lead = await Lead.create({
       personId: personRecord.personId, // <-- Add this
       leadOrganizationId: orgRecord.leadOrganizationId,
@@ -232,6 +373,9 @@ exports.createLead = async (req, res) => {
       productName: req.body.productName,
       sourceOriginID: req.body.sourceOriginID,
       value,
+      // Add visibility settings
+      visibilityLevel,
+      visibilityGroupId: userGroup ? userGroup.groupId : null,
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
@@ -461,7 +605,6 @@ exports.unarchiveLead = async (req, res) => {
   }
 };
 
-//...................new code..........................
 exports.getLeads = async (req, res) => {
   const {
     isArchived,
@@ -476,6 +619,37 @@ exports.getLeads = async (req, res) => {
   console.log(req.role, "role of the user............");
 
   try {
+    // Get user's visibility group and rules
+    let userGroup = null;
+    let leadVisibilityRule = null;
+
+    if (req.role !== "admin") {
+      const membership = await GroupMembership.findOne({
+        where: {
+          userId: req.adminId,
+          isActive: true,
+        },
+        include: [
+          {
+            model: VisibilityGroup,
+            as: "group",
+            where: { isActive: true },
+          },
+        ],
+      });
+
+      if (membership) {
+        userGroup = membership.group;
+        leadVisibilityRule = await ItemVisibilityRule.findOne({
+          where: {
+            groupId: userGroup.groupId,
+            entityType: "leads",
+            isActive: true,
+          },
+        });
+      }
+    }
+
     // Determine masterUserID based on role
 
     const pref = await LeadColumnPreference.findOne();
@@ -537,12 +711,103 @@ exports.getLeads = async (req, res) => {
       }
       // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
     } else {
-      // Non-admin users: filter by their own leads or specific user if provided
-      const userId =
-        queryMasterUserID && queryMasterUserID !== "all"
-          ? queryMasterUserID
-          : req.adminId;
-      whereClause[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
+      // Non-admin users: apply visibility filtering based on group rules
+      let visibilityConditions = [];
+
+      if (leadVisibilityRule) {
+        switch (leadVisibilityRule.defaultVisibility) {
+          case "owner_only":
+            // User can only see their own leads
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+            break;
+
+          case "group_only":
+            // User can see leads from their visibility group
+            if (userGroup) {
+              visibilityConditions.push({
+                [Op.or]: [
+                  { visibilityGroupId: userGroup.groupId },
+                  { masterUserID: req.adminId },
+                  { ownerId: req.adminId },
+                ],
+              });
+            }
+            break;
+
+          case "item_owners_visibility_group":
+            // User can see leads based on owner's visibility group
+            if (userGroup) {
+              // Get all users in the same visibility group
+              const groupMembers = await GroupMembership.findAll({
+                where: {
+                  groupId: userGroup.groupId,
+                  isActive: true,
+                },
+                attributes: ["userId"],
+              });
+
+              const memberIds = groupMembers.map((member) => member.userId);
+
+              visibilityConditions.push({
+                [Op.or]: [
+                  { masterUserID: { [Op.in]: memberIds } },
+                  { ownerId: { [Op.in]: memberIds } },
+                  // Include leads where visibility level allows group access
+                  {
+                    visibilityLevel: {
+                      [Op.in]: [
+                        "everyone",
+                        "group_only",
+                        "item_owners_visibility_group",
+                      ],
+                    },
+                    visibilityGroupId: userGroup.groupId,
+                  },
+                ],
+              });
+            }
+            break;
+
+          case "everyone":
+            // User can see all leads (no additional filtering)
+            break;
+
+          default:
+            // Default to owner only for security
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+        }
+      } else {
+        // No visibility rule found, default to owner only
+        visibilityConditions.push({
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        });
+      }
+
+      // Apply visibility conditions
+      if (visibilityConditions.length > 0) {
+        whereClause[Op.and] = whereClause[Op.and] || [];
+        whereClause[Op.and].push(...visibilityConditions);
+      }
+
+      // Handle specific user filtering for non-admin users
+      if (queryMasterUserID && queryMasterUserID !== "all") {
+        // Non-admin can only filter within their visible scope
+        const userId = queryMasterUserID;
+        whereClause[Op.and] = whereClause[Op.and] || [];
+        whereClause[Op.and].push({
+          [Op.or]: [{ masterUserID: userId }, { ownerId: userId }],
+        });
+      }
     }
 
     console.log("→ Query params:", req.query);
@@ -1547,6 +1812,69 @@ function buildCustomFieldCondition(condition, fieldId) {
     },
   };
 }
+
+// Get visibility options for lead creation/editing
+exports.getLeadVisibilityOptions = async (req, res) => {
+  try {
+    const permissions = await getUserLeadVisibilityPermissions(
+      req.adminId,
+      req.role
+    );
+
+    const options = [
+      {
+        value: "owner_only",
+        label: "Item owner",
+        description:
+          "Visible to the owner, Deals admins, parent visibility groups",
+        available: true,
+      },
+      {
+        value: "item_owners_visibility_group",
+        label: "Item owner's visibility group",
+        description:
+          "Visible to the owner, Deals admins, users in the same visibility group and parent group",
+        available: true,
+        default:
+          permissions.defaultVisibility === "item_owners_visibility_group",
+      },
+      {
+        value: "group_only",
+        label: "Item owner's visibility group and sub-groups",
+        description:
+          "Visible to the owner, Deals admins, users in the same visibility group, parent group and sub-groups",
+        available: permissions.userGroup !== null,
+      },
+      {
+        value: "everyone",
+        label: "All users",
+        description: "Visible to everyone in the company",
+        available:
+          req.role === "admin" ||
+          (permissions.userGroup &&
+            permissions.userGroup.allowGlobalVisibility),
+      },
+    ];
+
+    res.status(200).json({
+      message: "Visibility options retrieved successfully",
+      options: options.filter((opt) => opt.available),
+      defaultOption: permissions.defaultVisibility,
+      userGroup: permissions.userGroup
+        ? {
+            groupId: permissions.userGroup.groupId,
+            groupName: permissions.userGroup.groupName,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Error getting visibility options:", error);
+    res.status(500).json({
+      message: "Error retrieving visibility options",
+      error: error.message,
+    });
+  }
+};
 
 exports.updateLead = async (req, res) => {
   const { leadId } = req.params;
