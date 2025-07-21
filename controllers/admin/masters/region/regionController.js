@@ -178,7 +178,7 @@ exports.createRegions = async (req, res) => {
 
 // Get Regions by Country
 exports.getRegionsByCountry = async (req, res) => {
-  const { countryID } = req.params;
+  const { countryId } = req.params;
 
   try {
     const regions = await Region.findAll({
@@ -260,7 +260,7 @@ exports.getRegions = async (req, res) => {
         {
           model: Country,
           as: "country",
-          attributes: ["countryID", "country_desc"],
+          attributes: ["countryId", "country_desc"],
         },
       ],
       order: [[sortBy, order]],

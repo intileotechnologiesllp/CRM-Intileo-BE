@@ -2,7 +2,8 @@ const Country = require("../../../../models/admin/masters/countryModel");
 const Region = require("../../../../models/admin/masters/regionModel");
 const Joi = require("joi");
 const { Op } = require("sequelize");
-const logAuditTrail = require("../../../../utils/auditTrailLogger").logAuditTrail;
+const logAuditTrail =
+  require("../../../../utils/auditTrailLogger").logAuditTrail;
 const PROGRAMS = require("../../../../utils/programConstants");
 const historyLogger = require("../../../../utils/historyLogger").logHistory; // Import history logger
 
@@ -19,7 +20,6 @@ exports.createCountry = async (req, res) => {
 
   const { error } = countrySchema.validate(req.body);
   if (error) {
-    
     return res.status(400).json({ message: error.details[0].message }); // Return validation error
   }
 
@@ -28,15 +28,14 @@ exports.createCountry = async (req, res) => {
   try {
     const country = await Country.create({
       country_desc,
-      createdBy:req.role, // Set createdBy to "admin"
+      createdBy: req.role, // Set createdBy to "admin"
       createdById: req.adminId, // Set createdById to the authenticated admin ID
       mode: "added", // Set mode to "added"
     });
     console.log(country.countryID);
-    console.log(country.createdById,"id of admin");
-     // Get the creator ID from the country object
+    console.log(country.createdById, "id of admin");
+    // Get the creator ID from the country object
 
-    
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management
       "CREATE_COUNTRIES", // Mode
@@ -187,18 +186,18 @@ exports.editCountry = async (req, res) => {
       mode: "modified", // Set mode to "modified"
     });
 
-        // Capture the updated data
-        const updatedData = {
-          country_desc,
-        };
-    
-        // Calculate the changes
-        const changes = {};
-        for (const key in updatedData) {
-          if (originalData[key] !== updatedData[key]) {
-            changes[key] = { from: originalData[key], to: updatedData[key] };
-          }
-        }
+    // Capture the updated data
+    const updatedData = {
+      country_desc,
+    };
+
+    // Calculate the changes
+    const changes = {};
+    for (const key in updatedData) {
+      if (originalData[key] !== updatedData[key]) {
+        changes[key] = { from: originalData[key], to: updatedData[key] };
+      }
+    }
 
     await historyLogger(
       PROGRAMS.COUNTRY_MASTER, // Program ID for country management

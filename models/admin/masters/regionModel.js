@@ -45,10 +45,10 @@ const Region = sequelize.define("Region", {
     type: DataTypes.DATE,
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
-  }
+  },
 });
 
-Region.belongsTo(Country, { foreignKey: "countryID", as: "country" });
-Country.hasMany(Region, { foreignKey: "countryID", as: "regions" });
+Region.belongsTo(Country, { foreignKey: "countryId", as: "country" });
+Country.hasMany(Region, { foreignKey: "countryId", as: "regions" });
 
 module.exports = Region;
