@@ -16,6 +16,7 @@ router.get(
 router.get("/:entityType/groups", customFieldController.getFieldGroups);
 router.get("/:entityType/default", customFieldController.getDefaultFields);
 router.get("/:entityType/system", customFieldController.getSystemFields);
+router.get("/pipeline-options", customFieldController.getPipelineOptions);
 router.get(
   "/:entityType/hybrid-sections",
   customFieldController.getHybridFieldsSections

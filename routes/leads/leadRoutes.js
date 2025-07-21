@@ -6,6 +6,13 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 // Create a lead (Admin only)
 router.post("/create", verifyToken, leadController.createLead);
 
+// Get visibility options for lead creation/editing
+router.get(
+  "/visibility-options",
+  verifyToken,
+  leadController.getLeadVisibilityOptions
+);
+
 // Archive a lead
 router.post("/:leadId/archive", verifyToken, leadController.archiveLead);
 

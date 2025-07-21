@@ -66,6 +66,23 @@ const Deal = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    // New pipeline foreign keys
+    pipelineId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "pipelines",
+        key: "pipelineId",
+      },
+    },
+    stageId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "pipeline_stages",
+        key: "stageId",
+      },
+    },
     label: {
       type: DataTypes.STRING,
       allowNull: true,

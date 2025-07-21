@@ -19,6 +19,7 @@ const Activity = require("../../models/activity/activityModel");
 const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+
 const { getProgramId } = require("../../utils/programCache");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
@@ -2031,6 +2032,7 @@ exports.unarchiveDeal = async (req, res) => {
   }
 };
 
+
 exports.getDealsByStage = async (req, res) => {
   try {
     const allStages = [
@@ -2073,6 +2075,256 @@ exports.getDealsByStage = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+//this latest version of getDealsByStage function is used to get deals by stage with rotten days logic
+
+// exports.getDealsByStage = async (req, res) => {
+//   try {
+//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
+//     const Pipeline = require("../../models/deals/pipelineModel");
+//     const PipelineStage = require("../../models/deals/pipelineStageModel");
+
+//     let allStages = [
+//       "Qualified",
+//       "Contact Made",
+//       "Proposal Made",
+//       "Negotiations Started",
+//     ];
+
+//     // Apply user filtering for non-admin users
+//     let baseWhere = {};
+//     if (req.role !== "admin") {
+//       baseWhere.masterUserID = req.adminId;
+//     }
+
+//     // Try to get stages from pipeline system with rotten days info
+//     let stageRottenDaysMap = new Map();
+//     try {
+//       const masterUserID = req.adminId;
+//       const defaultPipeline = await Pipeline.findOne({
+//         where: {
+//           masterUserID,
+//           isDefault: true,
+//           isActive: true,
+//         },
+//         include: [
+//           {
+//             model: PipelineStage,
+//             as: "stages",
+//             where: { isActive: true },
+//             required: false,
+//             order: [["stageOrder", "ASC"]],
+//           },
+//         ],
+//       });
+
+//       if (
+//         defaultPipeline &&
+//         defaultPipeline.stages &&
+//         defaultPipeline.stages.length > 0
+//       ) {
+//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
+//         // Create map of stage name to rotten days
+//         defaultPipeline.stages.forEach((stage) => {
+//           stageRottenDaysMap.set(stage.stageName, {
+//             dealRottenDays: stage.dealRottenDays,
+//             stageColor: stage.color,
+//           });
+//         });
+//       }
+//     } catch (pipelineError) {
+//       console.log(
+//         "Pipeline system not available, using hardcoded stages:",
+//         pipelineError.message
+//       );
+//     }
+
+//     const result = [];
+//     let totalDeals = 0;
+
+//     for (const stage of allStages) {
+//       const deals = await Deal.findAll({
+//         where: {
+//           ...baseWhere,
+//           pipelineStage: stage,
+//         },
+//         order: [["createdAt", "DESC"]],
+//       });
+
+//       // Process deals with rotten logic
+//       const processedDeals = deals.map((deal) => {
+//         const dealObj = deal.toJSON();
+//         const stageInfo = stageRottenDaysMap.get(stage);
+
+//         if (stageInfo && stageInfo.dealRottenDays) {
+//           // Calculate days since deal entered this stage
+//           const daysSinceCreated = Math.floor(
+//             (new Date() - new Date(deal.createdAt)) / (1000 * 60 * 60 * 24)
+//           );
+
+//           const isRotten = daysSinceCreated > stageInfo.dealRottenDays;
+
+//           // Add rotten deal indicators
+//           dealObj.daysSinceCreated = daysSinceCreated;
+//           dealObj.isRotten = isRotten;
+//           dealObj.dealRottenDays = stageInfo.dealRottenDays;
+//           dealObj.daysOverdue = isRotten
+//             ? daysSinceCreated - stageInfo.dealRottenDays
+//             : 0;
+
+//           // Change color for rotten deals
+//           dealObj.displayColor = isRotten ? "#FF4444" : stageInfo.stageColor; // Red for rotten
+//           dealObj.rottenStatus = isRotten ? "rotten" : "fresh";
+//         } else {
+//           // No rotten days configured
+//           dealObj.isRotten = false;
+//           dealObj.rottenStatus = "fresh";
+//           dealObj.displayColor = stageInfo?.stageColor || "#007BFF";
+//         }
+
+//         return dealObj;
+//       });
+
+//       // Calculate stage statistics including rotten deals
+//       const rottenDealsCount = processedDeals.filter(
+//         (deal) => deal.isRotten
+//       ).length;
+//       const totalValue = processedDeals.reduce(
+//         (sum, deal) => sum + (deal.value || 0),
+//         0
+//       );
+//       const dealCount = processedDeals.length;
+//       totalDeals += dealCount;
+
+//       // Get stage info for display
+//       const stageInfo = stageRottenDaysMap.get(stage);
+
+//       result.push({
+//         stage,
+//         totalValue,
+//         dealCount,
+//         rottenDealsCount,
+//         freshDealsCount: dealCount - rottenDealsCount,
+//         rottenPercentage:
+//           dealCount > 0 ? Math.round((rottenDealsCount / dealCount) * 100) : 0,
+//         deals: processedDeals,
+//         stageInfo: {
+//           dealRottenDays: stageInfo?.dealRottenDays || null,
+//           stageColor: stageInfo?.stageColor || "#007BFF",
+//           hasRottenDaysConfigured: !!stageInfo?.dealRottenDays,
+//         },
+//       });
+//     }
+
+//     res.status(200).json({
+//       totalDeals,
+//       stages: result,
+//       rottenDealsInfo: {
+//         description:
+//           "Deals are marked as 'rotten' when they exceed the configured days for their stage",
+//         colorCoding: {
+//           fresh: "Original stage color",
+//           rotten: "#FF4444 (Red)",
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error in getDealsByStage:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+// this function is latest version of getDealsByStage
+
+// exports.getDealsByStage = async (req, res) => {
+//   try {
+//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
+//     const Pipeline = require("../../models/deals/pipelineModel");
+//     const PipelineStage = require("../../models/deals/pipelineStageModel");
+
+//     let allStages = [
+//       "Qualified",
+//       "Contact Made",
+//       "Proposal Made",
+//       "Negotiations Started",
+//     ];
+
+//     // Try to get stages from pipeline system
+//     try {
+//       const masterUserID = req.adminId;
+//       const defaultPipeline = await Pipeline.findOne({
+//         where: {
+//           masterUserID,
+//           isDefault: true,
+//           isActive: true,
+//         },
+//         include: [
+//           {
+//             model: PipelineStage,
+//             as: "stages",
+//             where: { isActive: true },
+//             required: false,
+//             order: [["stageOrder", "ASC"]],
+//           },
+//         ],
+//       });
+
+//       if (
+//         defaultPipeline &&
+//         defaultPipeline.stages &&
+//         defaultPipeline.stages.length > 0
+//       ) {
+//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
+//       }
+//     } catch (pipelineError) {
+//       console.log(
+//         "Pipeline system not available, using hardcoded stages:",
+//         pipelineError.message
+//       );
+//     }
+
+//     const result = [];
+//     let totalDeals = 0;
+
+//     // Apply user filtering for non-admin users
+//     let baseWhere = {};
+//     if (req.role !== "admin") {
+//       baseWhere.masterUserID = req.adminId;
+//     }
+
+//     for (const stage of allStages) {
+//       const deals = await Deal.findAll({
+//         where: {
+//           ...baseWhere,
+//           pipelineStage: stage,
+//         },
+//         order: [["createdAt", "DESC"]],
+//       });
+
+//       const totalValue = deals.reduce(
+//         (sum, deal) => sum + (deal.value || 0),
+//         0
+//       );
+//       const dealCount = deals.length;
+//       totalDeals += dealCount;
+
+//       result.push({
+//         stage,
+//         totalValue,
+//         dealCount,
+//         deals,
+//       });
+//     }
+
+//     res.status(200).json({
+//       totalDeals,
+//       stages: result,
+//     });
+//   } catch (error) {
+//     console.error("Error in getDealsByStage:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 
 // ...existing code...
 exports.getDealDetail = async (req, res) => {

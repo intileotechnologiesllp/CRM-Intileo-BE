@@ -210,6 +210,27 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.FLOAT,
     allowNull: true, // Value of the lead
   },
+
+  // Visibility management fields
+  visibilityLevel: {
+    type: DataTypes.ENUM(
+      "owner_only",
+      "group_only",
+      "everyone",
+      "item_owners_visibility_group"
+    ),
+    defaultValue: "item_owners_visibility_group",
+    comment: "Visibility level for the lead",
+  },
+  visibilityGroupId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "VisibilityGroups",
+      key: "groupId",
+    },
+    comment: "Reference to the owner's visibility group",
+  },
 });
 
 module.exports = Lead;
