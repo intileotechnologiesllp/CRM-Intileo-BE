@@ -185,6 +185,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.deals = deals.map((deal) => ({
           id: deal.dealId,
+          dealId: deal.dealId, // Add explicit dealId field
           type: "deal",
           title: deal.title,
           subtitle: `${deal.pipeline} • ${deal.pipelineStage}`,
@@ -278,6 +279,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.people = people.map((person) => ({
           id: person.personId,
+          personId: person.personId, // Add explicit personId field
           type: "person",
           title: person.contactPerson,
           subtitle: person.jobTitle || person.organization || "Contact", // Use existing fields
@@ -330,6 +332,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.organizations = organizations.map((org) => ({
           id: org.leadOrganizationId,
+          leadOrganizationId: org.leadOrganizationId, // Add explicit leadOrganizationId field
           type: "organization",
           title: org.organization,
           subtitle: "Organization", // Removed industry as it doesn't exist
@@ -400,6 +403,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.leads = leads.map((lead) => ({
           id: lead.leadId,
+          leadId: lead.leadId, // Add explicit leadId field
           type: "lead",
           title: lead.title,
           subtitle: `${lead.organization || "No Organization"} • ${
@@ -454,6 +458,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.activities = activities.map((activity) => ({
           id: activity.activityId,
+          activityId: activity.activityId, // Add explicit activityId field
           type: "activity",
           title: activity.subject,
           subtitle: `${activity.type} • ${
@@ -517,6 +522,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.emails = emails.map((email) => ({
           id: email.emailID,
+          emailID: email.emailID, // Add explicit emailID field
           type: "email",
           title: email.subject || "No Subject",
           subtitle: `From: ${email.senderName || email.sender} • To: ${
@@ -930,10 +936,6 @@ exports.getRecentSearches = async (req, res) => {
         searchResults: parsedResults,
         searchedAt: search.searchedAt,
         timeAgo: getTimeAgo(search.searchedAt),
-        // Add quick access URLs for top results
-        quickResults: parsedResults
-          ? generateQuickResults(parsedResults)
-          : null,
       };
     });
 
@@ -959,74 +961,6 @@ exports.getRecentSearches = async (req, res) => {
     });
   }
 };
-
-// Helper function to generate quick results for navigation
-function generateQuickResults(searchResults) {
-  const quickResults = [];
-
-  // Add top 3 results from each category
-  const categories = [
-    "deals",
-    "people",
-    "organizations",
-    "leads",
-    "activities",
-    "emails",
-  ];
-
-  categories.forEach((category) => {
-    if (
-      searchResults.results[category] &&
-      searchResults.results[category].length > 0
-    ) {
-      searchResults.results[category].slice(0, 3).forEach((item) => {
-        quickResults.push({
-          id: item.id,
-          type: item.type || category.slice(0, -1), // Remove 's' from category name
-          title: item.title,
-          subtitle: item.subtitle,
-          // Generate navigation URL based on type
-          navigationUrl: generateNavigationUrl(
-            item.type || category.slice(0, -1),
-            item.id
-          ),
-          category: category,
-          icon: getIconForType(item.type || category.slice(0, -1)),
-        });
-      });
-    }
-  });
-
-  return quickResults.slice(0, 10); // Limit to top 10 quick results
-}
-
-// Helper function to generate navigation URLs
-function generateNavigationUrl(type, id) {
-  const baseUrls = {
-    deal: `/deals/${id}`,
-    person: `/people/${id}`,
-    organization: `/organizations/${id}`,
-    lead: `/leads/${id}`,
-    activity: `/activities/${id}`,
-    email: `/emails/${id}`,
-  };
-
-  return baseUrls[type] || `/${type}s/${id}`;
-}
-
-// Helper function to get icons for different types
-function getIconForType(type) {
-  const icons = {
-    deal: "💼",
-    person: "👤",
-    organization: "🏢",
-    lead: "🎯",
-    activity: "📅",
-    email: "✉️",
-  };
-
-  return icons[type] || "📄";
-}
 
 // Helper function to get time ago string
 function getTimeAgo(date) {
