@@ -6,6 +6,7 @@ const Email = require("../models/email/emailModel");
 const Attachment = require("../models/email/attachmentModel");
 const nodemailer = require("nodemailer");
 const { Sequelize } = require("sequelize");
+const { cleanupRecentSearches } = require("./recentSearchCleanup");
 
 //
 // Combined cron job to fetch recent and sent emails for all users
@@ -241,5 +242,27 @@ cron.schedule("0 2 * * *", async () => {
     }
   } catch (error) {
     console.error("Error auto-deleting old trash emails:", error);
+  }
+});
+
+// Daily cleanup of recent search history (runs at 2:00 AM)
+cron.schedule("0 2 * * *", async () => {
+  console.log("Running daily cleanup of recent search history...");
+
+  try {
+    const result = await cleanupRecentSearches({
+      daysToKeep: 30, // Keep searches for 30 days
+      maxPerUser: 50, // Keep maximum 50 searches per user
+    });
+
+    if (result.success) {
+      console.log(
+        `Recent search cleanup completed: ${result.deletedCount} searches deleted`
+      );
+    } else {
+      console.error("Recent search cleanup failed:", result.error);
+    }
+  } catch (error) {
+    console.error("Error running recent search cleanup:", error);
   }
 });

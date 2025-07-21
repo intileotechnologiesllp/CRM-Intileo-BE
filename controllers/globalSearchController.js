@@ -9,6 +9,7 @@ const CustomField = require("../models/customFieldModel");
 const CustomFieldValue = require("../models/customFieldValueModel");
 const RecentSearch = require("../models/recentSearchModel");
 const { sequelize } = require("../models");
+const { cleanupDuplicateSearches } = require("../utils/recentSearchCleanup");
 
 exports.globalSearch = async (req, res) => {
   try {
@@ -664,7 +665,7 @@ async function saveRecentSearch(
     if (recentSearch) {
       // Update existing recent search
       await recentSearch.update({
-        searchTypes: searchTypes,
+        searchTypes: JSON.stringify(searchTypes),
         resultsCount: resultsCount,
         searchedAt: new Date(),
       });
@@ -673,7 +674,7 @@ async function saveRecentSearch(
       await RecentSearch.create({
         masterUserID: adminId,
         searchTerm: searchTerm,
-        searchTypes: searchTypes,
+        searchTypes: JSON.stringify(searchTypes),
         resultsCount: resultsCount,
         searchedAt: new Date(),
       });
@@ -696,6 +697,19 @@ async function saveRecentSearch(
           },
         },
       });
+    }
+
+    // Periodically clean up duplicates (every 10th search)
+    if (Math.random() < 0.1) {
+      // 10% chance
+      try {
+        await cleanupDuplicateSearches(adminId);
+      } catch (duplicateCleanupError) {
+        console.warn(
+          "Failed to cleanup duplicate searches:",
+          duplicateCleanupError.message
+        );
+      }
     }
   } catch (error) {
     console.error("Error saving recent search:", error);
@@ -826,7 +840,11 @@ exports.getRecentSearches = async (req, res) => {
     const formattedSearches = recentSearches.map((search) => ({
       id: search.id,
       searchTerm: search.searchTerm,
-      searchTypes: search.searchTypes || ["all"],
+      searchTypes: Array.isArray(search.searchTypes)
+        ? search.searchTypes
+        : search.searchTypes
+        ? JSON.parse(search.searchTypes)
+        : ["all"],
       resultsCount: search.resultsCount,
       searchedAt: search.searchedAt,
       timeAgo: getTimeAgo(search.searchedAt),
@@ -949,7 +967,176 @@ exports.clearRecentSearches = async (req, res) => {
   } catch (error) {
     console.error("Clear recent searches error:", error);
     res.status(500).json({
-      message: "Internal server error clearing recent searches",
+      message: "Error clearing recent searches",
+      error: error.message,
+    });
+  }
+};
+
+// Get recent search statistics
+exports.getRecentSearchStats = async (req, res) => {
+  try {
+    const { getRecentSearchStats } = require("../utils/recentSearchCleanup");
+
+    console.log("=== GET RECENT SEARCH STATS ===");
+    console.log("Admin ID:", req.adminId);
+
+    // Get overall stats
+    const overallStats = await getRecentSearchStats();
+
+    // Get user-specific stats
+    const userStats = await RecentSearch.findAll({
+      where: { masterUserID: req.adminId },
+      attributes: [
+        [
+          RecentSearch.sequelize.fn("COUNT", RecentSearch.sequelize.col("id")),
+          "totalSearches",
+        ],
+        [
+          RecentSearch.sequelize.fn(
+            "COUNT",
+            RecentSearch.sequelize.fn(
+              "DISTINCT",
+              RecentSearch.sequelize.col("searchTerm")
+            )
+          ),
+          "uniqueTerms",
+        ],
+        [
+          RecentSearch.sequelize.fn(
+            "MAX",
+            RecentSearch.sequelize.col("searchedAt")
+          ),
+          "lastSearch",
+        ],
+        [
+          RecentSearch.sequelize.fn(
+            "MIN",
+            RecentSearch.sequelize.col("searchedAt")
+          ),
+          "firstSearch",
+        ],
+      ],
+      raw: true,
+    });
+
+    // Get most frequent search terms for this user
+    const topSearchTerms = await RecentSearch.findAll({
+      where: { masterUserID: req.adminId },
+      attributes: [
+        "searchTerm",
+        [
+          RecentSearch.sequelize.fn(
+            "COUNT",
+            RecentSearch.sequelize.col("searchTerm")
+          ),
+          "frequency",
+        ],
+        [
+          RecentSearch.sequelize.fn(
+            "MAX",
+            RecentSearch.sequelize.col("searchedAt")
+          ),
+          "lastUsed",
+        ],
+      ],
+      group: ["searchTerm"],
+      order: [
+        [
+          RecentSearch.sequelize.fn(
+            "COUNT",
+            RecentSearch.sequelize.col("searchTerm")
+          ),
+          "DESC",
+        ],
+      ],
+      limit: 10,
+      raw: true,
+    });
+
+    res.status(200).json({
+      userStats: userStats[0] || {
+        totalSearches: 0,
+        uniqueTerms: 0,
+        lastSearch: null,
+        firstSearch: null,
+      },
+      topSearchTerms,
+      overallStats,
+      adminId: req.adminId,
+    });
+  } catch (error) {
+    console.error("Get recent search stats error:", error);
+    res.status(500).json({
+      message: "Error getting recent search statistics",
+      error: error.message,
+    });
+  }
+};
+
+// Manual cleanup of recent searches
+exports.cleanupRecentSearches = async (req, res) => {
+  try {
+    const {
+      daysToKeep = 30,
+      maxPerUser = 50,
+      cleanupDuplicates = true,
+      userOnly = true,
+    } = req.body;
+
+    console.log("=== MANUAL RECENT SEARCH CLEANUP ===");
+    console.log("Admin ID:", req.adminId);
+    console.log("Days to keep:", daysToKeep);
+    console.log("Max per user:", maxPerUser);
+    console.log("Cleanup duplicates:", cleanupDuplicates);
+    console.log("User only:", userOnly);
+
+    const {
+      cleanupRecentSearches,
+      cleanupDuplicateSearches,
+    } = require("../utils/recentSearchCleanup");
+
+    let results = {
+      oldSearchesDeleted: 0,
+      duplicatesDeleted: 0,
+      totalDeleted: 0,
+    };
+
+    // Clean up old searches
+    const cleanupResult = await cleanupRecentSearches({
+      daysToKeep,
+      maxPerUser,
+      adminId: userOnly ? req.adminId : null,
+    });
+
+    if (cleanupResult.success) {
+      results.oldSearchesDeleted = cleanupResult.deletedCount;
+      results.totalDeleted += cleanupResult.deletedCount;
+    }
+
+    // Clean up duplicates if requested
+    if (cleanupDuplicates) {
+      const duplicateResult = await cleanupDuplicateSearches(req.adminId);
+      if (duplicateResult.success) {
+        results.duplicatesDeleted = duplicateResult.deletedCount;
+        results.totalDeleted += duplicateResult.deletedCount;
+      }
+    }
+
+    res.status(200).json({
+      message: "Recent search cleanup completed successfully",
+      results,
+      settings: {
+        daysToKeep,
+        maxPerUser,
+        cleanupDuplicates,
+        userOnly,
+      },
+    });
+  } catch (error) {
+    console.error("Manual cleanup recent searches error:", error);
+    res.status(500).json({
+      message: "Error during recent search cleanup",
       error: error.message,
     });
   }
