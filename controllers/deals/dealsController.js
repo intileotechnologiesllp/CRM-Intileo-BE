@@ -21,6 +21,7 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust pat
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 
 const { getProgramId } = require("../../utils/programCache");
+const PipelineStage = require("../../models/deals/pipelineStageModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -1969,13 +1970,16 @@ exports.getDealSummary = async (req, res) => {
     });
 
     // Probabilities for each stage
-    const stageProbabilities = {
-      Qualified: 10,
-      "Contact Made": 25,
-      "Proposal Made": 50,
-      "Negotiations Started": 75,
-      // Add more stages as needed
-    };
+    // Fetch dynamic probabilities from pipeline stages
+    const pipelineStages = await PipelineStage.findAll({
+      attributes: ["stageName", "probability"],
+      where: { isActive: true },
+    });
+
+    const stageProbabilities = pipelineStages.reduce((acc, stage) => {
+      acc[stage.stageName] = stage.probability || 0;
+      return acc;
+    }, {});
 
     // Group deals by currency
     const currencyMap = {};
