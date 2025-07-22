@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Fields - Organization-Wide Access</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .field-card {
+        border: 1px solid #ddd;
+        margin: 10px 0;
+        padding: 15px;
+        border-radius: 5px;
+        background: #f9f9f9;
+      }
+      .field-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .field-title {
+        font-weight: bold;
+        color: #333;
+      }
+      .field-creator {
+        font-size: 12px;
+        color: #666;
+        background: #e3f2fd;
+        padding: 4px 8px;
+        border-radius: 12px;
+      }
+      .field-permissions {
+        display: flex;
+        gap: 10px;
+        margin-top: 8px;
+      }
+      .permission-badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 3px;
+      }
+      .can-edit {
+        background: #c8e6c9;
+        color: #2e7d32;
+      }
+      .can-view {
+        background: #fff3e0;
+        color: #ef6c00;
+      }
+      .cannot-edit {
+        background: #ffcdd2;
+        color: #c62828;
+      }
+      .tabs {
+        margin: 20px 0;
+      }
+      .tab {
+        display: inline-block;
+        padding: 10px 20px;
+        background: #e0e0e0;
+        margin-right: 5px;
+        cursor: pointer;
+        border-radius: 5px 5px 0 0;
+      }
+      .tab.active {
+        background: #2196f3;
+        color: white;
+      }
+      .content {
+        display: none;
+      }
+      .content.active {
+        display: block;
+      }
+      .stats {
+        background: #f5f5f5;
+        padding: 15px;
+        border-radius: 5px;
+        margin: 15px 0;
+      }
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+      }
+      .stat-item {
+        text-align: center;
+      }
+      .stat-number {
+        font-size: 24px;
+        font-weight: bold;
+        color: #2196f3;
+      }
+      .stat-label {
+        font-size: 12px;
+        color: #666;
+      }
+      .controls {
+        margin: 20px 0;
+      }
+      select,
+      button {
+        padding: 8px 12px;
+        margin: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      button {
+        background: #2196f3;
+        color: white;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1976d2;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Custom Fields Management - Organization-Wide Access</h1>
+      <p>
+        This demonstrates the improved custom fields system where all users can
+        see and use custom fields created by any user in the organization.
+      </p>
+
+      <div class="controls">
+        <label>Entity Type:</label>
+        <select id="entityType">
+          <option value="">All</option>
+          <option value="deals">Deals</option>
+          <option value="leads">Leads</option>
+          <option value="person">Person</option>
+          <option value="both">Both</option>
+        </select>
+
+        <label>Scope:</label>
+        <select id="scope">
+          <option value="organization">Organization-wide (Recommended)</option>
+          <option value="user">My Fields Only</option>
+          <option value="all">All Fields</option>
+        </select>
+
+        <button onclick="loadCustomFields()">Load Custom Fields</button>
+        <button onclick="loadCollaborators()">View Collaborators</button>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" onclick="showTab('fields')">Custom Fields</div>
+        <div class="tab" onclick="showTab('collaborators')">Collaborators</div>
+        <div class="tab" onclick="showTab('stats')">Statistics</div>
+      </div>
+
+      <div id="fields" class="content active">
+        <h2>Custom Fields</h2>
+        <div id="fieldsContainer">
+          <p>Click "Load Custom Fields" to see the fields...</p>
+        </div>
+      </div>
+
+      <div id="collaborators" class="content">
+        <h2>Field Collaborators</h2>
+        <div id="collaboratorsContainer">
+          <p>Click "View Collaborators" to see who created custom fields...</p>
+        </div>
+      </div>
+
+      <div id="stats" class="content">
+        <h2>Usage Statistics</h2>
+        <div id="statsContainer">
+          <p>Load custom fields or collaborators to see statistics...</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Note: In a real application, you would need to handle authentication
+      // and make actual API calls. This is for demonstration purposes.
+
+      function showTab(tabName) {
+        // Hide all content
+        document.querySelectorAll(".content").forEach((content) => {
+          content.classList.remove("active");
+        });
+
+        // Remove active from all tabs
+        document.querySelectorAll(".tab").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+
+        // Show selected content and tab
+        document.getElementById(tabName).classList.add("active");
+        event.target.classList.add("active");
+      }
+
+      async function loadCustomFields() {
+        const entityType = document.getElementById("entityType").value;
+        const scope = document.getElementById("scope").value;
+
+        try {
+          // Simulate API call - replace with actual API endpoint
+          const url = `/api/custom-fields?entityType=${entityType}&scope=${scope}&includeDefaults=true`;
+          console.log("API Call:", url);
+
+          // For demonstration, show what the response would look like
+          displayMockCustomFields(entityType, scope);
+        } catch (error) {
+          console.error("Error loading custom fields:", error);
+          document.getElementById("fieldsContainer").innerHTML =
+            '<div style="color: red;">Error loading custom fields. Check console for details.</div>';
+        }
+      }
+
+      async function loadCollaborators() {
+        const entityType = document.getElementById("entityType").value;
+
+        try {
+          // Simulate API call - replace with actual API endpoint
+          const url = `/api/custom-fields/collaborators?entityType=${entityType}`;
+          console.log("API Call:", url);
+
+          // For demonstration, show what the response would look like
+          displayMockCollaborators();
+        } catch (error) {
+          console.error("Error loading collaborators:", error);
+          document.getElementById("collaboratorsContainer").innerHTML =
+            '<div style="color: red;">Error loading collaborators. Check console for details.</div>';
+        }
+      }
+
+      function displayMockCustomFields(entityType, scope) {
+        const mockFields = [
+          {
+            fieldId: 1,
+            fieldName: "project_budget",
+            fieldLabel: "Project Budget",
+            fieldType: "currency",
+            entityType: "deals",
+            createdBy: {
+              fullName: "John Smith",
+              username: "jsmith",
+              isCurrentUser: false,
+            },
+            permissions: {
+              canEdit: false,
+              canDelete: false,
+              canView: true,
+              canUse: true,
+            },
+            category: "Financial",
+          },
+          {
+            fieldId: 2,
+            fieldName: "lead_source_detail",
+            fieldLabel: "Detailed Lead Source",
+            fieldType: "text",
+            entityType: "leads",
+            createdBy: {
+              fullName: "Current User",
+              username: "currentuser",
+              isCurrentUser: true,
+            },
+            permissions: {
+              canEdit: true,
+              canDelete: true,
+              canView: true,
+              canUse: true,
+            },
+            category: "Marketing",
+          },
+          {
+            fieldId: 3,
+            fieldName: "client_industry",
+            fieldLabel: "Client Industry",
+            fieldType: "select",
+            entityType: "both",
+            createdBy: {
+              fullName: "Alice Johnson",
+              username: "ajohnson",
+              isCurrentUser: false,
+            },
+            permissions: {
+              canEdit: false,
+              canDelete: false,
+              canView: true,
+              canUse: true,
+            },
+            category: "Classification",
+          },
+        ];
+
+        let html = `<div class="stats">
+                <h3>Scope: ${
+                  scope.charAt(0).toUpperCase() + scope.slice(1)
+                }</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-number">${mockFields.length}</div>
+                        <div class="stat-label">Total Fields</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${
+                          mockFields.filter((f) => f.createdBy.isCurrentUser)
+                            .length
+                        }</div>
+                        <div class="stat-label">Created by You</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${
+                          mockFields.filter((f) => !f.createdBy.isCurrentUser)
+                            .length
+                        }</div>
+                        <div class="stat-label">Created by Others</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${
+                          mockFields.filter((f) => f.permissions.canEdit).length
+                        }</div>
+                        <div class="stat-label">Editable by You</div>
+                    </div>
+                </div>
+            </div>`;
+
+        mockFields.forEach((field) => {
+          html += `
+                    <div class="field-card">
+                        <div class="field-header">
+                            <div>
+                                <div class="field-title">${field.fieldLabel} (${
+            field.fieldName
+          })</div>
+                                <div style="font-size: 12px; color: #666;">
+                                    Type: ${field.fieldType} | Entity: ${
+            field.entityType
+          } | Category: ${field.category}
+                                </div>
+                            </div>
+                            <div class="field-creator">
+                                Created by: ${field.createdBy.fullName}
+                                ${field.createdBy.isCurrentUser ? "(You)" : ""}
+                            </div>
+                        </div>
+                        <div class="field-permissions">
+                            <span class="permission-badge ${
+                              field.permissions.canView
+                                ? "can-view"
+                                : "cannot-edit"
+                            }">
+                                ${
+                                  field.permissions.canView
+                                    ? "👁️ Can View"
+                                    : "❌ Cannot View"
+                                }
+                            </span>
+                            <span class="permission-badge ${
+                              field.permissions.canUse
+                                ? "can-view"
+                                : "cannot-edit"
+                            }">
+                                ${
+                                  field.permissions.canUse
+                                    ? "✅ Can Use"
+                                    : "❌ Cannot Use"
+                                }
+                            </span>
+                            <span class="permission-badge ${
+                              field.permissions.canEdit
+                                ? "can-edit"
+                                : "cannot-edit"
+                            }">
+                                ${
+                                  field.permissions.canEdit
+                                    ? "✏️ Can Edit"
+                                    : "🔒 Read Only"
+                                }
+                            </span>
+                            <span class="permission-badge ${
+                              field.permissions.canDelete
+                                ? "can-edit"
+                                : "cannot-edit"
+                            }">
+                                ${
+                                  field.permissions.canDelete
+                                    ? "🗑️ Can Delete"
+                                    : "🔒 Protected"
+                                }
+                            </span>
+                        </div>
+                    </div>
+                `;
+        });
+
+        document.getElementById("fieldsContainer").innerHTML = html;
+        updateStatsTab(mockFields, null);
+      }
+
+      function displayMockCollaborators() {
+        const mockCollaborators = [
+          {
+            masterUserID: 1,
+            fullName: "John Smith",
+            username: "jsmith",
+            isCurrentUser: false,
+            totalFields: 5,
+            entitiesTargeted: ["deals", "leads"],
+            fieldsCreated: [
+              { fieldLabel: "Project Budget", entityType: "deals" },
+              { fieldLabel: "Deal Complexity", entityType: "deals" },
+              { fieldLabel: "Lead Temperature", entityType: "leads" },
+            ],
+          },
+          {
+            masterUserID: 2,
+            fullName: "Current User",
+            username: "currentuser",
+            isCurrentUser: true,
+            totalFields: 3,
+            entitiesTargeted: ["leads", "person"],
+            fieldsCreated: [
+              { fieldLabel: "Detailed Lead Source", entityType: "leads" },
+              { fieldLabel: "Contact Preference", entityType: "person" },
+            ],
+          },
+          {
+            masterUserID: 3,
+            fullName: "Alice Johnson",
+            username: "ajohnson",
+            isCurrentUser: false,
+            totalFields: 7,
+            entitiesTargeted: ["both", "deals"],
+            fieldsCreated: [
+              { fieldLabel: "Client Industry", entityType: "both" },
+              { fieldLabel: "Deal Priority", entityType: "deals" },
+            ],
+          },
+        ];
+
+        let html = `<div class="stats">
+                <h3>Collaboration Overview</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-number">${
+                          mockCollaborators.length
+                        }</div>
+                        <div class="stat-label">Active Contributors</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${mockCollaborators.reduce(
+                          (sum, c) => sum + c.totalFields,
+                          0
+                        )}</div>
+                        <div class="stat-label">Total Custom Fields</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${
+                          mockCollaborators.find((c) => c.isCurrentUser)
+                            ?.totalFields || 0
+                        }</div>
+                        <div class="stat-label">Your Contributions</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${mockCollaborators
+                          .filter((c) => !c.isCurrentUser)
+                          .reduce((sum, c) => sum + c.totalFields, 0)}</div>
+                        <div class="stat-label">Others' Contributions</div>
+                    </div>
+                </div>
+            </div>`;
+
+        mockCollaborators.forEach((collaborator) => {
+          html += `
+                    <div class="field-card">
+                        <div class="field-header">
+                            <div>
+                                <div class="field-title">
+                                    ${collaborator.fullName} (@${
+            collaborator.username
+          })
+                                    ${
+                                      collaborator.isCurrentUser
+                                        ? '<span style="color: #2196f3;">(You)</span>'
+                                        : ""
+                                    }
+                                </div>
+                                <div style="font-size: 12px; color: #666;">
+                                    ${collaborator.totalFields} custom fields | 
+                                    Entities: ${collaborator.entitiesTargeted.join(
+                                      ", "
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <strong>Recent Fields:</strong>
+                            <ul style="margin: 5px 0; padding-left: 20px;">
+                                ${collaborator.fieldsCreated
+                                  .slice(0, 3)
+                                  .map(
+                                    (field) =>
+                                      `<li>${field.fieldLabel} (${field.entityType})</li>`
+                                  )
+                                  .join("")}
+                                ${
+                                  collaborator.fieldsCreated.length > 3
+                                    ? `<li><em>...and ${
+                                        collaborator.fieldsCreated.length - 3
+                                      } more</em></li>`
+                                    : ""
+                                }
+                            </ul>
+                        </div>
+                    </div>
+                `;
+        });
+
+        document.getElementById("collaboratorsContainer").innerHTML = html;
+        updateStatsTab(null, mockCollaborators);
+      }
+
+      function updateStatsTab(fields, collaborators) {
+        if (!fields && !collaborators) return;
+
+        let html = '<div class="stats">';
+
+        if (fields) {
+          html += `
+                    <h3>Field Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-number">${fields.length}</div>
+                            <div class="stat-label">Total Custom Fields</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${
+                              [...new Set(fields.map((f) => f.entityType))]
+                                .length
+                            }</div>
+                            <div class="stat-label">Entity Types</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${
+                              [...new Set(fields.map((f) => f.category))].length
+                            }</div>
+                            <div class="stat-label">Categories</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${
+                              fields.filter((f) => f.permissions.canEdit).length
+                            }</div>
+                            <div class="stat-label">Editable Fields</div>
+                        </div>
+                    </div>
+                `;
+        }
+
+        if (collaborators) {
+          html += `
+                    <h3>Collaboration Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-number">${
+                              collaborators.length
+                            }</div>
+                            <div class="stat-label">Contributors</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${collaborators.reduce(
+                              (sum, c) => sum + c.totalFields,
+                              0
+                            )}</div>
+                            <div class="stat-label">Total Fields Created</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${Math.round(
+                              collaborators.reduce(
+                                (sum, c) => sum + c.totalFields,
+                                0
+                              ) / collaborators.length
+                            )}</div>
+                            <div class="stat-label">Average per User</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">${Math.max(
+                              ...collaborators.map((c) => c.totalFields)
+                            )}</div>
+                            <div class="stat-label">Most Active User</div>
+                        </div>
+                    </div>
+                `;
+        }
+
+        html += "</div>";
+        document.getElementById("statsContainer").innerHTML = html;
+      }
+
+      // Show API examples on page load
+      console.log("API Examples:");
+      console.log("1. Get organization-wide custom fields:");
+      console.log(
+        "   GET /api/custom-fields?scope=organization&entityType=deals"
+      );
+      console.log("");
+      console.log("2. Get only user-created fields:");
+      console.log("   GET /api/custom-fields?scope=user&entityType=leads");
+      console.log("");
+      console.log("3. Get collaborators information:");
+      console.log("   GET /api/custom-fields/collaborators?entityType=deals");
+      console.log("");
+      console.log("4. Response will include:");
+      console.log("   - createdBy: { fullName, username, isCurrentUser }");
+      console.log("   - permissions: { canEdit, canDelete, canView, canUse }");
+      console.log(
+        "   - collaborationInfo: { scope, totalCreators, creatorsList }"
+      );
+    </script>
+  </body>
+</html>

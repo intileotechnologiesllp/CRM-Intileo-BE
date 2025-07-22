@@ -754,14 +754,33 @@ exports.createCustomField = async (req, res) => {
 
 // Get all custom fields for an entity type
 exports.getCustomFields = async (req, res) => {
-  const { entityType, includeInactive, includeDefaults = "true" } = req.query;
+  const {
+    entityType,
+    includeInactive,
+    includeDefaults = "true",
+    scope = "organization", // "user", "organization", "all" - Internal parameter, doesn't affect response structure
+  } = req.query;
   const masterUserID = req.adminId;
 
   try {
     let whereClause = {
-      masterUserID,
       fieldSource: "custom", // Only get custom fields
     };
+
+    // Handle different scopes for custom field visibility - but keep response structure same
+    switch (scope) {
+      case "user":
+        // Only fields created by this specific user (OLD BEHAVIOR)
+        whereClause.masterUserID = masterUserID;
+        break;
+      case "organization":
+      case "all":
+      default:
+        // Organization-wide: Show all custom fields (NEW DEFAULT BEHAVIOR)
+        // Remove the masterUserID filter to make fields organization-wide
+        // This allows all users to see custom fields created by any user
+        break;
+    }
 
     if (entityType) {
       // Include fields specific to this entity type AND fields that work for both

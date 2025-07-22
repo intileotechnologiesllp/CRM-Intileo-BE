@@ -70,6 +70,16 @@ CustomFieldValue.belongsTo(CustomField, {
   as: "CustomField",
 });
 
+// CustomField-MasterUser associations (for tracking who created the field)
+CustomField.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "CreatedBy",
+});
+MasterUser.hasMany(CustomField, {
+  foreignKey: "masterUserID",
+  as: "CreatedCustomFields",
+});
+
 // Email-Deal associations
 Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
 Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
