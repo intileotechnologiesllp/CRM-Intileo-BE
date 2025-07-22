@@ -76,12 +76,16 @@ const Lead = sequelize.define("Lead", {
 
   // Person Information
   phone: {
-    type: DataTypes.STRING,
+    type: DataTypes.JSON,
     allowNull: true, // Phone number of the person
+    defaultValue: [], // Default to an empty array
+  comment: "JSON array to store multiple phone numbers",
   },
   email: {
-    type: DataTypes.STRING,
+    type: DataTypes.JSON,
     allowNull: true, // Email address of the person
+  defaultValue: [], // Default to an empty array
+  comment: "JSON array to store multiple email addresses",
     validate: {
       isEmail: true, // Ensure valid email format
     },
