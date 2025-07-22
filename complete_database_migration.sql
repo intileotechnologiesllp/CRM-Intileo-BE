@@ -86,6 +86,35 @@ ALTER TABLE `Deals` ADD COLUMN IF NOT EXISTS `stage` varchar(255) DEFAULT NULL C
 ALTER TABLE `Deals` ADD COLUMN IF NOT EXISTS `createdAt` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'Record creation timestamp';
 ALTER TABLE `Deals` ADD COLUMN IF NOT EXISTS `updatedAt` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Record update timestamp';
 
+-- Add missing columns to pipeline_stages table (especially dealRottenDays)
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `stageId` int NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary key for pipeline stages';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `stageName` varchar(100) NOT NULL COMMENT 'Name of the pipeline stage';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `pipelineId` int NOT NULL COMMENT 'Foreign key reference to pipelines table';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `stageOrder` int DEFAULT 0 COMMENT 'Order of the stage in the pipeline';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `probability` decimal(5,2) DEFAULT 0.00 COMMENT 'Win probability percentage (0.00-100.00)';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `dealRottenDays` int DEFAULT NULL COMMENT 'Number of days after which deals in this stage are considered rotten';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `color` varchar(7) DEFAULT '#28A745' COMMENT 'Color code for the stage';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `isActive` tinyint(1) DEFAULT 1 COMMENT 'Whether the stage is active';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `masterUserID` int NOT NULL COMMENT 'Master user ID (account owner)';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `createdBy` int NOT NULL COMMENT 'User who created this stage';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `updatedBy` int DEFAULT NULL COMMENT 'User who last updated this stage';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Stage creation timestamp';
+ALTER TABLE `pipeline_stages` ADD COLUMN IF NOT EXISTS `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Stage update timestamp';
+
+-- Add missing columns to pipelines table
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `pipelineId` int NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'Primary key for pipelines';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `pipelineName` varchar(100) NOT NULL COMMENT 'Name of the pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `description` text DEFAULT NULL COMMENT 'Description of the pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `isDefault` tinyint(1) DEFAULT 0 COMMENT 'Whether this is the default pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `isActive` tinyint(1) DEFAULT 1 COMMENT 'Whether the pipeline is active';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `color` varchar(7) DEFAULT '#007BFF' COMMENT 'Color code for the pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `displayOrder` int DEFAULT 0 COMMENT 'Display order of the pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `masterUserID` int NOT NULL COMMENT 'Master user ID (account owner)';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `createdBy` int NOT NULL COMMENT 'User who created this pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `updatedBy` int DEFAULT NULL COMMENT 'User who last updated this pipeline';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Pipeline creation timestamp';
+ALTER TABLE `pipelines` ADD COLUMN IF NOT EXISTS `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Pipeline update timestamp';
+
 -- ===============================================================================
 -- SECTION 2: CREATE ALL MISSING TABLES WITH COMPLETE FIELD DEFINITIONS
 -- ===============================================================================
