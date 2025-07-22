@@ -816,10 +816,11 @@ exports.getCustomFields = async (req, res) => {
           break;
         case "lead":
         case "leads":
-          defaultFields = await getDefaultFieldsFromModels(
-            "leads",
-            masterUserID
-          );
+          // For leads, include both leads and deals default fields since leads can be converted to deals
+          defaultFields = [
+            ...(await getDefaultFieldsFromModels("leads", masterUserID)),
+            ...(await getDefaultFieldsFromModels("deals", masterUserID)),
+          ];
           break;
         case "person":
         case "persons":
