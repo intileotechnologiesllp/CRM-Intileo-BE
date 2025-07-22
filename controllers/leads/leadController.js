@@ -133,8 +133,8 @@ exports.createLead = async (req, res) => {
     sourceChannelID,
     serviceType,
     scopeOfServiceType,
-    phones, // Array of phone numbers
-    emails, // Array of email addresses
+    phone,
+    email,
     company,
     proposalValue,
     esplProposalNo,
@@ -170,34 +170,22 @@ exports.createLead = async (req, res) => {
   }
 
   // --- Add validation here ---
-  if (!contactPerson || !organization || !title || !emails || !phones) {
+  if (!contactPerson || !organization || !title || !email) {
     return res.status(400).json({
-      message: "contactPerson, organization, title, emails, and phones are required.",
+      message: "contactPerson, organization, title, and email are required.",
     });
   }
 
-  // Validate emails and phones are arrays
-  if (!Array.isArray(emails) || emails.length === 0) {
-    return res.status(400).json({ message: "Emails must be a non-empty array." });
+  // Validate emailID is required when sourceOrgin is 0 (email-created lead)
+  if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
+    return res.status(400).json({
+      message:
+        "emailID is required when sourceOrgin is 0 (email-created lead).",
+    });
   }
-  if (!Array.isArray(phones) || phones.length === 0) {
-    return res.status(400).json({ message: "Phones must be a non-empty array." });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Invalid email format." });
   }
-
-  // Validate email format
-  for (const email of emails) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ message: `Invalid email format: ${email}` });
-    }
-  }
-
-  // Validate phone format (example: numeric validation)
-  for (const phone of phones) {
-    if (!/^\d+$/.test(phone)) {
-      return res.status(400).json({ message: `Invalid phone format: ${phone}` });
-    }
-  }
-
   if (proposalValue && proposalValue < 0) {
     return res
       .status(400)
@@ -313,36 +301,30 @@ exports.createLead = async (req, res) => {
         .json({ message: "Failed to create/find organization." });
     }
     // 2. Find or create Person (linked to organization)
-    let personRecord = await Person.findOne({ where: { email: emails[0] } });
+    let personRecord = await Person.findOne({ where: { email } });
     if (!personRecord) {
       personRecord = await Person.create({
         contactPerson,
-        email: emails[0], // Use the first email for the primary record
-        phone: phones[0], // Use the first phone for the primary record
+        email,
+        phone,
         leadOrganizationId: orgRecord.leadOrganizationId,
         masterUserID: req.adminId,
       });
     }
-
-    // Link additional emails and phones to the person
-    for (let i = 1; i < emails.length; i++) {
-      await Person.create({
-        contactPerson,
-        email: emails[i],
-        phone: null, // No phone for additional email records
-        leadOrganizationId: orgRecord.leadOrganizationId,
-        masterUserID: req.adminId,
-      });
-    }
-    for (let i = 1; i < phones.length; i++) {
-      await Person.create({
-        contactPerson,
-        email: null, // No email for additional phone records
-        phone: phones[i],
-        leadOrganizationId: orgRecord.leadOrganizationId,
-        masterUserID: req.adminId,
-      });
-    }
+    //     const duplicateLead = await Lead.findOne({
+    //   where: {
+    //     organization,
+    //     contactPerson,
+    //     // email,
+    //     title
+    //   }
+    // });
+    // if (duplicateLead) {
+    //   return res.status(409).json({
+    //     message: "Lead Already Exist."
+    //   });
+    // }
+    // const duplicateByOrg = await Lead.findOne({ where: { organization } });
 
     const owner = await MasterUser.findOne({
       where: { masterUserID: req.adminId },
@@ -370,8 +352,8 @@ exports.createLead = async (req, res) => {
       sourceChannelID,
       serviceType,
       scopeOfServiceType,
-      phone: phones[0], // Use the first phone for the lead record
-      email: emails[0], // Use the first email for the lead record
+      phone,
+      email,
       company,
       proposalValue,
       esplProposalNo,
