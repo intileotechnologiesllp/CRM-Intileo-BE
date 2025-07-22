@@ -93,8 +93,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "leads",
         isActive: true,
         isDefault: true,
-        leadView: false,
-        dealView: false,
+        leadView: true,
+        dealView: true,
       },
       {
         fieldName: "probability",
@@ -212,6 +212,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isActive: true,
         isDefault: true,
         options: pipelineOptions,
+        leadView: false,
+        dealView: true,
       },
       {
         fieldName: "pipelineStage",
@@ -223,6 +225,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isActive: true,
         isDefault: true,
         options: stageOptions,
+        leadView: false,
+        dealView: true,
       },
       {
         fieldName: "productName",
