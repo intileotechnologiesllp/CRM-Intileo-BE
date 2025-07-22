@@ -29,7 +29,7 @@ router.post(
   validateAdmin,
   pipelineController.createStage
 );
-router.put("/stages/:stageId", validateAdmin, pipelineController.updateStage);
+router.post("/stages/:stageId", validateAdmin, pipelineController.updateStage);
 router.delete(
   "/stages/:stageId",
   validateAdmin,

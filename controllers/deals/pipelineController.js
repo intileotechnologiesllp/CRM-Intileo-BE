@@ -118,7 +118,8 @@ exports.getPipelines = async (req, res) => {
   const masterUserID = req.adminId;
 
   try {
-    let whereClause = { masterUserID };
+    // Organization-wide pipelines: Remove masterUserID filter to show all pipelines
+    let whereClause = {};
 
     if (includeInactive !== "true") {
       whereClause.isActive = true;
