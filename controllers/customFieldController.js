@@ -817,10 +817,33 @@ exports.getCustomFields = async (req, res) => {
         case "lead":
         case "leads":
           // For leads, include both leads and deals default fields since leads can be converted to deals
-          defaultFields = [
-            ...(await getDefaultFieldsFromModels("leads", masterUserID)),
-            ...(await getDefaultFieldsFromModels("deals", masterUserID)),
-          ];
+          // But deduplicate by fieldName, giving priority to leads fields
+          const leadsFields = await getDefaultFieldsFromModels(
+            "leads",
+            masterUserID
+          );
+          const dealsFields = await getDefaultFieldsFromModels(
+            "deals",
+            masterUserID
+          );
+
+          // Create a map to track fields by fieldName to avoid duplicates
+          const fieldMap = new Map();
+
+          // Add leads fields first (higher priority)
+          leadsFields.forEach((field) => {
+            fieldMap.set(field.fieldName, field);
+          });
+
+          // Add deals fields only if fieldName doesn't already exist
+          dealsFields.forEach((field) => {
+            if (!fieldMap.has(field.fieldName)) {
+              fieldMap.set(field.fieldName, field);
+            }
+          });
+
+          // Convert map back to array
+          defaultFields = Array.from(fieldMap.values());
           break;
         case "person":
         case "persons":
