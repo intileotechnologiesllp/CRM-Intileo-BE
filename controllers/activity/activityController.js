@@ -104,6 +104,327 @@ exports.createActivity = async (req, res) => {
   }
 };
 
+// exports.getActivities = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 50,
+//       search = "",
+//       type,
+//       assignedTo,
+//       isDone,
+//       personId,
+//       leadOrganizationId,
+//       dealId,
+//       leadId,
+//       dateFilter,
+//       filterId,
+//       startDate,
+//       endDate,
+//     } = req.query;
+
+//     const pref = await ActivityColumnPreference.findOne();
+//     let attributes = [];
+//     if (pref) {
+//       const columns =
+//         typeof pref.columns === "string"
+//           ? JSON.parse(pref.columns)
+//           : pref.columns;
+//       const activityFields = Object.keys(Activity.rawAttributes);
+//       columns
+//         .filter((col) => col.check && activityFields.includes(col.key))
+//         .forEach((col) => {
+//           attributes.push(col.key);
+//         });
+//       if (attributes.length === 0) attributes = undefined;
+//     }
+
+//     const where = {};
+//     let filterWhere = {};
+
+//     if (filterId) {
+//       const filter = await LeadFilter.findByPk(filterId);
+//       if (!filter) {
+//         return res.status(404).json({ message: "Filter not found." });
+//       }
+//       const filterConfig =
+//         typeof filter.filterConfig === "string"
+//           ? JSON.parse(filter.filterConfig)
+//           : filter.filterConfig;
+
+//       const { all = [], any = [] } = filterConfig;
+//       const activityFields = Object.keys(Activity.rawAttributes);
+
+//       if (all.length > 0) {
+//         filterWhere[Op.and] = [];
+//         all.forEach((cond) => {
+//           if (cond.entity === "Lead" && cond.field === "title") {
+//             filterWhere[Op.and].push({
+//               "$Lead.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (activityFields.includes(cond.field)) {
+//             filterWhere[Op.and].push(buildCondition(cond));
+//           }
+//         });
+//         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+//       }
+
+//       if (any.length > 0) {
+//         filterWhere[Op.or] = [];
+//         any.forEach((cond) => {
+//           if (cond.entity === "Lead" && cond.field === "title") {
+//             filterWhere[Op.or].push({
+//               "$Lead.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (activityFields.includes(cond.field)) {
+//             filterWhere[Op.or].push(buildCondition(cond));
+//           }
+//         });
+//         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+//       }
+//     }
+
+//     const now = moment().startOf("day");
+//     switch (dateFilter) {
+//       case "overdue":
+//         where.startDateTime = { [Op.lt]: now.toDate() };
+//         where.isDone = false;
+//         break;
+//       case "today":
+//         where.startDateTime = {
+//           [Op.gte]: now.toDate(),
+//           [Op.lt]: moment(now).add(1, "day").toDate(),
+//         };
+//         break;
+//       case "tomorrow":
+//         where.startDateTime = {
+//           [Op.gte]: moment(now).add(1, "day").toDate(),
+//           [Op.lt]: moment(now).add(2, "day").toDate(),
+//         };
+//         break;
+//       case "this_week":
+//         where.startDateTime = {
+//           [Op.gte]: now.toDate(),
+//           [Op.lt]: moment(now).endOf("week").toDate(),
+//         };
+//         break;
+//       case "next_week":
+//         where.startDateTime = {
+//           [Op.gte]: moment(now).add(1, "week").startOf("week").toDate(),
+//           [Op.lt]: moment(now).add(1, "week").endOf("week").toDate(),
+//         };
+//         break;
+//       case "select_period":
+//         if (startDate && endDate) {
+//           where.startDateTime = {
+//             [Op.gte]: new Date(startDate),
+//             [Op.lte]: new Date(endDate),
+//           };
+//         }
+//         break;
+//       case "To-do":
+//         where.isDone = false;
+//         where.startDateTime = { [Op.gte]: now.toDate() };
+//         break;
+//       default:
+//         break;
+//     }
+
+//     if (search) {
+//       where[Op.or] = [
+//         { subject: { [Op.like]: `%${search}%` } },
+//         { description: { [Op.like]: `%${search}%` } },
+//       ];
+//     }
+//     if (type) where.type = type;
+//     if (typeof isDone !== "undefined") where.isDone = isDone === "true";
+//     if (personId) where.personId = personId;
+//     if (leadOrganizationId) where.leadOrganizationId = leadOrganizationId;
+//     if (dealId) where.dealId = dealId;
+//     if (leadId) where.leadId = leadId;
+
+//     if (req.role !== "admin") {
+//       where[Op.or] = [
+//         { masterUserID: req.adminId },
+//         { assignedTo: req.adminId },
+//       ];
+//     }
+
+//     const finalWhere = { ...filterWhere, ...where };
+//     const alwaysInclude = [
+//       "dealId",
+//       "leadId",
+//       "assignedTo",
+//       "leadOrganizationId",
+//       "personId",
+//       "activityId",
+//       "type",
+//       "startDateTime",
+//       "endDateTime",
+//     ];
+//     if (attributes) {
+//       alwaysInclude.forEach((field) => {
+//         if (!attributes.includes(field)) attributes.push(field);
+//       });
+//     }
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+//     const { rows: activities, count: total } = await Activity.findAndCountAll({
+//       where: finalWhere,
+//       limit: parseInt(limit),
+//       offset,
+//       order: [["startDateTime", "DESC"]],
+//       attributes,
+//       include: [
+//         {
+//           model: Lead,
+//           attributes: ["title"],
+//           required: false,
+//         },
+//         {
+//           model: Deal,
+//           attributes: ["title"],
+//           required: false,
+//         },
+//         {
+//           model: Organizations,
+//           as: "ActivityOrganization", // Correct alias
+//           attributes: ["organization"],
+//           required: false,
+//         },
+//         {
+//           model: Person,
+//           as: "ActivityPerson", // Correct alias
+//           attributes: ["contactPerson", "email"],
+//           required: false,
+//         },
+//       ],
+//     });
+
+//     const activitiesWithTitle = activities.map((activity) => {
+//       const data = activity.get ? activity.get({ plain: true }) : activity;
+//       const { Lead, Deal, Organizations, Person, ...rest } = data;
+//       let title = null;
+//       if (rest.leadId && Lead) {
+//         title = Lead.title;
+//       } else if (rest.dealId && Deal) {
+//         title = Deal.title;
+//       }
+//       return {
+//         ...rest,
+//         title,
+//         organization: Organizations ? Organizations.organization : null,
+//         contactPerson: Person ? Person.contactPerson : null,
+//         email: Person ? Person.email : null,
+//       };
+//     });
+
+//     res.status(200).json({
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       currentPage: parseInt(page),
+//       activities: activitiesWithTitle,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching activities:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+// const operatorMap = {
+//   is: "eq",
+//   "is not": "ne",
+//   "is empty": "is empty",
+//   "is not empty": "is not empty",
+//   "is exactly or earlier than": "lte",
+//   "is earlier than": "lt",
+//   "is exactly or later than": "gte",
+//   "is later than": "gt",
+//   // Add more mappings if needed
+// };
+// function buildCondition(cond) {
+//   const ops = {
+//     eq: Op.eq,
+//     ne: Op.ne,
+//     like: Op.like,
+//     notLike: Op.notLike,
+//     gt: Op.gt,
+//     gte: Op.gte,
+//     lt: Op.lt,
+//     lte: Op.lte,
+//     in: Op.in,
+//     notIn: Op.notIn,
+//     is: Op.eq,
+//     isNot: Op.ne,
+//     isEmpty: Op.is,
+//     isNotEmpty: Op.not,
+//   };
+
+//   let operator = cond.operator;
+//   if (operatorMap[operator]) {
+//     operator = operatorMap[operator];
+//   }
+
+//   // Handle "is empty" and "is not empty"
+//   if (operator === "is empty") {
+//     return { [cond.field]: { [Op.is]: null } };
+//   }
+//   if (operator === "is not empty") {
+//     return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+//   }
+
+//   // Handle date fields
+//   const leadDateFields = Object.entries(Activity.rawAttributes)
+//     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+//     .map(([key]) => key);
+
+//   // const DealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
+//   //   .filter(([_, attr]) => attr.type && attr.type.key === 'DATE')
+//   //   .map(([key]) => key);
+
+//   const allDateFields = [...leadDateFields];
+
+//   if (allDateFields.includes(cond.field)) {
+//     if (cond.useExactDate) {
+//       const date = new Date(cond.value);
+//       if (isNaN(date.getTime())) return {};
+//       return {
+//         [cond.field]: {
+//           [ops[operator] || Op.eq]: date,
+//         },
+//       };
+//     }
+//     // Otherwise, use relative date conversion
+//     const dateRange = convertRelativeDate(cond.value);
+//     const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
+
+//     if (
+//       dateRange &&
+//       isValidDate(dateRange.start) &&
+//       isValidDate(dateRange.end)
+//     ) {
+//       return {
+//         [cond.field]: {
+//           [Op.between]: [dateRange.start, dateRange.end],
+//         },
+//       };
+//     }
+//     if (dateRange && isValidDate(dateRange.start)) {
+//       return {
+//         [cond.field]: {
+//           [ops[operator] || Op.eq]: dateRange.start,
+//         },
+//       };
+//     }
+//     return {};
+//   }
+
+//   // Default
+//   return {
+//     [cond.field]: {
+//       [ops[operator] || Op.eq]: cond.value,
+//     },
+//   };
+// }
 exports.getActivities = async (req, res) => {
   try {
     const {
