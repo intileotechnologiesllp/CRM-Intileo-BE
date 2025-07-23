@@ -54,16 +54,22 @@ exports.getLeadFilters = async (req, res) => {
         },
       });
     }
+
     // Filter by entityType if provided
     let filtered = filters;
     if (entityType) {
       filtered = filters.filter((f) => {
-        const all = f.filterConfig.all || [];
-        const any = f.filterConfig.any || [];
+        const filterConfig =
+          typeof f.filterConfig === "string"
+            ? JSON.parse(f.filterConfig)
+            : f.filterConfig;
+        const all = filterConfig.all || [];
+        const any = filterConfig.any || [];
         const allEntities = [...all, ...any];
         return allEntities.some((cond) => cond.entity === entityType);
       });
     }
+
     res.status(200).json({ filters: filtered });
   } catch (error) {
     console.error("Error fetching filters:", error);
