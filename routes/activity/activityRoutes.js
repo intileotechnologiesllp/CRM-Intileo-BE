@@ -46,6 +46,11 @@ router.get(
   verifyToken,
   activityController.getCalendarActivities
 );
+router.get(
+  "/get-filter-fields",
+  verifyToken,
+  activityController.getActivityFilterFields
+);
 
 // Bulk activity operations
 router.post("/bulk-edit", verifyToken, activityController.bulkEditActivities);

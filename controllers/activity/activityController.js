@@ -1484,3 +1484,53 @@ exports.bulkReassignActivities = async (req, res) => {
     });
   }
 };
+
+exports.getActivityFilterFields = async (req, res) => {
+  try {
+    const activityFields = Object.keys(Activity.rawAttributes);
+
+    // Exclude ID fields
+    const filteredFields = activityFields.filter(
+      (field) => !field.toLowerCase().endsWith("id")
+    );
+
+    // Predefined fields with labels
+    const predefinedFields = [
+      { value: "dueDate", label: "Due Date" },
+      { value: "priority", label: "Priority" },
+      { value: "subject", label: "Subject" },
+      { value: "type", label: "Type" },
+      { value: "organization", label: "Organization" },
+      { value: "contactPerson", label: "Contact Person" },
+      { value: "email", label: "Email" },
+      { value: "description", label: "Description" },
+      { value: "status", label: "Status" },
+      { value: "notes", label: "Notes" },
+      { value: "isDone", label: "Is Done" },
+    ];
+
+    // Combine predefined fields with dynamically fetched fields
+    const combinedFields = [
+      ...predefinedFields,
+      ...filteredFields.map((field) => ({
+        value: field,
+        label: field
+          .replace(/([A-Z])/g, " $1")
+          .replace(/^./, (str) => str.toUpperCase()),
+      })),
+    ];
+
+    // Remove duplicate fields
+    const uniqueFields = combinedFields.filter(
+      (field, index, self) =>
+        index === self.findIndex((f) => f.value === field.value)
+    );
+
+    res.status(200).json({ fields: uniqueFields });
+  } catch (error) {
+    console.error("Error fetching activity fields:", error);
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
+  }
+};
