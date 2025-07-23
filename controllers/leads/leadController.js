@@ -672,6 +672,10 @@ exports.getLeads = async (req, res) => {
       if (!leadAttributes.includes("leadId")) {
         leadAttributes.unshift("leadId");
       }
+      // Always include the sortBy field for ordering
+      if (!leadAttributes.includes(sortBy)) {
+        leadAttributes.push(sortBy);
+      }
 
       leadDetailsAttributes = columns
         .filter((col) => col.check && leadDetailsFields.includes(col.key))
@@ -681,6 +685,10 @@ exports.getLeads = async (req, res) => {
     console.log(leadAttributes, "leadAttributes from preferences");
 
     let whereClause = {};
+    let hasActivityFiltering = false; // Initialize early for use throughout the function
+    let hasPersonFiltering = false; // Initialize for Person filtering
+    let hasOrganizationFiltering = false; // Initialize for Organization filtering
+
     // let include = [
     //   {
     //     model: LeadDetails,
@@ -839,17 +847,20 @@ exports.getLeads = async (req, res) => {
       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
       const personFields = Object.keys(Person.rawAttributes);
       const organizationFields = Object.keys(Organization.rawAttributes);
+      const activityFields = Object.keys(Activity.rawAttributes);
 
       let filterWhere = {};
       let leadDetailsWhere = {};
       let personWhere = {};
       let organizationWhere = {};
+      let activityWhere = {};
       let customFieldsConditions = { all: [], any: [] };
 
       console.log("Available lead fields:", leadFields);
       console.log("Available leadDetails fields:", leadDetailsFields);
       console.log("Available person fields:", personFields);
       console.log("Available organization fields:", organizationFields);
+      console.log("Available activity fields:", activityFields);
 
       // --- Your new filter logic for all ---
       if (all.length > 0) {
@@ -859,27 +870,107 @@ exports.getLeads = async (req, res) => {
         leadDetailsWhere[Op.and] = [];
         personWhere[Op.and] = [];
         organizationWhere[Op.and] = [];
+        activityWhere[Op.and] = [];
         all.forEach((cond) => {
           console.log("Processing condition:", cond);
 
-          if (leadFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in Lead fields`);
-            filterWhere[Op.and].push(buildCondition(cond));
-          } else if (leadDetailsFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in LeadDetails fields`);
-            leadDetailsWhere[Op.and].push(buildCondition(cond));
-          } else if (personFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in Person fields`);
-            personWhere[Op.and].push(buildCondition(cond));
-          } else if (organizationFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in Organization fields`);
-            organizationWhere[Op.and].push(buildCondition(cond));
+          // Check if entity is specified in the condition
+          if (cond.entity) {
+            console.log(`Condition specifies entity: ${cond.entity}`);
+
+            // Handle both "Lead" and "Leads" entity names for backward compatibility
+            if (
+              (cond.entity === "Lead" || cond.entity === "Leads") &&
+              leadFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Lead field due to entity specification`
+              );
+              filterWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "LeadDetails" &&
+              leadDetailsFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as LeadDetails field due to entity specification`
+              );
+              leadDetailsWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Person" &&
+              personFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Person field due to entity specification`
+              );
+              personWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Organization" &&
+              organizationFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Organization field due to entity specification`
+              );
+              organizationWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Activity" &&
+              activityFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Activity field due to entity specification`
+              );
+              const activityCondition = buildCondition(cond);
+              console.log(
+                `Built Activity condition for ${cond.field}:`,
+                activityCondition
+              );
+              console.log(
+                `Activity condition symbols:`,
+                Object.getOwnPropertySymbols(activityCondition[cond.field])
+              );
+              if (
+                Object.getOwnPropertySymbols(activityCondition[cond.field])
+                  .length > 0
+              ) {
+                const symbol = Object.getOwnPropertySymbols(
+                  activityCondition[cond.field]
+                )[0];
+                console.log(
+                  `Activity condition value: ${
+                    activityCondition[cond.field][symbol]
+                  }`
+                );
+              }
+              activityWhere[Op.and].push(activityCondition);
+            } else {
+              console.log(
+                `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
+              );
+              customFieldsConditions.all.push(cond);
+            }
           } else {
-            console.log(
-              `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-            );
-            // Handle custom fields
-            customFieldsConditions.all.push(cond);
+            // Fallback to original logic when entity is not specified
+            if (leadFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Lead fields`);
+              filterWhere[Op.and].push(buildCondition(cond));
+            } else if (leadDetailsFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in LeadDetails fields`);
+              leadDetailsWhere[Op.and].push(buildCondition(cond));
+            } else if (personFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Person fields`);
+              personWhere[Op.and].push(buildCondition(cond));
+            } else if (organizationFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Organization fields`);
+              organizationWhere[Op.and].push(buildCondition(cond));
+            } else if (activityFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Activity fields`);
+              activityWhere[Op.and].push(buildCondition(cond));
+            } else {
+              console.log(
+                `Field '${cond.field}' NOT found in standard fields, treating as custom field`
+              );
+              // Handle custom fields
+              customFieldsConditions.all.push(cond);
+            }
           }
         });
         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
@@ -888,6 +979,7 @@ exports.getLeads = async (req, res) => {
         if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
         if (organizationWhere[Op.and].length === 0)
           delete organizationWhere[Op.and];
+        if (activityWhere[Op.and].length === 0) delete activityWhere[Op.and];
       }
 
       // --- Your new filter logic for any ---
@@ -896,18 +988,76 @@ exports.getLeads = async (req, res) => {
         leadDetailsWhere[Op.or] = [];
         personWhere[Op.or] = [];
         organizationWhere[Op.or] = [];
+        activityWhere[Op.or] = [];
         any.forEach((cond) => {
-          if (leadFields.includes(cond.field)) {
-            filterWhere[Op.or].push(buildCondition(cond));
-          } else if (leadDetailsFields.includes(cond.field)) {
-            leadDetailsWhere[Op.or].push(buildCondition(cond));
-          } else if (personFields.includes(cond.field)) {
-            personWhere[Op.or].push(buildCondition(cond));
-          } else if (organizationFields.includes(cond.field)) {
-            organizationWhere[Op.or].push(buildCondition(cond));
+          // Check if entity is specified in the condition
+          if (cond.entity) {
+            console.log(`'Any' condition specifies entity: ${cond.entity}`);
+
+            if (cond.entity === "Lead" && leadFields.includes(cond.field)) {
+              console.log(
+                `Field '${cond.field}' processed as Lead field due to entity specification`
+              );
+              filterWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "LeadDetails" &&
+              leadDetailsFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as LeadDetails field due to entity specification`
+              );
+              leadDetailsWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Person" &&
+              personFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Person field due to entity specification`
+              );
+              personWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Organization" &&
+              organizationFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Organization field due to entity specification`
+              );
+              organizationWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Activity" &&
+              activityFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Activity field due to entity specification`
+              );
+              const activityCondition = buildCondition(cond);
+              console.log(
+                `Built Activity condition for ${cond.field}:`,
+                activityCondition
+              );
+              activityWhere[Op.or].push(activityCondition);
+            } else {
+              console.log(
+                `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
+              );
+              customFieldsConditions.any.push(cond);
+            }
           } else {
-            // Handle custom fields
-            customFieldsConditions.any.push(cond);
+            // Fallback to original logic when entity is not specified
+            if (leadFields.includes(cond.field)) {
+              filterWhere[Op.or].push(buildCondition(cond));
+            } else if (leadDetailsFields.includes(cond.field)) {
+              leadDetailsWhere[Op.or].push(buildCondition(cond));
+            } else if (personFields.includes(cond.field)) {
+              personWhere[Op.or].push(buildCondition(cond));
+            } else if (organizationFields.includes(cond.field)) {
+              organizationWhere[Op.or].push(buildCondition(cond));
+            } else if (activityFields.includes(cond.field)) {
+              activityWhere[Op.or].push(buildCondition(cond));
+            } else {
+              // Handle custom fields
+              customFieldsConditions.any.push(cond);
+            }
           }
         });
         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
@@ -916,6 +1066,7 @@ exports.getLeads = async (req, res) => {
         if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
         if (organizationWhere[Op.or].length === 0)
           delete organizationWhere[Op.or];
+        if (activityWhere[Op.or].length === 0) delete activityWhere[Op.or];
       }
 
       // Merge with archive/masterUserID filters
@@ -974,6 +1125,76 @@ exports.getLeads = async (req, res) => {
         "→ Built organizationWhere:",
         JSON.stringify(organizationWhere)
       );
+      console.log("→ Built activityWhere:", activityWhere);
+      console.log(
+        "→ Activity where object keys length:",
+        Object.keys(activityWhere).length
+      );
+      console.log(
+        "→ Activity where object symbols length:",
+        Object.getOwnPropertySymbols(activityWhere).length
+      );
+      console.log(
+        "→ All activity where properties:",
+        Object.getOwnPropertyNames(activityWhere).concat(
+          Object.getOwnPropertySymbols(activityWhere)
+        )
+      );
+
+      // Fix: Check for both regular keys and Symbol properties (Sequelize operators are Symbols)
+      hasActivityFiltering =
+        Object.keys(activityWhere).length > 0 ||
+        Object.getOwnPropertySymbols(activityWhere).length > 0;
+
+      hasPersonFiltering =
+        Object.keys(personWhere).length > 0 ||
+        Object.getOwnPropertySymbols(personWhere).length > 0;
+
+      hasOrganizationFiltering =
+        Object.keys(organizationWhere).length > 0 ||
+        Object.getOwnPropertySymbols(organizationWhere).length > 0;
+
+      if (hasActivityFiltering) {
+        console.log("→ Activity filtering will be applied:");
+        if (activityWhere[Op.and]) {
+          console.log(
+            "  - AND conditions count:",
+            activityWhere[Op.and].length
+          );
+        }
+        if (activityWhere[Op.or]) {
+          console.log("  - OR conditions count:", activityWhere[Op.or].length);
+        }
+
+        // Quick database check for debugging
+        try {
+          const totalActivities = await Activity.count();
+          console.log("→ Total activities in database:", totalActivities);
+
+          const activitiesWithType = await Activity.count({
+            where: { type: "Meeting" },
+          });
+          console.log("→ Activities with type='Meeting':", activitiesWithType);
+
+          const activitiesWithLeads = await Activity.count({
+            where: { leadId: { [Op.not]: null } },
+          });
+          console.log("→ Activities linked to leads:", activitiesWithLeads);
+
+          const leadsWithActivities = await Lead.count({
+            include: [
+              {
+                model: Activity,
+                as: "Activities",
+                required: true,
+              },
+            ],
+          });
+          console.log("→ Leads that have activities:", leadsWithActivities);
+        } catch (debugError) {
+          console.log("→ Debug query error:", debugError.message);
+        }
+      }
 
       if (Object.keys(leadDetailsWhere).length > 0) {
         include.push({
@@ -990,7 +1211,15 @@ exports.getLeads = async (req, res) => {
         });
       }
 
-      if (Object.keys(personWhere).length > 0) {
+      if (hasPersonFiltering) {
+        console.log("→ Person filtering will be applied:");
+        if (personWhere[Op.and]) {
+          console.log("  - AND conditions count:", personWhere[Op.and].length);
+        }
+        if (personWhere[Op.or]) {
+          console.log("  - OR conditions count:", personWhere[Op.or].length);
+        }
+
         include.push({
           model: Person,
           as: "LeadPerson",
@@ -1005,7 +1234,21 @@ exports.getLeads = async (req, res) => {
         });
       }
 
-      if (Object.keys(organizationWhere).length > 0) {
+      if (hasOrganizationFiltering) {
+        console.log("→ Organization filtering will be applied:");
+        if (organizationWhere[Op.and]) {
+          console.log(
+            "  - AND conditions count:",
+            organizationWhere[Op.and].length
+          );
+        }
+        if (organizationWhere[Op.or]) {
+          console.log(
+            "  - OR conditions count:",
+            organizationWhere[Op.or].length
+          );
+        }
+
         include.push({
           model: Organization,
           as: "LeadOrganization",
@@ -1016,6 +1259,203 @@ exports.getLeads = async (req, res) => {
         include.push({
           model: Organization,
           as: "LeadOrganization",
+          required: false,
+        });
+      }
+
+      if (hasActivityFiltering) {
+        console.log("==========================================");
+        console.log("🔥 ACTIVITY FILTERING DETECTED!");
+        console.log(
+          "🔥 Activity where clause:",
+          JSON.stringify(activityWhere, null, 2)
+        );
+        console.log("🔥 Activity where keys:", Object.keys(activityWhere));
+        console.log(
+          "🔥 Activity where symbols:",
+          Object.getOwnPropertySymbols(activityWhere)
+        );
+
+        // Debug: Show the actual condition structure
+        if (activityWhere[Op.and]) {
+          console.log("🔥 AND conditions details:", activityWhere[Op.and]);
+          activityWhere[Op.and].forEach((condition, index) => {
+            console.log(
+              `🔥 Condition ${index}:`,
+              JSON.stringify(condition, null, 2)
+            );
+            console.log(`🔥 Condition ${index} keys:`, Object.keys(condition));
+            console.log(
+              `🔥 Condition ${index} symbols:`,
+              Object.getOwnPropertySymbols(condition)
+            );
+
+            // Check each field in the condition
+            Object.keys(condition).forEach((field) => {
+              console.log(`🔥 Field '${field}' value:`, condition[field]);
+              console.log(
+                `🔥 Field '${field}' symbols:`,
+                Object.getOwnPropertySymbols(condition[field])
+              );
+
+              // Show Symbol values
+              Object.getOwnPropertySymbols(condition[field]).forEach(
+                (symbol) => {
+                  console.log(
+                    `🔥 Symbol ${symbol.toString()} value:`,
+                    condition[field][symbol]
+                  );
+                }
+              );
+            });
+          });
+        }
+        console.log("==========================================");
+
+        // NEW APPROACH: Rebuild the activity condition from scratch to avoid Symbol loss
+        console.log("🔧 REBUILDING ACTIVITY CONDITIONS FROM SCRATCH...");
+
+        // Find the activity conditions from the filter config and rebuild them
+        let rebuiltActivityWhere = null;
+
+        if (activityWhere[Op.and] && activityWhere[Op.and].length > 0) {
+          const conditions = [];
+
+          activityWhere[Op.and].forEach((condition, index) => {
+            console.log(`🔧 Rebuilding condition ${index}:`, condition);
+
+            // Extract the field name and value from the original condition
+            Object.keys(condition).forEach((fieldName) => {
+              const fieldCondition = condition[fieldName];
+              console.log(
+                `🔧 Processing field '${fieldName}' with condition:`,
+                fieldCondition
+              );
+
+              // Find the operator and value
+              Object.getOwnPropertySymbols(fieldCondition).forEach((symbol) => {
+                const value = fieldCondition[symbol];
+                console.log(
+                  `🔧 Found operator ${symbol.toString()} with value: ${value}`
+                );
+
+                // Rebuild the condition with fresh Symbols
+                if (symbol === Op.eq) {
+                  const rebuiltCondition = { [fieldName]: { [Op.eq]: value } };
+                  console.log(`🔧 Rebuilt condition:`, rebuiltCondition);
+                  console.log(
+                    `🔧 Rebuilt condition symbols:`,
+                    Object.getOwnPropertySymbols(rebuiltCondition[fieldName])
+                  );
+                  conditions.push(rebuiltCondition);
+                }
+                // Add other operators as needed (Op.ne, Op.like, etc.)
+              });
+            });
+          });
+
+          if (conditions.length > 0) {
+            rebuiltActivityWhere = { [Op.and]: conditions };
+            console.log("� REBUILT ACTIVITY WHERE:", rebuiltActivityWhere);
+            console.log(
+              "� Rebuilt symbols:",
+              Object.getOwnPropertySymbols(rebuiltActivityWhere)
+            );
+
+            if (rebuiltActivityWhere[Op.and]) {
+              console.log(
+                "� Rebuilt AND conditions:",
+                rebuiltActivityWhere[Op.and]
+              );
+              rebuiltActivityWhere[Op.and].forEach((condition, index) => {
+                console.log(`� Rebuilt condition ${index}:`, condition);
+                Object.keys(condition).forEach((field) => {
+                  console.log(
+                    `🔧 Field '${field}' symbols:`,
+                    Object.getOwnPropertySymbols(condition[field])
+                  );
+                  Object.getOwnPropertySymbols(condition[field]).forEach(
+                    (symbol) => {
+                      console.log(
+                        `� Rebuilt field '${field}' symbol ${symbol.toString()} = ${
+                          condition[field][symbol]
+                        }`
+                      );
+                    }
+                  );
+                });
+              });
+            }
+          }
+        }
+
+        // Use the rebuilt condition if available, otherwise try direct approach
+        const finalActivityWhere = rebuiltActivityWhere || { type: "Meeting" };
+
+        console.log("🔧 FINAL ACTIVITY WHERE CONDITION:", finalActivityWhere);
+        console.log(
+          "🔧 Final condition symbols:",
+          Object.getOwnPropertySymbols(finalActivityWhere)
+        );
+
+        include.push({
+          model: Activity,
+          as: "Activities",
+          required: true,
+          where: finalActivityWhere,
+        });
+
+        console.log("🔥 ACTIVITY FILTERING APPLIED WITH REBUILT CONDITIONS");
+        console.log(
+          "🔥 This should now generate SQL: INNER JOIN activities ON activities.leadId = leads.leadId WHERE activities.type = 'Meeting'"
+        );
+
+        // FINAL DEBUG: Check what's actually in the include array
+        const finalActivityInclude = include[include.length - 1];
+        console.log("🔍 FINAL ACTIVITY INCLUDE IN ARRAY:");
+        console.log("🔍 Model:", finalActivityInclude.model.name);
+        console.log("🔍 As:", finalActivityInclude.as);
+        console.log("🔍 Required:", finalActivityInclude.required);
+        console.log("🔍 Where clause:", finalActivityInclude.where);
+        console.log(
+          "🔍 Where keys:",
+          Object.keys(finalActivityInclude.where || {})
+        );
+        console.log(
+          "🔍 Where symbols:",
+          Object.getOwnPropertySymbols(finalActivityInclude.where || {})
+        );
+
+        if (
+          finalActivityInclude.where &&
+          typeof finalActivityInclude.where === "object"
+        ) {
+          Object.keys(finalActivityInclude.where).forEach((key) => {
+            console.log(
+              `🔍 Where property '${key}':`,
+              finalActivityInclude.where[key]
+            );
+          });
+          Object.getOwnPropertySymbols(finalActivityInclude.where).forEach(
+            (symbol) => {
+              console.log(
+                `🔍 Where symbol ${symbol.toString()}:`,
+                finalActivityInclude.where[symbol]
+              );
+            }
+          );
+        }
+
+        console.log("==========================================");
+      } else {
+        console.log("==========================================");
+        console.log(
+          "🔵 NO ACTIVITY FILTERING - ADDING DEFAULT ACTIVITY INCLUDE"
+        );
+        console.log("==========================================");
+        include.push({
+          model: Activity,
+          as: "Activities",
           required: false,
         });
       }
@@ -1129,6 +1569,13 @@ exports.getLeads = async (req, res) => {
           whereClause[Op.or]
         );
       }
+
+      // Add default Activity include for non-filtered queries
+      include.push({
+        model: Activity,
+        as: "Activities",
+        required: false,
+      });
     }
 
     // Pagination
@@ -1152,6 +1599,9 @@ exports.getLeads = async (req, res) => {
         required: false,
       });
     }
+
+    // Activity include is now handled in the filtering section above
+    // No need for additional Activity include logic here
     include.push({
       model: MasterUser,
       as: "Owner",
@@ -1164,14 +1614,83 @@ exports.getLeads = async (req, res) => {
     // if (!leadAttributes.includes('personId')) {
     //   leadAttributes.push('personId');
     // }
-    whereClause.dealId = null;
+
+    // Only exclude converted leads (dealId = null) if we're NOT doing Activity, Person, or Organization filtering
+    // When any of these filterings are applied, include all leads regardless of conversion status
+    if (
+      !hasActivityFiltering &&
+      !hasPersonFiltering &&
+      !hasOrganizationFiltering
+    ) {
+      whereClause.dealId = null;
+      console.log("🔍 Applied dealId = null (excluding converted leads)");
+    } else {
+      console.log(
+        "🔍 Skipped dealId = null (Entity filtering allows converted leads)"
+      );
+    }
+
+    console.log("==========================================");
+    console.log("🚀 FINAL QUERY EXECUTION STARTING");
+    console.log("🚀 Total include array length:", include.length);
+
+    // Check if Activity filtering is active
+    console.log("🚀 Activity include details:");
+    const activityInclude = include.find((i) => i.as === "Activities");
+    if (activityInclude) {
+      console.log("  🎯 Activity include found:");
+      console.log("    - Required:", activityInclude.required);
+      console.log("    - Has where clause:", !!activityInclude.where);
+      if (activityInclude.where) {
+        console.log(
+          "    - Where clause:",
+          JSON.stringify(activityInclude.where)
+        );
+      }
+    } else {
+      console.log("  ❌ NO Activity include found!");
+    }
+
+    // Check if Person filtering is active
+    console.log("🚀 Person include details:");
+    const personInclude = include.find((i) => i.as === "LeadPerson");
+    if (personInclude) {
+      console.log("  👤 Person include found:");
+      console.log("    - Required:", personInclude.required);
+      console.log("    - Has where clause:", !!personInclude.where);
+      if (personInclude.where) {
+        console.log("    - Where clause:", JSON.stringify(personInclude.where));
+      }
+    } else {
+      console.log("  ❌ NO Person include found!");
+    }
+
+    // Check if Organization filtering is active
+    console.log("🚀 Organization include details:");
+    const organizationInclude = include.find(
+      (i) => i.as === "LeadOrganization"
+    );
+    if (organizationInclude) {
+      console.log("  🏢 Organization include found:");
+      console.log("    - Required:", organizationInclude.required);
+      console.log("    - Has where clause:", !!organizationInclude.where);
+      if (organizationInclude.where) {
+        console.log(
+          "    - Where clause:",
+          JSON.stringify(organizationInclude.where)
+        );
+      }
+    } else {
+      console.log("  ❌ NO Organization include found!");
+    }
+    console.log("==========================================");
+
     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
     const leads = await Lead.findAndCountAll({
       where: whereClause,
       include,
       limit: parseInt(limit),
       offset: parseInt(offset),
-      // order: [[Lead, sortBy, order.toUpperCase()]],
       order: [[sortBy, order.toUpperCase()]],
       attributes:
         leadAttributes && leadAttributes.length > 0
@@ -1179,7 +1698,60 @@ exports.getLeads = async (req, res) => {
           : undefined,
     });
 
-    console.log("→ Query executed. Total records:", leads.count);
+    console.log("==========================================");
+    console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
+    console.log("🎉 Total records found:", leads.count);
+
+    // Debug Activity filtering results
+    if (filterId && activityInclude && activityInclude.required) {
+      console.log("🎯 ACTIVITY FILTER RESULTS:");
+      console.log("  - Leads found with Activity filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead activities:",
+          leads.rows[0].Activities
+            ? leads.rows[0].Activities.length
+            : "No Activities"
+        );
+        if (leads.rows[0].Activities && leads.rows[0].Activities.length > 0) {
+          console.log(
+            "  - First activity type:",
+            leads.rows[0].Activities[0].type
+          );
+        }
+      }
+    }
+
+    // Debug Person filtering results
+    if (filterId && hasPersonFiltering) {
+      console.log("👤 PERSON FILTER RESULTS:");
+      console.log("  - Leads found with Person filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead person:",
+          leads.rows[0].LeadPerson
+            ? leads.rows[0].LeadPerson.firstName +
+                " " +
+                leads.rows[0].LeadPerson.lastName
+            : "No Person"
+        );
+      }
+    }
+
+    // Debug Organization filtering results
+    if (filterId && hasOrganizationFiltering) {
+      console.log("🏢 ORGANIZATION FILTER RESULTS:");
+      console.log("  - Leads found with Organization filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead organization:",
+          leads.rows[0].LeadOrganization
+            ? leads.rows[0].LeadOrganization.organizationName
+            : "No Organization"
+        );
+      }
+    }
+    console.log("==========================================");
 
     // Get custom field values for all leads (including default/system fields and unified fields)
     // Only include custom fields where check is true
@@ -1231,6 +1803,13 @@ exports.getLeads = async (req, res) => {
       delete leadObj.Owner; // Remove the nested Owner object
       delete leadObj.LeadPerson;
       delete leadObj.LeadOrganization;
+
+      // Keep Activities data for the response
+      if (leadObj.Activities) {
+        leadObj.activities = leadObj.Activities;
+        delete leadObj.Activities; // Remove the nested Activities object but keep the data in activities
+      }
+
       if (leadObj.details) {
         Object.assign(leadObj, leadObj.details);
         delete leadObj.details;
@@ -1247,7 +1826,7 @@ exports.getLeads = async (req, res) => {
 
       return leadObj;
     });
-    console.log(leads.rows, "leads rows after flattening");
+    // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
 
     // let persons, organizations;
 
@@ -1274,7 +1853,7 @@ exports.getLeads = async (req, res) => {
       },
       raw: true,
     });
-    console.log("flatLeads:", flatLeads);
+    // console.log("flatLeads:", flatLeads); // Commented out to see Activity filtering debug messages
 
     // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
     const orgPersonsMap = {};
@@ -1487,7 +2066,8 @@ function buildCondition(condition) {
   }
 
   // Default condition
-  return { [field]: { [ops[mappedOperator] || Op.eq]: processedValue } };
+  const sequelizeOp = ops[mappedOperator] || Op.eq;
+  return { [field]: { [sequelizeOp]: processedValue } };
 }
 
 // Helper functions for custom field filtering
