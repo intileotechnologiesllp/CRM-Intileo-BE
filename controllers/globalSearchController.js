@@ -32,7 +32,7 @@ exports.globalSearch = async (req, res) => {
     const searchQuery = searchTerm.trim();
     const searchTypes =
       types === "all"
-        ? ["deals", "people", "organizations", "leads", "activities", "emails"]
+        ? ["deals", "people", "organizations", "leads", "activities"]
         : types.split(",").map((t) => t.trim());
 
     console.log("=== GLOBAL SEARCH DEBUG ===");
@@ -127,7 +127,6 @@ exports.globalSearch = async (req, res) => {
         organizations: [],
         leads: [],
         activities: [],
-        emails: [],
       },
       summary: {
         deals: 0,
@@ -135,7 +134,6 @@ exports.globalSearch = async (req, res) => {
         organizations: 0,
         leads: 0,
         activities: 0,
-        emails: 0,
       },
     };
 
@@ -663,67 +661,6 @@ exports.globalSearch = async (req, res) => {
         results.summary.activities = activities.length;
       } catch (error) {
         console.error("Error searching activities:", error);
-      }
-    }
-
-    // Search in Emails
-    if (searchTypes.includes("emails")) {
-      try {
-        const emails = await Email.findAll({
-          where: {
-            [Op.or]: [
-              { subject: { [Op.like]: `%${searchQuery}%` } },
-              { sender: { [Op.like]: `%${searchQuery}%` } },
-              { senderName: { [Op.like]: `%${searchQuery}%` } },
-              { recipient: { [Op.like]: `%${searchQuery}%` } },
-              { body: { [Op.like]: `%${searchQuery}%` } },
-            ],
-            masterUserID: req.adminId,
-          },
-          attributes: [
-            "emailID",
-            "subject",
-            "sender",
-            "senderName",
-            "recipient",
-            "createdAt",
-            "updatedAt",
-            "dealId",
-            "leadId",
-            "isRead",
-          ],
-          limit: parseInt(limit),
-          offset: parseInt(offset),
-          order: [["createdAt", "DESC"]],
-        });
-
-        results.results.emails = emails.map((email) => ({
-          id: email.emailID,
-          emailID: email.emailID, // Add explicit emailID field
-          type: "email",
-          title: email.subject || "No Subject",
-          subtitle: `From: ${email.senderName || email.sender} • To: ${
-            email.recipient
-          }`,
-          sender: email.sender,
-          senderName: email.senderName,
-          recipient: email.recipient,
-          isRead: email.isRead,
-          dealId: email.dealId,
-          leadId: email.leadId,
-          createdAt: email.createdAt,
-          updatedAt: email.updatedAt,
-          matchedFields: getMatchedFields(email, searchQuery, [
-            "subject",
-            "sender",
-            "senderName",
-            "recipient",
-          ]),
-        }));
-
-        results.summary.emails = emails.length;
-      } catch (error) {
-        console.error("Error searching emails:", error);
       }
     }
 
