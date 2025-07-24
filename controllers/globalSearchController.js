@@ -1,3 +1,105 @@
+// Mark a search result as recently viewed
+exports.markRecentlyViewed = async (req, res) => {
+  try {
+    const { entityType, entityId, searchTerm, searchTypes } = req.body;
+    // entityType: 'deal', 'person', 'organization', 'lead', 'activity'
+    // entityId: the id of the entity
+    // searchTerm, searchTypes: optional, for context
+    if (!entityType || !entityId) {
+      return res
+        .status(400)
+        .json({ message: "entityType and entityId are required" });
+    }
+    // Upsert logic: if already viewed, update viewedAt; else, create new
+    const [recent, created] = await RecentSearch.findOrCreate({
+      where: {
+        masterUserID: req.adminId,
+        entityType,
+        entityId,
+        isRecentlyViewed: true,
+      },
+      defaults: {
+        searchTerm: searchTerm || "",
+        searchTypes: searchTypes ? JSON.stringify(searchTypes) : null,
+        resultsCount: 1,
+        isRecentlyViewed: true,
+        searchedAt: new Date(),
+      },
+    });
+    if (!created) {
+      // Update timestamp if already exists
+      await recent.update({ searchedAt: new Date() });
+    }
+    res
+      .status(200)
+      .json({ message: "Marked as recently viewed", entityType, entityId });
+  } catch (error) {
+    console.error("Error marking recently viewed:", error);
+    res
+      .status(500)
+      .json({ message: "Error marking recently viewed", error: error.message });
+  }
+};
+
+// Get recently viewed items for the user, including full entity data
+exports.getRecentlyViewed = async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    // Only fetch items marked as recently viewed for this user
+    const recents = await RecentSearch.findAll({
+      where: {
+        masterUserID: req.adminId,
+        isRecentlyViewed: true,
+      },
+      order: [["searchedAt", "DESC"]],
+      limit: parseInt(limit),
+    });
+
+    // Fetch full entity data for each recently viewed item
+    const entityResults = await Promise.all(
+      recents.map(async (item) => {
+        let entityData = null;
+        try {
+          if (item.entityType === "deal") {
+            entityData = await Deal.findOne({
+              where: { dealId: item.entityId },
+            });
+          } else if (item.entityType === "person") {
+            entityData = await Person.findOne({
+              where: { personId: item.entityId },
+            });
+          } else if (item.entityType === "organization") {
+            entityData = await Organization.findOne({
+              where: { leadOrganizationId: item.entityId },
+            });
+          } else if (item.entityType === "lead") {
+            entityData = await Lead.findOne({
+              where: { leadId: item.entityId },
+            });
+          } else if (item.entityType === "activity") {
+            entityData = await Activity.findOne({
+              where: { activityId: item.entityId },
+            });
+          }
+        } catch (err) {
+          entityData = null;
+        }
+        return {
+          ...item.toJSON(),
+          entity: entityData,
+        };
+      })
+    );
+
+    res.status(200).json({ recentlyViewed: entityResults });
+  } catch (error) {
+    console.error("Error fetching recently viewed:", error);
+    res.status(500).json({
+      message: "Error fetching recently viewed",
+      error: error.message,
+    });
+  }
+};
 const { Op } = require("sequelize");
 const Sequelize = require("sequelize");
 const Deal = require("../models/deals/dealsModels");
@@ -814,6 +916,9 @@ async function saveRecentSearch(
         resultsCount: resultsCount,
         searchResults: resultsData ? JSON.stringify(resultsData) : null,
         searchedAt: new Date(),
+        isRecentlyViewed: false, // Always mark as not recently viewed for search
+        entityType: null,
+        entityId: null,
       });
     } else {
       // Create new recent search
@@ -824,6 +929,9 @@ async function saveRecentSearch(
         resultsCount: resultsCount,
         searchResults: resultsData ? JSON.stringify(resultsData) : null,
         searchedAt: new Date(),
+        isRecentlyViewed: false,
+        entityType: null,
+        entityId: null,
       });
     }
 
@@ -969,11 +1077,10 @@ exports.getRecentSearches = async (req, res) => {
     console.log("Limit:", limit);
     console.log("Include empty searches:", includeEmptySearches);
 
-    // Build where condition
+    // Always filter by masterUserID so recent searches are user-specific (like recently viewed)
     const whereCondition = {
       masterUserID: req.adminId,
     };
-
     // Exclude searches with zero results unless explicitly requested
     if (includeEmptySearches !== "true" && includeEmptySearches !== true) {
       whereCondition.resultsCount = {
