@@ -62,12 +62,10 @@ exports.markRecentlyViewed = async (req, res) => {
     }
 
     if (!canMark) {
-      return res
-        .status(403)
-        .json({
-          message:
-            "You do not have permission to mark this entity as recently viewed.",
-        });
+      return res.status(403).json({
+        message:
+          "You do not have permission to mark this entity as recently viewed.",
+      });
     }
 
     // Upsert logic: if already viewed, update viewedAt; else, create new
@@ -969,30 +967,22 @@ async function saveRecentSearch(
         }
       : null;
 
+    // Only set entityType/entityId if present (for recently viewed, not for search)
+    const baseData = {
+      masterUserID: adminId,
+      searchTerm: searchTerm,
+      searchTypes: JSON.stringify(searchTypes),
+      resultsCount: resultsCount,
+      searchResults: resultsData ? JSON.stringify(resultsData) : null,
+      searchedAt: new Date(),
+      isRecentlyViewed: false,
+    };
+
     if (recentSearch) {
       // Update existing recent search
-      await recentSearch.update({
-        searchTypes: JSON.stringify(searchTypes),
-        resultsCount: resultsCount,
-        searchResults: resultsData ? JSON.stringify(resultsData) : null,
-        searchedAt: new Date(),
-        isRecentlyViewed: false, // Always mark as not recently viewed for search
-        entityType: null,
-        entityId: null,
-      });
+      await recentSearch.update(baseData);
     } else {
-      // Create new recent search
-      await RecentSearch.create({
-        masterUserID: adminId,
-        searchTerm: searchTerm,
-        searchTypes: JSON.stringify(searchTypes),
-        resultsCount: resultsCount,
-        searchResults: resultsData ? JSON.stringify(resultsData) : null,
-        searchedAt: new Date(),
-        isRecentlyViewed: false,
-        entityType: null,
-        entityId: null,
-      });
+      await RecentSearch.create(baseData);
     }
 
     // Clean up old searches (keep only last 50 searches per user)
