@@ -2,23 +2,84 @@
 exports.markRecentlyViewed = async (req, res) => {
   try {
     const { entityType, entityId, searchTerm, searchTypes } = req.body;
-    // entityType: 'deal', 'person', 'organization', 'lead', 'activity'
-    // entityId: the id of the entity
-    // searchTerm, searchTypes: optional, for context
+    const masterUserID = req.adminId;
     if (!entityType || !entityId) {
       return res
         .status(400)
         .json({ message: "entityType and entityId are required" });
     }
+
+    // Role-based access check: only allow marking if user can see the entity
+    let canMark = false;
+    if (req.role === "admin") {
+      canMark = true;
+    } else {
+      // For each entity type, check ownership or visibility
+      let entity = null;
+      if (entityType === "deal") {
+        entity = await Deal.findOne({ where: { dealId: entityId } });
+        if (
+          entity &&
+          (entity.masterUserID === masterUserID ||
+            entity.ownerId === masterUserID)
+        )
+          canMark = true;
+      } else if (entityType === "person") {
+        entity = await Person.findOne({ where: { personId: entityId } });
+        if (
+          entity &&
+          (entity.masterUserID === masterUserID ||
+            entity.ownerId === masterUserID)
+        )
+          canMark = true;
+      } else if (entityType === "organization") {
+        entity = await Organization.findOne({
+          where: { leadOrganizationId: entityId },
+        });
+        if (
+          entity &&
+          (entity.masterUserID === masterUserID ||
+            entity.ownerId === masterUserID)
+        )
+          canMark = true;
+      } else if (entityType === "lead") {
+        entity = await Lead.findOne({ where: { leadId: entityId } });
+        if (
+          entity &&
+          (entity.masterUserID === masterUserID ||
+            entity.ownerId === masterUserID)
+        )
+          canMark = true;
+      } else if (entityType === "activity") {
+        entity = await Activity.findOne({ where: { activityId: entityId } });
+        if (
+          entity &&
+          (entity.masterUserID === masterUserID ||
+            entity.ownerId === masterUserID)
+        )
+          canMark = true;
+      }
+    }
+
+    if (!canMark) {
+      return res
+        .status(403)
+        .json({
+          message:
+            "You do not have permission to mark this entity as recently viewed.",
+        });
+    }
+
     // Upsert logic: if already viewed, update viewedAt; else, create new
     const [recent, created] = await RecentSearch.findOrCreate({
       where: {
-        masterUserID: req.adminId,
+        masterUserID,
         entityType,
         entityId,
         isRecentlyViewed: true,
       },
       defaults: {
+        masterUserID,
         searchTerm: searchTerm || "",
         searchTypes: searchTypes ? JSON.stringify(searchTypes) : null,
         resultsCount: 1,
@@ -27,8 +88,7 @@ exports.markRecentlyViewed = async (req, res) => {
       },
     });
     if (!created) {
-      // Update timestamp if already exists
-      await recent.update({ searchedAt: new Date() });
+      await recent.update({ searchedAt: new Date(), masterUserID });
     }
     res
       .status(200)
