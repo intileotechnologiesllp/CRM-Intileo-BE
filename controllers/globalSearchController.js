@@ -344,7 +344,7 @@ exports.globalSearch = async (req, res) => {
           const simplePeopleSearch = await Person.findAll({
             where: {
               masterUserID: req.adminId,
-              contactPerson: { [Op.iLike]: `%${searchQuery}%` },
+              contactPerson: { [Op.like]: `%${searchQuery}%` },
             },
             limit: 3,
           });
