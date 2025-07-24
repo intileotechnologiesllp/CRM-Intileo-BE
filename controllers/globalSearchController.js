@@ -1,4 +1,5 @@
 const { Op } = require("sequelize");
+const Sequelize = require("sequelize");
 const Deal = require("../models/deals/dealsModels");
 const Person = require("../models/leads/leadPersonModel");
 const Organization = require("../models/leads/leadOrganizationModel");
@@ -264,29 +265,29 @@ exports.globalSearch = async (req, res) => {
         // Use case-insensitive search for text fields (MySQL compatible)
         const peopleSearchConditions = {
           [Op.or]: [
-            sequelize.where(
-              sequelize.fn("LOWER", sequelize.col("contactPerson")),
+            Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("contactPerson")),
               "LIKE",
               `%${searchQuery.toLowerCase()}%`
             ),
-            sequelize.where(
-              sequelize.fn("LOWER", sequelize.col("email")),
+            Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("email")),
               "LIKE",
               `%${searchQuery.toLowerCase()}%`
             ),
             { phone: { [Op.like]: `%${searchQuery}%` } },
-            sequelize.where(
-              sequelize.fn("LOWER", sequelize.col("jobTitle")),
+            Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("jobTitle")),
               "LIKE",
               `%${searchQuery.toLowerCase()}%`
             ),
-            sequelize.where(
-              sequelize.fn("LOWER", sequelize.col("organization")),
+            Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("organization")),
               "LIKE",
               `%${searchQuery.toLowerCase()}%`
             ),
-            sequelize.where(
-              sequelize.fn("LOWER", sequelize.col("notes")),
+            Sequelize.where(
+              Sequelize.fn("LOWER", Sequelize.col("notes")),
               "LIKE",
               `%${searchQuery.toLowerCase()}%`
             ),
