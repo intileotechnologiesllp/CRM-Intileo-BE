@@ -479,15 +479,15 @@ exports.globalSearch = async (req, res) => {
     // Search in Organizations
     if (searchTypes.includes("organizations")) {
       try {
+        const orgWhere = {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${searchQuery}%` } },
+            { address: { [Op.like]: `%${searchQuery}%` } },
+          ],
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
+        };
         const organizations = await Organization.findAll({
-          where: {
-            [Op.or]: [
-              { organization: { [Op.like]: `%${searchQuery}%` } },
-              { address: { [Op.like]: `%${searchQuery}%` } },
-              // Removed columns that don't exist: email, phone, website, industry, city, country
-            ],
-            masterUserID: req.adminId,
-          },
+          where: orgWhere,
           limit: parseInt(limit),
           offset: parseInt(offset),
           order: [["updatedAt", "DESC"]],
@@ -495,21 +495,20 @@ exports.globalSearch = async (req, res) => {
 
         results.results.organizations = organizations.map((org) => ({
           id: org.leadOrganizationId,
-          leadOrganizationId: org.leadOrganizationId, // Add explicit leadOrganizationId field
+          leadOrganizationId: org.leadOrganizationId,
           type: "organization",
           title: org.organization,
-          subtitle: "Organization", // Removed industry as it doesn't exist
-          email: null, // Removed as it doesn't exist
-          phone: null, // Removed as it doesn't exist
-          website: null, // Removed as it doesn't exist
-          location: null, // Removed as city/country don't exist
+          subtitle: "Organization",
+          email: null,
+          phone: null,
+          website: null,
+          location: null,
           address: org.address,
           createdAt: org.createdAt,
           updatedAt: org.updatedAt,
           matchedFields: getMatchedFields(org, searchQuery, [
             "organization",
             "address",
-            // Removed non-existent fields
           ]),
         }));
 
@@ -534,10 +533,9 @@ exports.globalSearch = async (req, res) => {
             { phone: { [Op.like]: `%${searchQuery}%` } },
             { organization: { [Op.like]: `%${searchQuery}%` } },
             { sourceChannel: { [Op.like]: `%${searchQuery}%` } },
-            // Removed leadSource as it doesn't exist
             { status: { [Op.like]: `%${searchQuery}%` } },
           ],
-          masterUserID: req.adminId,
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         };
 
         console.log(
@@ -566,7 +564,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.leads = leads.map((lead) => ({
           id: lead.leadId,
-          leadId: lead.leadId, // Add explicit leadId field
+          leadId: lead.leadId,
           type: "lead",
           title: lead.title,
           subtitle: `${lead.organization || "No Organization"} • ${
@@ -577,7 +575,7 @@ exports.globalSearch = async (req, res) => {
           phone: lead.phone,
           organization: lead.organization,
           sourceChannel: lead.sourceChannel,
-          leadSource: null, // Removed as it doesn't exist
+          leadSource: null,
           status: lead.status,
           createdAt: lead.createdAt,
           updatedAt: lead.updatedAt,
@@ -588,7 +586,6 @@ exports.globalSearch = async (req, res) => {
             "phone",
             "organization",
             "sourceChannel",
-            // Removed leadSource as it doesn't exist
             "status",
           ]),
         }));
@@ -604,20 +601,20 @@ exports.globalSearch = async (req, res) => {
     // Search in Activities
     if (searchTypes.includes("activities")) {
       try {
+        const activityWhere = {
+          [Op.or]: [
+            { subject: { [Op.like]: `%${searchQuery}%` } },
+            { description: { [Op.like]: `%${searchQuery}%` } },
+            { type: { [Op.like]: `%${searchQuery}%` } },
+            { location: { [Op.like]: `%${searchQuery}%` } },
+            { contactPerson: { [Op.like]: `%${searchQuery}%` } },
+            { email: { [Op.like]: `%${searchQuery}%` } },
+            { organization: { [Op.like]: `%${searchQuery}%` } },
+          ],
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
+        };
         const activities = await Activity.findAll({
-          where: {
-            [Op.or]: [
-              { subject: { [Op.like]: `%${searchQuery}%` } },
-              { description: { [Op.like]: `%${searchQuery}%` } },
-              { type: { [Op.like]: `%${searchQuery}%` } },
-              { location: { [Op.like]: `%${searchQuery}%` } },
-              // Added fields
-              { contactPerson: { [Op.like]: `%${searchQuery}%` } },
-              { email: { [Op.like]: `%${searchQuery}%` } },
-              { organization: { [Op.like]: `%${searchQuery}%` } },
-            ],
-            masterUserID: req.adminId,
-          },
+          where: activityWhere,
           limit: parseInt(limit),
           offset: parseInt(offset),
           order: [["startDateTime", "DESC"]],
@@ -625,7 +622,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.activities = activities.map((activity) => ({
           id: activity.activityId,
-          activityId: activity.activityId, // Add explicit activityId field
+          activityId: activity.activityId,
           type: "activity",
           title: activity.subject,
           subtitle: `${activity.type} • ${
@@ -647,7 +644,6 @@ exports.globalSearch = async (req, res) => {
             "description",
             "type",
             "location",
-            // Added fields
             "contactPerson",
             "email",
             "organization",
