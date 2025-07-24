@@ -153,6 +153,11 @@ exports.globalSearch = async (req, res) => {
             { organizationCountry: { [Op.like]: `%${searchQuery}%` } },
             { esplProposalNo: { [Op.like]: `%${searchQuery}%` } },
             { sourceOrgin: { [Op.like]: `%${searchQuery}%` } },
+            // Added fields
+            { contactPerson: { [Op.like]: `%${searchQuery}%` } },
+            { email: { [Op.like]: `%${searchQuery}%` } },
+            { phone: { [Op.like]: `%${searchQuery}%` } },
+            { organization: { [Op.like]: `%${searchQuery}%` } },
             // Search by value if it's a number
             ...(isNaN(searchQuery) ? [] : [{ value: parseFloat(searchQuery) }]),
           ],
@@ -218,6 +223,11 @@ exports.globalSearch = async (req, res) => {
             "organizationCountry",
             "esplProposalNo",
             "sourceOrgin",
+            // Added fields
+            "contactPerson",
+            "email",
+            "phone",
+            "organization",
           ]),
         }));
 
@@ -607,6 +617,10 @@ exports.globalSearch = async (req, res) => {
               { description: { [Op.like]: `%${searchQuery}%` } },
               { type: { [Op.like]: `%${searchQuery}%` } },
               { location: { [Op.like]: `%${searchQuery}%` } },
+              // Added fields
+              { contactPerson: { [Op.like]: `%${searchQuery}%` } },
+              { email: { [Op.like]: `%${searchQuery}%` } },
+              { organization: { [Op.like]: `%${searchQuery}%` } },
             ],
             masterUserID: req.adminId,
           },
@@ -639,6 +653,10 @@ exports.globalSearch = async (req, res) => {
             "description",
             "type",
             "location",
+            // Added fields
+            "contactPerson",
+            "email",
+            "organization",
           ]),
         }));
 
