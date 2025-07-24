@@ -45,17 +45,13 @@ exports.globalSearch = async (req, res) => {
     // Test database connectivity and data availability
     try {
       console.log("=== DATABASE CONNECTIVITY TEST ===");
-      const totalPeople = await Person.count({
-        where: { masterUserID: req.adminId },
-      });
-      const totalLeads = await Lead.count({
-        where: { masterUserID: req.adminId },
-      });
-      const totalDeals = await Deal.count({
-        where: { masterUserID: req.adminId },
-      });
+      const adminFilter =
+        req.role === "admin" ? {} : { masterUserID: req.adminId };
+      const totalPeople = await Person.count({ where: adminFilter });
+      const totalLeads = await Lead.count({ where: adminFilter });
+      const totalDeals = await Deal.count({ where: adminFilter });
       const totalOrganizations = await Organization.count({
-        where: { masterUserID: req.adminId },
+        where: adminFilter,
       });
 
       console.log("Total people for adminId", req.adminId, ":", totalPeople);
@@ -72,7 +68,7 @@ exports.globalSearch = async (req, res) => {
       const johnInPeople = await Person.findAll({
         where: {
           contactPerson: { [Op.like]: `%john%` },
-          masterUserID: req.adminId,
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         },
         attributes: ["personId", "contactPerson", "email", "masterUserID"],
         limit: 5,
@@ -85,7 +81,7 @@ exports.globalSearch = async (req, res) => {
             { contactPerson: { [Op.like]: `%john%` } },
             { email: { [Op.like]: `%john%` } },
           ],
-          masterUserID: req.adminId,
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         },
         attributes: [
           "leadId",
@@ -156,10 +152,9 @@ exports.globalSearch = async (req, res) => {
             { email: { [Op.like]: `%${searchQuery}%` } },
             { phone: { [Op.like]: `%${searchQuery}%` } },
             { organization: { [Op.like]: `%${searchQuery}%` } },
-            // Search by value if it's a number
             ...(isNaN(searchQuery) ? [] : [{ value: parseFloat(searchQuery) }]),
           ],
-          masterUserID: req.adminId,
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         };
 
         if (!includeInactive) {
@@ -178,7 +173,7 @@ exports.globalSearch = async (req, res) => {
             {
               model: Organization,
               as: "Organization",
-              attributes: ["leadOrganizationId", "organization"], // Removed "email" as it doesn't exist
+              attributes: ["leadOrganizationId", "organization"],
               required: false,
             },
           ],
@@ -189,7 +184,7 @@ exports.globalSearch = async (req, res) => {
 
         results.results.deals = deals.map((deal) => ({
           id: deal.dealId,
-          dealId: deal.dealId, // Add explicit dealId field
+          dealId: deal.dealId,
           type: "deal",
           title: deal.title,
           subtitle: `${deal.pipeline} • ${deal.pipelineStage}`,
@@ -206,7 +201,7 @@ exports.globalSearch = async (req, res) => {
           organization: deal.Organization
             ? {
                 name: deal.Organization.organization,
-                email: null, // Remove email as it doesn't exist in Organization table
+                email: null,
               }
             : null,
           createdAt: deal.createdAt,
@@ -221,7 +216,6 @@ exports.globalSearch = async (req, res) => {
             "organizationCountry",
             "esplProposalNo",
             "sourceOrgin",
-            // Added fields
             "contactPerson",
             "email",
             "phone",
@@ -243,8 +237,10 @@ exports.globalSearch = async (req, res) => {
         console.log("Admin ID for people search:", req.adminId);
 
         // First, let's check what people data exists for this user
+        const adminFilter =
+          req.role === "admin" ? {} : { masterUserID: req.adminId };
         const allPeople = await Person.findAll({
-          where: { masterUserID: req.adminId },
+          where: adminFilter,
           attributes: [
             "personId",
             "contactPerson",
@@ -300,7 +296,7 @@ exports.globalSearch = async (req, res) => {
               `%${searchQuery.toLowerCase()}%`
             ),
           ],
-          masterUserID: req.adminId,
+          ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         };
 
         console.log(
@@ -321,7 +317,7 @@ exports.globalSearch = async (req, res) => {
             "notes",
             "createdAt",
             "updatedAt",
-            "leadOrganizationId", // Include for potential organization lookup
+            "leadOrganizationId",
           ],
           limit: parseInt(limit),
           offset: parseInt(offset),
@@ -351,7 +347,7 @@ exports.globalSearch = async (req, res) => {
           // Let's try a simpler search to see if data exists
           const simplePeopleSearch = await Person.findAll({
             where: {
-              masterUserID: req.adminId,
+              ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
               contactPerson: { [Op.like]: `%${searchQuery}%` },
             },
             limit: 3,
@@ -447,7 +443,7 @@ exports.globalSearch = async (req, res) => {
           console.log("Attempting fallback basic people search...");
           const basicPeople = await Person.findAll({
             where: {
-              masterUserID: req.adminId,
+              ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
               contactPerson: { [Op.like]: `%${searchQuery}%` },
             },
             limit: parseInt(limit),
@@ -802,12 +798,15 @@ async function saveRecentSearch(
       ? {
           summary: searchResults.summary,
           results: {
-            deals: searchResults.results.deals.slice(0, 5), // Store only top 5 results per type
-            people: searchResults.results.people.slice(0, 5),
-            organizations: searchResults.results.organizations.slice(0, 5),
-            leads: searchResults.results.leads.slice(0, 5),
-            activities: searchResults.results.activities.slice(0, 3),
-            emails: searchResults.results.emails.slice(0, 3),
+            deals: (searchResults.results.deals || []).slice(0, 5),
+            people: (searchResults.results.people || []).slice(0, 5),
+            organizations: (searchResults.results.organizations || []).slice(
+              0,
+              5
+            ),
+            leads: (searchResults.results.leads || []).slice(0, 5),
+            activities: (searchResults.results.activities || []).slice(0, 3),
+            emails: (searchResults.results.emails || []).slice(0, 3),
           },
         }
       : null;
