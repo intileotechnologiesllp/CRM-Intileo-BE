@@ -39,6 +39,21 @@ const RecentSearch = sequelize.define(
       defaultValue: DataTypes.NOW,
       comment: "When the search was performed",
     },
+    isRecentlyViewed: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment: "Indicates if the search was recently viewed",
+    },
+    entityType: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Type of entity associated with the search (e.g., lead, deal)",
+    },
+    entityId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      comment: "ID of the entity associated with the search",
+    },
   },
   {
     tableName: "RecentSearches",

@@ -56,4 +56,6 @@ router.get(
   globalSearchController.testPersonSearch
 );
 
+router.get("/mark-recently-viewed", verifyToken, globalSearchController.markRecentlyViewed);
+router.get("/get-recently-viewed", verifyToken, globalSearchController.getRecentlyViewed);
 module.exports = router;
