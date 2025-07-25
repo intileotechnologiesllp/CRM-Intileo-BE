@@ -374,6 +374,12 @@ exports.createDeal = async (req, res) => {
 
     if (existingLead) {
       await existingLead.update({ dealId: deal.dealId });
+    } else if (leadId) {
+      // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
+      const leadToUpdate = await Lead.findByPk(leadId);
+      if (leadToUpdate) {
+        await leadToUpdate.update({ dealId: deal.dealId });
+      }
     }
 
     // Handle custom fields - extract from req.body directly
