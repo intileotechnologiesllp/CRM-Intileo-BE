@@ -1073,7 +1073,7 @@ exports.getDeals = async (req, res) => {
       );
     });
 
-    // Attach custom fields to each deal
+    // Attach custom fields and status to each deal
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
 
@@ -1085,6 +1085,12 @@ exports.getDeals = async (req, res) => {
 
       // Add custom fields
       dealObj.customFields = customFieldsByDeal[dealObj.dealId] || {};
+
+      // Ensure status is present (from deal or details)
+      if (!("status" in dealObj)) {
+        // Try to get status from original deal instance if not present
+        dealObj.status = deal.status || null;
+      }
 
       return dealObj;
     });
