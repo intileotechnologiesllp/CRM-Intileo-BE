@@ -1615,20 +1615,9 @@ exports.getLeads = async (req, res) => {
     //   leadAttributes.push('personId');
     // }
 
-    // Only exclude converted leads (dealId = null) if we're NOT doing Activity, Person, or Organization filtering
-    // When any of these filterings are applied, include all leads regardless of conversion status
-    if (
-      !hasActivityFiltering &&
-      !hasPersonFiltering &&
-      !hasOrganizationFiltering
-    ) {
-      whereClause.dealId = null;
-      console.log("🔍 Applied dealId = null (excluding converted leads)");
-    } else {
-      console.log(
-        "🔍 Skipped dealId = null (Entity filtering allows converted leads)"
-      );
-    }
+    // Always exclude leads that have a dealId (converted leads)
+    whereClause.dealId = null;
+    console.log("🔍 Applied dealId = null (excluding converted leads)");
 
     console.log("==========================================");
     console.log("🚀 FINAL QUERY EXECUTION STARTING");
