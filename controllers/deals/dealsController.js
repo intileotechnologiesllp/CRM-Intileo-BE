@@ -1550,7 +1550,11 @@ const operatorMap = {
   "is earlier than": "lt",
   "is exactly or later than": "gte",
   "is later than": "gt",
-  // Add more mappings if needed
+  // New mappings for frontend operators
+  "is before": "lt",
+  "is after": "gt",
+  "is exactly on or before": "lte",
+  "is exactly on or after": "gte",
 };
 
 // Helper to build a single condition
@@ -1597,18 +1601,57 @@ function buildCondition(cond) {
   const allDateFields = [...dealDateFields, ...dealDetailsDateFields];
 
   if (allDateFields.includes(cond.field)) {
-    if (cond.useExactDate) {
-      // If only a date string (YYYY-MM-DD), filter for the whole day
-      const dateStr = cond.value;
-      if (!dateStr) return {};
-      // Start of day
-      const start = new Date(dateStr + "T00:00:00.000Z");
-      // End of day
-      const end = new Date(dateStr + "T23:59:59.999Z");
+    // Support new date operators
+    const dateStr = cond.value;
+    if (!dateStr) return {};
+    // For exact date (full day)
+    if (cond.useExactDate || operator === "eq") {
+      const start = new Date(dateStr + "T00:00:00");
+      const end = new Date(dateStr + "T23:59:59.999");
       if (isNaN(start.getTime()) || isNaN(end.getTime())) return {};
       return {
         [cond.field]: {
           [Op.between]: [start, end],
+        },
+      };
+    }
+    // is before: strictly less than start of day
+    if (operator === "lt") {
+      const start = new Date(dateStr + "T00:00:00");
+      if (isNaN(start.getTime())) return {};
+      return {
+        [cond.field]: {
+          [Op.lt]: start,
+        },
+      };
+    }
+    // is after: strictly greater than end of day
+    if (operator === "gt") {
+      const end = new Date(dateStr + "T23:59:59.999");
+      if (isNaN(end.getTime())) return {};
+      return {
+        [cond.field]: {
+          [Op.gt]: end,
+        },
+      };
+    }
+    // is exactly on or before: less than or equal to end of day
+    if (operator === "lte") {
+      const end = new Date(dateStr + "T23:59:59.999");
+      if (isNaN(end.getTime())) return {};
+      return {
+        [cond.field]: {
+          [Op.lte]: end,
+        },
+      };
+    }
+    // is exactly on or after: greater than or equal to start of day
+    if (operator === "gte") {
+      const start = new Date(dateStr + "T00:00:00");
+      if (isNaN(start.getTime())) return {};
+      return {
+        [cond.field]: {
+          [Op.gte]: start,
         },
       };
     }
