@@ -2898,19 +2898,49 @@ exports.getDealDetail = async (req, res) => {
       });
     }
 
-    // Fetch notes for this deal with limit
-    const notes = await DealNote.findAll({
+    // Fetch notes for this deal and its linked lead (if any)
+    let notes = await DealNote.findAll({
       where: { dealId },
-      limit: 20, // Limit notes to prevent large responses
+      limit: 20,
       order: [["createdAt", "DESC"]],
     });
+    // If deal has a linked leadId, fetch notes for that lead as well
+    let leadNotes = [];
+    if (deal.leadId) {
+      leadNotes = await DealNote.findAll({
+        where: { leadId: deal.leadId },
+        limit: 20,
+        order: [["createdAt", "DESC"]],
+      });
+    }
+    // Merge and deduplicate notes by note id (if available)
+    if (leadNotes.length > 0) {
+      const noteMap = new Map();
+      notes.forEach((n) => noteMap.set(n.noteId || n.id, n));
+      leadNotes.forEach((n) => noteMap.set(n.noteId || n.id, n));
+      notes = Array.from(noteMap.values());
+    }
 
-    // Fetch activities for this deal with limit
-    const activities = await Activity.findAll({
+    // Fetch activities for this deal and its linked lead (if any)
+    let activities = await Activity.findAll({
       where: { dealId },
-      limit: 20, // Limit activities to prevent large responses
+      limit: 20,
       order: [["startDateTime", "DESC"]],
     });
+    let leadActivities = [];
+    if (deal.leadId) {
+      leadActivities = await Activity.findAll({
+        where: { leadId: deal.leadId },
+        limit: 20,
+        order: [["startDateTime", "DESC"]],
+      });
+    }
+    if (leadActivities.length > 0) {
+      const actMap = new Map();
+      activities.forEach((a) => actMap.set(a.activityId || a.id, a));
+      leadActivities.forEach((a) => actMap.set(a.activityId || a.id, a));
+      activities = Array.from(actMap.values());
+    }
 
     // Fetch custom field values for this deal
     const customFieldValues = await CustomFieldValue.findAll({
