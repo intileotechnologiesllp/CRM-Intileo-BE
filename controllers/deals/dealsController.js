@@ -11,6 +11,7 @@ const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const DealParticipant = require("../../models/deals/dealPartcipentsModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const DealNote = require("../../models/deals/delasNoteModel");
+const LeadNote = require("../../models/leads/leadNoteModel");
 const Email = require("../../models/email/emailModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
@@ -2904,20 +2905,14 @@ exports.getDealDetail = async (req, res) => {
       limit: 20,
       order: [["createdAt", "DESC"]],
     });
-    // Only fetch notes by leadId if DealNote has a leadId column
     let leadNotes = [];
-    if (
-      deal.leadId &&
-      DealNote.rawAttributes &&
-      DealNote.rawAttributes.leadId
-    ) {
-      leadNotes = await DealNote.findAll({
+    if (deal.leadId) {
+      leadNotes = await LeadNote.findAll({
         where: { leadId: deal.leadId },
         limit: 20,
         order: [["createdAt", "DESC"]],
       });
     }
-    // Merge and deduplicate notes by note id (if available)
     if (leadNotes.length > 0) {
       const noteMap = new Map();
       notes.forEach((n) => noteMap.set(n.noteId || n.id, n));
@@ -2926,23 +2921,21 @@ exports.getDealDetail = async (req, res) => {
     }
 
     // Fetch activities for this deal and its linked lead (if any)
+    // Fetch activities for this deal and its linked lead (if any) using Activity model
     let activities = await Activity.findAll({
-      where: { dealId },
-      limit: 20,
+      where: {
+        [Op.or]: [
+          { dealId },
+          deal.leadId ? { leadId: deal.leadId } : null,
+        ].filter(Boolean),
+      },
+      limit: 40, // fetch more to cover both
       order: [["startDateTime", "DESC"]],
     });
-    let leadActivities = [];
-    if (deal.leadId) {
-      leadActivities = await Activity.findAll({
-        where: { leadId: deal.leadId },
-        limit: 20,
-        order: [["startDateTime", "DESC"]],
-      });
-    }
-    if (leadActivities.length > 0) {
+    // Deduplicate activities by activityId or id
+    if (activities.length > 0) {
       const actMap = new Map();
       activities.forEach((a) => actMap.set(a.activityId || a.id, a));
-      leadActivities.forEach((a) => actMap.set(a.activityId || a.id, a));
       activities = Array.from(actMap.values());
     }
 
