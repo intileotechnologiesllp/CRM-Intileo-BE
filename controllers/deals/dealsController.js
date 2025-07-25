@@ -1099,6 +1099,59 @@ exports.getDeals = async (req, res) => {
       return dealObj;
     });
 
+    // --- Deal summary calculation (like getDealSummary) ---
+    // Use the filtered deals for summary
+    const summaryDeals = dealsWithCustomFields;
+    // If dealsWithCustomFields is empty, summary will be zeroed
+    let totalValue = 0;
+    let totalWeightedValue = 0;
+    let totalDealCount = 0;
+    const currencyMap = {};
+
+    // Fetch pipeline stage probabilities
+    let stageProbabilities = {};
+    try {
+      const pipelineStages = await PipelineStage.findAll({
+        attributes: ["stageName", "probability"],
+        where: { isActive: true },
+      });
+      stageProbabilities = pipelineStages.reduce((acc, stage) => {
+        acc[stage.stageName] = stage.probability || 0;
+        return acc;
+      }, {});
+    } catch (e) {
+      // fallback: all probabilities 0
+    }
+
+    summaryDeals.forEach((deal) => {
+      const currency = deal.currency;
+      const value = deal.value || 0;
+      const pipelineStage = deal.pipelineStage;
+      if (!currencyMap[currency]) {
+        currencyMap[currency] = {
+          totalValue: 0,
+          weightedValue: 0,
+          dealCount: 0,
+        };
+      }
+      currencyMap[currency].totalValue += value;
+      currencyMap[currency].weightedValue +=
+        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
+      currencyMap[currency].dealCount += 1;
+      totalValue += value;
+      totalWeightedValue +=
+        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
+      totalDealCount += 1;
+    });
+
+    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
+      currency,
+      totalValue: data.totalValue,
+      weightedValue: data.weightedValue,
+      dealCount: data.dealCount,
+    }));
+    summary.sort((a, b) => b.totalValue - a.totalValue);
+
     res.status(200).json({
       message: "Deals fetched successfully",
       totalDeals: total,
@@ -1106,6 +1159,10 @@ exports.getDeals = async (req, res) => {
       currentPage: parseInt(page),
       deals: dealsWithCustomFields,
       role: req.role,
+      totalValue,
+      totalWeightedValue,
+      totalDealCount,
+      summary,
     });
   } catch (error) {
     console.error("Error fetching deals:", error);
