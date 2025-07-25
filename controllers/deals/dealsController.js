@@ -2898,15 +2898,19 @@ exports.getDealDetail = async (req, res) => {
       });
     }
 
-    // Fetch notes for this deal and its linked lead (if any)
+    // Fetch notes for this deal
     let notes = await DealNote.findAll({
       where: { dealId },
       limit: 20,
       order: [["createdAt", "DESC"]],
     });
-    // If deal has a linked leadId, fetch notes for that lead as well
+    // Only fetch notes by leadId if DealNote has a leadId column
     let leadNotes = [];
-    if (deal.leadId) {
+    if (
+      deal.leadId &&
+      DealNote.rawAttributes &&
+      DealNote.rawAttributes.leadId
+    ) {
       leadNotes = await DealNote.findAll({
         where: { leadId: deal.leadId },
         limit: 20,
