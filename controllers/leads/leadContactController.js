@@ -1,5 +1,6 @@
 const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const { Op } = require("sequelize");
+const Sequelize = require("sequelize");
 const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
 const MasterUser = require("../../models/master/masterUserModel");
@@ -1152,23 +1153,19 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
     res.status(200).json({
       message: "Persons and organizations fetched successfully",
-      persons: {
-        data: persons,
-        pagination: {
-          total: personCount,
-          page: personPage,
-          limit: personLimit,
-          totalPages: Math.ceil(personCount / personLimit),
-        },
+      persons,
+      organizations,
+      personsPagination: {
+        totalRecords: personCount,
+        totalPages: Math.ceil(personCount / personLimit),
+        currentPage: personPage,
+        limit: personLimit,
       },
-      organizations: {
-        data: organizations,
-        pagination: {
-          total: orgCount,
-          page: orgPage,
-          limit: orgLimit,
-          totalPages: Math.ceil(orgCount / orgLimit),
-        },
+      organizationsPagination: {
+        totalRecords: orgCount,
+        totalPages: Math.ceil(orgCount / orgLimit),
+        currentPage: orgPage,
+        limit: orgLimit,
       },
     });
   } catch (error) {

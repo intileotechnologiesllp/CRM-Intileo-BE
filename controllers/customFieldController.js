@@ -180,7 +180,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: true,
         dealView: true,
       },
-            {
+      {
         fieldName: "email",
         fieldLabel: "Email",
         fieldType: "text",
@@ -192,7 +192,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: true,
         dealView: true,
       },
-                  {
+      {
         fieldName: "phone",
         fieldLabel: "Phone",
         fieldType: "text",
@@ -554,7 +554,7 @@ exports.createCustomField = async (req, res) => {
     }
 
     // Check against default fields to prevent conflicts
-    const defaultFields = getDefaultFieldsFromModels(entityType);
+    const defaultFields = await getDefaultFieldsFromModels(entityType);
     const conflictingDefaultField = defaultFields.find(
       (field) => field.fieldName.toLowerCase() === normalizedFieldName
     );
