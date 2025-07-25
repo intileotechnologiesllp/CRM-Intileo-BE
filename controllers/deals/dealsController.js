@@ -644,6 +644,10 @@ exports.getDeals = async (req, res) => {
       if (!attributes.includes("dealId")) {
         attributes.unshift("dealId");
       }
+      // Always include status column from database
+      if (!attributes.includes("status")) {
+        attributes.push("status");
+      }
 
       if (attributes.length === 0) attributes = undefined;
       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
