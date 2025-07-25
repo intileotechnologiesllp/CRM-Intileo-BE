@@ -375,7 +375,8 @@ exports.getActivities = async (req, res) => {
 
     const activitiesWithTitle = activities.map((activity) => {
       const data = activity.get ? activity.get({ plain: true }) : activity;
-      const { Lead, Deal, Organizations, Person, ...rest } = data;
+      const { Lead, Deal, ActivityOrganization, ActivityPerson, ...rest } =
+        data;
       let title = null;
       if (rest.leadId && Lead) {
         title = Lead.title;
@@ -385,9 +386,11 @@ exports.getActivities = async (req, res) => {
       return {
         ...rest,
         title,
-        organization: Organizations ? Organizations.organization : null,
-        contactPerson: Person ? Person.contactPerson : null,
-        email: Person ? Person.email : null,
+        organization: ActivityOrganization
+          ? ActivityOrganization.organization
+          : null,
+        contactPerson: ActivityPerson ? ActivityPerson.contactPerson : null,
+        email: ActivityPerson ? ActivityPerson.email : null,
       };
     });
 
