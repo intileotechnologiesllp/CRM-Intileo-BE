@@ -1598,11 +1598,17 @@ function buildCondition(cond) {
 
   if (allDateFields.includes(cond.field)) {
     if (cond.useExactDate) {
-      const date = new Date(cond.value);
-      if (isNaN(date.getTime())) return {};
+      // If only a date string (YYYY-MM-DD), filter for the whole day
+      const dateStr = cond.value;
+      if (!dateStr) return {};
+      // Start of day
+      const start = new Date(dateStr + "T00:00:00.000Z");
+      // End of day
+      const end = new Date(dateStr + "T23:59:59.999Z");
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return {};
       return {
         [cond.field]: {
-          [ops[operator] || Op.eq]: date,
+          [Op.between]: [start, end],
         },
       };
     }
