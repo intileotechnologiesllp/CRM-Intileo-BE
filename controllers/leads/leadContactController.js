@@ -840,6 +840,7 @@ exports.addPersonNote = async (req, res) => {
 
     const note = await PersonNote.create({
       personId,
+      masterUserID: req.adminId,
       content: content.trim(),
       createdBy: req.adminId,
     });
@@ -883,6 +884,7 @@ exports.addOrganizationNote = async (req, res) => {
 
     const note = await OrganizationNote.create({
       leadOrganizationId,
+      masterUserID: req.adminId,
       content: content.trim(),
       createdBy: req.adminId,
     });
