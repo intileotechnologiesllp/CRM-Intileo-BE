@@ -828,15 +828,39 @@ exports.addPersonNote = async (req, res) => {
     return res.status(400).json({ message: "Person ID is required." });
   }
   const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
   try {
-    // You should have a PersonNote model/table
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
     const note = await PersonNote.create({
       personId,
-      content,
-      createdBy: req.adminId, // or req.user.id
+      content: content.trim(),
+      createdBy: req.adminId,
     });
-    res.status(201).json({ message: "Note added to person", note });
+
+    // Fetch the created note with creator details
+    const noteWithCreator = await PersonNote.findByPk(note.noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      message: "Note added to person successfully",
+      note: noteWithCreator,
+    });
   } catch (error) {
+    console.error("Error adding person note:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -847,15 +871,291 @@ exports.addOrganizationNote = async (req, res) => {
     return res.status(400).json({ message: "Organization ID is required." });
   }
   const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
   try {
-    // You should have an OrganizationNote model/table
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
+    }
+
     const note = await OrganizationNote.create({
       leadOrganizationId,
-      content,
+      content: content.trim(),
       createdBy: req.adminId,
     });
-    res.status(201).json({ message: "Note added to organization", note });
+
+    // Fetch the created note with creator details
+    const noteWithCreator = await OrganizationNote.findByPk(note.noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      message: "Note added to organization successfully",
+      note: noteWithCreator,
+    });
   } catch (error) {
+    console.error("Error adding organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get all notes for a person
+exports.getPersonNotes = async (req, res) => {
+  const { personId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    const { count, rows: notes } = await PersonNote.findAndCountAll({
+      where: { personId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
+    });
+
+    res.status(200).json({
+      message: "Person notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+      notes,
+    });
+  } catch (error) {
+    console.error("Error fetching person notes:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get all notes for an organization
+exports.getOrganizationNotes = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
+    }
+
+    const { count, rows: notes } = await OrganizationNote.findAndCountAll({
+      where: { leadOrganizationId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
+    });
+
+    res.status(200).json({
+      message: "Organization notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+      notes,
+    });
+  } catch (error) {
+    console.error("Error fetching organization notes:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Update a person note
+exports.updatePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+  const { content } = req.body;
+
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+
+  try {
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
+    }
+
+    // Update the note
+    await note.update({ content: content.trim() });
+
+    // Fetch updated note with creator details
+    const updatedNote = await PersonNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(200).json({
+      message: "Person note updated successfully",
+      note: updatedNote,
+    });
+  } catch (error) {
+    console.error("Error updating person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Update an organization note
+exports.updateOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+  const { content } = req.body;
+
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
+    }
+
+    // Update the note
+    await note.update({ content: content.trim() });
+
+    // Fetch updated note with creator details
+    const updatedNote = await OrganizationNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(200).json({
+      message: "Organization note updated successfully",
+      note: updatedNote,
+    });
+  } catch (error) {
+    console.error("Error updating organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete a person note
+exports.deletePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Person note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete an organization note
+exports.deleteOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Organization note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting organization note:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -984,6 +1284,7 @@ exports.getPersonsByOrganization = async (req, res) => {
 };
 exports.getPersonsAndOrganizations = async (req, res) => {
   try {
+    // ...existing code...
     // Pagination and search for persons
     const personPage = parseInt(req.query.personPage) || 1;
     const personLimit = parseInt(req.query.personLimit) || 20;
@@ -996,19 +1297,202 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     const orgOffset = (orgPage - 1) * orgLimit;
     const orgSearch = req.query.orgSearch || "";
 
-    // Role-based filtering logic
-    let personWhere = personSearch
-      ? {
-          [Op.or]: [
-            { contactPerson: { [Op.like]: `%${personSearch}%` } },
-            { email: { [Op.like]: `%${personSearch}%` } },
-            { phone: { [Op.like]: `%${personSearch}%` } },
-            { jobTitle: { [Op.like]: `%${personSearch}%` } },
-            { personLabels: { [Op.like]: `%${personSearch}%` } },
-            { organization: { [Op.like]: `%${personSearch}%` } },
-          ],
+    // Dynamic filter config (from body or query) -- now supports filterId as number or object
+    const LeadFilter = require("../../models/leads/leadFiltersModel");
+    let filterConfig = null;
+    let filterIdRaw = null;
+    if (req.body && req.body.filterId !== undefined) {
+      filterIdRaw = req.body.filterId;
+    } else if (req.query && req.query.filterId !== undefined) {
+      filterIdRaw = req.query.filterId;
+    }
+
+    // If filterIdRaw is a number, fetch filterConfig from DB
+    if (filterIdRaw !== null && filterIdRaw !== undefined) {
+      if (typeof filterIdRaw === "string" && /^\d+$/.test(filterIdRaw)) {
+        // filterIdRaw is a string number
+        const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
+        if (filterRow && filterRow.filterConfig) {
+          filterConfig = filterRow.filterConfig;
         }
-      : {};
+      } else if (typeof filterIdRaw === "number") {
+        const filterRow = await LeadFilter.findByPk(filterIdRaw);
+        if (filterRow && filterRow.filterConfig) {
+          filterConfig = filterRow.filterConfig;
+        }
+      } else {
+        // Try to parse as JSON object
+        try {
+          filterConfig =
+            typeof filterIdRaw === "string"
+              ? JSON.parse(filterIdRaw)
+              : filterIdRaw;
+        } catch (e) {
+          filterConfig = null;
+        }
+      }
+    }
+
+    // Build dynamic filter logic for all supported entities
+    let personWhere = {};
+    let leadWhere = {};
+    let dealWhere = {};
+    let organizationWhere = {};
+    let activityWhere = {};
+    const ops = {
+      eq: Op.eq,
+      ne: Op.ne,
+      like: Op.like,
+      notLike: Op.notLike,
+      gt: Op.gt,
+      gte: Op.gte,
+      lt: Op.lt,
+      lte: Op.lte,
+      in: Op.in,
+      notIn: Op.notIn,
+      is: Op.eq,
+      isNot: Op.ne,
+      isEmpty: Op.is,
+      isNotEmpty: Op.not,
+      between: Op.between,
+      notBetween: Op.notBetween,
+    };
+    const operatorMap = {
+      is: "eq",
+      "is not": "ne",
+      "is empty": "isEmpty",
+      "is not empty": "isNotEmpty",
+      contains: "like",
+      "does not contain": "notLike",
+      "is exactly or earlier than": "lte",
+      "is earlier than": "lt",
+      "is exactly or later than": "gte",
+      "is later than": "gt",
+      equals: "eq",
+      "not equals": "ne",
+      "greater than": "gt",
+      "greater than or equal": "gte",
+      "less than": "lt",
+      "less than or equal": "lte",
+    };
+
+    function buildWhere(conds, entity) {
+      const where = {};
+      if (!Array.isArray(conds)) return where;
+      conds.forEach(function (cond) {
+        let op = operatorMap[cond.operator] || cond.operator;
+        let value = cond.value;
+        if (op === "like" || op === "notLike") {
+          value = `%${value}%`;
+        }
+        if (op === "isEmpty") {
+          where[cond.field] = { [Op.is]: null };
+        } else if (op === "isNotEmpty") {
+          where[cond.field] = { [Op.not]: null };
+        } else if (ops[op]) {
+          where[cond.field] = { [ops[op]]: value };
+        }
+      });
+      return where;
+    }
+
+    // If filterConfig is provided, build AND/OR logic for all entities
+    if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
+      if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
+        const andPerson = [],
+          andLead = [],
+          andDeal = [],
+          andOrg = [],
+          andActivity = [];
+        filterConfig.all.forEach(function (cond) {
+          switch ((cond.entity || "Person").toLowerCase()) {
+            case "person":
+              andPerson.push(cond);
+              break;
+            case "lead":
+              andLead.push(cond);
+              break;
+            case "deal":
+              andDeal.push(cond);
+              break;
+            case "organization":
+              andOrg.push(cond);
+              break;
+            case "activity":
+              andActivity.push(cond);
+              break;
+          }
+        });
+        if (andPerson.length)
+          personWhere[Op.and] = andPerson.map((c) => buildWhere([c], "Person"));
+        if (andLead.length)
+          leadWhere[Op.and] = andLead.map((c) => buildWhere([c], "Lead"));
+        if (andDeal.length)
+          dealWhere[Op.and] = andDeal.map((c) => buildWhere([c], "Deal"));
+        if (andOrg.length)
+          organizationWhere[Op.and] = andOrg.map((c) =>
+            buildWhere([c], "Organization")
+          );
+        if (andActivity.length)
+          activityWhere[Op.and] = andActivity.map((c) =>
+            buildWhere([c], "Activity")
+          );
+      }
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        const orPerson = [],
+          orLead = [],
+          orDeal = [],
+          orOrg = [],
+          orActivity = [];
+        filterConfig.any.forEach(function (cond) {
+          switch ((cond.entity || "Person").toLowerCase()) {
+            case "person":
+              orPerson.push(cond);
+              break;
+            case "lead":
+              orLead.push(cond);
+              break;
+            case "deal":
+              orDeal.push(cond);
+              break;
+            case "organization":
+              orOrg.push(cond);
+              break;
+            case "activity":
+              orActivity.push(cond);
+              break;
+          }
+        });
+        if (orPerson.length)
+          personWhere[Op.or] = orPerson.map((c) => buildWhere([c], "Person"));
+        if (orLead.length)
+          leadWhere[Op.or] = orLead.map((c) => buildWhere([c], "Lead"));
+        if (orDeal.length)
+          dealWhere[Op.or] = orDeal.map((c) => buildWhere([c], "Deal"));
+        if (orOrg.length)
+          organizationWhere[Op.or] = orOrg.map((c) =>
+            buildWhere([c], "Organization")
+          );
+        if (orActivity.length)
+          activityWhere[Op.or] = orActivity.map((c) =>
+            buildWhere([c], "Activity")
+          );
+      }
+    } else if (personSearch) {
+      // Fallback to search logic if no filterConfig
+      personWhere[Op.or] = [
+        { contactPerson: { [Op.like]: `%${personSearch}%` } },
+        { email: { [Op.like]: `%${personSearch}%` } },
+        { phone: { [Op.like]: `%${personSearch}%` } },
+        { jobTitle: { [Op.like]: `%${personSearch}%` } },
+        { personLabels: { [Op.like]: `%${personSearch}%` } },
+        { organization: { [Op.like]: `%${personSearch}%` } },
+      ];
+    }
+
+    // Role-based filtering logic for organizations
     let orgWhere = orgSearch
       ? {
           [Op.or]: [
@@ -1052,15 +1536,69 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         order: [["organization", "ASC"]],
         raw: true,
       });
+    console.log("[DEBUG] organizations count:", orgCount);
+    console.log(
+      "[DEBUG] organizations sample:",
+      organizations && organizations.length > 0 ? organizations[0] : null
+    );
 
-    // Fetch persons with pagination
+    // Build include array for related models
+    const includeArr = [];
+    if (Object.keys(organizationWhere).length > 0) {
+      includeArr.push({
+        model: Organization,
+        as: "LeadOrganization",
+        where: organizationWhere,
+        required: true,
+      });
+    } else {
+      includeArr.push({ model: Organization, as: "LeadOrganization" });
+    }
+    if (Object.keys(leadWhere).length > 0) {
+      includeArr.push({
+        model: Lead,
+        as: "Leads",
+        where: leadWhere,
+        required: true,
+      });
+    }
+    if (Object.keys(dealWhere).length > 0) {
+      includeArr.push({
+        model: Deal,
+        as: "Deals",
+        where: dealWhere,
+        required: true,
+      });
+    }
+    // Activity model support (if you have an Activity model and association)
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      if (Object.keys(activityWhere).length > 0) {
+        includeArr.push({
+          model: Activity,
+          as: "Activities",
+          where: activityWhere,
+          required: true,
+        });
+      }
+    } catch (e) {
+      // Activity model not present or not associated
+    }
+
+    // Fetch persons with pagination and dynamic filter
     let { count: personCount, rows: persons } = await Person.findAndCountAll({
       where: personWhere,
+      include: includeArr,
       limit: personLimit,
       offset: personOffset,
       order: [["contactPerson", "ASC"]],
       raw: true,
     });
+    console.log("[DEBUG] persons count:", personCount);
+    console.log(
+      "[DEBUG] persons sample:",
+      persons && persons.length > 0 ? persons[0] : null
+    );
 
     // Build org map for quick lookup
     const orgMap = {};
@@ -1152,21 +1690,14 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     }));
 
     res.status(200).json({
-      message: "Persons and organizations fetched successfully",
-      persons,
-      organizations,
+      message: "Persons fetched successfully",
       personsPagination: {
         totalRecords: personCount,
         totalPages: Math.ceil(personCount / personLimit),
         currentPage: personPage,
         limit: personLimit,
       },
-      organizationsPagination: {
-        totalRecords: orgCount,
-        totalPages: Math.ceil(orgCount / orgLimit),
-        currentPage: orgPage,
-        limit: orgLimit,
-      },
+      persons,
     });
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);

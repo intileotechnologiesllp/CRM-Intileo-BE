@@ -4,25 +4,96 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 
 const leadContactsController = require("../../controllers/leads/leadContactController");
 
-
-router.post("/create-organization", verifyToken, leadContactsController.createOrganization);
+router.post(
+  "/create-organization",
+  verifyToken,
+  leadContactsController.createOrganization
+);
 router.post("/create-person", verifyToken, leadContactsController.createPerson);
 router.get("/get-contact-timeline", leadContactsController.getContactTimeline);
-router.get("/get-person-timeline/:personId", leadContactsController.getPersonTimeline);
-router.get("/get-organization-timeline/:organizationId", leadContactsController.getOrganizationTimeline);
+router.get(
+  "/get-person-timeline/:personId",
+  leadContactsController.getPersonTimeline
+);
+router.get(
+  "/get-organization-timeline/:organizationId",
+  leadContactsController.getOrganizationTimeline
+);
 router.get("/get-person-fields", leadContactsController.getPersonFields);
-router.get("/get-organization-fields", leadContactsController.getOrganizationFields);
-router.post("/update-person-fields/:personId", verifyToken, leadContactsController.updatePerson);
-router.post("/update-organization-fields/:leadOrganizationId", verifyToken, leadContactsController.updateOrganization);
-router.post("/link-person-organization", verifyToken, leadContactsController.linkPersonToOrganization);
-router.post("/create-person-note/:personId", verifyToken, leadContactsController.addPersonNote);
-router.post("/create-organization-note/:leadOrganizationId", verifyToken, leadContactsController.addOrganizationNote);
-router.get("/get-all-Persons",leadContactsController.getAllContactPersons);
-router.get("/get-all-persons-by-organization/:leadOrganizationId", leadContactsController.getPersonsByOrganization);
-router.get("/get-all-person-organizations",verifyToken,leadContactsController.getPersonsAndOrganizations);
+router.get(
+  "/get-organization-fields",
+  leadContactsController.getOrganizationFields
+);
+router.post(
+  "/update-person-fields/:personId",
+  verifyToken,
+  leadContactsController.updatePerson
+);
+router.post(
+  "/update-organization-fields/:leadOrganizationId",
+  verifyToken,
+  leadContactsController.updateOrganization
+);
+router.post(
+  "/link-person-organization",
+  verifyToken,
+  leadContactsController.linkPersonToOrganization
+);
+router.post(
+  "/create-person-note/:personId",
+  verifyToken,
+  leadContactsController.addPersonNote
+);
+router.post(
+  "/create-organization-note/:leadOrganizationId",
+  verifyToken,
+  leadContactsController.addOrganizationNote
+);
 
+// Get notes routes
+router.get(
+  "/get-person-notes/:personId",
+  verifyToken,
+  leadContactsController.getPersonNotes
+);
+router.get(
+  "/get-organization-notes/:leadOrganizationId",
+  verifyToken,
+  leadContactsController.getOrganizationNotes
+);
 
+// Update notes routes
+router.put(
+  "/update-person-note/:personId/:noteId",
+  verifyToken,
+  leadContactsController.updatePersonNote
+);
+router.put(
+  "/update-organization-note/:leadOrganizationId/:noteId",
+  verifyToken,
+  leadContactsController.updateOrganizationNote
+);
 
-
+// Delete notes routes
+router.delete(
+  "/delete-person-note/:personId/:noteId",
+  verifyToken,
+  leadContactsController.deletePersonNote
+);
+router.delete(
+  "/delete-organization-note/:leadOrganizationId/:noteId",
+  verifyToken,
+  leadContactsController.deleteOrganizationNote
+);
+router.get("/get-all-Persons", leadContactsController.getAllContactPersons);
+router.get(
+  "/get-all-persons-by-organization/:leadOrganizationId",
+  leadContactsController.getPersonsByOrganization
+);
+router.get(
+  "/get-all-person-organizations",
+  verifyToken,
+  leadContactsController.getPersonsAndOrganizations
+);
 
 module.exports = router;
