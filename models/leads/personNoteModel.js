@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+
 const PersonNote = sequelize.define(
   "PersonNote",
   {
@@ -14,8 +15,13 @@ const PersonNote = sequelize.define(
       references: { model: "leadpeople", key: "personId" },
       onDelete: "CASCADE",
     },
+    masterUserID: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "masterusers", key: "masterUserID" },
+    },
     content: {
-      type: DataTypes.TEXT,
+      type: DataTypes.TEXT("long"),
       allowNull: false,
     },
     createdBy: {

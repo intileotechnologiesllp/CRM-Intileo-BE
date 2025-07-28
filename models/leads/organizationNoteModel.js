@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+
 const OrganizationNote = sequelize.define(
   "OrganizationNote",
   {
@@ -14,8 +15,13 @@ const OrganizationNote = sequelize.define(
       references: { model: "leadorganizations", key: "leadOrganizationId" },
       onDelete: "CASCADE",
     },
+    masterUserID: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: { model: "masterusers", key: "masterUserID" },
+    },
     content: {
-      type: DataTypes.TEXT,
+      type: DataTypes.TEXT("long"),
       allowNull: false,
     },
     createdBy: {
