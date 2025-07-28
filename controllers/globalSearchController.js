@@ -695,6 +695,7 @@ exports.globalSearch = async (req, res) => {
             { sourceChannel: { [Op.like]: `%${searchQuery}%` } },
             { status: { [Op.like]: `%${searchQuery}%` } },
           ],
+          dealId: { [Op.is]: null }, // Only leads without dealId
           ...(req.role === "admin" ? {} : { masterUserID: req.adminId }),
         };
 
