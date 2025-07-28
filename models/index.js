@@ -11,6 +11,8 @@ const CustomField = require("./customFieldModel");
 const CustomFieldValue = require("./customFieldValueModel");
 const Email = require("./email/emailModel");
 const RecentSearch = require("./recentSearchModel");
+const PersonNote = require("./leads/personNoteModel");
+const OrganizationNote = require("./leads/organizationNoteModel");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -51,17 +53,32 @@ Activity.belongsTo(Organization, {
   as: "ActivityOrganization",
 });
 
-// // PersonNote associations
-// Person.hasMany(PersonNote, { foreignKey: "personId", as: "notes" });
-// PersonNote.belongsTo(Person, { foreignKey: "personId", as: "person" });
-// MasterUser.hasMany(PersonNote, { foreignKey: "createdBy", as: "personNotes" });
-// PersonNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
+// PersonNote associations
+Person.hasMany(PersonNote, { foreignKey: "personId", as: "personNotes" });
+PersonNote.belongsTo(Person, { foreignKey: "personId", as: "person" });
+MasterUser.hasMany(PersonNote, {
+  foreignKey: "createdBy",
+  as: "createdPersonNotes",
+});
+PersonNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
 
-// // OrganizationNote associations
-// Organization.hasMany(OrganizationNote, { foreignKey: "leadOrganizationId", as: "notes" });
-// OrganizationNote.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "LeadOrganization" });
-// MasterUser.hasMany(OrganizationNote, { foreignKey: "createdBy", as: "organizationNotes" });
-// OrganizationNote.belongsTo(MasterUser, { foreignKey: "createdBy", as: "creator" });
+// OrganizationNote associations
+Organization.hasMany(OrganizationNote, {
+  foreignKey: "leadOrganizationId",
+  as: "orgNotes",
+});
+OrganizationNote.belongsTo(Organization, {
+  foreignKey: "leadOrganizationId",
+  as: "organization",
+});
+MasterUser.hasMany(OrganizationNote, {
+  foreignKey: "createdBy",
+  as: "createdOrgNotes",
+});
+OrganizationNote.belongsTo(MasterUser, {
+  foreignKey: "createdBy",
+  as: "creator",
+});
 
 // Custom Field associations
 CustomField.hasMany(CustomFieldValue, { foreignKey: "fieldId", as: "values" });
@@ -117,4 +134,6 @@ module.exports = {
   CustomFieldValue,
   Email,
   RecentSearch,
+  PersonNote,
+  OrganizationNote,
 };

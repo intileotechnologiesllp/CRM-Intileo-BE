@@ -36,12 +36,4 @@ const PersonNote = sequelize.define(
   }
 );
 
-PersonNote.associate = (models) => {
-  PersonNote.belongsTo(models.Person, { foreignKey: "personId", as: "person" });
-  PersonNote.belongsTo(models.MasterUser, {
-    foreignKey: "createdBy",
-    as: "creator",
-  });
-};
-
 module.exports = PersonNote;

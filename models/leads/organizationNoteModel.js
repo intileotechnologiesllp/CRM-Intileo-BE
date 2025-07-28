@@ -36,15 +36,4 @@ const OrganizationNote = sequelize.define(
   }
 );
 
-OrganizationNote.associate = (models) => {
-  OrganizationNote.belongsTo(models.Organization, {
-    foreignKey: "leadOrganizationId",
-    as: "organization",
-  });
-  OrganizationNote.belongsTo(models.MasterUser, {
-    foreignKey: "createdBy",
-    as: "creator",
-  });
-};
-
 module.exports = OrganizationNote;
