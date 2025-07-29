@@ -416,7 +416,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-          leadView: true,
+        leadView: true,
         dealView: true,
       },
       {
@@ -428,7 +428,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-          leadView: true,
+        leadView: true,
         dealView: true,
       },
       {
@@ -440,7 +440,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-          leadView: true,
+        leadView: true,
         dealView: true,
       },
       {
@@ -452,7 +452,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-          leadView: true,
+        leadView: true,
         dealView: true,
       },
       {
@@ -876,9 +876,13 @@ exports.getCustomFields = async (req, res) => {
     }
 
     if (entityType) {
-      // Include fields specific to this entity type AND fields that work for both
+      // Normalize entityType for organization
+      let normalizedEntityType = entityType;
+      if (entityType === "organization" || entityType === "organizations") {
+        normalizedEntityType = "organization";
+      }
       whereClause.entityType = {
-        [Op.in]: [entityType, "both"],
+        [Op.in]: [normalizedEntityType, "both"],
       };
     }
 
@@ -942,6 +946,13 @@ exports.getCustomFields = async (req, res) => {
         case "persons":
           defaultFields = await getDefaultFieldsFromModels(
             "person",
+            masterUserID
+          );
+          break;
+        case "organization":
+        case "organizations":
+          defaultFields = await getDefaultFieldsFromModels(
+            "organization",
             masterUserID
           );
           break;
