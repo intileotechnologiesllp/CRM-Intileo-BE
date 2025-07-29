@@ -7,6 +7,20 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const orgOffset = (orgPage - 1) * orgLimit;
     const orgSearch = req.query.orgSearch || "";
 
+    // Restrict data for non-admins
+    if (req.role !== "admin") {
+      // Only show organizations where user is owner or masterUserID
+      if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+      organizationWhere[Op.and].push({
+        [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+      });
+      // Only show persons where user is owner or masterUserID
+      if (!personWhere[Op.and]) personWhere[Op.and] = [];
+      personWhere[Op.and].push({
+        [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+      });
+    }
+
     // Dynamic filter config (from body or query)
     const LeadFilter = require("../../models/leads/leadFiltersModel");
     let filterConfig = null;
@@ -369,12 +383,11 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     res.status(200).json({
       message: "Organizations fetched successfully",
-      organizationsPagination: {
-        totalRecords: orgCount,
-        totalPages: Math.ceil(orgCount / orgLimit),
-        currentPage: orgPage,
-        limit: orgLimit,
-      },
+
+      totalRecords: orgCount,
+      totalPages: Math.ceil(orgCount / orgLimit),
+      currentPage: orgPage,
+      limit: orgLimit,
       organizations: orgsOut,
     });
   } catch (error) {
@@ -2575,15 +2588,35 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       persons: orgPersonsMap[o.leadOrganizationId] || [],
     }));
 
+    // Build flat persons array with organization as string
+    const flatPersons = persons.map((p) => ({
+      personId: p.personId,
+      leadOrganizationId: p.leadOrganizationId,
+      contactPerson: p.contactPerson,
+      email: p.email,
+      phone: p.phone,
+      notes: p.notes || null,
+      postalAddress: p.postalAddress || null,
+      birthday: p.birthday || null,
+      jobTitle: p.jobTitle,
+      personLabels: p.personLabels,
+      organization: p.organization
+        ? typeof p.organization === "object"
+          ? p.organization.organization
+          : p.organization
+        : null,
+      masterUserID: p.masterUserID,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+      ownerName: p.ownerName || null,
+      leadCount: p.leadCount || 0,
+    }));
+
     res.status(200).json({
-      message: "Persons fetched successfully",
-      personsPagination: {
-        totalRecords: persons.length,
-        totalPages: Math.ceil(persons.length / personLimit),
-        currentPage: personPage,
-        limit: personLimit,
-      },
-      persons,
+      totalRecords: persons.length,
+      totalPages: Math.ceil(persons.length / personLimit),
+      currentPage: personPage,
+      persons: flatPersons,
     });
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);
