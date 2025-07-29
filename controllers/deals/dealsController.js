@@ -20,6 +20,7 @@ const Activity = require("../../models/activity/activityModel");
 const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const { sendEmail } = require("../../utils/emailSend"); // Add email service import
 
 const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
@@ -3793,4 +3794,373 @@ exports.getDealFieldsForFilter = (req, res) => {
     // ...add more as needed
   ];
   res.status(200).json({ fields });
+};
+
+// Bulk edit deals functionality
+exports.bulkEditDeals = async (req, res) => {
+  const { dealIds, updateData } = req.body;
+
+  // Validate input
+  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+    return res.status(400).json({
+      message: "dealIds must be a non-empty array",
+    });
+  }
+
+  if (!updateData || Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      message: "updateData must contain at least one field to update",
+    });
+  }
+
+  console.log("Bulk edit deals request:", { dealIds, updateData });
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        getProgramId("DEALS"),
+        "BULK_DEAL_UPDATE",
+        null,
+        "Access denied. You do not have permission to bulk edit deals.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk edit deals.",
+      });
+    }
+
+    // Get all columns for different models
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
+    const personFields = Object.keys(Person.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    // Split the update data by model
+    const dealData = {};
+    const dealDetailsData = {};
+    const personData = {};
+    const organizationData = {};
+    const customFields = {};
+
+    for (const key in updateData) {
+      if (dealFields.includes(key)) {
+        dealData[key] = updateData[key];
+      } else if (personFields.includes(key)) {
+        personData[key] = updateData[key];
+      } else if (organizationFields.includes(key)) {
+        organizationData[key] = updateData[key];
+      } else if (dealDetailsFields.includes(key)) {
+        dealDetailsData[key] = updateData[key];
+      } else {
+        // Treat as custom field
+        customFields[key] = updateData[key];
+      }
+    }
+
+    console.log("Processed update data:", {
+      dealData,
+      dealDetailsData,
+      personData,
+      organizationData,
+      customFields,
+    });
+
+    // Find deals to update
+    let whereClause = { dealId: { [Op.in]: dealIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const dealsToUpdate = await Deal.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: DealDetails,
+          as: "details",
+          required: false,
+        },
+        {
+          model: Person,
+          as: "Person",
+          required: false,
+        },
+        {
+          model: Organization,
+          as: "Organization",
+          required: false,
+        },
+      ],
+    });
+
+    if (dealsToUpdate.length === 0) {
+      return res.status(404).json({
+        message:
+          "No deals found to update or you don't have permission to edit them",
+      });
+    }
+
+    console.log(`Found ${dealsToUpdate.length} deals to update`);
+
+    const updateResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each deal
+    for (const deal of dealsToUpdate) {
+      try {
+        console.log(`Processing deal ${deal.dealId}`);
+
+        // Track if owner is being changed
+        let ownerChanged = false;
+        let newOwner = null;
+        if (updateData.ownerId && updateData.ownerId !== deal.ownerId) {
+          ownerChanged = true;
+          newOwner = await MasterUser.findByPk(updateData.ownerId);
+        }
+
+        // Check if pipelineStage is changing and create stage history
+        if (
+          dealData.pipelineStage &&
+          dealData.pipelineStage !== deal.pipelineStage
+        ) {
+          await DealStageHistory.create({
+            dealId: deal.dealId,
+            stageName: dealData.pipelineStage,
+            enteredAt: new Date(),
+          });
+        }
+
+        // Update Deal table
+        if (Object.keys(dealData).length > 0) {
+          await deal.update(dealData);
+          console.log(`Updated deal ${deal.dealId} with:`, dealData);
+        }
+
+        // Update DealDetails table
+        if (Object.keys(dealDetailsData).length > 0) {
+          let dealDetails = await DealDetails.findOne({
+            where: { dealId: deal.dealId },
+          });
+
+          if (dealDetails) {
+            await dealDetails.update(dealDetailsData);
+          } else {
+            await DealDetails.create({
+              dealId: deal.dealId,
+              ...dealDetailsData,
+            });
+          }
+          console.log(
+            `Updated deal details for ${deal.dealId}:`,
+            dealDetailsData
+          );
+        }
+
+        // Update Person table
+        if (Object.keys(personData).length > 0 && deal.personId) {
+          const person = await Person.findByPk(deal.personId);
+          if (person) {
+            await person.update(personData);
+            console.log(`Updated person ${deal.personId}:`, personData);
+          }
+        }
+
+        // Update Organization table
+        if (
+          Object.keys(organizationData).length > 0 &&
+          deal.leadOrganizationId
+        ) {
+          const organization = await Organization.findByPk(
+            deal.leadOrganizationId
+          );
+          if (organization) {
+            await organization.update(organizationData);
+            console.log(
+              `Updated organization ${deal.leadOrganizationId}:`,
+              organizationData
+            );
+          }
+        }
+
+        // Handle custom fields
+        const savedCustomFields = {};
+        if (customFields && Object.keys(customFields).length > 0) {
+          for (const [fieldKey, value] of Object.entries(customFields)) {
+            try {
+              // Find custom field by fieldId first, then by fieldName
+              let customField = await CustomField.findOne({
+                where: {
+                  fieldId: fieldKey,
+                  entityType: { [Op.in]: ["deal", "both", "lead"] },
+                  isActive: true,
+                  [Op.or]: [
+                    { masterUserID: req.adminId },
+                    { fieldSource: "default" },
+                    { fieldSource: "system" },
+                  ],
+                },
+              });
+
+              if (!customField) {
+                customField = await CustomField.findOne({
+                  where: {
+                    fieldName: fieldKey,
+                    entityType: { [Op.in]: ["deal", "both", "lead"] },
+                    isActive: true,
+                    [Op.or]: [
+                      { masterUserID: req.adminId },
+                      { fieldSource: "default" },
+                      { fieldSource: "system" },
+                    ],
+                  },
+                });
+              }
+
+              if (
+                customField &&
+                value !== null &&
+                value !== undefined &&
+                value !== ""
+              ) {
+                // Check if custom field value already exists
+                const existingValue = await CustomFieldValue.findOne({
+                  where: {
+                    fieldId: customField.fieldId,
+                    entityId: deal.dealId,
+                    entityType: "deal",
+                  },
+                });
+
+                if (existingValue) {
+                  await existingValue.update({ value: value });
+                } else {
+                  await CustomFieldValue.create({
+                    fieldId: customField.fieldId,
+                    entityId: deal.dealId,
+                    entityType: "deal",
+                    value: value,
+                    masterUserID: req.adminId,
+                  });
+                }
+
+                savedCustomFields[customField.fieldName] = {
+                  fieldName: customField.fieldName,
+                  fieldType: customField.fieldType,
+                  value: value,
+                };
+              }
+            } catch (customFieldError) {
+              console.error(
+                `Error updating custom field ${fieldKey} for deal ${deal.dealId}:`,
+                customFieldError
+              );
+            }
+          }
+        }
+
+        // Send email notification if owner changed
+        if (ownerChanged && newOwner && newOwner.email) {
+          try {
+            const assigner = await MasterUser.findByPk(req.adminId);
+            if (assigner && assigner.email) {
+              await sendEmail(assigner.email, {
+                from: assigner.email,
+                to: newOwner.email,
+                subject: "You have been assigned a new deal",
+                text: `Hello ${newOwner.name},\n\nYou have been assigned a new deal: "${deal.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+              });
+            }
+          } catch (emailError) {
+            console.error(
+              `Error sending email notification for deal ${deal.dealId}:`,
+              emailError
+            );
+          }
+        }
+
+        // Log audit trail for successful update
+        await historyLogger(
+          getProgramId("DEALS"),
+          "BULK_DEAL_UPDATE",
+          req.adminId,
+          deal.dealId,
+          null,
+          `Deal bulk updated by ${req.role}`,
+          { updateData }
+        );
+
+        updateResults.successful.push({
+          dealId: deal.dealId,
+          title: deal.title,
+          value: deal.value,
+          pipelineStage: deal.pipelineStage,
+          customFields: savedCustomFields,
+        });
+      } catch (dealError) {
+        console.error(`Error updating deal ${deal.dealId}:`, dealError);
+
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "BULK_DEAL_UPDATE",
+          req.adminId,
+          `Error updating deal ${deal.dealId}: ${dealError.message}`,
+          req.adminId
+        );
+
+        updateResults.failed.push({
+          dealId: deal.dealId,
+          title: deal.title,
+          error: dealError.message,
+        });
+      }
+    }
+
+    // Check for deals that were requested but not found
+    const foundDealIds = dealsToUpdate.map((deal) => deal.dealId);
+    const notFoundDealIds = dealIds.filter((id) => !foundDealIds.includes(id));
+
+    notFoundDealIds.forEach((dealId) => {
+      updateResults.skipped.push({
+        dealId: dealId,
+        reason: "Deal not found or no permission to edit",
+      });
+    });
+
+    console.log("Bulk update results:", updateResults);
+
+    res.status(200).json({
+      message: "Bulk edit operation completed",
+      results: updateResults,
+      summary: {
+        total: dealIds.length,
+        successful: updateResults.successful.length,
+        failed: updateResults.failed.length,
+        skipped: updateResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk edit deals:", error);
+
+    await logAuditTrail(
+      getProgramId("DEALS"),
+      "BULK_DEAL_UPDATE",
+      null,
+      "Error in bulk edit deals: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
 };
