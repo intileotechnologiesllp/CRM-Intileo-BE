@@ -15,10 +15,16 @@ const Report = sequelize.define(
       allowNull: false,
       references: { model: "dashboards", key: "dashboardId" },
     },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "Untitled Report",
+    },
     entity: { type: DataTypes.STRING, allowNull: false }, // e.g. "Lead", "Deal"
     type: { type: DataTypes.STRING, allowNull: false }, // e.g. "Performance", "Conversion"
     config: { type: DataTypes.JSON, allowNull: true }, // chart config, filters, etc.
-    position: { type: DataTypes.INTEGER, allowNull: true },
+    position: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 0 },
+    description: { type: DataTypes.TEXT, allowNull: true },
   },
   {
     tableName: "Reports",
