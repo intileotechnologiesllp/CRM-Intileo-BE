@@ -317,13 +317,55 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         (orgLeadCount[l.leadOrganizationId] || 0) + 1;
     });
 
-    // Build organizations array with persons, leadCount, and ownerName
-    const orgsOut = organizations.map((o) => ({
-      ...o,
-      ownerName: o.ownerId ? ownerMap[o.ownerId] || null : null,
-      leadCount: orgLeadCount[o.leadOrganizationId] || 0,
-      persons: orgPersonsMap[o.leadOrganizationId] || [],
-    }));
+    // Fetch custom field values for all organizations
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const Sequelize = require("sequelize");
+    const orgIdsForCustomFields = organizations.map(
+      (o) => o.leadOrganizationId
+    );
+    let orgCustomFieldValues = [];
+    if (orgIdsForCustomFields.length > 0) {
+      orgCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: orgIdsForCustomFields,
+          entityType: "organization",
+        },
+        raw: true,
+      });
+    }
+    // Fetch all custom fields for organization entity
+    const allOrgCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+    const orgCustomFieldIdToName = {};
+    allOrgCustomFields.forEach((cf) => {
+      orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+    // Map orgId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    orgCustomFieldValues.forEach((cfv) => {
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization
+    const orgsOut = organizations.map((o) => {
+      const customFields = orgCustomFieldsMap[o.leadOrganizationId] || {};
+      return {
+        ...o,
+        ...customFields,
+        ownerName: o.ownerId ? ownerMap[o.ownerId] || null : null,
+        leadCount: orgLeadCount[o.leadOrganizationId] || 0,
+        persons: orgPersonsMap[o.leadOrganizationId] || [],
+      };
+    });
 
     res.status(200).json({
       message: "Organizations fetched successfully",
@@ -499,7 +541,9 @@ exports.createOrganization = async (req, res) => {
         .status(400)
         .json({ message: "Organization name is required." });
     }
-    const { organization, organizationLabels, address, visibleTo } = req.body;
+    const { organization, organizationLabels, address, visibleTo, ...rest } =
+      req.body;
+
     // Check if organization already exists
     const existingOrg = await Organization.findOne({ where: { organization } });
     if (existingOrg) {
@@ -508,6 +552,19 @@ exports.createOrganization = async (req, res) => {
         organization: existingOrg,
       });
     }
+
+    // Get all organization model fields
+    const orgFields = Object.keys(Organization.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!orgFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
+    }
+
+    // Create the organization
     const org = await Organization.create({
       organization,
       organizationLabels,
@@ -516,6 +573,32 @@ exports.createOrganization = async (req, res) => {
       masterUserID,
       ownerId, // Set the owner ID if provided
     });
+
+    // Save custom fields if any
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const Sequelize = require("sequelize");
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: org.leadOrganizationId,
+          entityType: "organization",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
+
     res.status(201).json({
       message: "Organization created successfully",
       organization: org,
@@ -2428,6 +2511,48 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       }
     });
     persons = Array.from(personMap.values());
+
+    // Fetch custom field values for all persons
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const Sequelize = require("sequelize");
+    const personIdsForCustomFields = persons.map((p) => p.personId);
+    let customFieldValues = [];
+    if (personIdsForCustomFields.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: personIdsForCustomFields,
+          entityType: "person",
+        },
+        raw: true,
+      });
+    }
+    // Fetch all custom fields for person entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+    // Map personId to their custom field values as { fieldName: value }
+    const personCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!personCustomFieldsMap[cfv.entityId])
+        personCustomFieldsMap[cfv.entityId] = {};
+      personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each person
+    persons = persons.map((p) => {
+      const customFields = personCustomFieldsMap[p.personId] || {};
+      return { ...p, ...customFields };
+    });
 
     // Build orgPersonsMap for organizations
     const orgPersonsMap = {};
