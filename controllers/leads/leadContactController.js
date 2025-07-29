@@ -369,6 +369,7 @@ exports.createPerson = async (req, res) => {
       jobTitle,
       personLabels,
       organization, // may be undefined or empty
+      ...rest
     } = req.body;
 
     // Check for duplicate email (email must be unique across all persons)
@@ -405,8 +406,19 @@ exports.createPerson = async (req, res) => {
       // Only create/find organization if provided
       [org] = await Organization.findOrCreate({
         where: { organization },
-        defaults: { organization, masterUserID }, // <-- add masterUserID here
+        defaults: { organization, masterUserID },
       });
+    }
+
+    // Get all person model fields
+    const personFields = Object.keys(Person.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!personFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
     }
 
     // Create the person
@@ -423,6 +435,30 @@ exports.createPerson = async (req, res) => {
       leadOrganizationId: org ? org.leadOrganizationId : null,
       masterUserID,
     });
+
+    // Save custom fields if any
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["person", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: person.personId,
+          entityType: "person",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
 
     res.status(201).json({ message: "Person created successfully", person });
   } catch (error) {

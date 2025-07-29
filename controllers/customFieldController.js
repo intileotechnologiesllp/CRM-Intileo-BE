@@ -60,6 +60,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
   const specificFields = {
     // Fields from your screenshot that exist in database models
     leads: [
+      // ...existing code for leads fields...
       {
         fieldName: "title",
         fieldLabel: "Title",
@@ -206,6 +207,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
       },
     ],
     deals: [
+      // ...existing code for deals fields...
       {
         fieldName: "title",
         fieldLabel: "Title",
@@ -294,8 +296,9 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
       },
     ],
     person: [
+      // ...existing code for person fields...
       {
-        fieldName: "name",
+        fieldName: "contactPerson",
         fieldLabel: "Name",
         fieldType: "text",
         dbColumn: "contactPerson",
@@ -397,6 +400,68 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dbColumn: "notes",
         isRequired: false,
         entityType: "person",
+        isActive: true,
+        isDefault: true,
+        leadView: true,
+        dealView: true,
+      },
+    ],
+    organization: [
+      {
+        fieldName: "organization",
+        fieldLabel: "Name",
+        fieldType: "text",
+        dbColumn: "name",
+        isRequired: true,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+          leadView: true,
+        dealView: true,
+      },
+      {
+        fieldName: "ownerId",
+        fieldLabel: "Owner",
+        fieldType: "number",
+        dbColumn: "ownerId",
+        isRequired: false,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+          leadView: true,
+        dealView: true,
+      },
+      {
+        fieldName: "visibleTo",
+        fieldLabel: "Visible to",
+        fieldType: "text",
+        dbColumn: "visibleTo",
+        isRequired: false,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+          leadView: true,
+        dealView: true,
+      },
+      {
+        fieldName: "address",
+        fieldLabel: "Address",
+        fieldType: "text",
+        dbColumn: "address",
+        isRequired: false,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+          leadView: true,
+        dealView: true,
+      },
+      {
+        fieldName: "organizationLabels",
+        fieldLabel: "Labels",
+        fieldType: "multiselect",
+        dbColumn: "labels",
+        isRequired: false,
+        entityType: "organization",
         isActive: true,
         isDefault: true,
         leadView: true,
