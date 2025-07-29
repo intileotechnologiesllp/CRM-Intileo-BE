@@ -3813,6 +3813,58 @@ exports.bulkEditDeals = async (req, res) => {
     });
   }
 
+  // Check for potential duplicate issues when updating multiple deals with same values
+  if (dealIds.length > 1) {
+    const duplicateChecks = [];
+
+    // Check title uniqueness if updating title
+    if (updateData.title) {
+      const existingTitleCount = await Deal.count({
+        where: {
+          title: updateData.title,
+          dealId: { [Op.notIn]: dealIds },
+        },
+      });
+
+      if (existingTitleCount > 0) {
+        duplicateChecks.push({
+          field: "title",
+          value: updateData.title,
+          message: "Title already exists for another deal",
+        });
+      }
+    }
+
+    // Check other unique fields if they exist (add more as needed)
+    if (updateData.esplProposalNo) {
+      const existingProposalCount = await Deal.count({
+        where: {
+          esplProposalNo: updateData.esplProposalNo,
+          dealId: { [Op.notIn]: dealIds },
+        },
+      });
+
+      if (existingProposalCount > 0) {
+        duplicateChecks.push({
+          field: "esplProposalNo",
+          value: updateData.esplProposalNo,
+          message: "ESPL Proposal Number already exists for another deal",
+        });
+      }
+    }
+
+    // If we found duplicate issues, return error
+    if (duplicateChecks.length > 0) {
+      return res.status(400).json({
+        message:
+          "Cannot update multiple deals due to duplicate value constraints",
+        duplicateIssues: duplicateChecks,
+        suggestion:
+          "Please ensure unique values for fields that require uniqueness, or update deals individually",
+      });
+    }
+  }
+
   console.log("Bulk edit deals request:", { dealIds, updateData });
 
   try {
@@ -3941,36 +3993,141 @@ exports.bulkEditDeals = async (req, res) => {
 
         // Update Deal table
         if (Object.keys(dealData).length > 0) {
-          await deal.update(dealData);
-          console.log(`Updated deal ${deal.dealId} with:`, dealData);
+          try {
+            await deal.update(dealData);
+            console.log(`Updated deal ${deal.dealId} with:`, dealData);
+          } catch (updateError) {
+            // Handle specific database constraint errors
+            if (
+              updateError.name === "SequelizeUniqueConstraintError" ||
+              updateError.original?.code === "ER_DUP_ENTRY"
+            ) {
+              let constraintField = "unknown";
+              let duplicateValue = "unknown";
+
+              // Extract field name and value from error message
+              if (updateError.original?.sqlMessage) {
+                const match = updateError.original.sqlMessage.match(
+                  /Duplicate entry '(.+?)' for key '(.+?)'/
+                );
+                if (match) {
+                  duplicateValue = match[1];
+                  constraintField = match[2];
+                }
+              }
+
+              throw new Error(
+                `Duplicate ${constraintField}: '${duplicateValue}' already exists. Please use a unique value.`
+              );
+            }
+
+            // Handle other constraint violations
+            if (updateError.name === "SequelizeValidationError") {
+              const validationErrors = updateError.errors
+                .map((err) => err.message)
+                .join(", ");
+              throw new Error(`Validation error: ${validationErrors}`);
+            }
+
+            if (updateError.name === "SequelizeForeignKeyConstraintError") {
+              throw new Error(
+                `Foreign key constraint error: Invalid reference to related data.`
+              );
+            }
+
+            // Re-throw original error if not a known constraint error
+            throw updateError;
+          }
         }
 
         // Update DealDetails table
         if (Object.keys(dealDetailsData).length > 0) {
-          let dealDetails = await DealDetails.findOne({
-            where: { dealId: deal.dealId },
-          });
-
-          if (dealDetails) {
-            await dealDetails.update(dealDetailsData);
-          } else {
-            await DealDetails.create({
-              dealId: deal.dealId,
-              ...dealDetailsData,
+          try {
+            let dealDetails = await DealDetails.findOne({
+              where: { dealId: deal.dealId },
             });
+
+            if (dealDetails) {
+              await dealDetails.update(dealDetailsData);
+            } else {
+              await DealDetails.create({
+                dealId: deal.dealId,
+                ...dealDetailsData,
+              });
+            }
+            console.log(
+              `Updated deal details for ${deal.dealId}:`,
+              dealDetailsData
+            );
+          } catch (detailsError) {
+            // Handle specific database constraint errors for DealDetails
+            if (
+              detailsError.name === "SequelizeUniqueConstraintError" ||
+              detailsError.original?.code === "ER_DUP_ENTRY"
+            ) {
+              let constraintField = "unknown";
+              let duplicateValue = "unknown";
+
+              if (detailsError.original?.sqlMessage) {
+                const match = detailsError.original.sqlMessage.match(
+                  /Duplicate entry '(.+?)' for key '(.+?)'/
+                );
+                if (match) {
+                  duplicateValue = match[1];
+                  constraintField = match[2];
+                }
+              }
+
+              throw new Error(
+                `Duplicate ${constraintField} in deal details: '${duplicateValue}' already exists.`
+              );
+            }
+
+            if (detailsError.name === "SequelizeValidationError") {
+              const validationErrors = detailsError.errors
+                .map((err) => err.message)
+                .join(", ");
+              throw new Error(
+                `Deal details validation error: ${validationErrors}`
+              );
+            }
+
+            throw detailsError;
           }
-          console.log(
-            `Updated deal details for ${deal.dealId}:`,
-            dealDetailsData
-          );
         }
 
         // Update Person table
         if (Object.keys(personData).length > 0 && deal.personId) {
-          const person = await Person.findByPk(deal.personId);
-          if (person) {
-            await person.update(personData);
-            console.log(`Updated person ${deal.personId}:`, personData);
+          try {
+            const person = await Person.findByPk(deal.personId);
+            if (person) {
+              await person.update(personData);
+              console.log(`Updated person ${deal.personId}:`, personData);
+            }
+          } catch (personError) {
+            if (
+              personError.name === "SequelizeUniqueConstraintError" ||
+              personError.original?.code === "ER_DUP_ENTRY"
+            ) {
+              let constraintField = "unknown";
+              let duplicateValue = "unknown";
+
+              if (personError.original?.sqlMessage) {
+                const match = personError.original.sqlMessage.match(
+                  /Duplicate entry '(.+?)' for key '(.+?)'/
+                );
+                if (match) {
+                  duplicateValue = match[1];
+                  constraintField = match[2];
+                }
+              }
+
+              throw new Error(
+                `Duplicate ${constraintField} in person data: '${duplicateValue}' already exists.`
+              );
+            }
+
+            throw personError;
           }
         }
 
@@ -3979,15 +4136,41 @@ exports.bulkEditDeals = async (req, res) => {
           Object.keys(organizationData).length > 0 &&
           deal.leadOrganizationId
         ) {
-          const organization = await Organization.findByPk(
-            deal.leadOrganizationId
-          );
-          if (organization) {
-            await organization.update(organizationData);
-            console.log(
-              `Updated organization ${deal.leadOrganizationId}:`,
-              organizationData
+          try {
+            const organization = await Organization.findByPk(
+              deal.leadOrganizationId
             );
+            if (organization) {
+              await organization.update(organizationData);
+              console.log(
+                `Updated organization ${deal.leadOrganizationId}:`,
+                organizationData
+              );
+            }
+          } catch (orgError) {
+            if (
+              orgError.name === "SequelizeUniqueConstraintError" ||
+              orgError.original?.code === "ER_DUP_ENTRY"
+            ) {
+              let constraintField = "unknown";
+              let duplicateValue = "unknown";
+
+              if (orgError.original?.sqlMessage) {
+                const match = orgError.original.sqlMessage.match(
+                  /Duplicate entry '(.+?)' for key '(.+?)'/
+                );
+                if (match) {
+                  duplicateValue = match[1];
+                  constraintField = match[2];
+                }
+              }
+
+              throw new Error(
+                `Duplicate ${constraintField} in organization data: '${duplicateValue}' already exists.`
+              );
+            }
+
+            throw orgError;
           }
         }
 
@@ -4108,18 +4291,35 @@ exports.bulkEditDeals = async (req, res) => {
       } catch (dealError) {
         console.error(`Error updating deal ${deal.dealId}:`, dealError);
 
+        // Create more detailed error message
+        let errorMessage = dealError.message;
+        let errorType = "general";
+
+        if (
+          dealError.name === "SequelizeUniqueConstraintError" ||
+          dealError.original?.code === "ER_DUP_ENTRY"
+        ) {
+          errorType = "duplicate";
+        } else if (dealError.name === "SequelizeValidationError") {
+          errorType = "validation";
+        } else if (dealError.name === "SequelizeForeignKeyConstraintError") {
+          errorType = "foreign_key";
+        }
+
         await logAuditTrail(
           getProgramId("DEALS"),
           "BULK_DEAL_UPDATE",
           req.adminId,
-          `Error updating deal ${deal.dealId}: ${dealError.message}`,
+          `Error updating deal ${deal.dealId}: ${errorMessage}`,
           req.adminId
         );
 
         updateResults.failed.push({
           dealId: deal.dealId,
-          title: deal.title,
-          error: dealError.message,
+          title: deal.title || `Deal ${deal.dealId}`,
+          error: errorMessage,
+          errorType: errorType,
+          errorCode: dealError.original?.code || dealError.name,
         });
       }
     }
@@ -4145,7 +4345,31 @@ exports.bulkEditDeals = async (req, res) => {
         successful: updateResults.successful.length,
         failed: updateResults.failed.length,
         skipped: updateResults.skipped.length,
+        hasErrors: updateResults.failed.length > 0,
+        errorBreakdown: {
+          duplicateErrors: updateResults.failed.filter(
+            (f) => f.errorType === "duplicate"
+          ).length,
+          validationErrors: updateResults.failed.filter(
+            (f) => f.errorType === "validation"
+          ).length,
+          foreignKeyErrors: updateResults.failed.filter(
+            (f) => f.errorType === "foreign_key"
+          ).length,
+          generalErrors: updateResults.failed.filter(
+            (f) => f.errorType === "general"
+          ).length,
+        },
       },
+      recommendations:
+        updateResults.failed.length > 0
+          ? [
+              "Check for duplicate values in fields that require uniqueness",
+              "Ensure all required fields are provided",
+              "Verify that referenced IDs exist in the system",
+              "Consider updating deals individually if bulk update continues to fail",
+            ]
+          : null,
     });
   } catch (error) {
     console.error("Error in bulk edit deals:", error);
