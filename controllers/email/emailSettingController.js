@@ -40,29 +40,35 @@ const upload = multer({ storage });
 const cleanEmailBody = (body) => {
   if (!body) return "";
 
+  // Pre-process to remove VML (Vector Markup Language) content that causes parsing issues
+  let preprocessedBody = body;
+
+  // Remove VML namespace tags (v:*, o:*) that cause selector parsing errors
+  preprocessedBody = preprocessedBody.replace(/<v:[^>]*>.*?<\/v:[^>]*>/gis, "");
+  preprocessedBody = preprocessedBody.replace(/<o:[^>]*>.*?<\/o:[^>]*>/gis, "");
+  preprocessedBody = preprocessedBody.replace(/<v:[^>]*\/>/gis, "");
+  preprocessedBody = preprocessedBody.replace(/<o:[^>]*\/>/gis, "");
+
   // First, use html-to-text for comprehensive HTML-to-text conversion
-  const cleanText = htmlToText(body, {
+  const cleanText = htmlToText(preprocessedBody, {
     wordwrap: false,
     ignoreHref: true,
     ignoreImage: true,
     uppercaseHeadings: false,
     preserveNewlines: false,
     selectors: [
-      // Remove VML (Vector Markup Language) content
-      { selector: 'v\\:*', format: 'skip' },
-      { selector: 'o\\:*', format: 'skip' },
       // Remove style tags and their content
-      { selector: 'style', format: 'skip' },
+      { selector: "style", format: "skip" },
       // Remove script tags and their content
-      { selector: 'script', format: 'skip' },
+      { selector: "script", format: "skip" },
       // Remove tracking pixels and small images
-      { selector: 'img[width="1"]', format: 'skip' },
-      { selector: 'img[height="1"]', format: 'skip' },
+      { selector: 'img[width="1"]', format: "skip" },
+      { selector: 'img[height="1"]', format: "skip" },
       // Keep important content as text
-      { selector: 'a', options: { ignoreHref: true } },
-      { selector: 'div', format: 'block' },
-      { selector: 'p', format: 'block' },
-      { selector: 'br', format: 'lineBreak' },
+      { selector: "a", options: { ignoreHref: true } },
+      { selector: "div", format: "block" },
+      { selector: "p", format: "block" },
+      { selector: "br", format: "lineBreak" },
     ],
   });
 
@@ -1335,11 +1341,9 @@ exports.downloadAttachment = async (req, res) => {
         console.debug(
           `[downloadAttachment] Attachment not found in email (after messageId search): ${filename}`
         );
-        return res
-          .status(404)
-          .json({
-            message: "Attachment not found in email (after messageId search).",
-          });
+        return res.status(404).json({
+          message: "Attachment not found in email (after messageId search).",
+        });
       }
     }
 
