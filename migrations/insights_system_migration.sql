@@ -1,3 +1,21 @@
+-- Drop existing parentId foreign key constraint if it exists (migration-safe)
+SET @fk_name := (SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_NAME = 'Dashboards' AND COLUMN_NAME = 'parentId' AND REFERENCED_TABLE_NAME = 'Dashboards' AND CONSTRAINT_NAME != 'PRIMARY' LIMIT 1);
+SET @sql := IF(@fk_name IS NOT NULL, CONCAT('ALTER TABLE `Dashboards` DROP FOREIGN KEY ', @fk_name, ';'), 'SELECT 1;');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+-- Create Reports table if it does not exist (basic structure, adjust as needed)
+CREATE TABLE IF NOT EXISTS `Reports` (
+  `reportId` int(11) NOT NULL AUTO_INCREMENT,
+  `dashboardId` int(11) NOT NULL,
+  `entity` varchar(255) NOT NULL,
+  `type` varchar(255) NOT NULL,
+  `config` text,
+  `position` int(11) DEFAULT 0,
+  `createdAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`reportId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- =====================================================
 -- Insights System Migration SQL
 -- Run this in phpMyAdmin to create the Goals table
@@ -12,8 +30,9 @@ ADD INDEX IF NOT EXISTS `idx_dashboard_type` (`type`),
 ADD INDEX IF NOT EXISTS `idx_dashboard_parent` (`parentId`);
 
 -- Add foreign key constraint for parentId (self-referencing)
-ALTER TABLE `Dashboards` 
-ADD CONSTRAINT IF NOT EXISTS `Dashboards_parentId_foreign` 
+-- NOTE: MySQL/MariaDB does NOT support IF NOT EXISTS for ADD CONSTRAINT/FOREIGN KEY. Remove IF NOT EXISTS for compatibility.
+ALTER TABLE `Dashboards`
+ADD CONSTRAINT `Dashboards_parentId_foreign`
 FOREIGN KEY (`parentId`) REFERENCES `Dashboards` (`dashboardId`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Create Goals table
@@ -57,7 +76,7 @@ ADD COLUMN IF NOT EXISTS `parentId` int(11) DEFAULT NULL AFTER `type`;
 
 -- Add foreign key constraint for parentId (self-referencing)
 ALTER TABLE `Dashboards` 
-ADD CONSTRAINT IF NOT EXISTS `Dashboards_parentId_foreign` 
+ADD CONSTRAINT  `Dashboards_parentId_foreign` 
 FOREIGN KEY (`parentId`) REFERENCES `Dashboards` (`dashboardId`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- =====================================================

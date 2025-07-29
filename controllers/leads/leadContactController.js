@@ -2281,180 +2281,46 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         }
       : {};
 
-    // Restrict by role (admin sees all, non-admin sees only their own or owned)
-    if (req.role !== "admin") {
-      // For organizations: only those where user is masterUserID or ownerId
-      orgWhere[Op.or] = orgWhere[Op.or] || [];
-      orgWhere[Op.or].push({ masterUserID: req.adminId });
-      orgWhere[Op.or].push({ ownerId: req.adminId });
-
-      // For persons: only those where user is masterUserID or in user's organizations
-      // First, get organizations user can see
-      const userOrgs = await Organization.findAll({
+    // Fetch organizations first - same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin") {
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        raw: true,
+      });
+    } else {
+      organizations = await Organization.findAll({
         where: {
+          ...orgWhere,
           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
         },
-        attributes: ["leadOrganizationId"],
         raw: true,
       });
-      const userOrgIds = userOrgs.map((o) => o.leadOrganizationId);
-      personWhere[Op.or] = personWhere[Op.or] || [];
-      personWhere[Op.or].push({ masterUserID: req.adminId });
-      if (userOrgIds.length > 0) {
-        personWhere[Op.or].push({ leadOrganizationId: userOrgIds });
-      }
     }
 
-    // Fetch organizations with pagination
-    let { count: orgCount, rows: organizations } =
-      await Organization.findAndCountAll({
-        where: orgWhere,
-        limit: orgLimit,
-        offset: orgOffset,
-        order: [["organization", "ASC"]],
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Fetch persons using EXACT same logic as getLeads API
+    let persons = [];
+    if (req.role === "admin") {
+      persons = await Person.findAll({
+        where: personWhere,
         raw: true,
       });
-    console.log("[DEBUG] organizations count:", orgCount);
-    console.log(
-      "[DEBUG] organizations sample:",
-      organizations && organizations.length > 0 ? organizations[0] : null
-    );
-
-    // Build include array for related models
-    const includeArr = [];
-
-    // Always include organization (left join)
-    if (hasOrgFilters) {
-      includeArr.push({
-        model: Organization,
-        as: "LeadOrganization",
-        where: organizationWhere,
-        required: true, // Inner join when filtering
-      });
-      console.log(
-        "[DEBUG] Added Organization include with filtering (INNER JOIN)"
-      );
     } else {
-      includeArr.push({
-        model: Organization,
-        as: "LeadOrganization",
-        required: false, // Left join when not filtering
+      persons = await Person.findAll({
+        where: {
+          ...personWhere,
+          [Op.or]: [
+            { masterUserID: req.adminId },
+            { leadOrganizationId: orgIds },
+          ],
+        },
+        raw: true,
       });
-      console.log(
-        "[DEBUG] Added Organization include without filtering (LEFT JOIN)"
-      );
     }
 
-    // Always include Leads with required: true (inner join)
-    if (hasLeadFilters) {
-      includeArr.push({
-        model: Lead,
-        as: "Leads",
-        where: leadWhere,
-        required: true,
-        attributes: [],
-      });
-      console.log("[DEBUG] Added Lead include with filtering (INNER JOIN)");
-    } else {
-      includeArr.push({
-        model: Lead,
-        as: "Leads",
-        required: true,
-        attributes: [],
-      });
-      console.log("[DEBUG] Added Lead include without filtering (INNER JOIN)");
-    }
-
-    // Include Deals if filtering is applied
-    if (hasDealFilters) {
-      includeArr.push({
-        model: Deal,
-        as: "Deals",
-        where: dealWhere,
-        required: true,
-      });
-      console.log("[DEBUG] Added Deal include with filtering (INNER JOIN)");
-    }
-
-    // Include Activities if filtering is applied
-    try {
-      const Activity = require("../../models/activity/activityModel");
-      console.log("[DEBUG] Activity model loaded successfully");
-      console.log(
-        "[DEBUG] Activity model fields:",
-        Object.keys(Activity.rawAttributes)
-      );
-
-      if (hasActivityFilters) {
-        console.log("[DEBUG] Activity filtering detected!");
-        console.log(
-          "[DEBUG] activityWhere:",
-          JSON.stringify(activityWhere, null, 2)
-        );
-
-        // Check if Person-Activity association exists
-        console.log(
-          "[DEBUG] Person model associations:",
-          Object.keys(Person.associations || {})
-        );
-
-        includeArr.push({
-          model: Activity,
-          as: "Activities",
-          where: activityWhere,
-          required: true, // Inner join to filter persons by activities
-        });
-        console.log(
-          "[DEBUG] Added Activity include with filtering (INNER JOIN)"
-        );
-
-        // Debug: log the Activities include object
-        console.log(
-          "[DEBUG] Activities include object:",
-          JSON.stringify(
-            {
-              model: "Activity",
-              as: "Activities",
-              where: activityWhere,
-              required: true,
-            },
-            null,
-            2
-          )
-        );
-      } else {
-        console.log(
-          "[DEBUG] No activity filtering applied, Activities not included in includeArr"
-        );
-        console.log(
-          "[DEBUG] activityWhere is empty or undefined:",
-          activityWhere
-        );
-      }
-    } catch (e) {
-      console.log("[DEBUG] Error including Activities:", e.message);
-      console.log("[DEBUG] Full error stack:", e.stack);
-    }
-    // Debug logging for includeArr
-    console.log("[DEBUG] includeArr:", JSON.stringify(includeArr, null, 2));
-    // Debug logging for leadWhere and includeArr
-    console.log("[DEBUG] leadWhere:", JSON.stringify(leadWhere, null, 2));
-    console.log("[DEBUG] includeArr:", JSON.stringify(includeArr, null, 2));
-
-    // Fetch persons with pagination and dynamic filter
-    // Debug: log SQL query generated by Sequelize
-    const SequelizeLogger = {
-      log: (msg) => console.log("[SEQUELIZE SQL]", msg),
-    };
-    let { count: personCount, rows: persons } = await Person.findAndCountAll({
-      where: personWhere,
-      include: includeArr,
-      limit: personLimit,
-      offset: personOffset,
-      order: [["contactPerson", "ASC"]],
-      logging: SequelizeLogger.log,
-    });
-    console.log("[DEBUG] persons count:", personCount);
+    console.log("[DEBUG] persons count:", persons.length);
     console.log(
       "[DEBUG] persons sample:",
       persons && persons.length > 0 ? persons[0] : null
@@ -2482,53 +2348,56 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       ownerMap[o.masterUserID] = o.name;
     });
 
-    // Count leads for each person and organization
-    const orgIds = organizations.map((o) => o.leadOrganizationId);
+    // Add ownerName to persons - same logic as getLeads API
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+    }));
+
+    // Count leads for each person using the same approach as getLeads API
     const personIds = persons.map((p) => p.personId);
-
-    // Only include persons with at least one lead
-    // Fix: Do not filter by Leads array length, as required: true join guarantees only persons with matching leads
-    // Remove the filter step entirely
-    // Deduplicate persons by personId
-    const personMap = new Map();
-    persons.forEach((p) => {
-      let ownerName = ownerMap[p.ownerId] || null;
-      let organization = p.LeadOrganization
-        ? {
-            leadOrganizationId: p.LeadOrganization.leadOrganizationId,
-            organization: p.LeadOrganization.organization,
-          }
-        : null;
-      let leadCount = 0;
-      if (Array.isArray(p.Leads)) {
-        leadCount = p.Leads.length;
-      } else if (p.Leads && typeof p.Leads === "object") {
-        leadCount = 1;
-      }
-      // If already present, increment leadCount
-      if (personMap.has(p.personId)) {
-        const existing = personMap.get(p.personId);
-        existing.leadCount += leadCount;
-      } else {
-        personMap.set(p.personId, {
-          personId: p.personId,
-          contactPerson: p.contactPerson,
-          email: p.email,
-          phone: p.phone,
-          jobTitle: p.jobTitle,
-          personLabels: p.personLabels,
-          organization,
-          ownerName,
-          leadCount,
-        });
-      }
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ personId: personIds }, { leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
     });
-    persons = Array.from(personMap.values());
 
-    // Fetch custom field values for all persons
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Add leadCount to persons - same logic as getLeads API
+    persons = persons.map((p) => {
+      let ownerName = null;
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+        }
+      }
+      return {
+        ...p,
+        ownerName,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all persons - same as getLeads API
     const CustomField = require("../../models/customFieldModel");
     const CustomFieldValue = require("../../models/customFieldValueModel");
-    const Sequelize = require("sequelize");
     const personIdsForCustomFields = persons.map((p) => p.personId);
     let customFieldValues = [];
     if (personIdsForCustomFields.length > 0) {
@@ -2540,6 +2409,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         raw: true,
       });
     }
+
     // Fetch all custom fields for person entity
     const allCustomFields = await CustomField.findAll({
       where: {
@@ -2548,10 +2418,12 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       },
       raw: true,
     });
+
     const customFieldIdToName = {};
     allCustomFields.forEach((cf) => {
       customFieldIdToName[cf.fieldId] = cf.fieldName;
     });
+
     // Map personId to their custom field values as { fieldName: value }
     const personCustomFieldsMap = {};
     customFieldValues.forEach((cfv) => {
@@ -2561,62 +2433,18 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
     });
 
-    // Attach custom fields as direct properties to each person
+    // Attach custom fields as direct properties to each person - same as getLeads API
     persons = persons.map((p) => {
       const customFields = personCustomFieldsMap[p.personId] || {};
       return { ...p, ...customFields };
     });
 
-    // Build orgPersonsMap for organizations
-    const orgPersonsMap = {};
-    persons.forEach((p) => {
-      if (p.organization && p.organization.leadOrganizationId) {
-        if (!orgPersonsMap[p.organization.leadOrganizationId])
-          orgPersonsMap[p.organization.leadOrganizationId] = [];
-        orgPersonsMap[p.organization.leadOrganizationId].push({
-          personId: p.personId,
-          contactPerson: p.contactPerson,
-        });
-      }
-    });
-
-    // Build organizations array with ownerName, leadCount, and persons array
-    organizations = organizations.map((o) => ({
-      ...o,
-      ownerName: ownerMap[o.ownerId] || null,
-      // leadCount for orgs can be calculated similarly if needed
-      persons: orgPersonsMap[o.leadOrganizationId] || [],
-    }));
-
-    // Build flat persons array with organization as string
-    const flatPersons = persons.map((p) => ({
-      personId: p.personId,
-      leadOrganizationId: p.leadOrganizationId,
-      contactPerson: p.contactPerson,
-      email: p.email,
-      phone: p.phone,
-      notes: p.notes || null,
-      postalAddress: p.postalAddress || null,
-      birthday: p.birthday || null,
-      jobTitle: p.jobTitle,
-      personLabels: p.personLabels,
-      organization: p.organization
-        ? typeof p.organization === "object"
-          ? p.organization.organization
-          : p.organization
-        : null,
-      masterUserID: p.masterUserID,
-      createdAt: p.createdAt,
-      updatedAt: p.updatedAt,
-      ownerName: p.ownerName || null,
-      leadCount: p.leadCount || 0,
-    }));
-
+    // Return persons in EXACT same format as getLeads API
     res.status(200).json({
       totalRecords: persons.length,
       totalPages: Math.ceil(persons.length / personLimit),
       currentPage: personPage,
-      persons: flatPersons,
+      persons: persons, // Return persons exactly as they are in getLeads API
     });
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);
