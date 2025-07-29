@@ -1,6 +1,13 @@
 // Get organizations with persons, leadCount, and ownerName, supporting dynamic filtering
 exports.getOrganizationsAndPersons = async (req, res) => {
   try {
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+
     // Pagination and search for organizations
     const orgPage = parseInt(req.query.orgPage) || 1;
     const orgLimit = parseInt(req.query.orgLimit) || 20;
@@ -511,7 +518,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
 
     // Fetch owner names from MasterUser - same as getLeads API
-    const MasterUser = require("../../models/master/masterUserModel");
     const owners = await MasterUser.findAll({
       where: { masterUserID: ownerIds },
       attributes: ["masterUserID", "name"],
@@ -533,7 +539,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     }));
 
     // Count leads for each organization - same as getLeads API
-    const Lead = require("../../models").Lead;
     const leadCounts = await Lead.findAll({
       attributes: [
         "personId",
@@ -563,8 +568,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     }));
 
     // Fetch custom field values for all organizations - same as getLeads API
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     const orgIdsForCustomFields = organizations.map(
       (o) => o.leadOrganizationId
     );
