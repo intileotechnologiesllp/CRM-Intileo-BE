@@ -23,13 +23,13 @@ Lead.hasOne(LeadDetails, {
 LeadDetails.belongsTo(Lead, { foreignKey: "leadId", as: "lead" });
 
 Lead.belongsTo(Person, { as: "LeadPerson", foreignKey: "personId" });
-Person.hasMany(Lead, { foreignKey: "personId" });
+Person.hasMany(Lead, { foreignKey: "personId", as: "Leads" });
 
 Lead.belongsTo(Organization, {
   as: "LeadOrganization",
   foreignKey: "leadOrganizationId",
 });
-Organization.hasMany(Lead, { foreignKey: "leadOrganizationId" });
+Organization.hasMany(Lead, { foreignKey: "leadOrganizationId", as: "Leads" });
 Person.belongsTo(Organization, {
   foreignKey: "leadOrganizationId",
   as: "LeadOrganization",
@@ -43,6 +43,7 @@ Lead.belongsTo(MasterUser, { as: "Owner", foreignKey: "ownerId" });
 // Activity associations - only define the hasMany side here
 // The belongsTo associations are already defined in activityModel.js
 Lead.hasMany(Activity, { foreignKey: "leadId", as: "Activities" });
+Person.hasMany(Activity, { foreignKey: "personId", as: "Activities" });
 Activity.belongsTo(MasterUser, {
   foreignKey: "assignedTo",
   as: "assignedUser",
@@ -120,6 +121,18 @@ Pipeline.hasMany(Deal, { foreignKey: "pipelineId", as: "deals" });
 // Deal-PipelineStage associations
 Deal.belongsTo(PipelineStage, { foreignKey: "stageId", as: "stageData" });
 PipelineStage.hasMany(Deal, { foreignKey: "stageId", as: "deals" });
+
+// Person-Deal associations (belongsTo is already defined in dealsModels.js)
+Person.hasMany(Deal, { foreignKey: "personId", as: "Deals" });
+
+// Organization-Deal associations (belongsTo is already defined in dealsModels.js)
+Organization.hasMany(Deal, {
+  foreignKey: "leadOrganizationId",
+  as: "OrgDeals",
+});
+
+// Lead-Deal associations (belongsTo is already defined in dealsModels.js)
+Lead.hasMany(Deal, { foreignKey: "leadId", as: "LeadDeals" });
 
 module.exports = {
   Lead,

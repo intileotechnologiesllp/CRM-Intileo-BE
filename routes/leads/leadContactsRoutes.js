@@ -95,5 +95,6 @@ router.get(
   verifyToken,
   leadContactsController.getPersonsAndOrganizations
 );
+router.get("/get-organization",verifyToken,leadContactsController.getOrganizationsAndPersons)
 
-module.exports = router;
+module.exports = router
