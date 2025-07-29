@@ -7,20 +7,6 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const orgOffset = (orgPage - 1) * orgLimit;
     const orgSearch = req.query.orgSearch || "";
 
-    // Restrict data for non-admins
-    if (req.role !== "admin") {
-      // Only show organizations where user is owner or masterUserID
-      if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
-      organizationWhere[Op.and].push({
-        [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
-      });
-      // Only show persons where user is owner or masterUserID
-      if (!personWhere[Op.and]) personWhere[Op.and] = [];
-      personWhere[Op.and].push({
-        [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
-      });
-    }
-
     // Dynamic filter config (from body or query)
     const LeadFilter = require("../../models/leads/leadFiltersModel");
     let filterConfig = null;
@@ -60,6 +46,10 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     let activityWhere = {};
 
     const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Debug: print filterConfig
+    console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
     const ops = {
       eq: Op.eq,
       ne: Op.ne,
@@ -94,100 +84,328 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       "less than": "lt",
       "less than or equal": "lte",
     };
+
+    // Helper function to build a single condition - following the pattern from other APIs
     function buildCondition(cond) {
+      console.log(
+        "[DEBUG] buildCondition called with:",
+        JSON.stringify(cond, null, 2)
+      );
+
+      const ops = {
+        eq: Op.eq,
+        ne: Op.ne,
+        like: Op.like,
+        notLike: Op.notLike,
+        gt: Op.gt,
+        gte: Op.gte,
+        lt: Op.lt,
+        lte: Op.lte,
+        in: Op.in,
+        notIn: Op.notIn,
+        is: Op.eq,
+        isNot: Op.ne,
+        isEmpty: Op.is,
+        isNotEmpty: Op.not,
+        between: Op.between,
+        notBetween: Op.notBetween,
+      };
+
       let operator = cond.operator;
-      if (operatorMap[operator]) operator = operatorMap[operator];
-      if (operator === "isEmpty" || operator === "is empty")
-        return { [cond.field]: { [Op.is]: null } };
-      if (operator === "isNotEmpty" || operator === "is not empty")
-        return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-      if (operator === "like" || operator === "contains")
-        return { [cond.field]: { [Op.like]: `%${cond.value}%` } };
-      if (operator === "notLike" || operator === "does not contain")
-        return { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
-      return { [cond.field]: { [ops[operator] || Op.eq]: cond.value } };
+      console.log("[DEBUG] Original operator:", operator);
+
+      if (operatorMap[operator]) {
+        operator = operatorMap[operator];
+        console.log("[DEBUG] Mapped operator:", operator);
+      }
+
+      // Handle "is empty" and "is not empty"
+      if (operator === "isEmpty" || operator === "is empty") {
+        const result = { [cond.field]: { [Op.is]: null } };
+        console.log(
+          "[DEBUG] isEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "isNotEmpty" || operator === "is not empty") {
+        const result = { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+        console.log(
+          "[DEBUG] isNotEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "contains" and "does not contain" for text fields
+      if (operator === "like" || operator === "contains") {
+        const result = { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] like condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "notLike" || operator === "does not contain") {
+        const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Default condition
+      const finalOperator = ops[operator] || Op.eq;
+      console.log("[DEBUG] Final operator symbol:", finalOperator);
+      console.log("[DEBUG] Condition value:", cond.value);
+      console.log("[DEBUG] Condition field:", cond.field);
+
+      const result = {
+        [cond.field]: {
+          [finalOperator]: cond.value,
+        },
+      };
+      console.log(
+        "[DEBUG] Default condition result:",
+        JSON.stringify(result, null, 2)
+      );
+
+      // Additional validation
+      if (cond.value === undefined || cond.value === null) {
+        console.log("[DEBUG] WARNING: cond.value is undefined or null!");
+      }
+
+      return result;
     }
 
     // Get model field names for validation
-    const Organization = require("../../models").Organization;
-    const Person = require("../../models").Person;
-    const Lead = require("../../models").Lead;
-    const Deal = require("../../models").Deal;
-    let Activity,
-      activityFields = [];
-    try {
-      Activity = require("../../models/activity/activityModel");
-      activityFields = Object.keys(Activity.rawAttributes);
-    } catch {}
-    const organizationFields = Object.keys(Organization.rawAttributes);
     const personFields = Object.keys(Person.rawAttributes);
     const leadFields = Object.keys(Lead.rawAttributes);
     const dealFields = Object.keys(Deal.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
 
-    // Build where clauses from filterConfig
+    let activityFields = [];
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      activityFields = Object.keys(Activity.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Activity model not available:", e.message);
+    }
+
+    console.log("[DEBUG] Available fields:");
+    console.log("- Person fields:", personFields.slice(0, 5), "...");
+    console.log("- Lead fields:", leadFields.slice(0, 5), "...");
+    console.log("- Deal fields:", dealFields.slice(0, 5), "...");
+    console.log(
+      "- Organization fields:",
+      organizationFields.slice(0, 5),
+      "..."
+    );
+    console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+
+    // If filterConfig is provided, build AND/OR logic for all entities
     if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
       if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
-        // Process conditions in parallel for async operations
-        const processConditions = await Promise.all(
-          filterConfig.all.map(async function (cond) {
-            if (cond.entity) {
-              switch (cond.entity.toLowerCase()) {
-                case "organization":
-                  if (organizationFields.includes(cond.field)) {
-                    if (!organizationWhere[Op.and])
-                      organizationWhere[Op.and] = [];
-                    organizationWhere[Op.and].push(buildCondition(cond));
-                  }
-                  break;
-                case "person":
-                  if (personFields.includes(cond.field)) {
-                    if (!personWhere[Op.and]) personWhere[Op.and] = [];
-                    personWhere[Op.and].push(buildCondition(cond));
-                  }
-                  break;
-                case "lead":
-                  if (leadFields.includes(cond.field)) {
-                    if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
-                    leadWhere[Op.and].push(buildCondition(cond));
-                  }
-                  break;
-                case "deal":
-                  if (dealFields.includes(cond.field)) {
-                    if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
-                    dealWhere[Op.and].push(buildCondition(cond));
-                  }
-                  break;
-                case "activity":
-                  if (activityFields.includes(cond.field)) {
-                    if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
-                    activityWhere[Op.and].push(buildCondition(cond));
-                  }
-                  break;
-              }
-            } else {
-              // Auto-detect entity based on field name
-              if (organizationFields.includes(cond.field)) {
-                if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
-                organizationWhere[Op.and].push(buildCondition(cond));
-              } else if (personFields.includes(cond.field)) {
-                if (!personWhere[Op.and]) personWhere[Op.and] = [];
-                personWhere[Op.and].push(buildCondition(cond));
-              } else if (leadFields.includes(cond.field)) {
-                if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
-                leadWhere[Op.and].push(buildCondition(cond));
-              } else if (dealFields.includes(cond.field)) {
-                if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
-                dealWhere[Op.and].push(buildCondition(cond));
-              } else if (activityFields.includes(cond.field)) {
-                if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
-                activityWhere[Op.and].push(buildCondition(cond));
-              }
+        console.log("[DEBUG] Processing 'all' conditions:", filterConfig.all);
+
+        filterConfig.all.forEach(function (cond) {
+          console.log(`[DEBUG] Processing AND condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.and]) personWhere[Op.and] = [];
+                  personWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+                  leadWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+                  dealWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.and])
+                    organizationWhere[Op.and] = [];
+                  organizationWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+                  activityWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
             }
-          })
-        );
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.and]) personWhere[Op.and] = [];
+              personWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person AND condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+              leadWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead AND condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+              dealWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal AND condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+              organizationWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization AND condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+              activityWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity AND condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
       }
-      // (OR conditions can be added similarly if needed)
+
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        console.log("[DEBUG] Processing 'any' conditions:", filterConfig.any);
+
+        filterConfig.any.forEach(function (cond) {
+          console.log(`[DEBUG] Processing OR condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.or]) personWhere[Op.or] = [];
+                  personWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+                  leadWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+                  dealWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+                  organizationWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+                  activityWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.or]) personWhere[Op.or] = [];
+              personWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person OR condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+              leadWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead OR condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+              dealWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal OR condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+              organizationWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization OR condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+              activityWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity OR condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
     } else if (orgSearch) {
+      // Fallback to search logic if no filterConfig
       organizationWhere[Op.or] = [
         { organization: { [Op.like]: `%${orgSearch}%` } },
         { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
@@ -195,146 +413,158 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       ];
     }
 
-    let organizations, orgCount, persons, leads;
+    // Debug: log all where clauses
+    console.log("[DEBUG] Final where clauses:");
+    console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
+    console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
+    console.log(
+      "- organizationWhere:",
+      JSON.stringify(organizationWhere, null, 2)
+    );
+    console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
 
-    // Check if we have lead filtering
-    const hasLeadFiltering =
-      Object.keys(leadWhere).length > 0 ||
-      Object.getOwnPropertySymbols(leadWhere).length > 0;
+    // Role-based filtering logic for organizations - same as getLeads API
+    let orgWhere = orgSearch
+      ? {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${orgSearch}%` } },
+            { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+            { address: { [Op.like]: `%${orgSearch}%` } },
+          ],
+        }
+      : {};
 
-    if (hasLeadFiltering) {
-      // When filtering by leads, first find matching leads, then get their organizations
-      const filteredLeads = await Lead.findAll({
-        where: leadWhere,
-        attributes: ["leadId", "leadOrganizationId"],
+    // Merge organizationWhere from filters with orgWhere from search
+    if (Object.keys(organizationWhere).length > 0) {
+      orgWhere = { ...orgWhere, ...organizationWhere };
+    }
+
+    // Fetch organizations using EXACT same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin") {
+      organizations = await Organization.findAll({
+        where: orgWhere,
         raw: true,
       });
-
-      // Get unique organization IDs from filtered leads
-      const leadOrgIds = [
-        ...new Set(
-          filteredLeads.map((l) => l.leadOrganizationId).filter(Boolean)
-        ),
-      ];
-
-      if (leadOrgIds.length === 0) {
-        // No leads match the filter, return empty results
-        organizations = [];
-        orgCount = 0;
-        persons = [];
-        leads = [];
-      } else {
-        // Combine lead org filtering with other organization filters
-        const combinedOrgWhere = {
-          ...organizationWhere,
-          leadOrganizationId: leadOrgIds,
-        };
-
-        // Fetch organizations with pagination and filtering
-        const orgResult = await Organization.findAndCountAll({
-          where: combinedOrgWhere,
-          limit: orgLimit,
-          offset: orgOffset,
-          order: [["organization", "ASC"]],
-          raw: true,
-        });
-
-        organizations = orgResult.rows;
-        orgCount = orgResult.count;
-
-        // Get final org IDs after pagination
-        const orgIds = organizations.map((o) => o.leadOrganizationId);
-
-        // Fetch persons for these organizations
-        persons = await Person.findAll({
-          where: {
-            leadOrganizationId: orgIds.length > 0 ? orgIds : -1,
-            ...personWhere,
-          },
-          attributes: ["personId", "contactPerson", "leadOrganizationId"],
-          raw: true,
-        });
-
-        // Fetch leads for these organizations (with lead filtering applied)
-        leads = await Lead.findAll({
-          where: {
-            leadOrganizationId: orgIds.length > 0 ? orgIds : -1,
-            ...leadWhere,
-          },
-          attributes: ["leadId", "leadOrganizationId"],
-          raw: true,
-        });
-      }
     } else {
-      // No lead filtering, use original logic
-      const orgResult = await Organization.findAndCountAll({
-        where: organizationWhere,
-        limit: orgLimit,
-        offset: orgOffset,
-        order: [["organization", "ASC"]],
-        raw: true,
-      });
-
-      organizations = orgResult.rows;
-      orgCount = orgResult.count;
-
-      // Fetch all persons for these organizations
-      const orgIds = organizations.map((o) => o.leadOrganizationId);
-      persons = await Person.findAll({
+      organizations = await Organization.findAll({
         where: {
-          leadOrganizationId: orgIds.length > 0 ? orgIds : -1,
-          ...personWhere,
+          ...orgWhere,
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
         },
-        attributes: ["personId", "contactPerson", "leadOrganizationId"],
-        raw: true,
-      });
-
-      // Fetch all leads for these organizations
-      leads = await Lead.findAll({
-        where: {
-          leadOrganizationId: orgIds.length > 0 ? orgIds : -1,
-          ...leadWhere,
-        },
-        attributes: ["leadId", "leadOrganizationId"],
         raw: true,
       });
     }
 
-    // Fetch all owners for these organizations
-    const ownerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Merge personWhere from filters with role-based filtering - same as getLeads API
+    let finalPersonWhere = { ...personWhere };
+
+    // Fetch persons using EXACT same logic as getLeads API
+    let persons = [];
+    if (req.role === "admin") {
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    }
+
+    // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] } - same as getLeads API
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
+      }
+    });
+
+    // Get all unique ownerIds from persons and organizations - same as getLeads API
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser - same as getLeads API
     const MasterUser = require("../../models/master/masterUserModel");
     const owners = await MasterUser.findAll({
       where: { masterUserID: ownerIds },
       attributes: ["masterUserID", "name"],
       raw: true,
     });
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
     const ownerMap = {};
     owners.forEach((o) => {
       ownerMap[o.masterUserID] = o.name;
     });
 
-    // Build persons map by org
-    const orgPersonsMap = {};
-    persons.forEach((p) => {
-      if (!orgPersonsMap[p.leadOrganizationId])
-        orgPersonsMap[p.leadOrganizationId] = [];
-      orgPersonsMap[p.leadOrganizationId].push({
-        personId: p.personId,
-        contactPerson: p.contactPerson,
-      });
+    // Add ownerName to organizations - same as getLeads API
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+    }));
+
+    // Count leads for each organization - same as getLeads API
+    const Lead = require("../../models").Lead;
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
     });
 
-    // Build lead count by org
-    const orgLeadCount = {};
-    leads.forEach((l) => {
-      orgLeadCount[l.leadOrganizationId] =
-        (orgLeadCount[l.leadOrganizationId] || 0) + 1;
+    // Build maps for quick lookup
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
     });
 
-    // Fetch custom field values for all organizations
+    // Add leadCount and persons array to organizations - EXACT same format as getLeads API
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- same as getLeads API
+    }));
+
+    // Fetch custom field values for all organizations - same as getLeads API
     const CustomField = require("../../models/customFieldModel");
     const CustomFieldValue = require("../../models/customFieldValueModel");
-    const Sequelize = require("sequelize");
     const orgIdsForCustomFields = organizations.map(
       (o) => o.leadOrganizationId
     );
@@ -348,6 +578,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         raw: true,
       });
     }
+
     // Fetch all custom fields for organization entity
     const allOrgCustomFields = await CustomField.findAll({
       where: {
@@ -356,10 +587,12 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       },
       raw: true,
     });
+
     const orgCustomFieldIdToName = {};
     allOrgCustomFields.forEach((cf) => {
       orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
     });
+
     // Map orgId to their custom field values as { fieldName: value }
     const orgCustomFieldsMap = {};
     orgCustomFieldValues.forEach((cfv) => {
@@ -369,26 +602,18 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
     });
 
-    // Attach custom fields as direct properties to each organization
-    const orgsOut = organizations.map((o) => {
+    // Attach custom fields as direct properties to each organization - same as getLeads API
+    organizations = organizations.map((o) => {
       const customFields = orgCustomFieldsMap[o.leadOrganizationId] || {};
-      return {
-        ...o,
-        ...customFields,
-        ownerName: o.ownerId ? ownerMap[o.ownerId] || null : null,
-        leadCount: orgLeadCount[o.leadOrganizationId] || 0,
-        persons: orgPersonsMap[o.leadOrganizationId] || [],
-      };
+      return { ...o, ...customFields };
     });
 
+    // Return organizations in EXACT same format as getLeads API
     res.status(200).json({
-      message: "Organizations fetched successfully",
-
-      totalRecords: orgCount,
-      totalPages: Math.ceil(orgCount / orgLimit),
+      totalRecords: organizations.length,
+      totalPages: Math.ceil(organizations.length / orgLimit),
       currentPage: orgPage,
-      limit: orgLimit,
-      organizations: orgsOut,
+      organizations: organizations, // Return organizations exactly as they are in getLeads API
     });
   } catch (error) {
     console.error("Error fetching organizations and persons:", error);
