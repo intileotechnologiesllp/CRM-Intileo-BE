@@ -1248,11 +1248,9 @@ exports.getOrganizationsAndPersons = async (req, res) => {
           raw: true,
         });
       }else if (req.query.masterUserId) {
+        organizationWhere.masterUserID = req.query.masterUserId;
         orgFilterResults = await Organization.findAll({
-          where: {
-            ...organizationWhere,
-            masterUserID: req.query.masterUserId,
-          },
+          where:organizationWhere,
           attributes: ["leadOrganizationId"],
           raw: true,
         });
