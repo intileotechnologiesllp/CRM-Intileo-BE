@@ -15,12 +15,10 @@ exports.bulkUpdateOrganizations = async (req, res) => {
     typeof updateData !== "object" ||
     Object.keys(updateData).length === 0
   ) {
-    return res
-      .status(400)
-      .json({
-        message:
-          "'leadOrganizationId' array and 'updateData' object are required.",
-      });
+    return res.status(400).json({
+      message:
+        "'leadOrganizationId' array and 'updateData' object are required.",
+    });
   }
 
   const results = [];
@@ -182,11 +180,9 @@ exports.bulkUpdatePersons = async (req, res) => {
     typeof updateData !== "object" ||
     Object.keys(updateData).length === 0
   ) {
-    return res
-      .status(400)
-      .json({
-        message: "'personId' array and 'updateData' object are required.",
-      });
+    return res.status(400).json({
+      message: "'personId' array and 'updateData' object are required.",
+    });
   }
 
   const results = [];
@@ -194,10 +190,19 @@ exports.bulkUpdatePersons = async (req, res) => {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
     try {
-      const person = await Person.findOne({
-        where: { personId: pId, masterUserID: adminId },
-        transaction,
-      });
+      // Admins can update any person, others only their own
+      let person;
+      if (req.role === "admin") {
+        person = await Person.findOne({
+          where: { personId: pId },
+          transaction,
+        });
+      } else {
+        person = await Person.findOne({
+          where: { personId: pId, masterUserID: adminId },
+          transaction,
+        });
+      }
       if (!person) {
         await transaction.rollback();
         results.push({
@@ -1018,8 +1023,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
           attributes: ["leadOrganizationId", "organization"],
           raw: true,
         });
-      }
-      else {
+      } else {
         personFilterResults = await Person.findAll({
           where: {
             ...personWhere,
