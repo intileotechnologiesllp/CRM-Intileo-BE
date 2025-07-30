@@ -29,8 +29,7 @@ exports.createDashboard = async (req, res) => {
 
     // If folder name is provided and not default, check if it's a valid existing folder
     if (!parentId && folder && folder !== "My dashboards") {
-      // Only use existing folders, don't auto-create new ones to avoid confusion
-      const existingFolder = await DASHBOARD.findOne({
+      let existingFolder = await DASHBOARD.findOne({
         where: {
           name: folder,
           ownerId,
@@ -39,17 +38,19 @@ exports.createDashboard = async (req, res) => {
         },
       });
 
-      if (existingFolder) {
-        // Use the existing folder
-        resolvedParentId = existingFolder.dashboardId;
-        resolvedFolderName = existingFolder.name;
-      } else {
-        // If folder doesn't exist, inform user instead of defaulting to root
-        return res.status(400).json({
-          success: false,
-          message: `Folder "${folder}" does not exist. Please create the folder first or use an existing folder.`,
+      if (!existingFolder) {
+        // Auto-create the folder if it doesn't exist
+        existingFolder = await DASHBOARD.create({
+          name: folder,
+          folder: "My dashboards",
+          type: "folder",
+          parentId: null,
+          ownerId,
         });
       }
+      // Use the existing or newly created folder
+      resolvedParentId = existingFolder.dashboardId;
+      resolvedFolderName = existingFolder.name;
     }
 
     // If parentId is provided, validate it is a folder
