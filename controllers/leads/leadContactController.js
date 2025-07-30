@@ -1241,14 +1241,14 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       let orgFilterResults = [];
-      if (req.role === "admin" && !req.query.masterUserId) {
+      if (req.role === "admin" && !req.query.masterUserID) {
         orgFilterResults = await Organization.findAll({
           where: organizationWhere,
           attributes: ["leadOrganizationId"],
           raw: true,
         });
-      }else if (req.query.masterUserId) {
-        organizationWhere.masterUserID = req.query.masterUserId;
+      }else if (req.query.masterUserID) {
+        organizationWhere.masterUserID = req.query.masterUserID;
         orgFilterResults = await Organization.findAll({
           where:organizationWhere,
           attributes: ["leadOrganizationId"],
