@@ -1241,16 +1241,9 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       let orgFilterResults = [];
-      if (req.role === "admin" && !req.query.masterUserID) {
+      if (req.role === "admin") {
         orgFilterResults = await Organization.findAll({
           where: organizationWhere,
-          attributes: ["leadOrganizationId"],
-          raw: true,
-        });
-      }else if (req.query.masterUserID) {
-        organizationWhere.masterUserID = req.query.masterUserID;
-        orgFilterResults = await Organization.findAll({
-          where:organizationWhere,
           attributes: ["leadOrganizationId"],
           raw: true,
         });
@@ -1373,12 +1366,18 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     // Fetch organizations using EXACT same logic as getLeads API
     let organizations = [];
-    if (req.role === "admin") {
+    if (req.role === "admin"&&!req.query.masterUserID) {
       organizations = await Organization.findAll({
         where: orgWhere,
         raw: true,
       });
-    } else {
+    }else if (req.query.masterUserID) {
+      orgWhere.masterUserID = req.query.masterUserID;
+      organizations = await Organization.findAll({
+        where:orgWhere,
+        raw: true,
+      });
+    }else {
       organizations = await Organization.findAll({
         where: {
           ...orgWhere,
