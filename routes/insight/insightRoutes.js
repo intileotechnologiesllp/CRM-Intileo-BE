@@ -18,19 +18,19 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 // router.use(authMiddleware);
 
 // =============== DASHBOARD ROUTES ===============
-router.post("/dashboards", verifyToken, insightController.createDashboard);
-router.get("/dashboards", verifyToken, insightController.getDashboards);
+router.post("/create-dashboards", verifyToken, insightController.createDashboard);
+router.get("/get-dashboards", verifyToken, insightController.getDashboards);
 router.get(
-  "/dashboards/:dashboardId",
+  "/get-dashboards/:dashboardId",
   verifyToken,
   insightController.getDashboard
 );
 router.put(
-  "/dashboards/:dashboardId",
+  "/update-dashboards/:dashboardId",
   verifyToken,
   insightController.updateDashboard
 );
-router.delete("/dashboards/:dashboardId", insightController.deleteDashboard);
+router.delete("/delete-dashboards/:dashboardId", verifyToken, insightController.deleteDashboard);
 
 // =============== FOLDER MANAGEMENT ROUTES ===============
 router.post("/folders", verifyToken, insightController.createFolder);
