@@ -96,5 +96,6 @@ router.get(
   leadContactsController.getPersonsAndOrganizations
 );
 router.get("/get-organization",verifyToken,leadContactsController.getOrganizationsAndPersons)
-
+router.post("/bulk-edit-persons", verifyToken, leadContactsController.bulkUpdatePersons);
+router.post("/bulk-edit-organizations", verifyToken, leadContactsController.bulkUpdateOrganizations);
 module.exports = router
