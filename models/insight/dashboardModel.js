@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
+
 const Dashboard = sequelize.define(
   "Dashboard",
   {
@@ -28,5 +29,6 @@ const Dashboard = sequelize.define(
     timestamps: true,
   }
 );
+
 
 module.exports = Dashboard;
