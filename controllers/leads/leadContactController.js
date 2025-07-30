@@ -1003,13 +1003,23 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       let personFilterResults = [];
-      if (req.role === "admin") {
+      if (req.role === "admin" && !req.query.masterUserId) {
         personFilterResults = await Person.findAll({
           where: personWhere,
           attributes: ["leadOrganizationId", "organization"],
           raw: true,
         });
-      } else {
+      } else if (req.query.masterUserId) {
+        personFilterResults = await Person.findAll({
+          where: {
+            ...personWhere,
+            masterUserID: req.query.masterUserId,
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+      else {
         personFilterResults = await Person.findAll({
           where: {
             ...personWhere,
