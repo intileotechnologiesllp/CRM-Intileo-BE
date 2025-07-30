@@ -57,6 +57,13 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     // Debug: print filterConfig
     console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
+    console.log("[DEBUG] Available model fields:");
+    console.log("[DEBUG] - Lead fields:", Object.keys(Lead.rawAttributes));
+    console.log("[DEBUG] - Person fields:", Object.keys(Person.rawAttributes));
+    console.log(
+      "[DEBUG] - Organization fields:",
+      Object.keys(Organization.rawAttributes)
+    );
     const ops = {
       eq: Op.eq,
       ne: Op.ne,
@@ -164,7 +171,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
       // Default condition
       const finalOperator = ops[operator] || Op.eq;
-      console.log("[DEBUG] Final operator symbol:", finalOperator);
+      console.log("[DEBUG] Final operator symbol:", finalOperator.toString());
       console.log("[DEBUG] Condition value:", cond.value);
       console.log("[DEBUG] Condition field:", cond.field);
 
@@ -173,10 +180,16 @@ exports.getOrganizationsAndPersons = async (req, res) => {
           [finalOperator]: cond.value,
         },
       };
-      console.log(
-        "[DEBUG] Default condition result:",
-        JSON.stringify(result, null, 2)
-      );
+
+      // Special logging for sequelize operators (they don't serialize well with JSON.stringify)
+      console.log("[DEBUG] Default condition result:", {
+        field: cond.field,
+        operator: finalOperator.toString(),
+        value: cond.value,
+        resultStructure: `{ ${cond.field}: { ${finalOperator.toString()}: "${
+          cond.value
+        }" } }`,
+      });
 
       // Additional validation
       if (cond.value === undefined || cond.value === null) {
@@ -424,12 +437,405 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     console.log("[DEBUG] Final where clauses:");
     console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
     console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- leadWhere keys:", Object.keys(leadWhere));
+    console.log("- leadWhere[Op.and]:", leadWhere[Op.and]);
     console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
     console.log(
       "- organizationWhere:",
       JSON.stringify(organizationWhere, null, 2)
     );
     console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
+
+    // Apply Lead filters to get relevant organization IDs
+    let leadFilteredOrgIds = [];
+    const hasLeadFilters =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFilters) {
+      console.log("[DEBUG] Applying Lead filters to find organizations");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get organization IDs from leads
+      leadFilteredOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from leads that don't have leadOrganizationId but have organization name
+      const leadOrgNames = leadFilterResults
+        .map((lead) => lead.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Lead-filtered org IDs:", leadFilteredOrgIds);
+      console.log("[DEBUG] Lead organization names:", leadOrgNames);
+
+      // If we have organization names from leads, also find organizations by name
+      if (leadOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: leadOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        leadFilteredOrgIds = [
+          ...new Set([...leadFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from lead org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined lead-filtered org IDs:",
+          leadFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Activity filters to get relevant organization IDs
+    let activityFilteredOrgIds = [];
+    const hasActivityFilters =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFilters) {
+      console.log("[DEBUG] Applying Activity filters to find organizations");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get organization IDs from activities
+        activityFilteredOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        // Also get organization names directly from activities that don't have leadOrganizationId but have organization name
+        const activityOrgNames = activityFilterResults
+          .map((activity) => activity.organization)
+          .filter(Boolean);
+
+        console.log(
+          "[DEBUG] Activity-filtered org IDs:",
+          activityFilteredOrgIds
+        );
+        console.log("[DEBUG] Activity organization names:", activityOrgNames);
+
+        // If we have organization names from activities, also find organizations by name
+        if (activityOrgNames.length > 0) {
+          const orgsByName = await Organization.findAll({
+            where: {
+              organization: { [Op.in]: activityOrgNames },
+            },
+            attributes: ["leadOrganizationId"],
+            raw: true,
+          });
+
+          const additionalOrgIds = orgsByName.map(
+            (org) => org.leadOrganizationId
+          );
+          activityFilteredOrgIds = [
+            ...new Set([...activityFilteredOrgIds, ...additionalOrgIds]),
+          ];
+
+          console.log(
+            "[DEBUG] Additional org IDs from activity org names:",
+            additionalOrgIds
+          );
+          console.log(
+            "[DEBUG] Combined activity-filtered org IDs:",
+            activityFilteredOrgIds
+          );
+        }
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Person filters to get relevant organization IDs
+    let personFilteredOrgIds = [];
+    const hasPersonFilters =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFilters) {
+      console.log("[DEBUG] Applying Person filters to find organizations");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        personFilterResults = await Person.findAll({
+          where: {
+            ...personWhere,
+            [Op.or]: [{ masterUserID: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get organization IDs from persons
+      personFilteredOrgIds = personFilterResults
+        .map((person) => person.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from persons that don't have leadOrganizationId but have organization name
+      const personOrgNames = personFilterResults
+        .map((person) => person.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Person-filtered org IDs:", personFilteredOrgIds);
+      console.log("[DEBUG] Person organization names:", personOrgNames);
+
+      // If we have organization names from persons, also find organizations by name
+      if (personOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: personOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        personFilteredOrgIds = [
+          ...new Set([...personFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from person org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined person-filtered org IDs:",
+          personFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Deal filters to get relevant organization IDs
+    let dealFilteredOrgIds = [];
+    const hasDealFilters =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFilters) {
+      console.log("[DEBUG] Applying Deal filters to find organizations");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get organization IDs from deals
+      dealFilteredOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from deals that don't have leadOrganizationId but have organization name
+      const dealOrgNames = dealFilterResults
+        .map((deal) => deal.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Deal-filtered org IDs:", dealFilteredOrgIds);
+      console.log("[DEBUG] Deal organization names:", dealOrgNames);
+
+      // If we have organization names from deals, also find organizations by name
+      if (dealOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: dealOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        dealFilteredOrgIds = [
+          ...new Set([...dealFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from deal org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined deal-filtered org IDs:",
+          dealFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Organization filters directly
+    let orgFilteredOrgIds = [];
+    const hasOrgFilters =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFilters) {
+      console.log(
+        "[DEBUG] Applying Organization filters to find organizations"
+      );
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs from organizations
+      orgFilteredOrgIds = orgFilterResults
+        .map((org) => org.leadOrganizationId)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Organization-filtered org IDs:", orgFilteredOrgIds);
+    }
 
     // Role-based filtering logic for organizations - same as getLeads API
     let orgWhere = orgSearch
@@ -447,6 +853,81 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       orgWhere = { ...orgWhere, ...organizationWhere };
     }
 
+    // Apply Lead, Activity, Person, Deal, and Organization filters by restricting to organizations found in those entities
+    const allFilteredOrgIds = [
+      ...new Set([
+        ...leadFilteredOrgIds,
+        ...activityFilteredOrgIds,
+        ...personFilteredOrgIds,
+        ...dealFilteredOrgIds,
+        ...orgFilteredOrgIds,
+      ]),
+    ];
+
+    if (allFilteredOrgIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to org IDs:",
+        allFilteredOrgIds
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredOrgIds.length,
+        "org IDs"
+      );
+
+      if (Object.keys(orgWhere).length > 0) {
+        // Combine with existing filters using AND
+        orgWhere = {
+          [Op.and]: [
+            orgWhere,
+            { leadOrganizationId: { [Op.in]: allFilteredOrgIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        orgWhere = { leadOrganizationId: { [Op.in]: allFilteredOrgIds } };
+      }
+    } else if (
+      hasLeadFilters ||
+      hasActivityFilters ||
+      hasPersonFilters ||
+      hasDealFilters ||
+      hasOrgFilters
+    ) {
+      // If entity filters were applied but no matching organizations found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching organizations found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: orgPage,
+        organizations: [],
+      });
+    }
+
+    console.log("[DEBUG] Final orgWhere:", JSON.stringify(orgWhere, null, 2));
+
     // Fetch organizations using EXACT same logic as getLeads API
     let organizations = [];
     if (req.role === "admin") {
@@ -462,6 +943,21 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         },
         raw: true,
       });
+    }
+
+    console.log(
+      "[DEBUG] Found",
+      organizations.length,
+      "organizations after filtering"
+    );
+    if (organizations.length > 0) {
+      console.log(
+        "[DEBUG] Sample organizations:",
+        organizations.slice(0, 3).map((o) => ({
+          id: o.leadOrganizationId,
+          name: o.organization,
+        }))
+      );
     }
 
     const orgIds = organizations.map((o) => o.leadOrganizationId);
@@ -1356,34 +1852,34 @@ exports.getPersonFields = async (req, res) => {
     // You can customize or fetch this list from your model or config if needed
     const fields = [
       { key: "contactPerson", label: "Name" },
-      { key: "firstName", label: "First name" },
-      { key: "lastName", label: "Last name" },
+      // { key: "firstName", label: "First name" },
+      // { key: "lastName", label: "Last name" },
       { key: "email", label: "Email" },
       { key: "phone", label: "Phone" },
       { key: "jobTitle", label: "Job title" },
       { key: "birthday", label: "Birthday" },
       { key: "personLabels", label: "Labels" },
       { key: "organization", label: "Organization" },
-      { key: "owner", label: "Owner" },
-      { key: "notes", label: "Notes" },
+      // { key: "owner", label: "Owner" },
+      // { key: "notes", label: "Notes" },
       { key: "postalAddress", label: "Postal address" },
-      { key: "postalAddressDetails", label: "Postal address (details)" },
-      { key: "visibleTo", label: "Visible to" },
+      // { key: "postalAddressDetails", label: "Postal address (details)" },
+      // { key: "visibleTo", label: "Visible to" },
       { key: "createdAt", label: "Person created" },
       { key: "updatedAt", label: "Update time" },
-      { key: "activitiesToDo", label: "Activities to do" },
-      { key: "doneActivities", label: "Done activities" },
-      { key: "closedDeals", label: "Closed deals" },
-      { key: "openDeals", label: "Open deals" },
-      { key: "wonDeals", label: "Won deals" },
-      { key: "lostDeals", label: "Lost deals" },
-      { key: "totalActivities", label: "Total activities" },
-      { key: "lastActivityDate", label: "Last activity date" },
-      { key: "nextActivityDate", label: "Next activity date" },
-      { key: "lastEmailReceived", label: "Last email received" },
-      { key: "lastEmailSent", label: "Last email sent" },
-      { key: "emailMessagesCount", label: "Email messages count" },
-      { key: "instantMessenger", label: "Instant messenger" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
+      // { key: "instantMessenger", label: "Instant messenger" },
     ];
     res.status(200).json({ fields });
   } catch (error) {
@@ -1398,25 +1894,25 @@ exports.getOrganizationFields = async (req, res) => {
       { key: "organization", label: "Organization name" },
       { key: "organizationLabels", label: "Labels" },
       { key: "address", label: "Address" },
-      { key: "addressDetails", label: "Address (details)" },
-      { key: "visibleTo", label: "Visible to" },
+      // { key: "addressDetails", label: "Address (details)" },
+      // { key: "visibleTo", label: "Visible to" },
       { key: "createdAt", label: "Organization created" },
       { key: "updatedAt", label: "Update time" },
-      { key: "owner", label: "Owner" },
-      { key: "people", label: "People" },
-      { key: "notes", label: "Notes" },
-      { key: "activitiesToDo", label: "Activities to do" },
-      { key: "doneActivities", label: "Done activities" },
-      { key: "closedDeals", label: "Closed deals" },
-      { key: "openDeals", label: "Open deals" },
-      { key: "wonDeals", label: "Won deals" },
-      { key: "lostDeals", label: "Lost deals" },
-      { key: "totalActivities", label: "Total activities" },
-      { key: "lastActivityDate", label: "Last activity date" },
-      { key: "nextActivityDate", label: "Next activity date" },
-      { key: "lastEmailReceived", label: "Last email received" },
-      { key: "lastEmailSent", label: "Last email sent" },
-      { key: "emailMessagesCount", label: "Email messages count" },
+      { key: "ownerId", label: "Owner" },
+      // { key: "people", label: "People" },
+      // { key: "notes", label: "Notes" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
     ];
     res.status(200).json({ fields });
   } catch (error) {
@@ -1988,7 +2484,15 @@ exports.getPersonsByOrganization = async (req, res) => {
 };
 exports.getPersonsAndOrganizations = async (req, res) => {
   try {
-    // ...existing code...
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    // const CustomField = require("../../models/customFieldModel");
+    // const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
     // Pagination and search for persons
     const personPage = parseInt(req.query.personPage) || 1;
     const personLimit = parseInt(req.query.personLimit) || 20;
@@ -2498,6 +3002,339 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       );
     }
 
+    // Apply Lead filters to get relevant person IDs
+    let leadFilteredPersonIds = [];
+    const hasLeadFiltersSymbol =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFiltersSymbol) {
+      console.log("[DEBUG] Applying Lead filters to find persons");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get person IDs directly from leads
+      const directPersonIds = leadFilterResults
+        .map((lead) => lead.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from leads, then find persons in those organizations
+      const leadOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (leadOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: leadOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      leadFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Lead-filtered person IDs:",
+        leadFilteredPersonIds.length
+      );
+    }
+
+    // Apply Activity filters to get relevant person IDs
+    let activityFilteredPersonIds = [];
+    const hasActivityFiltersSymbol =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFiltersSymbol) {
+      console.log("[DEBUG] Applying Activity filters to find persons");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get person IDs directly from activities
+        const directPersonIds = activityFilterResults
+          .map((activity) => activity.personId)
+          .filter(Boolean);
+
+        // Get organization IDs from activities, then find persons in those organizations
+        const activityOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        let orgPersonIds = [];
+        if (activityOrgIds.length > 0) {
+          const personsInOrgs = await Person.findAll({
+            where: { leadOrganizationId: { [Op.in]: activityOrgIds } },
+            attributes: ["personId"],
+            raw: true,
+          });
+          orgPersonIds = personsInOrgs.map((p) => p.personId);
+        }
+
+        activityFilteredPersonIds = [
+          ...new Set([...directPersonIds, ...orgPersonIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Activity-filtered person IDs:",
+          activityFilteredPersonIds.length
+        );
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Deal filters to get relevant person IDs
+    let dealFilteredPersonIds = [];
+    const hasDealFiltersSymbol =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFiltersSymbol) {
+      console.log("[DEBUG] Applying Deal filters to find persons");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get person IDs directly from deals
+      const directPersonIds = dealFilterResults
+        .map((deal) => deal.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from deals, then find persons in those organizations
+      const dealOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (dealOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: dealOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      dealFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Deal-filtered person IDs:",
+        dealFilteredPersonIds.length
+      );
+    }
+
+    // Apply Organization filters to get relevant person IDs
+    let orgFilteredPersonIds = [];
+    const hasOrgFiltersSymbol =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFiltersSymbol) {
+      console.log("[DEBUG] Applying Organization filters to find persons");
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs, then find persons in those organizations
+      const orgIds = orgFilterResults.map((org) => org.leadOrganizationId);
+
+      if (orgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: orgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgFilteredPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      console.log(
+        "[DEBUG] Organization-filtered person IDs:",
+        orgFilteredPersonIds.length
+      );
+    }
+
+    // Apply Person filters directly
+    let personFilteredPersonIds = [];
+    const hasPersonFiltersSymbol =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFiltersSymbol) {
+      console.log("[DEBUG] Applying Person filters to find persons");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["personId"],
+          raw: true,
+        });
+      } else {
+        personFilterResults = await Person.findAll({
+          where: {
+            ...personWhere,
+            [Op.or]: [{ masterUserID: req.adminId }],
+          },
+          attributes: ["personId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get person IDs directly from person filters
+      personFilteredPersonIds = personFilterResults.map(
+        (person) => person.personId
+      );
+
+      console.log(
+        "[DEBUG] Person-filtered person IDs:",
+        personFilteredPersonIds.length
+      );
+    }
+
     // Role-based filtering logic for organizations
     let orgWhere = orgSearch
       ? {
@@ -2528,22 +3365,113 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
     const orgIds = organizations.map((o) => o.leadOrganizationId);
 
-    // Fetch persons using EXACT same logic as getLeads API
+    // Apply Lead, Activity, Deal, Organization, and Person filters by restricting to persons found in those entities
+    const allFilteredPersonIds = [
+      ...new Set([
+        ...leadFilteredPersonIds,
+        ...activityFilteredPersonIds,
+        ...dealFilteredPersonIds,
+        ...orgFilteredPersonIds,
+        ...personFilteredPersonIds,
+      ]),
+    ];
+
+    // Merge personWhere from filters with filtered person IDs
+    let finalPersonWhere = { ...personWhere };
+
+    if (allFilteredPersonIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to person IDs:",
+        allFilteredPersonIds.length
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredPersonIds.length,
+        "person IDs"
+      );
+
+      if (Object.keys(finalPersonWhere).length > 0) {
+        // Combine with existing filters using AND
+        finalPersonWhere = {
+          [Op.and]: [
+            finalPersonWhere,
+            { personId: { [Op.in]: allFilteredPersonIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        finalPersonWhere = { personId: { [Op.in]: allFilteredPersonIds } };
+      }
+    } else if (
+      hasLeadFiltersSymbol ||
+      hasActivityFiltersSymbol ||
+      hasDealFiltersSymbol ||
+      hasOrgFiltersSymbol ||
+      hasPersonFiltersSymbol
+    ) {
+      // If entity filters were applied but no matching persons found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching persons found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: personPage,
+        persons: [],
+      });
+    }
+
+    console.log(
+      "[DEBUG] Final finalPersonWhere:",
+      JSON.stringify(finalPersonWhere, null, 2)
+    );
+
+    // Fetch persons using updated filtering logic
     let persons = [];
     if (req.role === "admin") {
       persons = await Person.findAll({
-        where: personWhere,
+        where: finalPersonWhere,
         raw: true,
       });
     } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
       persons = await Person.findAll({
-        where: {
-          ...personWhere,
-          [Op.or]: [
-            { masterUserID: req.adminId },
-            { leadOrganizationId: orgIds },
-          ],
-        },
+        where: finalPersonWhere,
         raw: true,
       });
     }
