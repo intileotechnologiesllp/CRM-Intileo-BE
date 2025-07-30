@@ -1,3 +1,315 @@
+// Bulk update organizations with custom fields (fields not wrapped in object)
+exports.bulkUpdateOrganizations = async (req, res) => {
+  const { updates } = req.body; // [{ leadOrganizationId, field1, field2, ... }]
+  const adminId = req.adminId;
+  const entityType = "organization";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const sequelize = require("../../config/db");
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return res.status(400).json({ message: "Updates array is required." });
+  }
+
+  const results = [];
+  for (const update of updates) {
+    const { leadOrganizationId, ...fields } = update;
+    if (!leadOrganizationId || Object.keys(fields).length === 0) {
+      results.push({
+        leadOrganizationId,
+        success: false,
+        error: "leadOrganizationId and at least one custom field are required.",
+      });
+      continue;
+    }
+    const transaction = await sequelize.transaction();
+    try {
+      const organization = await Organization.findOne({
+        where: { leadOrganizationId, masterUserID: adminId },
+        transaction,
+      });
+      if (!organization) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId,
+          success: false,
+          error: "Organization not found.",
+        });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field "${customField.fieldLabel}" is required.`
+          );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option "${value}" for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: leadOrganizationId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: leadOrganizationId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId,
+          success: false,
+          errors: validationErrors,
+        });
+        continue;
+      }
+      await transaction.commit();
+      results.push({
+        leadOrganizationId,
+        success: true,
+        updatedFields: updatedValues,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({
+        leadOrganizationId,
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
+// Bulk update persons with custom fields (fields not wrapped in object)
+exports.bulkUpdatePersons = async (req, res) => {
+  const { updates } = req.body; // [{ personId, name, email, ... }]
+  const adminId = req.adminId;
+  const entityType = "person";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Person = require("../../models/leads/leadPersonModel");
+  const sequelize = require("../../config/db");
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    return res.status(400).json({ message: "Updates array is required." });
+  }
+
+  const results = [];
+  for (const update of updates) {
+    const { personId, ...fields } = update;
+    if (!personId || Object.keys(fields).length === 0) {
+      results.push({
+        personId,
+        success: false,
+        error: "personId and at least one custom field are required.",
+      });
+      continue;
+    }
+    const transaction = await sequelize.transaction();
+    try {
+      const person = await Person.findOne({
+        where: { personId, masterUserID: adminId },
+        transaction,
+      });
+      if (!person) {
+        await transaction.rollback();
+        results.push({ personId, success: false, error: "Person not found." });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field "${customField.fieldLabel}" is required.`
+          );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option "${value}" for field "${customField.fieldLabel}".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: personId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: personId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({ personId, success: false, errors: validationErrors });
+        continue;
+      }
+      await transaction.commit();
+      results.push({ personId, success: true, updatedFields: updatedValues });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({ personId, success: false, error: error.message });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
 // Get organizations with persons, leadCount, and ownerName, supporting dynamic filtering
 exports.getOrganizationsAndPersons = async (req, res) => {
   try {
@@ -3573,16 +3885,14 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         where: finalPersonWhere,
         raw: true,
       });
-    }else if(req.query.masterUserID) {
+    } else if (req.query.masterUserID) {
       // If masterUserID is provided, filter by that as well
       finalPersonWhere.masterUserID = req.query.masterUserID;
       persons = await Person.findAll({
         where: finalPersonWhere,
         raw: true,
       });
-
-    }
-    else{
+    } else {
       const roleBasedPersonFilter = {
         [Op.or]: [
           { masterUserID: req.adminId },
