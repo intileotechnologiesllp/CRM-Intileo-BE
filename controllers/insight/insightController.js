@@ -123,10 +123,12 @@ exports.getDashboards = async (req, res) => {
       include: [
         {
           model: Report,
+          as: "Reports",
           required: false,
         },
         {
           model: Goal,
+          as: "Goals",
           required: false,
         },
       ],
@@ -201,11 +203,13 @@ exports.getDashboard = async (req, res) => {
       include: [
         {
           model: Report,
+          as: "Reports",
           required: false,
           order: [["position", "ASC"]],
         },
         {
           model: Goal,
+          as: "Goals",
           where: { isActive: true },
           required: false,
           order: [["createdAt", "DESC"]],
@@ -415,10 +419,12 @@ exports.getFolderContents = async (req, res) => {
       include: [
         {
           model: Report,
+          as: "Reports",
           required: false,
         },
         {
           model: Goal,
+          as: "Goals",
           required: false,
         },
       ],
@@ -719,6 +725,7 @@ exports.updateReport = async (req, res) => {
       include: [
         {
           model: DASHBOARD,
+          as: "Dashboard",
           where: { ownerId },
         },
       ],
@@ -765,6 +772,7 @@ exports.deleteReport = async (req, res) => {
       include: [
         {
           model: DASHBOARD,
+          as: "Dashboard",
           where: { ownerId },
         },
       ],
@@ -803,6 +811,7 @@ exports.getReportData = async (req, res) => {
       include: [
         {
           model: DASHBOARD,
+          as: "Dashboard",
           where: { ownerId },
         },
       ],

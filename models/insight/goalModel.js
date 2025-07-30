@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-const Dashboard = require("./dashboardModel");
 
 const Goal = sequelize.define(
   "Goal",
@@ -63,8 +62,5 @@ const Goal = sequelize.define(
     timestamps: true,
   }
 );
-
-Goal.belongsTo(Dashboard, { foreignKey: "dashboardId" });
-Dashboard.hasMany(Goal, { foreignKey: "dashboardId" });
 
 module.exports = Goal;

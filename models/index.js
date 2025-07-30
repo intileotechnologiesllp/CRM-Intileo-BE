@@ -13,6 +13,9 @@ const Email = require("./email/emailModel");
 const RecentSearch = require("./recentSearchModel");
 const PersonNote = require("./leads/personNoteModel");
 const OrganizationNote = require("./leads/organizationNoteModel");
+const Dashboard = require("./insight/dashboardModel");
+const Report = require("./insight/reportModel");
+const Goal = require("./insight/goalModel");
 
 // Associations
 Lead.hasOne(LeadDetails, {
@@ -134,6 +137,13 @@ Organization.hasMany(Deal, {
 // Lead-Deal associations (belongsTo is already defined in dealsModels.js)
 Lead.hasMany(Deal, { foreignKey: "leadId", as: "LeadDeals" });
 
+// Dashboard-Report-Goal associations
+Dashboard.hasMany(Report, { foreignKey: "dashboardId", as: "Reports" });
+Report.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });
+
+Dashboard.hasMany(Goal, { foreignKey: "dashboardId", as: "Goals" });
+Goal.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -149,4 +159,7 @@ module.exports = {
   RecentSearch,
   PersonNote,
   OrganizationNote,
+  Dashboard,
+  Report,
+  Goal,
 };

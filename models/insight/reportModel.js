@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-const Dashboard = require("../../models/insight/dashboardModel"); // adjust path as needed
 
 const Report = sequelize.define(
   "Report",
@@ -31,7 +30,5 @@ const Report = sequelize.define(
     timestamps: true,
   }
 );
-
-Report.belongsTo(Dashboard, { foreignKey: "dashboardId" });
 
 module.exports = Report;
