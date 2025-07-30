@@ -2521,12 +2521,46 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         // filterIdRaw is a string number
         const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
         if (filterRow && filterRow.filterConfig) {
-          filterConfig = filterRow.filterConfig;
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
         }
       } else if (typeof filterIdRaw === "number") {
         const filterRow = await LeadFilter.findByPk(filterIdRaw);
         if (filterRow && filterRow.filterConfig) {
-          filterConfig = filterRow.filterConfig;
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
         }
       } else {
         // Try to parse as JSON object
