@@ -1075,22 +1075,13 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       let personFilterResults = [];
-      if (req.role === "admin" && !req.query.masterUserId) {
+      if (req.role === "admin") {
         personFilterResults = await Person.findAll({
           where: personWhere,
           attributes: ["leadOrganizationId", "organization"],
           raw: true,
         });
-      } else if (req.query.masterUserId) {
-        personFilterResults = await Person.findAll({
-          where: {
-            ...personWhere,
-            masterUserID: req.query.masterUserId,
-          },
-          attributes: ["leadOrganizationId", "organization"],
-          raw: true,
-        });
-      } else {
+      }else {
         personFilterResults = await Person.findAll({
           where: {
             ...personWhere,
@@ -1250,13 +1241,23 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       });
 
       let orgFilterResults = [];
-      if (req.role === "admin") {
+      if (req.role === "admin" && !req.query.masterUserId) {
         orgFilterResults = await Organization.findAll({
           where: organizationWhere,
           attributes: ["leadOrganizationId"],
           raw: true,
         });
-      } else {
+      }else if (req.query.masterUserId) {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            masterUserID: req.query.masterUserId,
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+      else {
         orgFilterResults = await Organization.findAll({
           where: {
             ...organizationWhere,
