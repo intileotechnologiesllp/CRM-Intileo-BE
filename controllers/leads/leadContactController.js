@@ -28,10 +28,19 @@ exports.bulkUpdateOrganizations = async (req, res) => {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
     try {
-      const organization = await Organization.findOne({
-        where: { leadOrganizationId: orgId, masterUserID: adminId },
-        transaction,
-      });
+      // Admins can update any organization, others only their own
+      let organization;
+      if (req.role === "admin") {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId },
+          transaction,
+        });
+      } else {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId, masterUserID: adminId },
+          transaction,
+        });
+      }
       if (!organization) {
         await transaction.rollback();
         results.push({
