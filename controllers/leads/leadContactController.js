@@ -22,6 +22,8 @@ exports.bulkUpdateOrganizations = async (req, res) => {
   }
 
   const results = [];
+  // Get all organization model fields
+  const orgFields = Object.keys(Organization.rawAttributes);
   for (const orgId of leadOrganizationId) {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
@@ -41,7 +43,33 @@ exports.bulkUpdateOrganizations = async (req, res) => {
       }
       const updatedValues = [];
       const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
       for (const [fieldKey, value] of Object.entries(fields)) {
+        if (orgFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await organization.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
         let customField;
         if (isNaN(fieldKey)) {
           customField = await CustomField.findOne({
@@ -131,6 +159,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
           isImportant: customField.isImportant,
         });
       }
+
       if (validationErrors.length > 0) {
         await transaction.rollback();
         results.push({
@@ -186,6 +215,8 @@ exports.bulkUpdatePersons = async (req, res) => {
   }
 
   const results = [];
+  // Get all person model fields
+  const personFields = Object.keys(Person.rawAttributes);
   for (const pId of personId) {
     const fields = { ...updateData };
     const transaction = await sequelize.transaction();
@@ -214,7 +245,33 @@ exports.bulkUpdatePersons = async (req, res) => {
       }
       const updatedValues = [];
       const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
       for (const [fieldKey, value] of Object.entries(fields)) {
+        if (personFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await person.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
         let customField;
         if (isNaN(fieldKey)) {
           customField = await CustomField.findOne({
@@ -304,6 +361,7 @@ exports.bulkUpdatePersons = async (req, res) => {
           isImportant: customField.isImportant,
         });
       }
+
       if (validationErrors.length > 0) {
         await transaction.rollback();
         results.push({
