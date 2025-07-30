@@ -1,6 +1,6 @@
-// Bulk update organizations with custom fields (fields not wrapped in object)
+// Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
 exports.bulkUpdateOrganizations = async (req, res) => {
-  const { updates } = req.body; // [{ leadOrganizationId, field1, field2, ... }]
+  const { leadOrganizationId, updateData } = req.body; // { leadOrganizationId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "organization";
   const CustomField = require("../../models/customFieldModel");
@@ -8,31 +8,34 @@ exports.bulkUpdateOrganizations = async (req, res) => {
   const Organization = require("../../models/leads/leadOrganizationModel");
   const sequelize = require("../../config/db");
 
-  if (!Array.isArray(updates) || updates.length === 0) {
-    return res.status(400).json({ message: "Updates array is required." });
+  if (
+    !Array.isArray(leadOrganizationId) ||
+    leadOrganizationId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res
+      .status(400)
+      .json({
+        message:
+          "'leadOrganizationId' array and 'updateData' object are required.",
+      });
   }
 
   const results = [];
-  for (const update of updates) {
-    const { leadOrganizationId, ...fields } = update;
-    if (!leadOrganizationId || Object.keys(fields).length === 0) {
-      results.push({
-        leadOrganizationId,
-        success: false,
-        error: "leadOrganizationId and at least one custom field are required.",
-      });
-      continue;
-    }
+  for (const orgId of leadOrganizationId) {
+    const fields = { ...updateData };
     const transaction = await sequelize.transaction();
     try {
       const organization = await Organization.findOne({
-        where: { leadOrganizationId, masterUserID: adminId },
+        where: { leadOrganizationId: orgId, masterUserID: adminId },
         transaction,
       });
       if (!organization) {
         await transaction.rollback();
         results.push({
-          leadOrganizationId,
+          leadOrganizationId: orgId,
           success: false,
           error: "Organization not found.",
         });
@@ -59,7 +62,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
           (value === null || value === "" || value === undefined)
         ) {
           validationErrors.push(
-            `Field "${customField.fieldLabel}" is required.`
+            `Field \"${customField.fieldLabel}\" is required.`
           );
           continue;
         }
@@ -72,7 +75,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
           processedValue = parseFloat(value);
           if (isNaN(processedValue)) {
             validationErrors.push(
-              `Invalid number value for field "${customField.fieldLabel}".`
+              `Invalid number value for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -81,7 +84,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(value)) {
             validationErrors.push(
-              `Invalid email format for field "${customField.fieldLabel}".`
+              `Invalid email format for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -92,7 +95,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
             : [];
           if (value && !validOptions.includes(value)) {
             validationErrors.push(
-              `Invalid option "${value}" for field "${customField.fieldLabel}".`
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -100,7 +103,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
         let fieldValue = await CustomFieldValue.findOne({
           where: {
             fieldId: customField.fieldId,
-            entityId: leadOrganizationId.toString(),
+            entityId: orgId.toString(),
             entityType,
             masterUserID: adminId,
           },
@@ -112,7 +115,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
           fieldValue = await CustomFieldValue.create(
             {
               fieldId: customField.fieldId,
-              entityId: leadOrganizationId.toString(),
+              entityId: orgId.toString(),
               entityType,
               value: processedValue,
               masterUserID: adminId,
@@ -133,7 +136,7 @@ exports.bulkUpdateOrganizations = async (req, res) => {
       if (validationErrors.length > 0) {
         await transaction.rollback();
         results.push({
-          leadOrganizationId,
+          leadOrganizationId: orgId,
           success: false,
           errors: validationErrors,
         });
@@ -141,14 +144,14 @@ exports.bulkUpdateOrganizations = async (req, res) => {
       }
       await transaction.commit();
       results.push({
-        leadOrganizationId,
+        leadOrganizationId: orgId,
         success: true,
         updatedFields: updatedValues,
       });
     } catch (error) {
       await transaction.rollback();
       results.push({
-        leadOrganizationId,
+        leadOrganizationId: orgId,
         success: false,
         error: error.message,
       });
@@ -162,9 +165,9 @@ exports.bulkUpdateOrganizations = async (req, res) => {
     failureCount: results.filter((r) => !r.success).length,
   });
 };
-// Bulk update persons with custom fields (fields not wrapped in object)
+// Bulk update persons with custom fields (accepts { personId: [], updateData: {} })
 exports.bulkUpdatePersons = async (req, res) => {
-  const { updates } = req.body; // [{ personId, name, email, ... }]
+  const { personId, updateData } = req.body; // { personId: [1,2,3], updateData: { field1: value1, ... } }
   const adminId = req.adminId;
   const entityType = "person";
   const CustomField = require("../../models/customFieldModel");
@@ -172,30 +175,36 @@ exports.bulkUpdatePersons = async (req, res) => {
   const Person = require("../../models/leads/leadPersonModel");
   const sequelize = require("../../config/db");
 
-  if (!Array.isArray(updates) || updates.length === 0) {
-    return res.status(400).json({ message: "Updates array is required." });
+  if (
+    !Array.isArray(personId) ||
+    personId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res
+      .status(400)
+      .json({
+        message: "'personId' array and 'updateData' object are required.",
+      });
   }
 
   const results = [];
-  for (const update of updates) {
-    const { personId, ...fields } = update;
-    if (!personId || Object.keys(fields).length === 0) {
-      results.push({
-        personId,
-        success: false,
-        error: "personId and at least one custom field are required.",
-      });
-      continue;
-    }
+  for (const pId of personId) {
+    const fields = { ...updateData };
     const transaction = await sequelize.transaction();
     try {
       const person = await Person.findOne({
-        where: { personId, masterUserID: adminId },
+        where: { personId: pId, masterUserID: adminId },
         transaction,
       });
       if (!person) {
         await transaction.rollback();
-        results.push({ personId, success: false, error: "Person not found." });
+        results.push({
+          personId: pId,
+          success: false,
+          error: "Person not found.",
+        });
         continue;
       }
       const updatedValues = [];
@@ -219,7 +228,7 @@ exports.bulkUpdatePersons = async (req, res) => {
           (value === null || value === "" || value === undefined)
         ) {
           validationErrors.push(
-            `Field "${customField.fieldLabel}" is required.`
+            `Field \"${customField.fieldLabel}\" is required.`
           );
           continue;
         }
@@ -232,7 +241,7 @@ exports.bulkUpdatePersons = async (req, res) => {
           processedValue = parseFloat(value);
           if (isNaN(processedValue)) {
             validationErrors.push(
-              `Invalid number value for field "${customField.fieldLabel}".`
+              `Invalid number value for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -241,7 +250,7 @@ exports.bulkUpdatePersons = async (req, res) => {
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           if (!emailRegex.test(value)) {
             validationErrors.push(
-              `Invalid email format for field "${customField.fieldLabel}".`
+              `Invalid email format for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -252,7 +261,7 @@ exports.bulkUpdatePersons = async (req, res) => {
             : [];
           if (value && !validOptions.includes(value)) {
             validationErrors.push(
-              `Invalid option "${value}" for field "${customField.fieldLabel}".`
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
             );
             continue;
           }
@@ -260,7 +269,7 @@ exports.bulkUpdatePersons = async (req, res) => {
         let fieldValue = await CustomFieldValue.findOne({
           where: {
             fieldId: customField.fieldId,
-            entityId: personId.toString(),
+            entityId: pId.toString(),
             entityType,
             masterUserID: adminId,
           },
@@ -272,7 +281,7 @@ exports.bulkUpdatePersons = async (req, res) => {
           fieldValue = await CustomFieldValue.create(
             {
               fieldId: customField.fieldId,
-              entityId: personId.toString(),
+              entityId: pId.toString(),
               entityType,
               value: processedValue,
               masterUserID: adminId,
@@ -292,14 +301,22 @@ exports.bulkUpdatePersons = async (req, res) => {
       }
       if (validationErrors.length > 0) {
         await transaction.rollback();
-        results.push({ personId, success: false, errors: validationErrors });
+        results.push({
+          personId: pId,
+          success: false,
+          errors: validationErrors,
+        });
         continue;
       }
       await transaction.commit();
-      results.push({ personId, success: true, updatedFields: updatedValues });
+      results.push({
+        personId: pId,
+        success: true,
+        updatedFields: updatedValues,
+      });
     } catch (error) {
       await transaction.rollback();
-      results.push({ personId, success: false, error: error.message });
+      results.push({ personId: pId, success: false, error: error.message });
     }
   }
   res.status(200).json({
