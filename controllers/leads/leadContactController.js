@@ -2627,7 +2627,12 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         return result;
       }
       if (operator === "isNotEmpty" || operator === "is not empty") {
-        const result = { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+        const result = {
+          [Op.and]: [
+            { [cond.field]: { [Op.not]: null } },
+            { [cond.field]: { [Op.ne]: "" } },
+          ],
+        };
         console.log(
           "[DEBUG] isNotEmpty condition result:",
           JSON.stringify(result, null, 2)
@@ -2648,6 +2653,16 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
         console.log(
           "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "is" operator for exact match
+      if (operator === "is" || operator === "eq") {
+        const result = { [cond.field]: cond.value };
+        console.log(
+          "[DEBUG] is/eq condition result:",
           JSON.stringify(result, null, 2)
         );
         return result;
@@ -2975,6 +2990,31 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     );
     console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
 
+    // Additional debug for contactPerson filtering
+    if (filterConfig && filterConfig.all && filterConfig.all.length > 0) {
+      const contactPersonFilter = filterConfig.all.find(
+        (cond) => cond.field === "contactPerson" && cond.entity === "Person"
+      );
+      if (contactPersonFilter) {
+        console.log("[DEBUG] Found contactPerson filter:", contactPersonFilter);
+        console.log(
+          "[DEBUG] Checking if personWhere contains contactPerson condition..."
+        );
+
+        // Test the exact query that will be run
+        const testQuery = await Person.findAll({
+          where: { contactPerson: contactPersonFilter.value },
+          attributes: ["personId", "contactPerson"],
+          limit: 5,
+          raw: true,
+        });
+        console.log(
+          "[DEBUG] Test query for exact contactPerson match:",
+          testQuery
+        );
+      }
+    }
+
     // Check if any conditions exist (including Op.and arrays)
     const hasActivityFilters =
       Object.keys(activityWhere).length > 0 ||
@@ -3298,6 +3338,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         stringKeys: Object.keys(personWhere).filter(
           (key) => typeof key === "string"
         ),
+        fullPersonWhere: JSON.stringify(personWhere, null, 2),
       });
 
       let personFilterResults = [];
@@ -3308,11 +3349,22 @@ exports.getPersonsAndOrganizations = async (req, res) => {
           raw: true,
         });
       } else {
+        // For non-admin users, we need to be careful about combining filters
+        const userAccessWhere = {
+          [Op.or]: [{ masterUserID: req.adminId }],
+        };
+
+        const combinedWhere = {
+          [Op.and]: [personWhere, userAccessWhere],
+        };
+
+        console.log(
+          "[DEBUG] Combined where for non-admin:",
+          JSON.stringify(combinedWhere, null, 2)
+        );
+
         personFilterResults = await Person.findAll({
-          where: {
-            ...personWhere,
-            [Op.or]: [{ masterUserID: req.adminId }],
-          },
+          where: combinedWhere,
           attributes: ["personId"],
           raw: true,
         });

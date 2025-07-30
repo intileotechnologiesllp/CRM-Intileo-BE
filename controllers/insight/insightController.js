@@ -21,77 +21,16 @@ exports.createDashboard = async (req, res) => {
       });
     }
 
-    // Determine the folder context for uniqueness check
-    let folderForCheck = folder || "My dashboards";
-    let parentIdForCheck = parentId || null;
-
-    // If folder name is provided and not default, ensure folder exists or create it (for parentId check)
-    if (!parentId && folder && folder !== "My dashboards") {
-      let folderRow = await DASHBOARD.findOne({
-        where: {
-          name: folder,
-          ownerId,
-          type: "folder",
-          parentId: null,
-        },
-      });
-      if (!folderRow) {
-        folderRow = await DASHBOARD.create({
-          name: folder,
-          folder: "My dashboards",
-          type: "folder",
-          parentId: null,
-          ownerId,
-        });
-      }
-      parentIdForCheck = folderRow.dashboardId;
-      folderForCheck = folderRow.name;
-    }
-
-    // If parentId is provided, validate it is a folder and use its dashboardId for uniqueness check
-    if (parentIdForCheck) {
-      const parentFolder = await DASHBOARD.findOne({
-        where: {
-          dashboardId: parentIdForCheck,
-          ownerId,
-          type: "folder",
-        },
-      });
-      if (!parentFolder) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent folder not found",
-        });
-      }
-      folderForCheck = parentFolder.name;
-    }
-
-    // Check if a dashboard with the same name already exists in the same folder (by parentId)
-    const existingDashboard = await DASHBOARD.findOne({
-      where: {
-        name,
-        ownerId,
-        parentId: parentIdForCheck,
-      },
-    });
-
-    if (existingDashboard) {
-      return res.status(400).json({
-        success: false,
-        message: "A dashboard with this name already exists in this folder",
-      });
-    }
-
     // Determine the type (folder or dashboard/file)
     const itemType = type || "dashboard"; // default to dashboard
 
     let resolvedParentId = parentId || null;
     let resolvedFolderName = folder || "My dashboards";
 
-    // If folder name is provided and not default, ensure folder exists or create it
+    // If folder name is provided and not default, check if it's a valid existing folder
     if (!parentId && folder && folder !== "My dashboards") {
-      // Check if folder exists for this user
-      let folderRow = await DASHBOARD.findOne({
+      // Only use existing folders, don't auto-create new ones to avoid confusion
+      const existingFolder = await DASHBOARD.findOne({
         where: {
           name: folder,
           ownerId,
@@ -99,18 +38,18 @@ exports.createDashboard = async (req, res) => {
           parentId: null,
         },
       });
-      if (!folderRow) {
-        // Create the folder if it doesn't exist
-        folderRow = await DASHBOARD.create({
-          name: folder,
-          folder: "My dashboards",
-          type: "folder",
-          parentId: null,
-          ownerId,
+
+      if (existingFolder) {
+        // Use the existing folder
+        resolvedParentId = existingFolder.dashboardId;
+        resolvedFolderName = existingFolder.name;
+      } else {
+        // If folder doesn't exist, inform user instead of defaulting to root
+        return res.status(400).json({
+          success: false,
+          message: `Folder "${folder}" does not exist. Please create the folder first or use an existing folder.`,
         });
       }
-      resolvedParentId = folderRow.dashboardId;
-      resolvedFolderName = folderRow.name;
     }
 
     // If parentId is provided, validate it is a folder
@@ -129,6 +68,25 @@ exports.createDashboard = async (req, res) => {
         });
       }
       resolvedFolderName = parentFolder.name;
+    }
+
+    // Check if a dashboard with the same name already exists in the same folder
+    const existingDashboard = await DASHBOARD.findOne({
+      where: {
+        name,
+        ownerId,
+        parentId: resolvedParentId, // Check within the same folder/parent
+        type: itemType, // Also check for the same type (dashboard/folder)
+      },
+    });
+
+    if (existingDashboard) {
+      return res.status(400).json({
+        success: false,
+        message: `A ${
+          itemType === "folder" ? "folder" : "dashboard"
+        } with this name already exists in this location`,
+      });
     }
 
     const newDashboard = await DASHBOARD.create({
@@ -366,6 +324,23 @@ exports.createFolder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Folder name is required",
+      });
+    }
+
+    // Check if a folder with the same name already exists in the same location
+    const existingFolder = await DASHBOARD.findOne({
+      where: {
+        name,
+        ownerId,
+        type: "folder",
+        parentId: parentId || null,
+      },
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({
+        success: false,
+        message: "A folder with this name already exists in this location",
       });
     }
 
