@@ -3568,22 +3568,21 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
     // Fetch persons using updated filtering logic
     let persons = [];
-    if (req.role === "admin") {
+    if (req.role === "admin" && !req.query.masterUserID) {
       persons = await Person.findAll({
         where: finalPersonWhere,
         raw: true,
       });
-    }else if(req.masterUserID){
+    }else if(req.query.masterUserID) {
+      // If masterUserID is provided, filter by that as well
+      finalPersonWhere.masterUserID = req.query.masterUserID;
       persons = await Person.findAll({
-        where: {
-          ...finalPersonWhere,
-          [Op.or]: [{ masterUserID: req.adminId }],
-        },
+        where: finalPersonWhere,
         raw: true,
       });
+
     }
-    
-    else {
+    else{
       const roleBasedPersonFilter = {
         [Op.or]: [
           { masterUserID: req.adminId },
