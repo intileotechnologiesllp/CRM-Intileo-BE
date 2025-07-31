@@ -74,8 +74,8 @@ router.delete(
 );
 
 // =============== GOAL ROUTES ===============
-router.get("/goal-types", verifyToken, insightController.getGoalTypes);
-router.post("/goals", verifyToken, insightController.createGoal);
+router.get("/goal-types", insightController.getGoalTypes);
+router.post("/create-goals", verifyToken, insightController.createGoal);
 router.get("/goals", verifyToken, insightController.getAllGoals);
 router.get(
   "/dashboards/:dashboardId/goals",

@@ -13,5 +13,8 @@ ADD COLUMN pipeline VARCHAR(255) NULL COMMENT 'Pipeline filter for deals';
 ALTER TABLE Goals 
 ADD COLUMN trackingMetric VARCHAR(50) NOT NULL DEFAULT 'Count' COMMENT 'Count or Value tracking';
 
+ALTER TABLE Goals 
+ADD COLUMN assignId VARCHAR(255) NULL COMMENT 'masterUserID assigned to the goal or everyone';
+
 -- Update existing records to have default values
 UPDATE Goals SET trackingMetric = 'Count' WHERE trackingMetric IS NULL;

@@ -1050,6 +1050,7 @@ exports.createGoal = async (req, res) => {
       endDate,
       description,
       assignee,
+      assignId,
       pipeline,
       trackingMetric,
     } = req.body;
@@ -1123,6 +1124,7 @@ exports.createGoal = async (req, res) => {
       endDate: defaultEndDate,
       description: goalName,
       assignee: assignee || null,
+      assignId: assignId || null, // Add assignId field
       pipeline: pipeline || null,
       trackingMetric: trackingMetric || "Count",
       ownerId,
@@ -1331,6 +1333,7 @@ exports.updateGoal = async (req, res) => {
       endDate,
       description,
       assignee,
+      assignId,
       pipeline,
       trackingMetric,
       isActive,
@@ -1361,6 +1364,7 @@ exports.updateGoal = async (req, res) => {
       endDate: endDate || goal.endDate,
       description: description !== undefined ? description : goal.description,
       assignee: assignee !== undefined ? assignee : goal.assignee,
+      assignId: assignId !== undefined ? assignId : goal.assignId,
       pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
       trackingMetric: trackingMetric || goal.trackingMetric,
       isActive: isActive !== undefined ? isActive : goal.isActive,
@@ -1478,6 +1482,7 @@ exports.getGoalData = async (req, res) => {
       entity,
       goalType,
       assignee,
+      assignId,
       pipeline,
       startDate,
       endDate,
@@ -1491,11 +1496,20 @@ exports.getGoalData = async (req, res) => {
       },
     };
 
-    // Add assignee filter if specified
-    if (assignee && assignee !== "All" && assignee !== "Company (everyone)") {
+    // Add assignee filter based on assignId and assignee values
+    if (assignId && assignId !== "everyone") {
+      // Specific user assigned
+      whereClause.masterUserID = assignId;
+    } else if (
+      assignee &&
+      assignee !== "All" &&
+      assignee !== "Company (everyone)" &&
+      assignee !== "everyone"
+    ) {
+      // Legacy assignee field (for backward compatibility)
       whereClause.masterUserID = assignee;
     }
-    // If assignee is "Company (everyone)" or null, don't add user filter to get all data
+    // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
 
     // Add pipeline filter if specified
     if (pipeline && entity === "Deal") {
@@ -1779,6 +1793,7 @@ exports.getGoalData = async (req, res) => {
           entity: entity,
           goalType: goalType,
           assignee: assignee,
+          assignId: assignId,
           pipeline: pipeline,
         },
       },
@@ -2018,6 +2033,7 @@ async function calculateGoalProgress(goal, ownerId) {
     startDate,
     endDate,
     assignee,
+    assignId,
     pipeline,
     trackingMetric,
   } = goal;
@@ -2028,12 +2044,23 @@ async function calculateGoalProgress(goal, ownerId) {
     },
   };
 
-  // Add assignee filter if specified
-  if (assignee && assignee !== "All") {
+  // Add assignee filter based on assignId and assignee values
+  if (assignId && assignId !== "everyone") {
+    // Specific user assigned
+    whereClause.masterUserID = assignId;
+  } else if (
+    assignee &&
+    assignee !== "All" &&
+    assignee !== "Company (everyone)" &&
+    assignee !== "everyone"
+  ) {
+    // Legacy assignee field (for backward compatibility)
     whereClause.masterUserID = assignee;
-  } else if (ownerId) {
+  } else if (ownerId && !assignId && !assignee) {
+    // Fallback to owner ID if no specific assignment
     whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
   }
+  // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
 
   // Add pipeline filter if specified
   if (pipeline && entity === "Deal") {
