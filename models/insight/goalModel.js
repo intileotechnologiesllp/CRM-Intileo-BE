@@ -52,6 +52,10 @@ const Goal = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     }, // User assigned to the goal
+    assignId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    }, // User ID assigned to the goal or 'everyone'
     pipeline: {
       type: DataTypes.STRING,
       allowNull: true,
