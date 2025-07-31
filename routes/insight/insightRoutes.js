@@ -82,7 +82,7 @@ router.get(
   verifyToken,
   insightController.getGoalsForDashboard
 );
-router.put(
+router.post(
   "/goals/:goalId/add-to-dashboard",
   verifyToken,
   insightController.addGoalToDashboard
