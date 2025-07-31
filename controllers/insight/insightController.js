@@ -25,7 +25,7 @@ exports.createDashboard = async (req, res) => {
     const itemType = type || "dashboard"; // default to dashboard
 
     let resolvedParentId = parentId || null;
-    let resolvedFolderName = folder || null; // Allow null values
+    let resolvedFolderName = null; // Start with null
 
     // If folder name is provided, check if it's a valid existing folder
     if (!parentId && folder) {
@@ -48,7 +48,7 @@ exports.createDashboard = async (req, res) => {
           // Auto-create the folder if it doesn't exist
           existingFolder = await DASHBOARD.create({
             name: folder,
-            folder: null, // Allow null values
+            folder: null, // Folders themselves don't have a folder parent
             type: "folder",
             parentId: null,
             ownerId,
@@ -58,13 +58,11 @@ exports.createDashboard = async (req, res) => {
         resolvedParentId = existingFolder.dashboardId;
         resolvedFolderName = existingFolder.name;
       }
-    }
-
-    // If parentId is provided, validate it is a folder
-    if (resolvedParentId) {
+    } else if (parentId) {
+      // If parentId is provided, validate it is a folder and get its name
       const parentFolder = await DASHBOARD.findOne({
         where: {
-          dashboardId: resolvedParentId,
+          dashboardId: parentId,
           ownerId,
           type: "folder",
         },
@@ -76,6 +74,9 @@ exports.createDashboard = async (req, res) => {
         });
       }
       resolvedFolderName = parentFolder.name;
+    } else {
+      // No folder specified and no parentId - this goes to "My dashboards"
+      resolvedFolderName = "My dashboards";
     }
 
     // Check if a dashboard with the same name already exists in the same folder
@@ -162,39 +163,15 @@ exports.getDashboards = async (req, res) => {
       });
     }
 
-    // Group dashboards by folder and organize hierarchically
+    // Group dashboards by folder for backward compatibility
     const dashboardsByFolder = {};
-    const hierarchicalData = [];
-
-    // First, create folders structure
-    const folders = dashboards.filter((item) => item.type === "folder");
-    const files = dashboards.filter((item) => item.type !== "folder");
-
-    // Organize into hierarchy
-    folders.forEach((folder) => {
-      const folderData = {
-        ...folder.toJSON(),
-        children: [],
-      };
-
-      // Find files that belong to this folder
-      const folderFiles = files.filter(
-        (file) => file.parentId === folder.dashboardId
-      );
-      folderData.children = folderFiles;
-
-      if (folder.parentId === null) {
-        hierarchicalData.push(folderData);
-      }
-    });
-
-    // Add orphaned files (files without parent folder)
-    const orphanedFiles = files.filter((file) => file.parentId === null);
-    hierarchicalData.push(...orphanedFiles);
-
-    // Legacy grouping by folder name for backward compatibility
     dashboards.forEach((dashboard) => {
-      const folder = dashboard.folder || "My dashboards";
+      const folder =
+        dashboard.folder === null ||
+        dashboard.folder === undefined ||
+        dashboard.folder === ""
+          ? "My dashboards"
+          : dashboard.folder;
       if (!dashboardsByFolder[folder]) {
         dashboardsByFolder[folder] = [];
       }
@@ -203,9 +180,7 @@ exports.getDashboards = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: dashboards,
       byFolder: dashboardsByFolder,
-      hierarchical: hierarchicalData,
     });
   } catch (error) {
     console.error("Error fetching dashboards:", error);

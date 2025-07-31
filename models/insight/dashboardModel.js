@@ -1,7 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-
 const Dashboard = sequelize.define(
   "Dashboard",
   {
@@ -14,7 +13,6 @@ const Dashboard = sequelize.define(
     folder: {
       type: DataTypes.STRING,
       allowNull: true,
-      defaultValue: "My dashboards",
     },
     type: {
       type: DataTypes.STRING,
@@ -29,6 +27,5 @@ const Dashboard = sequelize.define(
     timestamps: true,
   }
 );
-
 
 module.exports = Dashboard;
