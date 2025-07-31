@@ -29,11 +29,16 @@ exports.createDashboard = async (req, res) => {
 
     // If folder name is provided, check if it's a valid existing folder
     if (!parentId && folder) {
+      console.log(`[DEBUG] Processing folder request: "${folder}"`);
+
       // Handle special cases
       if (folder === "My dashboards") {
+        console.log("[DEBUG] Using My dashboards folder");
         resolvedFolderName = "My dashboards";
         // Don't set parentId - keep it null for root level
       } else {
+        console.log(`[DEBUG] Looking for existing folder: "${folder}"`);
+
         // Look for existing folder with the provided name
         let existingFolder = await DASHBOARD.findOne({
           where: {
@@ -44,19 +49,37 @@ exports.createDashboard = async (req, res) => {
           },
         });
 
+        console.log(
+          `[DEBUG] Existing folder found:`,
+          existingFolder
+            ? {
+                id: existingFolder.dashboardId,
+                name: existingFolder.name,
+                folder: existingFolder.folder,
+              }
+            : "None"
+        );
+
         if (!existingFolder) {
+          console.log(`[DEBUG] Creating new folder: "${folder}"`);
           // Auto-create the folder if it doesn't exist
           existingFolder = await DASHBOARD.create({
             name: folder,
-            folder: null, // Folders themselves don't have a folder parent
+            folder: folder, // Set folder field to its own name
             type: "folder",
             parentId: null,
             ownerId,
           });
+          console.log(
+            `[DEBUG] Created folder with ID: ${existingFolder.dashboardId}`
+          );
         }
         // Use the existing or newly created folder
         resolvedParentId = existingFolder.dashboardId;
         resolvedFolderName = existingFolder.name;
+        console.log(
+          `[DEBUG] Resolved parentId: ${resolvedParentId}, folderName: ${resolvedFolderName}`
+        );
       }
     } else if (parentId) {
       // If parentId is provided, validate it is a folder and get its name
@@ -165,18 +188,42 @@ exports.getDashboards = async (req, res) => {
 
     // Group dashboards by folder for backward compatibility
     const dashboardsByFolder = {};
+    console.log("[DEBUG] Grouping dashboards, total count:", dashboards.length);
+
     dashboards.forEach((dashboard) => {
-      const folder =
-        dashboard.folder === null ||
-        dashboard.folder === undefined ||
-        dashboard.folder === ""
-          ? "My dashboards"
-          : dashboard.folder;
+      let folder;
+
+      console.log(
+        `[DEBUG] Processing item: ${dashboard.name} (type: ${dashboard.type}, folder: ${dashboard.folder})`
+      );
+
+      if (dashboard.type === "folder") {
+        // Folders should appear as their own categories, not under "My dashboards"
+        // Skip folders - they don't get grouped anywhere, they ARE the groups
+        console.log(
+          `[DEBUG] Skipping folder "${dashboard.name}" - folders are categories, not items`
+        );
+        return; // Skip processing folders
+      } else {
+        // Dashboards use their folder field value
+        folder =
+          dashboard.folder === null ||
+          dashboard.folder === undefined ||
+          dashboard.folder === ""
+            ? "My dashboards"
+            : dashboard.folder;
+        console.log(
+          `[DEBUG] Dashboard "${dashboard.name}" grouped under: ${folder}`
+        );
+      }
+
       if (!dashboardsByFolder[folder]) {
         dashboardsByFolder[folder] = [];
       }
       dashboardsByFolder[folder].push(dashboard);
     });
+
+    console.log("[DEBUG] Final grouping:", Object.keys(dashboardsByFolder));
 
     res.status(200).json({
       success: true,
@@ -492,7 +539,7 @@ exports.createFolder = async (req, res) => {
 
     const newFolder = await DASHBOARD.create({
       name,
-      folder: folder || null, // Allow null values
+      folder: name, // Set folder field to its own name
       type: "folder",
       parentId: parentId || null,
       ownerId,
