@@ -18,7 +18,11 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 // router.use(authMiddleware);
 
 // =============== DASHBOARD ROUTES ===============
-router.post("/create-dashboards", verifyToken, insightController.createDashboard);
+router.post(
+  "/create-dashboards",
+  verifyToken,
+  insightController.createDashboard
+);
 router.get("/get-dashboards", verifyToken, insightController.getDashboards);
 router.get(
   "/get-dashboards/:dashboardId",
@@ -30,7 +34,16 @@ router.put(
   verifyToken,
   insightController.updateDashboard
 );
-router.delete("/delete-dashboards/:dashboardId", verifyToken, insightController.deleteDashboard);
+router.delete(
+  "/delete-dashboards/:dashboardId",
+  verifyToken,
+  insightController.deleteDashboard
+);
+router.delete(
+  "/bulk-delete-dashboards",
+  verifyToken,
+  insightController.bulkDeleteDashboards
+);
 
 // =============== FOLDER MANAGEMENT ROUTES ===============
 router.post("/folders", verifyToken, insightController.createFolder);
@@ -61,17 +74,25 @@ router.delete(
 );
 
 // =============== GOAL ROUTES ===============
-router.post("/goals", insightController.createGoal);
+router.get("/goal-types", verifyToken, insightController.getGoalTypes);
+router.post("/goals", verifyToken, insightController.createGoal);
+router.get("/goals", verifyToken, insightController.getAllGoals);
 router.get(
   "/dashboards/:dashboardId/goals",
   verifyToken,
   insightController.getGoalsForDashboard
+);
+router.put(
+  "/goals/:goalId/add-to-dashboard",
+  verifyToken,
+  insightController.addGoalToDashboard
 );
 router.get(
   "/goals/:goalId/progress",
   verifyToken,
   insightController.getGoalProgress
 );
+router.get("/goals/:goalId/data", verifyToken, insightController.getGoalData);
 router.put("/goals/:goalId", verifyToken, insightController.updateGoal);
 router.delete("/goals/:goalId", verifyToken, insightController.deleteGoal);
 
