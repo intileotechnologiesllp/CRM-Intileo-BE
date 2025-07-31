@@ -25,32 +25,39 @@ exports.createDashboard = async (req, res) => {
     const itemType = type || "dashboard"; // default to dashboard
 
     let resolvedParentId = parentId || null;
-    let resolvedFolderName = folder || "My dashboards";
+    let resolvedFolderName = folder || null; // Don't default to "My dashboards"
 
-    // If folder name is provided and not default, check if it's a valid existing folder
-    if (!parentId && folder && folder !== "My dashboards") {
-      let existingFolder = await DASHBOARD.findOne({
-        where: {
-          name: folder,
-          ownerId,
-          type: "folder",
-          parentId: null,
-        },
-      });
-
-      if (!existingFolder) {
-        // Auto-create the folder if it doesn't exist
-        existingFolder = await DASHBOARD.create({
-          name: folder,
-          folder: "My dashboards", // Folder should be in "My dashboards" group
-          type: "folder",
-          parentId: null,
-          ownerId,
+    // If folder name is provided, check if it's a valid existing folder
+    if (!parentId && folder) {
+      // Handle special case for "My dashboards" - treat as no folder
+      if (folder === "My dashboards") {
+        resolvedFolderName = "My dashboards";
+        // Don't set parentId - keep it null for root level
+      } else {
+        // Look for existing folder with the provided name
+        let existingFolder = await DASHBOARD.findOne({
+          where: {
+            name: folder,
+            ownerId,
+            type: "folder",
+            parentId: null,
+          },
         });
+
+        if (!existingFolder) {
+          // Auto-create the folder if it doesn't exist
+          existingFolder = await DASHBOARD.create({
+            name: folder,
+            folder: null, // Don't force into "My dashboards" group
+            type: "folder",
+            parentId: null,
+            ownerId,
+          });
+        }
+        // Use the existing or newly created folder
+        resolvedParentId = existingFolder.dashboardId;
+        resolvedFolderName = existingFolder.name;
       }
-      // Use the existing or newly created folder
-      resolvedParentId = existingFolder.dashboardId;
-      resolvedFolderName = existingFolder.name;
     }
 
     // If parentId is provided, validate it is a folder
@@ -92,7 +99,7 @@ exports.createDashboard = async (req, res) => {
 
     const newDashboard = await DASHBOARD.create({
       name,
-      folder: resolvedFolderName,
+      folder: resolvedFolderName || null, // Only set folder if explicitly provided
       type: itemType,
       parentId: resolvedParentId,
       ownerId,
@@ -510,7 +517,7 @@ exports.createFolder = async (req, res) => {
 
     const newFolder = await DASHBOARD.create({
       name,
-      folder: "My dashboards", // All top-level folders belong to "My dashboards"
+      folder: folder || null, // Don't force into "My dashboards" - use provided folder or null
       type: "folder",
       parentId: parentId || null,
       ownerId,
