@@ -1567,6 +1567,7 @@ exports.getGoalData = async (req, res) => {
   try {
     const { goalId } = req.params;
     const ownerId = req.adminId;
+    const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
 
     const goal = await Goal.findOne({
       where: {
@@ -1593,14 +1594,209 @@ exports.getGoalData = async (req, res) => {
       trackingMetric,
     } = goal;
 
-    // Build where clause based on goal criteria
-    // For indefinite goals (endDate is null), track from startDate to current date
-    const currentDate = new Date();
-    const effectiveEndDate = endDate || currentDate;
+    // Helper function to get date range for period filters
+    function getPeriodRange(filter) {
+      const now = new Date();
+      let start, end;
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
+      switch ((filter || "").toLowerCase()) {
+        case "yesterday":
+          start = new Date(today);
+          start.setDate(start.getDate() - 1);
+          end = new Date(today);
+          end.setDate(end.getDate() - 1);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "today":
+          start = new Date(today);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "tomorrow":
+          start = new Date(today);
+          start.setDate(start.getDate() + 1);
+          end = new Date(today);
+          end.setDate(end.getDate() + 1);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "this_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay());
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "last_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay() - 7);
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay() + 7);
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "last_two_weeks":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay() - 14);
+          end = new Date(today);
+          end.setDate(end.getDate() - end.getDay() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "this_month":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(
+            now.getFullYear(),
+            now.getMonth() + 1,
+            0,
+            23,
+            59,
+            59,
+            999
+          );
+          break;
+        case "last_month":
+          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+          break;
+        case "next_month":
+          start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          end = new Date(
+            now.getFullYear(),
+            now.getMonth() + 2,
+            0,
+            23,
+            59,
+            59,
+            999
+          );
+          break;
+        case "this_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "last_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+          const quarter = q === 0 ? 3 : q - 1;
+          start = new Date(year, quarter * 3, 1);
+          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "next_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+          const quarter = q === 3 ? 0 : q + 1;
+          start = new Date(year, quarter * 3, 1);
+          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "this_year":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+          break;
+        case "last_year":
+          start = new Date(now.getFullYear() - 1, 0, 1);
+          end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+          break;
+        case "next_year":
+          start = new Date(now.getFullYear() + 1, 0, 1);
+          end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+          break;
+        case "month_to_date":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = now;
+          break;
+        case "quarter_to_date": {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = now;
+          break;
+        }
+        case "year_to_date":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = now;
+          break;
+        case "past_7_days":
+          start = new Date(today);
+          start.setDate(start.getDate() - 6);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "past_2_weeks":
+          start = new Date(today);
+          start.setDate(start.getDate() - 13);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_7_days":
+          start = new Date(today);
+          end = new Date(today);
+          end.setDate(end.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_2_weeks":
+          start = new Date(today);
+          end = new Date(today);
+          end.setDate(end.getDate() + 13);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "past_1_month":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 1);
+          end = now;
+          break;
+        case "past_3_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 3);
+          end = now;
+          break;
+        case "past_6_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 6);
+          end = now;
+          break;
+        case "past_12_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 12);
+          end = now;
+          break;
+        case "next_3_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 3);
+          break;
+        case "next_6_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 6);
+          break;
+        case "next_12_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 12);
+          break;
+        case "goal_duration":
+        default:
+          // Use goal's startDate and endDate (or current date if indefinite)
+          start = startDate;
+          end = endDate || now;
+      }
+      return { start, end };
+    }
+
+    // Build where clause based on goal criteria and period filter
+    const { start, end } = getPeriodRange(periodFilter);
     const whereClause = {
       createdAt: {
-        [Op.between]: [startDate, effectiveEndDate],
+        [Op.between]: [start, end],
       },
     };
 
@@ -1703,6 +1899,28 @@ exports.getGoalData = async (req, res) => {
         trackingMetric,
         "Deal"
       );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+        summary.periodSummary = monthlyBreakdown.map((period) => {
+          // period.label: e.g. "Jul 2025" or similar
+          // period.goalTarget: goal for this period
+          // period.result: actual value for this period
+          // If your monthlyBreakdown uses different keys, adjust accordingly
+          const goal = period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goal;
+          const goalProgress =
+            goal > 0 ? `${Math.round((result / goal) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
     } else if (entity === "Activity") {
       const activities = await Activity.findAll({
         where: whereClause,
