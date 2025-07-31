@@ -25,11 +25,11 @@ exports.createDashboard = async (req, res) => {
     const itemType = type || "dashboard"; // default to dashboard
 
     let resolvedParentId = parentId || null;
-    let resolvedFolderName = folder || null; // Don't default to "My dashboards"
+    let resolvedFolderName = folder || null; // Allow null values
 
     // If folder name is provided, check if it's a valid existing folder
     if (!parentId && folder) {
-      // Handle special case for "My dashboards" - treat as no folder
+      // Handle special cases
       if (folder === "My dashboards") {
         resolvedFolderName = "My dashboards";
         // Don't set parentId - keep it null for root level
@@ -48,7 +48,7 @@ exports.createDashboard = async (req, res) => {
           // Auto-create the folder if it doesn't exist
           existingFolder = await DASHBOARD.create({
             name: folder,
-            folder: null, // Don't force into "My dashboards" group
+            folder: null, // Allow null values
             type: "folder",
             parentId: null,
             ownerId,
@@ -99,7 +99,7 @@ exports.createDashboard = async (req, res) => {
 
     const newDashboard = await DASHBOARD.create({
       name,
-      folder: resolvedFolderName || null, // Only set folder if explicitly provided
+      folder: resolvedFolderName, // Allow null values
       type: itemType,
       parentId: resolvedParentId,
       ownerId,
@@ -517,7 +517,7 @@ exports.createFolder = async (req, res) => {
 
     const newFolder = await DASHBOARD.create({
       name,
-      folder: folder || null, // Don't force into "My dashboards" - use provided folder or null
+      folder: folder || null, // Allow null values
       type: "folder",
       parentId: parentId || null,
       ownerId,

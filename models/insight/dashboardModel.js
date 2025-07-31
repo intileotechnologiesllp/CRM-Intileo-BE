@@ -13,7 +13,7 @@ const Dashboard = sequelize.define(
     name: { type: DataTypes.STRING, allowNull: false },
     folder: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
       defaultValue: "My dashboards",
     },
     type: {
