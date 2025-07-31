@@ -118,23 +118,42 @@ exports.createDashboard = async (req, res) => {
 exports.getDashboards = async (req, res) => {
   try {
     const ownerId = req.adminId;
-
-    const dashboards = await DASHBOARD.findAll({
-      where: { ownerId },
-      include: [
-        {
-          model: Report,
-          as: "Reports",
-          required: false,
-        },
-        {
-          model: Goal,
-          as: "Goals",
-          required: false,
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
+    const role = req.role;
+    let dashboards;
+    if (role === "admin") {
+      dashboards = await DASHBOARD.findAll({
+        include: [
+          {
+            model: Report,
+            as: "Reports",
+            required: false,
+          },
+          {
+            model: Goal,
+            as: "Goals",
+            required: false,
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+    } else {
+      dashboards = await DASHBOARD.findAll({
+        where: { ownerId },
+        include: [
+          {
+            model: Report,
+            as: "Reports",
+            required: false,
+          },
+          {
+            model: Goal,
+            as: "Goals",
+            required: false,
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+    }
 
     // Group dashboards by folder and organize hierarchically
     const dashboardsByFolder = {};
@@ -322,6 +341,7 @@ exports.bulkDeleteDashboards = async (req, res) => {
   try {
     const { dashboardIds } = req.body;
     const ownerId = req.adminId;
+    const role = req.role;
 
     // Validate input
     if (
@@ -335,13 +355,22 @@ exports.bulkDeleteDashboards = async (req, res) => {
       });
     }
 
-    // Get all user's dashboards to check the constraint
-    const allUserDashboards = await DASHBOARD.findAll({
-      where: {
-        ownerId,
-        type: { [Op.ne]: "folder" }, // Exclude folders from count
-      },
-    });
+    // Get all dashboards for admin, or only user's dashboards for non-admin
+    let allUserDashboards;
+    if (role === "admin") {
+      allUserDashboards = await DASHBOARD.findAll({
+        where: {
+          type: { [Op.ne]: "folder" },
+        },
+      });
+    } else {
+      allUserDashboards = await DASHBOARD.findAll({
+        where: {
+          ownerId,
+          type: { [Op.ne]: "folder" },
+        },
+      });
+    }
 
     // Check if user is trying to delete all dashboards
     const remainingDashboards = allUserDashboards.filter(
@@ -356,13 +385,22 @@ exports.bulkDeleteDashboards = async (req, res) => {
       });
     }
 
-    // Find dashboards to delete (only owned by current user)
-    const dashboardsToDelete = await DASHBOARD.findAll({
-      where: {
-        dashboardId: { [Op.in]: dashboardIds },
-        ownerId,
-      },
-    });
+    // Find dashboards to delete (admin: all, non-admin: only own)
+    let dashboardsToDelete;
+    if (role === "admin") {
+      dashboardsToDelete = await DASHBOARD.findAll({
+        where: {
+          dashboardId: { [Op.in]: dashboardIds },
+        },
+      });
+    } else {
+      dashboardsToDelete = await DASHBOARD.findAll({
+        where: {
+          dashboardId: { [Op.in]: dashboardIds },
+          ownerId,
+        },
+      });
+    }
 
     if (dashboardsToDelete.length === 0) {
       return res.status(404).json({
@@ -371,7 +409,7 @@ exports.bulkDeleteDashboards = async (req, res) => {
       });
     }
 
-    // Check if some dashboards were not found or not owned by user
+    // Check if some dashboards were not found or not accessible
     const foundIds = dashboardsToDelete.map((d) => d.dashboardId);
     const notFoundIds = dashboardIds.filter((id) => !foundIds.includes(id));
 
@@ -389,11 +427,10 @@ exports.bulkDeleteDashboards = async (req, res) => {
     });
 
     // Delete the dashboards
+    let deleteWhere = { dashboardId: { [Op.in]: foundIds } };
+    if (role !== "admin") deleteWhere.ownerId = ownerId;
     const deletedCount = await DASHBOARD.destroy({
-      where: {
-        dashboardId: { [Op.in]: foundIds },
-        ownerId,
-      },
+      where: deleteWhere,
     });
 
     let message = `Successfully deleted ${deletedCount} dashboard(s)`;
