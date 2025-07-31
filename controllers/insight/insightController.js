@@ -42,7 +42,7 @@ exports.createDashboard = async (req, res) => {
         // Auto-create the folder if it doesn't exist
         existingFolder = await DASHBOARD.create({
           name: folder,
-          folder: folder, // Use the actual folder name, not "My dashboards"
+          folder: "My dashboards", // Folder should be in "My dashboards" group
           type: "folder",
           parentId: null,
           ownerId,
@@ -473,7 +473,7 @@ exports.createFolder = async (req, res) => {
 
     const newFolder = await DASHBOARD.create({
       name,
-      folder: folder || "My dashboards",
+      folder: "My dashboards", // All top-level folders belong to "My dashboards"
       type: "folder",
       parentId: parentId || null,
       ownerId,
