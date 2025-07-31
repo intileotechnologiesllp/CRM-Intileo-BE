@@ -42,7 +42,7 @@ exports.createDashboard = async (req, res) => {
         // Auto-create the folder if it doesn't exist
         existingFolder = await DASHBOARD.create({
           name: folder,
-          folder: "My dashboards",
+          folder: folder, // Use the actual folder name, not "My dashboards"
           type: "folder",
           parentId: null,
           ownerId,
