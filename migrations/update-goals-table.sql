@@ -16,5 +16,11 @@ ADD COLUMN trackingMetric VARCHAR(50) NOT NULL DEFAULT 'Count' COMMENT 'Count or
 ALTER TABLE Goals 
 ADD COLUMN assignId VARCHAR(255) NULL COMMENT 'masterUserID assigned to the goal or everyone';
 
+ALTER TABLE Goals 
+ADD COLUMN count INT NULL COMMENT 'Target count when trackingMetric is Count';
+
+ALTER TABLE Goals 
+ADD COLUMN value DECIMAL(15,2) NULL COMMENT 'Target value when trackingMetric is Value';
+
 -- Update existing records to have default values
 UPDATE Goals SET trackingMetric = 'Count' WHERE trackingMetric IS NULL;

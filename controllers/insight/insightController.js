@@ -1053,14 +1053,32 @@ exports.createGoal = async (req, res) => {
       assignId,
       pipeline,
       trackingMetric,
+      count,
+      value,
     } = req.body;
     const ownerId = req.adminId;
 
     // Validate required fields - dashboardId is now optional
-    if (!entity || !goalType || !targetValue) {
+    if (!entity || !goalType) {
       return res.status(400).json({
         success: false,
-        message: "Entity, goal type, and target value are required",
+        message: "Entity and goal type are required",
+      });
+    }
+
+    // Validate target value or count/value based on tracking metric
+    if (!targetValue && !count && !value) {
+      return res.status(400).json({
+        success: false,
+        message: "Target value, count, or value is required",
+      });
+    }
+
+    // Validate start date is required
+    if (!startDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date is required",
       });
     }
 
@@ -1085,41 +1103,86 @@ exports.createGoal = async (req, res) => {
     const now = new Date();
     let defaultStartDate, defaultEndDate;
 
-    // Handle different frequency types
-    if (frequency === "Monthly") {
-      defaultStartDate =
-        startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-      defaultEndDate =
-        endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    } else if (frequency === "Quarterly") {
-      const quarter = Math.floor(now.getMonth() / 3);
-      defaultStartDate =
-        startDate || new Date(now.getFullYear(), quarter * 3, 1);
-      defaultEndDate =
-        endDate || new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-    } else if (frequency === "Yearly") {
-      defaultStartDate = startDate || new Date(now.getFullYear(), 0, 1);
-      defaultEndDate = endDate || new Date(now.getFullYear(), 11, 31);
+    // Parse startDate if provided
+    if (startDate) {
+      defaultStartDate = new Date(startDate);
+      // Validate startDate
+      if (isNaN(defaultStartDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid start date format",
+        });
+      }
+    }
+
+    // Parse endDate if provided, otherwise handle indefinite goals
+    if (endDate && endDate !== "" && endDate !== null) {
+      defaultEndDate = new Date(endDate);
+      // Validate endDate
+      if (isNaN(defaultEndDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid end date format",
+        });
+      }
+      // Validate end date is after start date
+      if (defaultEndDate <= defaultStartDate) {
+        return res.status(400).json({
+          success: false,
+          message: "End date must be after start date",
+        });
+      }
     } else {
-      // Default to monthly
-      defaultStartDate =
-        startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-      defaultEndDate =
-        endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      // No end date provided - goal continues indefinitely
+      // For display purposes, we can set a far future date or null
+      // Setting to null indicates an indefinite goal
+      defaultEndDate = null;
+
+      // If frequency is provided, we can calculate the current period's end date for tracking
+      // But the goal itself continues indefinitely
+      if (frequency === "Monthly") {
+        // For tracking current period only
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear(),
+          defaultStartDate.getMonth() + 1,
+          0
+        );
+      } else if (frequency === "Quarterly") {
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear(),
+          defaultStartDate.getMonth() + 3,
+          0
+        );
+      } else if (frequency === "Yearly") {
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear() + 1,
+          0,
+          0
+        );
+      }
+      // Note: For indefinite goals, we track progress from start date to current date
     }
 
     // Generate goal name if not provided
     const goalName =
       description || `${entity} ${goalType} - ${assignee || "All"}`;
 
+    // Determine target value based on tracking metric
+    let finalTargetValue = targetValue;
+    if (trackingMetric === "Count" && count) {
+      finalTargetValue = count;
+    } else if (trackingMetric === "Value" && value) {
+      finalTargetValue = value;
+    }
+
     const newGoal = await Goal.create({
       dashboardId: dashboardId || null,
       entity,
       goalType,
-      targetValue,
+      targetValue: finalTargetValue,
       targetType:
         targetType || (trackingMetric === "Value" ? "currency" : "number"),
-      period: frequency || period || "Monthly",
+      period: period || "Monthly", // Use period field as defined in model
       startDate: defaultStartDate,
       endDate: defaultEndDate,
       description: goalName,
@@ -1127,13 +1190,21 @@ exports.createGoal = async (req, res) => {
       assignId: assignId || null, // Add assignId field
       pipeline: pipeline || null,
       trackingMetric: trackingMetric || "Count",
+      count: trackingMetric === "Count" ? count || finalTargetValue : null,
+      value: trackingMetric === "Value" ? value || finalTargetValue : null,
       ownerId,
     });
 
     res.status(201).json({
       success: true,
       message: "Goal created successfully",
-      data: newGoal,
+      data: {
+        ...newGoal.toJSON(),
+        isIndefinite: !defaultEndDate,
+        durationInfo: !defaultEndDate
+          ? `Indefinite goal starting from ${defaultStartDate.toLocaleDateString()}`
+          : `Goal from ${defaultStartDate.toLocaleDateString()} to ${defaultEndDate.toLocaleDateString()}`,
+      },
     });
   } catch (error) {
     console.error("Error creating goal:", error);
@@ -1336,6 +1407,8 @@ exports.updateGoal = async (req, res) => {
       assignId,
       pipeline,
       trackingMetric,
+      count,
+      value,
       isActive,
     } = req.body;
     const ownerId = req.adminId;
@@ -1367,6 +1440,8 @@ exports.updateGoal = async (req, res) => {
       assignId: assignId !== undefined ? assignId : goal.assignId,
       pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
       trackingMetric: trackingMetric || goal.trackingMetric,
+      count: count !== undefined ? count : goal.count,
+      value: value !== undefined ? value : goal.value,
       isActive: isActive !== undefined ? isActive : goal.isActive,
     });
 
@@ -1490,9 +1565,13 @@ exports.getGoalData = async (req, res) => {
     } = goal;
 
     // Build where clause based on goal criteria
+    // For indefinite goals (endDate is null), track from startDate to current date
+    const currentDate = new Date();
+    const effectiveEndDate = endDate || currentDate;
+
     const whereClause = {
       createdAt: {
-        [Op.between]: [startDate, endDate],
+        [Op.between]: [startDate, effectiveEndDate],
       },
     };
 
@@ -1513,7 +1592,7 @@ exports.getGoalData = async (req, res) => {
 
     // Add pipeline filter if specified
     if (pipeline && entity === "Deal") {
-      whereClause.pipelineName = pipeline;
+      whereClause.pipeline = pipeline;
     }
 
     let data = [];
@@ -1528,7 +1607,7 @@ exports.getGoalData = async (req, res) => {
           "dealId",
           "title",
           "value",
-          "pipelineName",
+          "pipeline",
           "pipelineStage",
           "status",
           "masterUserID",
@@ -1552,7 +1631,7 @@ exports.getGoalData = async (req, res) => {
         id: deal.dealId,
         title: deal.title,
         value: parseFloat(deal.value || 0),
-        pipeline: deal.pipelineName,
+        pipeline: deal.pipeline,
         stage: deal.pipelineStage,
         status: deal.status,
         owner: deal.masterUserID,
@@ -1588,49 +1667,13 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate monthly breakdown for Summary tab
-      const currentDate = new Date();
-      const months = [
-        "Jul 2025",
-        "Aug 2025",
-        "Sep 2025",
-        "Oct 2025",
-        "Nov 2025",
-        "Dec 2025",
-      ];
-
-      monthlyBreakdown = months.map((month, index) => {
-        const monthStart = new Date(2025, 6 + index, 1); // July = 6
-        const monthEnd = new Date(2025, 7 + index, 0);
-
-        // Filter deals for this month
-        const monthDeals = filteredDeals.filter((deal) => {
-          const dealDate = new Date(deal.createdAt);
-          return dealDate >= monthStart && dealDate <= monthEnd;
-        });
-
-        const monthResult =
-          trackingMetric === "Value"
-            ? monthDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : monthDeals.length;
-
-        const difference = monthResult - parseFloat(goal.targetValue);
-        const percentage =
-          monthResult > 0
-            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
-            : 0;
-
-        return {
-          period: month,
-          goal: parseFloat(goal.targetValue),
-          result: monthResult,
-          difference: difference,
-          percentage: percentage,
-        };
-      });
+      // Generate monthly breakdown based on goal's actual duration
+      monthlyBreakdown = generateMonthlyBreakdown(
+        filteredDeals,
+        goal,
+        trackingMetric,
+        "Deal"
+      );
     } else if (entity === "Activity") {
       const activities = await Activity.findAll({
         where: whereClause,
@@ -1668,40 +1711,13 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate monthly breakdown for activities
-      const months = [
-        "Jul 2025",
-        "Aug 2025",
-        "Sep 2025",
-        "Oct 2025",
-        "Nov 2025",
-        "Dec 2025",
-      ];
-
-      monthlyBreakdown = months.map((month, index) => {
-        const monthStart = new Date(2025, 6 + index, 1);
-        const monthEnd = new Date(2025, 7 + index, 0);
-
-        const monthActivities = activities.filter((activity) => {
-          const activityDate = new Date(activity.createdAt);
-          return activityDate >= monthStart && activityDate <= monthEnd;
-        });
-
-        const monthResult = monthActivities.length;
-        const difference = monthResult - parseFloat(goal.targetValue);
-        const percentage =
-          monthResult > 0
-            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
-            : 0;
-
-        return {
-          period: month,
-          goal: parseFloat(goal.targetValue),
-          result: monthResult,
-          difference: difference,
-          percentage: percentage,
-        };
-      });
+      // Generate monthly breakdown based on goal's actual duration
+      monthlyBreakdown = generateMonthlyBreakdown(
+        activities,
+        goal,
+        trackingMetric,
+        "Activity"
+      );
     } else if (entity === "Lead") {
       const leads = await Lead.findAll({
         where: whereClause,
@@ -1742,41 +1758,119 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate monthly breakdown for leads
-      const months = [
-        "Jul 2025",
-        "Aug 2025",
-        "Sep 2025",
-        "Oct 2025",
-        "Nov 2025",
-        "Dec 2025",
-      ];
-
-      monthlyBreakdown = months.map((month, index) => {
-        const monthStart = new Date(2025, 6 + index, 1);
-        const monthEnd = new Date(2025, 7 + index, 0);
-
-        const monthLeads = leads.filter((lead) => {
-          const leadDate = new Date(lead.createdAt);
-          return leadDate >= monthStart && leadDate <= monthEnd;
-        });
-
-        const monthResult = monthLeads.length;
-        const difference = monthResult - parseFloat(goal.targetValue);
-        const percentage =
-          monthResult > 0
-            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
-            : 0;
-
-        return {
-          period: month,
-          goal: parseFloat(goal.targetValue),
-          result: monthResult,
-          difference: difference,
-          percentage: percentage,
-        };
-      });
+      // Generate monthly breakdown based on goal's actual duration
+      monthlyBreakdown = generateMonthlyBreakdown(
+        leads,
+        goal,
+        trackingMetric,
+        "Lead"
+      );
     }
+
+    // Calculate comprehensive duration information
+    const nowTime = new Date();
+    const isIndefinite = !endDate || endDate === null;
+    const goalStartDate = new Date(startDate);
+    const goalEndDate = endDate ? new Date(endDate) : null;
+
+    // Calculate periods based on frequency
+    let totalPeriods = 1;
+    let currentPeriod = 1;
+    let periodType = goal.period || "Monthly";
+
+    if (!isIndefinite && goalEndDate) {
+      const totalMonths =
+        (goalEndDate.getFullYear() - goalStartDate.getFullYear()) * 12 +
+        (goalEndDate.getMonth() - goalStartDate.getMonth()) +
+        1;
+
+      if (periodType === "Monthly") {
+        totalPeriods = totalMonths;
+        currentPeriod = Math.min(
+          totalPeriods,
+          (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+            (nowTime.getMonth() - goalStartDate.getMonth()) +
+            1
+        );
+      } else if (periodType === "Quarterly") {
+        totalPeriods = Math.ceil(totalMonths / 3);
+        currentPeriod = Math.min(
+          totalPeriods,
+          Math.ceil(
+            ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+              (nowTime.getMonth() - goalStartDate.getMonth()) +
+              1) /
+              3
+          )
+        );
+      } else if (periodType === "Yearly") {
+        totalPeriods = Math.ceil(totalMonths / 12);
+        currentPeriod = Math.min(
+          totalPeriods,
+          Math.ceil(
+            ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+              (nowTime.getMonth() - goalStartDate.getMonth()) +
+              1) /
+              12
+          )
+        );
+      }
+    } else if (isIndefinite) {
+      // For indefinite goals, calculate current period from start
+      const monthsFromStart =
+        (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+        (nowTime.getMonth() - goalStartDate.getMonth()) +
+        1;
+
+      if (periodType === "Monthly") {
+        currentPeriod = monthsFromStart;
+      } else if (periodType === "Quarterly") {
+        currentPeriod = Math.ceil(monthsFromStart / 3);
+      } else if (periodType === "Yearly") {
+        currentPeriod = Math.ceil(monthsFromStart / 12);
+      }
+      totalPeriods = null; // Indefinite
+    }
+
+    const durationInfo = {
+      startDate: startDate,
+      endDate: endDate,
+      isIndefinite: isIndefinite,
+      frequency: periodType,
+      totalPeriods: totalPeriods,
+      currentPeriod: currentPeriod,
+      durationDays: isIndefinite
+        ? null
+        : Math.ceil((goalEndDate - goalStartDate) / (1000 * 60 * 60 * 24)),
+      isActive:
+        nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+      timeRemaining: isIndefinite
+        ? null
+        : Math.max(
+            0,
+            Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+          ),
+      timeElapsed: Math.max(
+        0,
+        Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+      ),
+      status: isIndefinite
+        ? "ongoing"
+        : nowTime <= goalEndDate
+        ? "active"
+        : "expired",
+      trackingPeriod: isIndefinite
+        ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+        : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+      periodProgress: totalPeriods
+        ? `${currentPeriod} of ${totalPeriods} ${periodType.toLowerCase()} periods`
+        : `${currentPeriod} ${periodType.toLowerCase()} period(s) elapsed`,
+      targetPerPeriod: calculateTargetPerPeriod(
+        goal.targetValue,
+        periodType,
+        totalPeriods
+      ),
+    };
 
     res.status(200).json({
       success: true,
@@ -1789,6 +1883,7 @@ exports.getGoalData = async (req, res) => {
           startDate: startDate,
           endDate: endDate,
         },
+        duration: durationInfo,
         filters: {
           entity: entity,
           goalType: goalType,
@@ -2038,9 +2133,13 @@ async function calculateGoalProgress(goal, ownerId) {
     trackingMetric,
   } = goal;
 
+  // Handle indefinite goals (endDate is null)
+  const currentDate = new Date();
+  const effectiveEndDate = endDate || currentDate;
+
   const whereClause = {
     createdAt: {
-      [Op.between]: [startDate, endDate],
+      [Op.between]: [startDate, effectiveEndDate],
     },
   };
 
@@ -2064,7 +2163,7 @@ async function calculateGoalProgress(goal, ownerId) {
 
   // Add pipeline filter if specified
   if (pipeline && entity === "Deal") {
-    whereClause.pipelineName = pipeline;
+    whereClause.pipeline = pipeline;
   }
 
   let currentValue = 0;
@@ -2184,4 +2283,135 @@ function getDateRange(period) {
   }
 
   return { start, end };
+}
+
+// Generate monthly breakdown based on goal's actual duration and frequency
+function generateMonthlyBreakdown(records, goal, trackingMetric, entityType) {
+  const { startDate, endDate, period, targetValue } = goal;
+  const currentDate = new Date();
+  const isIndefinite = !endDate || endDate === null;
+
+  // Calculate effective end date for breakdown generation
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(endDate);
+  const goalStartDate = new Date(startDate);
+
+  // Calculate monthly target based on frequency
+  let monthlyTarget = parseFloat(targetValue);
+  if (period === "Quarterly") {
+    monthlyTarget = parseFloat(targetValue) / 3; // Divide quarterly target by 3 months
+  } else if (period === "Yearly") {
+    monthlyTarget = parseFloat(targetValue) / 12; // Divide yearly target by 12 months
+  }
+  // For Monthly frequency, target remains the same
+
+  const monthlyBreakdown = [];
+
+  // Generate months from start date to effective end date
+  let currentMonth = new Date(
+    goalStartDate.getFullYear(),
+    goalStartDate.getMonth(),
+    1
+  );
+
+  while (currentMonth <= effectiveEndDate) {
+    const monthStart = new Date(currentMonth);
+    const monthEnd = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth() + 1,
+      0
+    );
+
+    // Adjust first month to start from goal start date
+    if (
+      monthStart.getMonth() === goalStartDate.getMonth() &&
+      monthStart.getFullYear() === goalStartDate.getFullYear()
+    ) {
+      monthStart.setDate(goalStartDate.getDate());
+    }
+
+    // Adjust last month to end at goal end date (if not indefinite)
+    if (
+      !isIndefinite &&
+      monthEnd.getMonth() === new Date(endDate).getMonth() &&
+      monthEnd.getFullYear() === new Date(endDate).getFullYear()
+    ) {
+      monthEnd.setDate(new Date(endDate).getDate());
+    }
+
+    // Filter records for this month
+    const monthRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= monthStart && recordDate <= monthEnd;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let monthResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      monthResult = monthRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      monthResult = monthRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = monthResult - monthlyTarget;
+    const percentage =
+      monthResult > 0 ? Math.round((monthResult / monthlyTarget) * 100) : 0;
+
+    // Format period display
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const periodDisplay = `${
+      monthNames[currentMonth.getMonth()]
+    } ${currentMonth.getFullYear()}`;
+
+    monthlyBreakdown.push({
+      period: periodDisplay,
+      goal: monthlyTarget,
+      result: monthResult,
+      difference: difference,
+      percentage: percentage,
+      monthStart: monthStart.toISOString(),
+      monthEnd: monthEnd.toISOString(),
+      recordCount: monthRecords.length,
+      isCurrentMonth:
+        currentMonth.getMonth() === currentDate.getMonth() &&
+        currentMonth.getFullYear() === currentDate.getFullYear(),
+      isFutureMonth: currentMonth > currentDate,
+    });
+
+    // Move to next month
+    currentMonth.setMonth(currentMonth.getMonth() + 1);
+  }
+
+  return monthlyBreakdown;
+}
+
+// Calculate target per period based on frequency
+function calculateTargetPerPeriod(totalTarget, frequency, totalPeriods) {
+  const target = parseFloat(totalTarget);
+
+  if (frequency === "Monthly") {
+    return target; // Monthly targets remain the same
+  } else if (frequency === "Quarterly") {
+    return target / 3; // Quarterly target divided by 3 months
+  } else if (frequency === "Yearly") {
+    return target / 12; // Yearly target divided by 12 months
+  }
+
+  return target; // Default case
 }
