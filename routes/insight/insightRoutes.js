@@ -39,7 +39,7 @@ router.delete(
   verifyToken,
   insightController.deleteDashboard
 );
-router.delete(
+router.post(
   "/bulk-delete-dashboards",
   verifyToken,
   insightController.bulkDeleteDashboards
