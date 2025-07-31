@@ -317,6 +317,110 @@ exports.deleteDashboard = async (req, res) => {
   }
 };
 
+// Bulk delete multiple dashboards
+exports.bulkDeleteDashboards = async (req, res) => {
+  try {
+    const { dashboardIds } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate input
+    if (
+      !dashboardIds ||
+      !Array.isArray(dashboardIds) ||
+      dashboardIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard IDs array is required",
+      });
+    }
+
+    // Get all user's dashboards to check the constraint
+    const allUserDashboards = await DASHBOARD.findAll({
+      where: {
+        ownerId,
+        type: { [Op.ne]: "folder" }, // Exclude folders from count
+      },
+    });
+
+    // Check if user is trying to delete all dashboards
+    const remainingDashboards = allUserDashboards.filter(
+      (dashboard) => !dashboardIds.includes(dashboard.dashboardId)
+    );
+
+    if (remainingDashboards.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "It's required to keep at least one dashboard. Cannot delete all dashboards.",
+      });
+    }
+
+    // Find dashboards to delete (only owned by current user)
+    const dashboardsToDelete = await DASHBOARD.findAll({
+      where: {
+        dashboardId: { [Op.in]: dashboardIds },
+        ownerId,
+      },
+    });
+
+    if (dashboardsToDelete.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No dashboards found to delete",
+      });
+    }
+
+    // Check if some dashboards were not found or not owned by user
+    const foundIds = dashboardsToDelete.map((d) => d.dashboardId);
+    const notFoundIds = dashboardIds.filter((id) => !foundIds.includes(id));
+
+    // Delete associated reports and goals for all dashboards
+    await Report.destroy({
+      where: {
+        dashboardId: { [Op.in]: foundIds },
+      },
+    });
+
+    await Goal.destroy({
+      where: {
+        dashboardId: { [Op.in]: foundIds },
+      },
+    });
+
+    // Delete the dashboards
+    const deletedCount = await DASHBOARD.destroy({
+      where: {
+        dashboardId: { [Op.in]: foundIds },
+        ownerId,
+      },
+    });
+
+    let message = `Successfully deleted ${deletedCount} dashboard(s)`;
+    if (notFoundIds.length > 0) {
+      message += `. Note: ${notFoundIds.length} dashboard(s) were not found or not accessible.`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: message,
+      data: {
+        deletedCount: deletedCount,
+        deletedIds: foundIds,
+        notFoundIds: notFoundIds,
+        remainingDashboards: remainingDashboards.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error bulk deleting dashboards:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete dashboards",
+      error: error.message,
+    });
+  }
+};
+
 // =============== FOLDER MANAGEMENT ===============
 
 exports.createFolder = async (req, res) => {
@@ -843,6 +947,58 @@ exports.getReportData = async (req, res) => {
 
 // =============== GOAL MANAGEMENT ===============
 
+// Get available goal types for entity selection
+exports.getGoalTypes = async (req, res) => {
+  try {
+    const goalTypes = {
+      Deal: [
+        {
+          type: "Added",
+          description: "Based on the number or value of new deals",
+          metrics: ["count", "value"],
+        },
+        {
+          type: "Progressed",
+          description:
+            "Based on the number or value of deals entering a certain stage",
+          metrics: ["count", "value"],
+        },
+        {
+          type: "Won",
+          description: "Based on the number or value of won deals",
+          metrics: ["count", "value"],
+        },
+      ],
+      Activity: [
+        {
+          type: "Completed",
+          description: "Based on the number of completed activities",
+          metrics: ["count"],
+        },
+      ],
+      Forecast: [
+        {
+          type: "Revenue",
+          description: "Based on forecasted revenue",
+          metrics: ["value"],
+        },
+      ],
+    };
+
+    res.status(200).json({
+      success: true,
+      data: goalTypes,
+    });
+  } catch (error) {
+    console.error("Error fetching goal types:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goal types",
+      error: error.message,
+    });
+  }
+};
+
 exports.createGoal = async (req, res) => {
   try {
     const {
@@ -852,53 +1008,86 @@ exports.createGoal = async (req, res) => {
       targetValue,
       targetType,
       period,
+      frequency,
       startDate,
       endDate,
       description,
+      assignee,
+      pipeline,
+      trackingMetric,
     } = req.body;
     const ownerId = req.adminId;
 
-    // Validate required fields
-    if (!dashboardId || !entity || !goalType || !targetValue) {
+    // Validate required fields - dashboardId is now optional
+    if (!entity || !goalType || !targetValue) {
       return res.status(400).json({
         success: false,
-        message:
-          "Dashboard ID, entity, goal type, and target value are required",
+        message: "Entity, goal type, and target value are required",
       });
     }
 
-    // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
+    // Verify dashboard ownership if dashboardId is provided
+    if (dashboardId) {
+      const dashboard = await DASHBOARD.findOne({
+        where: {
+          dashboardId,
+          ownerId,
+        },
       });
+
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: "Dashboard not found or access denied",
+        });
+      }
     }
 
     // Set default dates if not provided
     const now = new Date();
-    const defaultStartDate =
-      startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-    const defaultEndDate =
-      endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    let defaultStartDate, defaultEndDate;
+
+    // Handle different frequency types
+    if (frequency === "Monthly") {
+      defaultStartDate =
+        startDate || new Date(now.getFullYear(), now.getMonth(), 1);
+      defaultEndDate =
+        endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    } else if (frequency === "Quarterly") {
+      const quarter = Math.floor(now.getMonth() / 3);
+      defaultStartDate =
+        startDate || new Date(now.getFullYear(), quarter * 3, 1);
+      defaultEndDate =
+        endDate || new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+    } else if (frequency === "Yearly") {
+      defaultStartDate = startDate || new Date(now.getFullYear(), 0, 1);
+      defaultEndDate = endDate || new Date(now.getFullYear(), 11, 31);
+    } else {
+      // Default to monthly
+      defaultStartDate =
+        startDate || new Date(now.getFullYear(), now.getMonth(), 1);
+      defaultEndDate =
+        endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    }
+
+    // Generate goal name if not provided
+    const goalName =
+      description || `${entity} ${goalType} - ${assignee || "All"}`;
 
     const newGoal = await Goal.create({
-      dashboardId,
+      dashboardId: dashboardId || null,
       entity,
       goalType,
       targetValue,
-      targetType: targetType || "number",
-      period: period || "monthly",
+      targetType:
+        targetType || (trackingMetric === "Value" ? "currency" : "number"),
+      period: frequency || period || "Monthly",
       startDate: defaultStartDate,
       endDate: defaultEndDate,
-      description,
+      description: goalName,
+      assignee: assignee || null,
+      pipeline: pipeline || null,
+      trackingMetric: trackingMetric || "Count",
       ownerId,
     });
 
@@ -917,10 +1106,131 @@ exports.createGoal = async (req, res) => {
   }
 };
 
+// Get all goals (not tied to specific dashboard)
+exports.getAllGoals = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+
+    const goals = await Goal.findAll({
+      where: {
+        ownerId,
+        isActive: true,
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Calculate progress for each goal
+    const goalsWithProgress = await Promise.all(
+      goals.map(async (goal) => {
+        const progress = await calculateGoalProgress(goal, ownerId);
+        return {
+          ...goal.toJSON(),
+          progress,
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: goalsWithProgress,
+    });
+  } catch (error) {
+    console.error("Error fetching goals:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goals",
+      error: error.message,
+    });
+  }
+};
+
+// Add goal to dashboard
+exports.addGoalToDashboard = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const { dashboardId } = req.body;
+    const ownerId = req.adminId;
+
+    // Verify goal ownership
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    // Verify dashboard ownership
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    await goal.update({
+      dashboardId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goal added to dashboard successfully",
+      data: goal,
+    });
+  } catch (error) {
+    console.error("Error adding goal to dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add goal to dashboard",
+      error: error.message,
+    });
+  }
+};
+
 exports.getGoalsForDashboard = async (req, res) => {
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
+
+    // If no dashboardId provided, return all goals for user
+    if (!dashboardId || dashboardId === "all") {
+      const goals = await Goal.findAll({
+        where: {
+          ownerId,
+          isActive: true,
+        },
+        order: [["createdAt", "DESC"]],
+      });
+
+      // Calculate progress for each goal
+      const goalsWithProgress = await Promise.all(
+        goals.map(async (goal) => {
+          const progress = await calculateGoalProgress(goal, ownerId);
+          return {
+            ...goal.toJSON(),
+            progress,
+          };
+        })
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: goalsWithProgress,
+      });
+    }
 
     // Verify dashboard ownership
     const dashboard = await DASHBOARD.findOne({
@@ -979,9 +1289,13 @@ exports.updateGoal = async (req, res) => {
       targetValue,
       targetType,
       period,
+      frequency,
       startDate,
       endDate,
       description,
+      assignee,
+      pipeline,
+      trackingMetric,
       isActive,
     } = req.body;
     const ownerId = req.adminId;
@@ -1005,10 +1319,13 @@ exports.updateGoal = async (req, res) => {
       goalType: goalType || goal.goalType,
       targetValue: targetValue !== undefined ? targetValue : goal.targetValue,
       targetType: targetType || goal.targetType,
-      period: period || goal.period,
+      period: frequency || period || goal.period,
       startDate: startDate || goal.startDate,
       endDate: endDate || goal.endDate,
       description: description !== undefined ? description : goal.description,
+      assignee: assignee !== undefined ? assignee : goal.assignee,
+      pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
+      trackingMetric: trackingMetric || goal.trackingMetric,
       isActive: isActive !== undefined ? isActive : goal.isActive,
     });
 
@@ -1095,6 +1412,345 @@ exports.getGoalProgress = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to calculate goal progress",
+      error: error.message,
+    });
+  }
+};
+
+// Get filtered data for a specific goal
+exports.getGoalData = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    const {
+      entity,
+      goalType,
+      assignee,
+      pipeline,
+      startDate,
+      endDate,
+      trackingMetric,
+    } = goal;
+
+    // Build where clause based on goal criteria
+    const whereClause = {
+      createdAt: {
+        [Op.between]: [startDate, endDate],
+      },
+    };
+
+    // Add assignee filter if specified
+    if (assignee && assignee !== "All" && assignee !== "Company (everyone)") {
+      whereClause.masterUserID = assignee;
+    }
+    // If assignee is "Company (everyone)" or null, don't add user filter to get all data
+
+    // Add pipeline filter if specified
+    if (pipeline && entity === "Deal") {
+      whereClause.pipelineName = pipeline;
+    }
+
+    let data = [];
+    let summary = {};
+    let monthlyBreakdown = [];
+
+    if (entity === "Deal") {
+      // Get deals based on goal criteria
+      const deals = await Deal.findAll({
+        where: whereClause,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "pipelineName",
+          "pipelineStage",
+          "status",
+          "masterUserID",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+
+      // Calculate summary based on goal type
+      let filteredDeals = deals;
+      if (goalType === "Won") {
+        filteredDeals = deals.filter((deal) => deal.status === "won");
+      } else if (goalType === "Progressed") {
+        filteredDeals = deals.filter(
+          (deal) => deal.pipelineStage !== "Qualified"
+        );
+      }
+
+      data = filteredDeals.map((deal) => ({
+        id: deal.dealId,
+        title: deal.title,
+        value: parseFloat(deal.value || 0),
+        pipeline: deal.pipelineName,
+        stage: deal.pipelineStage,
+        status: deal.status,
+        owner: deal.masterUserID,
+        createdAt: deal.createdAt,
+        updatedAt: deal.updatedAt,
+      }));
+
+      // Calculate current value based on tracking metric
+      const currentValue =
+        trackingMetric === "Value"
+          ? filteredDeals.reduce(
+              (sum, deal) => sum + parseFloat(deal.value || 0),
+              0
+            )
+          : filteredDeals.length;
+
+      // Calculate summary
+      summary = {
+        totalCount: filteredDeals.length,
+        totalValue: filteredDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      // Generate monthly breakdown for Summary tab
+      const currentDate = new Date();
+      const months = [
+        "Jul 2025",
+        "Aug 2025",
+        "Sep 2025",
+        "Oct 2025",
+        "Nov 2025",
+        "Dec 2025",
+      ];
+
+      monthlyBreakdown = months.map((month, index) => {
+        const monthStart = new Date(2025, 6 + index, 1); // July = 6
+        const monthEnd = new Date(2025, 7 + index, 0);
+
+        // Filter deals for this month
+        const monthDeals = filteredDeals.filter((deal) => {
+          const dealDate = new Date(deal.createdAt);
+          return dealDate >= monthStart && dealDate <= monthEnd;
+        });
+
+        const monthResult =
+          trackingMetric === "Value"
+            ? monthDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              )
+            : monthDeals.length;
+
+        const difference = monthResult - parseFloat(goal.targetValue);
+        const percentage =
+          monthResult > 0
+            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
+            : 0;
+
+        return {
+          period: month,
+          goal: parseFloat(goal.targetValue),
+          result: monthResult,
+          difference: difference,
+          percentage: percentage,
+        };
+      });
+    } else if (entity === "Activity") {
+      const activities = await Activity.findAll({
+        where: whereClause,
+        attributes: [
+          "activityId",
+          "activityType",
+          "subject",
+          "masterUserID",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+
+      data = activities.map((activity) => ({
+        id: activity.activityId,
+        type: activity.activityType,
+        subject: activity.subject,
+        owner: activity.masterUserID,
+        createdAt: activity.createdAt,
+        updatedAt: activity.updatedAt,
+      }));
+
+      summary = {
+        totalCount: activities.length,
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: activities.length,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      // Generate monthly breakdown for activities
+      const months = [
+        "Jul 2025",
+        "Aug 2025",
+        "Sep 2025",
+        "Oct 2025",
+        "Nov 2025",
+        "Dec 2025",
+      ];
+
+      monthlyBreakdown = months.map((month, index) => {
+        const monthStart = new Date(2025, 6 + index, 1);
+        const monthEnd = new Date(2025, 7 + index, 0);
+
+        const monthActivities = activities.filter((activity) => {
+          const activityDate = new Date(activity.createdAt);
+          return activityDate >= monthStart && activityDate <= monthEnd;
+        });
+
+        const monthResult = monthActivities.length;
+        const difference = monthResult - parseFloat(goal.targetValue);
+        const percentage =
+          monthResult > 0
+            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
+            : 0;
+
+        return {
+          period: month,
+          goal: parseFloat(goal.targetValue),
+          result: monthResult,
+          difference: difference,
+          percentage: percentage,
+        };
+      });
+    } else if (entity === "Lead") {
+      const leads = await Lead.findAll({
+        where: whereClause,
+        attributes: [
+          "leadId",
+          "firstName",
+          "lastName",
+          "email",
+          "status",
+          "masterUserID",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+
+      data = leads.map((lead) => ({
+        id: lead.leadId,
+        name: `${lead.firstName} ${lead.lastName}`,
+        email: lead.email,
+        status: lead.status,
+        owner: lead.masterUserID,
+        createdAt: lead.createdAt,
+        updatedAt: lead.updatedAt,
+      }));
+
+      summary = {
+        totalCount: leads.length,
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: leads.length,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      // Generate monthly breakdown for leads
+      const months = [
+        "Jul 2025",
+        "Aug 2025",
+        "Sep 2025",
+        "Oct 2025",
+        "Nov 2025",
+        "Dec 2025",
+      ];
+
+      monthlyBreakdown = months.map((month, index) => {
+        const monthStart = new Date(2025, 6 + index, 1);
+        const monthEnd = new Date(2025, 7 + index, 0);
+
+        const monthLeads = leads.filter((lead) => {
+          const leadDate = new Date(lead.createdAt);
+          return leadDate >= monthStart && leadDate <= monthEnd;
+        });
+
+        const monthResult = monthLeads.length;
+        const difference = monthResult - parseFloat(goal.targetValue);
+        const percentage =
+          monthResult > 0
+            ? Math.round((monthResult / parseFloat(goal.targetValue)) * 100)
+            : 0;
+
+        return {
+          period: month,
+          goal: parseFloat(goal.targetValue),
+          result: monthResult,
+          difference: difference,
+          percentage: percentage,
+        };
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        goal: goal.toJSON(),
+        records: data,
+        summary: summary,
+        monthlyBreakdown: monthlyBreakdown,
+        period: {
+          startDate: startDate,
+          endDate: endDate,
+        },
+        filters: {
+          entity: entity,
+          goalType: goalType,
+          assignee: assignee,
+          pipeline: pipeline,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching goal data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goal data",
       error: error.message,
     });
   }
@@ -1318,7 +1974,16 @@ async function generateActivityReportData(type, config, dateRange, ownerId) {
 }
 
 async function calculateGoalProgress(goal, ownerId) {
-  const { entity, goalType, targetValue, startDate, endDate } = goal;
+  const {
+    entity,
+    goalType,
+    targetValue,
+    startDate,
+    endDate,
+    assignee,
+    pipeline,
+    trackingMetric,
+  } = goal;
 
   const whereClause = {
     createdAt: {
@@ -1326,8 +1991,16 @@ async function calculateGoalProgress(goal, ownerId) {
     },
   };
 
-  if (ownerId) {
+  // Add assignee filter if specified
+  if (assignee && assignee !== "All") {
+    whereClause.masterUserID = assignee;
+  } else if (ownerId) {
     whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+  }
+
+  // Add pipeline filter if specified
+  if (pipeline && entity === "Deal") {
+    whereClause.pipelineName = pipeline;
   }
 
   let currentValue = 0;
@@ -1335,25 +2008,40 @@ async function calculateGoalProgress(goal, ownerId) {
   try {
     if (entity === "Deal") {
       if (goalType === "Added") {
-        const count = await Deal.count({ where: whereClause });
-        currentValue = count;
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", { where: whereClause });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: whereClause });
+          currentValue = count;
+        }
       } else if (goalType === "Won") {
-        const count = await Deal.count({
-          where: {
-            ...whereClause,
-            status: "won",
-          },
-        });
-        currentValue = count;
+        const wonWhereClause = {
+          ...whereClause,
+          status: "won",
+        };
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", { where: wonWhereClause });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: wonWhereClause });
+          currentValue = count;
+        }
       } else if (goalType === "Progressed") {
         // Count deals that moved stages
-        const count = await Deal.count({
-          where: {
-            ...whereClause,
-            pipelineStage: { [Op.ne]: "Qualified" },
-          },
-        });
-        currentValue = count;
+        const progressedWhereClause = {
+          ...whereClause,
+          pipelineStage: { [Op.ne]: "Qualified" },
+        };
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", {
+            where: progressedWhereClause,
+          });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: progressedWhereClause });
+          currentValue = count;
+        }
       }
     } else if (entity === "Lead") {
       const count = await Lead.count({ where: whereClause });
@@ -1361,6 +2049,15 @@ async function calculateGoalProgress(goal, ownerId) {
     } else if (entity === "Activity") {
       const count = await Activity.count({ where: whereClause });
       currentValue = count;
+    } else if (entity === "Forecast") {
+      // For forecast, calculate based on deal projections
+      const result = await Deal.sum("value", {
+        where: {
+          ...whereClause,
+          status: { [Op.in]: ["open", "qualified"] },
+        },
+      });
+      currentValue = result || 0;
     }
 
     const percentage = Math.min(

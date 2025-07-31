@@ -11,7 +11,7 @@ const Goal = sequelize.define(
     },
     dashboardId: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true, // Allow null for goals not assigned to dashboard yet
       references: { model: "dashboards", key: "dashboardId" },
     },
     entity: {
@@ -48,6 +48,19 @@ const Goal = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    assignee: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    }, // User assigned to the goal
+    pipeline: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    }, // Pipeline filter for deals
+    trackingMetric: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "Count",
+    }, // "Count" or "Value"
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
