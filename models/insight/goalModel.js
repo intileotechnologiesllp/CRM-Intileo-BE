@@ -42,7 +42,7 @@ const Goal = sequelize.define(
     },
     endDate: {
       type: DataTypes.DATE,
-      allowNull: false,
+      allowNull: true, // Allow null for indefinite goals
     },
     description: {
       type: DataTypes.TEXT,
@@ -65,6 +65,14 @@ const Goal = sequelize.define(
       allowNull: false,
       defaultValue: "Count",
     }, // "Count" or "Value"
+    count: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    }, // Target count when trackingMetric is "Count"
+    value: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: true,
+    }, // Target value when trackingMetric is "Value"
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
