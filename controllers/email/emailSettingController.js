@@ -622,6 +622,12 @@ exports.fetchSyncEmails = async (req, res) => {
         const references = Array.isArray(referencesHeader)
           ? referencesHeader.join(" ") // Convert array to string
           : referencesHeader || null;
+        // Determine read/unread status from IMAP flags
+        let isRead = false;
+        if (message.attributes && Array.isArray(message.attributes.flags)) {
+          isRead = message.attributes.flags.includes("\\Seen");
+        }
+
         const emailData = {
           messageId: parsedEmail.messageId || null,
           inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
@@ -642,6 +648,7 @@ exports.fetchSyncEmails = async (req, res) => {
           body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
           folder: dbFolderName, // Use mapped folder name
           createdAt: parsedEmail.date || new Date(),
+          isRead: isRead, // Save read/unread status
         };
         // Save email to the database
         const existingEmail = await Email.findOne({
