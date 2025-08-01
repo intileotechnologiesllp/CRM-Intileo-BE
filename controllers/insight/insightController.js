@@ -4,6 +4,7 @@ const Goal = require("../../models/insight/goalModel");
 const Deal = require("../../models/deals/dealsModels");
 const Lead = require("../../models/leads/leadsModel");
 const Activity = require("../../models/activity/activityModel");
+const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
 
 // =============== DASHBOARD MANAGEMENT ===============
@@ -1196,7 +1197,7 @@ exports.createGoal = async (req, res) => {
     let assigneeDisplay = "Everyone";
     if (assignId && assignId !== "everyone") {
       // Try to fetch user name from MasterUser if assignId is present and not 'everyone'
-      const MasterUser = require("../../models/masterUserModel");
+      
       const user = await MasterUser.findOne({
         where: { masterUserID: assignId },
       });
