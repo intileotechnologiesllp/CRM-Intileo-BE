@@ -13,7 +13,7 @@ router.get(
   "/:entityType/stats",
   customFieldController.getCustomFieldsWithStats
 );
-router.get("/:entityType/groups", customFieldController.getFieldGroups);
+router.get("/:entityType/groups", verifyToken,customFieldController.getFieldGroups);
 router.get("/:entityType/default", customFieldController.getDefaultFields);
 router.get("/:entityType/system", customFieldController.getSystemFields);
 router.get("/pipeline-options", customFieldController.getPipelineOptions);
@@ -21,8 +21,8 @@ router.get(
   "/:entityType/hybrid-sections",
   customFieldController.getHybridFieldsSections
 );
-router.post("/edit/:fieldId", customFieldController.updateCustomField);
-router.post("/delete/:fieldId", customFieldController.deleteCustomField);
+router.post("/edit/:fieldId", verifyToken,customFieldController.updateCustomField);
+router.post("/delete/:fieldId", verifyToken,customFieldController.deleteCustomField);
 
 // Custom Field Value Management Routes
 router.post("/values", customFieldController.saveCustomFieldValues);
