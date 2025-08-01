@@ -1458,7 +1458,7 @@ exports.updateCustomField = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_UPDATE",
-      masterUserID,
+      null,
       customField.fieldId,
       null,
       `Custom field "${customField.fieldLabel}" updated`,
@@ -1613,7 +1613,7 @@ exports.deleteCustomField = async (req, res) => {
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "CUSTOM_FIELD_DELETION",
-      masterUserID,
+      null,
       fieldId,
       null,
       `Custom field "${customField.fieldLabel}" deleted`,
