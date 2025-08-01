@@ -613,7 +613,7 @@ exports.createCustomField = async (req, res) => {
     if (existingCustomField) {
       return res.status(409).json({
         // message: `A custom field with name "${fieldName}" already exists for ${entityType} entity type.`,
-        message:"A custom field with already exists",
+        message: "A custom field with already exists",
         details: `Field "${fieldName}" is already defined for this entity type. Please choose a different name.`,
         conflictingField: {
           fieldName: existingCustomField.fieldName,
@@ -1230,11 +1230,10 @@ exports.updateCustomField = async (req, res) => {
     qualityRules,
   } = req.body;
 
-  const masterUserID = req.adminId;
-
+  // Allow any user to update the field (remove masterUserID check)
   try {
     const customField = await CustomField.findOne({
-      where: { fieldId, masterUserID },
+      where: { fieldId },
     });
 
     if (!customField) {
@@ -1591,9 +1590,10 @@ exports.deleteCustomField = async (req, res) => {
   const { fieldId } = req.params;
   const masterUserID = req.adminId;
 
+  // Allow any user to delete the field (remove masterUserID check for field)
   try {
     const customField = await CustomField.findOne({
-      where: { fieldId, masterUserID },
+      where: { fieldId },
     });
 
     if (!customField) {
@@ -1602,7 +1602,7 @@ exports.deleteCustomField = async (req, res) => {
       });
     }
 
-    // Delete all associated values first
+    // Delete all associated values for this user's org only
     await CustomFieldValue.destroy({
       where: { fieldId, masterUserID },
     });
@@ -2090,15 +2090,14 @@ exports.getCustomFieldsWithStats = async (req, res) => {
 // Get all available field groups for an entity type
 exports.getFieldGroups = async (req, res) => {
   const { entityType } = req.params;
-  const masterUserID = req.adminId;
 
   try {
+    // Show all field groups to all users (remove masterUserID from where)
     const fieldGroups = await CustomField.findAll({
       where: {
         entityType: {
           [Op.in]: [entityType, "both"],
         },
-        masterUserID,
         isActive: true,
       },
       attributes: ["fieldGroup"],
