@@ -93,6 +93,11 @@ router.get(
   insightController.getGoalProgress
 );
 router.get("/goals/:goalId/data", verifyToken, insightController.getGoalData);
+router.get(
+  "/goals/:goalId/progressed-data",
+  verifyToken,
+  insightController.getProgressedGoalData
+);
 router.put("/goals/:goalId", verifyToken, insightController.updateGoal);
 router.delete("/goals/:goalId", verifyToken, insightController.deleteGoal);
 
