@@ -1197,7 +1197,7 @@ exports.createGoal = async (req, res) => {
     let assigneeDisplay = "Everyone";
     if (assignId && assignId !== "everyone") {
       // Try to fetch user name from MasterUser if assignId is present and not 'everyone'
-      
+
       const user = await MasterUser.findOne({
         where: { masterUserID: assignId },
       });
@@ -1279,6 +1279,7 @@ exports.createGoal = async (req, res) => {
 exports.getAllGoals = async (req, res) => {
   try {
     const ownerId = req.adminId;
+    const now = new Date();
 
     const goals = await Goal.findAll({
       where: {
@@ -1299,9 +1300,27 @@ exports.getAllGoals = async (req, res) => {
       })
     );
 
+    // Group into Active and Past using createdAt date (1 month cutoff)
+    const activeGoals = [];
+    const pastGoals = [];
+    goalsWithProgress.forEach((goal) => {
+      const createdAt = new Date(goal.createdAt);
+      // If createdAt is more than 1 month ago, show in Past
+      const oneMonthAgo = new Date(now);
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      if (createdAt < oneMonthAgo) {
+        pastGoals.push(goal);
+      } else {
+        activeGoals.push(goal);
+      }
+    });
+
     res.status(200).json({
       success: true,
-      data: goalsWithProgress,
+      data: {
+        Active: activeGoals,
+        Past: pastGoals,
+      },
     });
   } catch (error) {
     console.error("Error fetching goals:", error);
