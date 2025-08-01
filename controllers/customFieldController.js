@@ -213,10 +213,12 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         fieldLabel: "Title",
         fieldType: "text",
         dbColumn: "title",
-        isRequired: true,
+        isRequired: false,
         entityType: "deals",
         isActive: true,
         isDefault: true,
+        leadView: false,
+        dealView: true,
       },
       {
         fieldName: "ownerId",
@@ -227,13 +229,15 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "deals",
         isActive: true,
         isDefault: true,
+        leadView: true,
+        dealView: true,
       },
       {
         fieldName: "pipeline",
         fieldLabel: "Pipeline",
         fieldType: "select",
         dbColumn: "pipelineId",
-        isRequired: false,
+        isRequired: true,
         entityType: "deals",
         isActive: true,
         isDefault: true,
@@ -608,7 +612,8 @@ exports.createCustomField = async (req, res) => {
 
     if (existingCustomField) {
       return res.status(409).json({
-        message: `A custom field with name "${fieldName}" already exists for ${entityType} entity type.`,
+        // message: `A custom field with name "${fieldName}" already exists for ${entityType} entity type.`,
+        message:"A custom field with already exists",
         details: `Field "${fieldName}" is already defined for this entity type. Please choose a different name.`,
         conflictingField: {
           fieldName: existingCustomField.fieldName,
