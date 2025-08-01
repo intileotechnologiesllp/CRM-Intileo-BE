@@ -2,6 +2,7 @@ const DASHBOARD = require("../../models/insight/dashboardModel");
 const Report = require("../../models/insight/reportModel");
 const Goal = require("../../models/insight/goalModel");
 const Deal = require("../../models/deals/dealsModels");
+const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const Lead = require("../../models/leads/leadsModel");
 const Activity = require("../../models/activity/activityModel");
 const MasterUser = require("../../models/master/masterUserModel");
@@ -1082,6 +1083,7 @@ exports.createGoal = async (req, res) => {
       assignee,
       assignId,
       pipeline,
+      pipelineStage,
       trackingMetric,
       count,
       value,
@@ -1094,6 +1096,22 @@ exports.createGoal = async (req, res) => {
         success: false,
         message: "Entity and goal type are required",
       });
+    }
+
+    // Additional validation for "Progressed" goals
+    if (goalType === "Progressed" && entity === "Deal") {
+      if (!pipeline) {
+        return res.status(400).json({
+          success: false,
+          message: "Pipeline is required for 'Progressed' deal goals",
+        });
+      }
+      if (!pipelineStage) {
+        return res.status(400).json({
+          success: false,
+          message: "Pipeline stage is required for 'Progressed' deal goals",
+        });
+      }
     }
 
     // Validate target value or count/value based on tracking metric
@@ -1248,6 +1266,7 @@ exports.createGoal = async (req, res) => {
       assignee: assignee || null,
       assignId: assignId || null, // Add assignId field
       pipeline: pipeline || null,
+      pipelineStage: pipelineStage || null, // Add pipelineStage field for "Progressed" goals
       trackingMetric: trackingMetric || "Count",
       count: trackingMetric === "Count" ? count || finalTargetValue : null,
       value: trackingMetric === "Value" ? value || finalTargetValue : null,
@@ -1484,6 +1503,7 @@ exports.updateGoal = async (req, res) => {
       assignee,
       assignId,
       pipeline,
+      pipelineStage,
       trackingMetric,
       count,
       value,
@@ -1517,6 +1537,8 @@ exports.updateGoal = async (req, res) => {
       assignee: assignee !== undefined ? assignee : goal.assignee,
       assignId: assignId !== undefined ? assignId : goal.assignId,
       pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
+      pipelineStage:
+        pipelineStage !== undefined ? pipelineStage : goal.pipelineStage,
       trackingMetric: trackingMetric || goal.trackingMetric,
       count: count !== undefined ? count : goal.count,
       value: value !== undefined ? value : goal.value,
@@ -1638,6 +1660,7 @@ exports.getGoalData = async (req, res) => {
       assignee,
       assignId,
       pipeline,
+      pipelineStage,
       startDate,
       endDate,
       trackingMetric,
@@ -1891,80 +1914,288 @@ exports.getGoalData = async (req, res) => {
     let monthlyBreakdown = [];
 
     if (entity === "Deal") {
-      // Get deals based on goal criteria
-      const deals = await Deal.findAll({
-        where: whereClause,
-        attributes: [
-          "dealId",
-          "title",
-          "value",
-          "pipeline",
-          "pipelineStage",
-          "status",
-          "masterUserID",
-          "createdAt",
-          "updatedAt",
-        ],
-        order: [["createdAt", "DESC"]],
-      });
+      // Handle different goal types with specific logic
+      if (goalType === "Progressed") {
+        // Use DealStageHistory for accurate stage progression tracking
+        if (pipelineStage) {
+          // Query DealStageHistory to find deals that entered this stage during the period
+          const stageEntries = await DealStageHistory.findAll({
+            where: {
+              stageName: pipelineStage,
+              enteredAt: {
+                [Op.between]: [start, end],
+              },
+            },
+            include: [
+              {
+                model: Deal,
+                as: "Deal",
+                where: {
+                  ...(assignId && assignId !== "everyone"
+                    ? { masterUserID: assignId }
+                    : {}),
+                  ...(assignee &&
+                  assignee !== "All" &&
+                  assignee !== "Company (everyone)" &&
+                  assignee !== "everyone" &&
+                  (!assignId || assignId === "everyone")
+                    ? { masterUserID: assignee }
+                    : {}),
+                  ...(pipeline ? { pipeline: pipeline } : {}),
+                },
+                attributes: [
+                  "dealId",
+                  "title",
+                  "value",
+                  "pipeline",
+                  "pipelineStage",
+                  "status",
+                  "masterUserID",
+                  "createdAt",
+                  "updatedAt",
+                ],
+              },
+            ],
+            order: [["enteredAt", "DESC"]],
+          });
 
-      // Calculate summary based on goal type
-      let filteredDeals = deals;
-      if (goalType === "Won") {
-        filteredDeals = deals.filter((deal) => deal.status === "won");
-      } else if (goalType === "Progressed") {
-        filteredDeals = deals.filter(
-          (deal) => deal.pipelineStage !== "Qualified"
+          // Format the data for frontend with stage entry information
+          data = stageEntries.map((entry) => ({
+            id: entry.Deal.dealId,
+            title: entry.Deal.title,
+            value: parseFloat(entry.Deal.value || 0),
+            pipeline: entry.Deal.pipeline,
+            stage: entry.Deal.pipelineStage,
+            status: entry.Deal.status,
+            owner: entry.Deal.masterUserID,
+            enteredStageAt: entry.enteredAt,
+            createdAt: entry.Deal.createdAt,
+            updatedAt: entry.Deal.updatedAt,
+          }));
+
+          // Calculate current value based on tracking metric
+          const currentValue =
+            trackingMetric === "Value"
+              ? data.reduce((sum, deal) => sum + deal.value, 0)
+              : data.length;
+
+          // Calculate summary for progressed goals
+          summary = {
+            totalCount: data.length,
+            totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+            goalTarget: parseFloat(goal.targetValue),
+            trackingMetric: trackingMetric,
+            targetStage: pipelineStage,
+            progress: {
+              current: currentValue,
+              target: parseFloat(goal.targetValue),
+              percentage: Math.min(
+                100,
+                Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+              ),
+            },
+          };
+
+          // Generate monthly breakdown by stage entry date for progressed goals
+          monthlyBreakdown = generateMonthlyBreakdownForProgressed(
+            stageEntries,
+            goal,
+            trackingMetric
+          );
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "Pipeline stage is required for progressed goals",
+          });
+        }
+      } else if (goalType === "Added") {
+        // Track deals that were added (created) during the period
+        const addedDeals = await Deal.findAll({
+          where: whereClause,
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "pipelineStage",
+            "status",
+            "masterUserID",
+            "createdAt",
+            "updatedAt",
+          ],
+          order: [["createdAt", "DESC"]],
+        });
+
+        // Format the data for frontend
+        data = addedDeals.map((deal) => ({
+          id: deal.dealId,
+          title: deal.title,
+          value: parseFloat(deal.value || 0),
+          pipeline: deal.pipeline,
+          stage: deal.pipelineStage,
+          status: deal.status,
+          owner: deal.masterUserID,
+          createdAt: deal.createdAt,
+          updatedAt: deal.updatedAt,
+        }));
+
+        // Calculate current value based on tracking metric
+        const currentValue =
+          trackingMetric === "Value"
+            ? data.reduce((sum, deal) => sum + deal.value, 0)
+            : data.length;
+
+        // Calculate summary for added goals
+        summary = {
+          totalCount: data.length,
+          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        // Generate monthly breakdown for added deals
+        monthlyBreakdown = generateMonthlyBreakdown(
+          addedDeals,
+          goal,
+          trackingMetric,
+          "Deal"
+        );
+      } else if (goalType === "Won") {
+        // Get deals based on goal criteria
+        const deals = await Deal.findAll({
+          where: whereClause,
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "pipelineStage",
+            "status",
+            "masterUserID",
+            "createdAt",
+            "updatedAt",
+          ],
+          order: [["createdAt", "DESC"]],
+        });
+
+        // Filter only won deals
+        const filteredDeals = deals.filter((deal) => deal.status === "won");
+
+        data = filteredDeals.map((deal) => ({
+          id: deal.dealId,
+          title: deal.title,
+          value: parseFloat(deal.value || 0),
+          pipeline: deal.pipeline,
+          stage: deal.pipelineStage,
+          status: deal.status,
+          owner: deal.masterUserID,
+          createdAt: deal.createdAt,
+          updatedAt: deal.updatedAt,
+        }));
+
+        // Calculate current value based on tracking metric
+        const currentValue =
+          trackingMetric === "Value"
+            ? filteredDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              )
+            : filteredDeals.length;
+
+        // Calculate summary for won goals
+        summary = {
+          totalCount: filteredDeals.length,
+          totalValue: filteredDeals.reduce(
+            (sum, deal) => sum + parseFloat(deal.value || 0),
+            0
+          ),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        // Generate monthly breakdown for won deals
+        monthlyBreakdown = generateMonthlyBreakdown(
+          filteredDeals,
+          goal,
+          trackingMetric,
+          "Deal"
+        );
+      } else {
+        // Default behavior for other goal types
+        const deals = await Deal.findAll({
+          where: whereClause,
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "pipelineStage",
+            "status",
+            "masterUserID",
+            "createdAt",
+            "updatedAt",
+          ],
+          order: [["createdAt", "DESC"]],
+        });
+
+        data = deals.map((deal) => ({
+          id: deal.dealId,
+          title: deal.title,
+          value: parseFloat(deal.value || 0),
+          pipeline: deal.pipeline,
+          stage: deal.pipelineStage,
+          status: deal.status,
+          owner: deal.masterUserID,
+          createdAt: deal.createdAt,
+          updatedAt: deal.updatedAt,
+        }));
+
+        const currentValue =
+          trackingMetric === "Value"
+            ? deals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0)
+            : deals.length;
+
+        summary = {
+          totalCount: deals.length,
+          totalValue: deals.reduce(
+            (sum, deal) => sum + parseFloat(deal.value || 0),
+            0
+          ),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        monthlyBreakdown = generateMonthlyBreakdown(
+          deals,
+          goal,
+          trackingMetric,
+          "Deal"
         );
       }
-
-      data = filteredDeals.map((deal) => ({
-        id: deal.dealId,
-        title: deal.title,
-        value: parseFloat(deal.value || 0),
-        pipeline: deal.pipeline,
-        stage: deal.pipelineStage,
-        status: deal.status,
-        owner: deal.masterUserID,
-        createdAt: deal.createdAt,
-        updatedAt: deal.updatedAt,
-      }));
-
-      // Calculate current value based on tracking metric
-      const currentValue =
-        trackingMetric === "Value"
-          ? filteredDeals.reduce(
-              (sum, deal) => sum + parseFloat(deal.value || 0),
-              0
-            )
-          : filteredDeals.length;
-
-      // Calculate summary
-      summary = {
-        totalCount: filteredDeals.length,
-        totalValue: filteredDeals.reduce(
-          (sum, deal) => sum + parseFloat(deal.value || 0),
-          0
-        ),
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: currentValue,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
-
-      // Generate monthly breakdown based on goal's actual duration
-      monthlyBreakdown = generateMonthlyBreakdown(
-        filteredDeals,
-        goal,
-        trackingMetric,
-        "Deal"
-      );
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
@@ -2203,6 +2434,7 @@ exports.getGoalData = async (req, res) => {
           assignee: assignee,
           assignId: assignId,
           pipeline: pipeline,
+          pipelineStage: pipelineStage,
         },
       },
     });
@@ -2211,6 +2443,352 @@ exports.getGoalData = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch goal data",
+      error: error.message,
+    });
+  }
+};
+
+// Get progressed goal data with detailed stage tracking
+exports.getProgressedGoalData = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+    const periodFilter = req.query.periodFilter;
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    // Check if goal type is supported (Progressed or Added)
+    if (
+      (goal.goalType !== "Progressed" && goal.goalType !== "Added") ||
+      goal.entity !== "Deal"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "This endpoint is only for 'Progressed' or 'Added' deal goals",
+      });
+    }
+
+    const {
+      assignee,
+      assignId,
+      pipeline,
+      pipelineStage,
+      startDate,
+      endDate,
+      trackingMetric,
+    } = goal;
+
+    // Use the same date range logic as getGoalData
+    function getPeriodRange(filter) {
+      const now = new Date();
+      let start, end;
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      switch ((filter || "").toLowerCase()) {
+        case "yesterday":
+          start = new Date(today);
+          start.setDate(start.getDate() - 1);
+          end = new Date(today);
+          end.setDate(end.getDate() - 1);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "today":
+          start = new Date(today);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "this_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay());
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "this_month":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = new Date(
+            now.getFullYear(),
+            now.getMonth() + 1,
+            0,
+            23,
+            59,
+            59,
+            999
+          );
+          break;
+        case "goal_duration":
+        default:
+          start = startDate;
+          end = endDate || now;
+      }
+      return { start, end };
+    }
+
+    let start, end;
+    try {
+      ({ start, end } = getPeriodRange(periodFilter));
+      if (
+        !start ||
+        !end ||
+        isNaN(new Date(start).getTime()) ||
+        isNaN(new Date(end).getTime())
+      ) {
+        start = startDate;
+        end = endDate || new Date();
+      }
+    } catch (e) {
+      start = startDate;
+      end = endDate || new Date();
+    }
+
+    // Build where clause for deals based on goal type
+    const whereClause = {};
+
+    // Add assignee filter
+    if (assignId && assignId !== "everyone") {
+      whereClause.masterUserID = assignId;
+    } else if (
+      assignee &&
+      assignee !== "All" &&
+      assignee !== "Company (everyone)" &&
+      assignee !== "everyone"
+    ) {
+      whereClause.masterUserID = assignee;
+    }
+
+    // Add pipeline filter
+    if (pipeline) {
+      whereClause.pipeline = pipeline;
+    }
+
+    let data = [];
+    let summary = {};
+    let monthlyBreakdown = [];
+
+    // Handle different goal types
+    if (goal.goalType === "Progressed") {
+      // Track deals that entered the specific pipeline stage during the period
+      if (pipelineStage) {
+        // Query DealStageHistory to find deals that entered this stage during the period
+        const stageEntries = await DealStageHistory.findAll({
+          where: {
+            stageName: pipelineStage,
+            enteredAt: {
+              [Op.between]: [start, end],
+            },
+          },
+          include: [
+            {
+              model: Deal,
+              as: "Deal",
+              where: whereClause,
+              attributes: [
+                "dealId",
+                "title",
+                "value",
+                "pipeline",
+                "pipelineStage",
+                "status",
+                "masterUserID",
+                "createdAt",
+                "updatedAt",
+              ],
+            },
+          ],
+          order: [["enteredAt", "DESC"]],
+        });
+
+        // Format the data for frontend
+        data = stageEntries.map((entry) => ({
+          id: entry.Deal.dealId,
+          title: entry.Deal.title,
+          value: parseFloat(entry.Deal.value || 0),
+          pipeline: entry.Deal.pipeline,
+          stage: entry.Deal.pipelineStage,
+          status: entry.Deal.status,
+          owner: entry.Deal.masterUserID,
+          enteredStageAt: entry.enteredAt,
+          createdAt: entry.Deal.createdAt,
+          updatedAt: entry.Deal.updatedAt,
+        }));
+
+        // Calculate current value based on tracking metric
+        const currentValue =
+          trackingMetric === "Value"
+            ? data.reduce((sum, deal) => sum + deal.value, 0)
+            : data.length;
+
+        // Calculate summary
+        summary = {
+          totalCount: data.length,
+          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          targetStage: pipelineStage,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        // Generate monthly breakdown by stage entry date
+        monthlyBreakdown = generateMonthlyBreakdownForProgressed(
+          stageEntries,
+          goal,
+          trackingMetric
+        );
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Pipeline stage is required for progressed goals",
+        });
+      }
+    } else if (goal.goalType === "Added") {
+      // Track deals that were added (created) during the period
+      const addedWhereClause = {
+        ...whereClause,
+        createdAt: {
+          [Op.between]: [start, end],
+        },
+      };
+
+      // Get all deals that were added during the period
+      const addedDeals = await Deal.findAll({
+        where: addedWhereClause,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "pipeline",
+          "pipelineStage",
+          "status",
+          "masterUserID",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+
+      // Format the data for frontend
+      data = addedDeals.map((deal) => ({
+        id: deal.dealId,
+        title: deal.title,
+        value: parseFloat(deal.value || 0),
+        pipeline: deal.pipeline,
+        stage: deal.pipelineStage,
+        status: deal.status,
+        owner: deal.masterUserID,
+        createdAt: deal.createdAt,
+        updatedAt: deal.updatedAt,
+      }));
+
+      // Calculate current value based on tracking metric
+      const currentValue =
+        trackingMetric === "Value"
+          ? data.reduce((sum, deal) => sum + deal.value, 0)
+          : data.length;
+
+      // Calculate summary
+      summary = {
+        totalCount: data.length,
+        totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      // Generate monthly breakdown for added deals
+      monthlyBreakdown = generateMonthlyBreakdown(
+        addedDeals,
+        goal,
+        trackingMetric,
+        "Deal"
+      );
+    }
+
+    // Enhanced duration info
+    const nowTime = new Date();
+    const isIndefinite = !endDate || endDate === null;
+    const goalStartDate = new Date(startDate);
+    const goalEndDate = endDate ? new Date(endDate) : null;
+
+    const durationInfo = {
+      startDate: startDate,
+      endDate: endDate,
+      isIndefinite: isIndefinite,
+      frequency: goal.period || "Monthly",
+      isActive:
+        nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+      timeRemaining: isIndefinite
+        ? null
+        : Math.max(
+            0,
+            Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+          ),
+      timeElapsed: Math.max(
+        0,
+        Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+      ),
+      status: isIndefinite
+        ? "ongoing"
+        : nowTime <= goalEndDate
+        ? "active"
+        : "expired",
+      trackingPeriod: isIndefinite
+        ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+        : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        goal: goal.toJSON(),
+        records: data,
+        summary: summary,
+        monthlyBreakdown: monthlyBreakdown,
+        period: {
+          startDate: start,
+          endDate: end,
+        },
+        duration: durationInfo,
+        filters: {
+          entity: goal.entity,
+          goalType: goal.goalType,
+          assignee: assignee,
+          assignId: assignId,
+          pipeline: pipeline,
+          pipelineStage: pipelineStage,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching progressed goal data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch progressed goal data",
       error: error.message,
     });
   }
@@ -2443,6 +3021,7 @@ async function calculateGoalProgress(goal, ownerId) {
     assignee,
     assignId,
     pipeline,
+    pipelineStage,
     trackingMetric,
   } = goal;
 
@@ -2504,11 +3083,16 @@ async function calculateGoalProgress(goal, ownerId) {
           currentValue = count;
         }
       } else if (goalType === "Progressed") {
-        // Count deals that moved stages
-        const progressedWhereClause = {
-          ...whereClause,
-          pipelineStage: { [Op.ne]: "Qualified" },
-        };
+        // Count deals that moved to specific stage or progressed beyond qualified
+        let progressedWhereClause = { ...whereClause };
+        if (pipelineStage) {
+          // Track deals entering specific pipeline stage
+          progressedWhereClause.pipelineStage = pipelineStage;
+        } else {
+          // Fallback: deals that progressed beyond "Qualified"
+          progressedWhereClause.pipelineStage = { [Op.ne]: "Qualified" };
+        }
+
         if (trackingMetric === "Value") {
           const result = await Deal.sum("value", {
             where: progressedWhereClause,
@@ -2727,4 +3311,66 @@ function calculateTargetPerPeriod(totalTarget, frequency, totalPeriods) {
   }
 
   return target; // Default case
+}
+
+// Generate monthly breakdown for progressed goals based on stage entry dates
+function generateMonthlyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const monthlyData = new Map();
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const monthKey = `${entryDate.getFullYear()}-${String(
+      entryDate.getMonth() + 1
+    ).padStart(2, "0")}`;
+    const monthLabel = entryDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+    });
+
+    if (!monthlyData.has(monthKey)) {
+      monthlyData.set(monthKey, {
+        period: monthLabel,
+        label: monthLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const monthData = monthlyData.get(monthKey);
+    monthData.count += 1;
+    monthData.value += parseFloat(entry.Deal?.value || 0);
+    monthData.deals.push(entry);
+  });
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(monthlyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([monthKey, data]) => {
+      const goalTarget = parseFloat(goal.targetValue);
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const goalProgress =
+        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
+
+      return {
+        period: data.period,
+        label: data.label,
+        goalTarget: goalTarget,
+        result: result,
+        difference: difference,
+        goalProgress: goalProgress,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
 }

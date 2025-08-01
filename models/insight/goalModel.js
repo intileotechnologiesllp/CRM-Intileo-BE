@@ -60,6 +60,10 @@ const Goal = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     }, // Pipeline filter for deals
+    pipelineStage: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    }, // Pipeline stage for "Progressed" goals - tracks deals entering this stage
     trackingMetric: {
       type: DataTypes.STRING,
       allowNull: false,
