@@ -1192,9 +1192,38 @@ exports.createGoal = async (req, res) => {
       // Note: For indefinite goals, we track progress from start date to current date
     }
 
-    // Generate goal name if not provided
-    const goalName =
-      description || `${entity} ${goalType} - ${assignee || "All"}`;
+    // Determine display name for assignee
+    let assigneeDisplay = "Everyone";
+    if (assignId && assignId !== "everyone") {
+      // Try to fetch user name from MasterUser if assignId is present and not 'everyone'
+      const MasterUser = require("../../models/masterUserModel");
+      const user = await MasterUser.findOne({
+        where: { masterUserID: assignId },
+      });
+      if (user && user.name) {
+        assigneeDisplay = user.name;
+      } else if (assignee && assignee !== "All" && assignee !== "everyone") {
+        assigneeDisplay = assignee;
+      }
+    } else if (assignee && assignee !== "All" && assignee !== "everyone") {
+      assigneeDisplay = assignee;
+    }
+
+    // Build goal name for UI as in screenshot
+    let goalName = description;
+    if (!goalName) {
+      if (entity === "Deal" && goalType === "Added") {
+        goalName = `Deals added ${assigneeDisplay}`;
+      } else if (entity === "Deal" && goalType === "Won") {
+        goalName = `Deals won ${assigneeDisplay}`;
+      } else if (entity === "Deal" && goalType === "Progressed") {
+        goalName = `Deals progressed ${assigneeDisplay}`;
+      } else if (entity === "Activity" && goalType === "Completed") {
+        goalName = `Activities completed ${assigneeDisplay}`;
+      } else {
+        goalName = `${entity} ${goalType} ${assigneeDisplay}`;
+      }
+    }
 
     // Determine target value based on tracking metric
     let finalTargetValue = targetValue;
