@@ -1793,7 +1793,24 @@ exports.getGoalData = async (req, res) => {
     }
 
     // Build where clause based on goal criteria and period filter
-    const { start, end } = getPeriodRange(periodFilter);
+    let start, end;
+    try {
+      ({ start, end } = getPeriodRange(periodFilter));
+      // If start or end is invalid, fallback to goal duration
+      if (
+        !start ||
+        !end ||
+        isNaN(new Date(start).getTime()) ||
+        isNaN(new Date(end).getTime())
+      ) {
+        start = startDate;
+        end = endDate || new Date();
+      }
+    } catch (e) {
+      // Fallback to goal duration if getPeriodRange fails
+      start = startDate;
+      end = endDate || new Date();
+    }
     const whereClause = {
       createdAt: {
         [Op.between]: [start, end],
