@@ -925,6 +925,15 @@ exports.fetchInboxEmails = async (req, res) => {
                 ? referencesHeader.join(" ")
                 : referencesHeader || null;
 
+              // Determine read/unread status from IMAP flags
+              let isRead = false;
+              if (
+                message.attributes &&
+                Array.isArray(message.attributes.flags)
+              ) {
+                isRead = message.attributes.flags.includes("\\Seen");
+              }
+
               const emailData = {
                 messageId: parsedEmail.messageId || null,
                 inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
@@ -951,6 +960,7 @@ exports.fetchInboxEmails = async (req, res) => {
                 ),
                 folder: folderType,
                 createdAt: parsedEmail.date || new Date(),
+                isRead: isRead, // Save read/unread status
               };
 
               // Check if email already exists
@@ -1279,8 +1289,17 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     // Get the most recent email
     const recentMessage = messages[messages.length - 1];
     const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
-
     const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+    // Determine read/unread status from IMAP flags
+    // If the message has the "\Seen" flag, it is read; otherwise, unread
+    let isRead = false;
+    if (
+      recentMessage.attributes &&
+      Array.isArray(recentMessage.attributes.flags)
+    ) {
+      isRead = recentMessage.attributes.flags.includes("\\Seen");
+    }
 
     if (!rawBody) {
       console.log("No body found for the most recent email.");
@@ -1345,6 +1364,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       folder: "inbox", // Add folder field
       // threadId,
       createdAt: parsedEmail.date || new Date(),
+      isRead: isRead, // Save read/unread status
     };
 
     console.log(`Processing recent email: ${emailData.messageId}`);
