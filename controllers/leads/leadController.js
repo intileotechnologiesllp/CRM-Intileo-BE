@@ -2928,38 +2928,36 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
     let where = {};
     let users = [];
 
-    if (req.role === "admin") {
-      // Admin can see all users (including other admins if needed for assignment)
-      where = {
-        // Remove the admin restriction if admins need to assign to other admins
-        // userType: { [Op.ne]: "admin" }
-      };
-
-      // Search by name (case-insensitive)
+    // If userType is 'all', fetch all users regardless of role
+    if (userType === "all") {
       if (search) {
         where.name = { [Op.like]: `%${search}%` };
       }
-
-      // Optional: filter by userType
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "admin") {
+      // Admin can see all users (including other admins if needed for assignment)
+      where = {
+        // userType: { [Op.ne]: "admin" }
+      };
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
       if (userType) {
         where.userType = userType;
       }
-
       users = await MasterUser.findAll({
         where,
         attributes: ["masterUserID", "name", "userType", "email"],
         order: [["name", "ASC"]],
       });
     } else if (req.role === "master") {
-      // Master users can see general users and themselves
       where = {
-        [Op.or]: [
-          { userType: "general" },
-          { masterUserID: req.adminId }, // Include themselves
-        ],
+        [Op.or]: [{ userType: "general" }, { masterUserID: req.adminId }],
       };
-
-      // Search by name (case-insensitive)
       if (search) {
         where[Op.and] = [
           { [Op.or]: where[Op.or] },
@@ -2967,42 +2965,34 @@ exports.getNonAdminMasterUserNames = async (req, res) => {
         ];
         delete where[Op.or];
       }
-
-      // Optional: filter by userType (but respect the role restrictions)
       if (userType && (userType === "general" || userType === "master")) {
         if (userType === "general") {
           where = { userType: "general" };
         } else {
-          where = { masterUserID: req.adminId }; // Only themselves if filtering by master
+          where = { masterUserID: req.adminId };
         }
-
         if (search) {
           where.name = { [Op.like]: `%${search}%` };
         }
       }
-
       users = await MasterUser.findAll({
         where,
         attributes: ["masterUserID", "name", "userType", "email"],
         order: [["name", "ASC"]],
       });
     } else if (req.role === "general") {
-      // General users can only see themselves
       where = {
         masterUserID: req.adminId,
       };
-
       if (search) {
         where.name = { [Op.like]: `%${search}%` };
       }
-
       users = await MasterUser.findAll({
         where,
         attributes: ["masterUserID", "name", "userType", "email"],
         order: [["name", "ASC"]],
       });
     } else {
-      // Invalid role - deny access
       await logAuditTrail(
         PROGRAMS.LEAD_MANAGEMENT,
         "MASTER_USER_FETCH",
