@@ -1092,16 +1092,6 @@ exports.createGoal = async (req, res) => {
     } = req.body;
     const ownerId = req.adminId;
 
-    // Log Activity goal creation flow
-    if (entity === "Activity") {
-      console.log("=== ACTIVITY GOAL CREATION FLOW ===");
-      console.log("Step 1: Request received");
-      console.log("Request Body:", JSON.stringify(req.body, null, 2));
-      console.log("Admin ID:", ownerId);
-      console.log("Timestamp:", new Date().toISOString());
-      console.log("========================================");
-    }
-
     // Validate required fields - dashboardId is now optional
     if (!entity || !goalType) {
       return res.status(400).json({
@@ -2226,31 +2216,24 @@ exports.getGoalData = async (req, res) => {
           const activityTypes = activityTypeFilter
             .split(",")
             .map((type) => type.trim());
-          activityWhereClause.activityType = {
+          activityWhereClause.type = {
             [Op.in]: activityTypes,
           };
         } else {
           // Single activity type
-          activityWhereClause.activityType = activityTypeFilter;
+          activityWhereClause.type = activityTypeFilter;
         }
       }
 
-      // Add pipeline filter if specified (separate from activity type)
-      if (
-        pipelineFilter &&
-        pipelineFilter !== "All pipelines" &&
-        pipelineFilter !== "all"
-      ) {
-        activityWhereClause.pipeline = pipelineFilter;
-      }
+      // Note: Pipeline field doesn't exist in Activity model - removing pipeline filter
+      // Activities are not associated with pipelines in the current schema
 
       const activities = await Activity.findAll({
         where: activityWhereClause,
         attributes: [
           "activityId",
-          "activityType",
+          "type", // Use 'type' instead of 'activityType'
           "subject",
-          "pipeline",
           "masterUserID",
           "createdAt",
           "updatedAt",
@@ -2260,9 +2243,8 @@ exports.getGoalData = async (req, res) => {
 
       data = activities.map((activity) => ({
         id: activity.activityId,
-        type: activity.activityType,
+        type: activity.type, // Use 'type' instead of 'activityType'
         subject: activity.subject,
-        pipeline: activity.pipeline,
         owner: activity.masterUserID,
         createdAt: activity.createdAt,
         updatedAt: activity.updatedAt,
@@ -2273,7 +2255,6 @@ exports.getGoalData = async (req, res) => {
         goalTarget: parseFloat(goal.targetValue),
         trackingMetric: trackingMetric,
         activityTypeFilter: activityTypeFilter, // Include filter info in response
-        pipelineFilter: pipelineFilter, // Include pipeline filter info
         progress: {
           current: activities.length,
           target: parseFloat(goal.targetValue),
@@ -2462,7 +2443,7 @@ exports.getGoalData = async (req, res) => {
           goalType: goalType,
           assignee: assignee,
           assignId: assignId,
-          pipeline: pipeline, // Show pipeline for all entities
+          pipeline: entity === "Deal" ? pipeline : null, // Only show pipeline for Deal goals (Activities don't have pipelines)
           pipelineStage: pipelineStage,
           activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
         },
