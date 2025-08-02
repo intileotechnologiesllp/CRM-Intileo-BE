@@ -1039,6 +1039,11 @@ exports.getGoalTypes = async (req, res) => {
       ],
       Activity: [
         {
+          type: "Added",
+          description: "Based on the number of activities that were created",
+          metrics: ["count"],
+        },
+        {
           type: "Completed",
           description: "Based on the number of completed activities",
           metrics: ["count"],
@@ -2225,6 +2230,15 @@ exports.getGoalData = async (req, res) => {
         }
       }
 
+      // Handle goalType-specific filtering
+      if (goalType === "Completed") {
+        // For completed activities, filter by completion status
+        activityWhereClause.isDone = true; // Use 'isDone' field for completion status
+      } else if (goalType === "Added") {
+        // For added activities, no additional filter needed - count all activities in date range
+        // The date range filtering is already handled by whereClause
+      }
+
       // Add pipeline filter by checking linked deals
       // Activities must be linked to deals in the specified pipeline
       let includeClause = [];
@@ -2258,6 +2272,7 @@ exports.getGoalData = async (req, res) => {
           "type", // Use 'type' instead of 'activityType'
           "subject",
           "dealId", // Include dealId to show linked deal
+          "isDone", // Include completion status
           "masterUserID",
           "createdAt",
           "updatedAt",
@@ -2272,6 +2287,7 @@ exports.getGoalData = async (req, res) => {
         dealId: activity.dealId,
         dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
         pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
+        isDone: activity.isDone, // Include completion status
         owner: activity.masterUserID,
         createdAt: activity.createdAt,
         updatedAt: activity.updatedAt,
@@ -2283,14 +2299,15 @@ exports.getGoalData = async (req, res) => {
         trackingMetric: trackingMetric,
         activityTypeFilter: activityTypeFilter, // Include filter info in response
         pipelineFilter: pipelineFilter, // Include pipeline filter info
+        goalType: goalType, // Include goal type in response
         filterDescription:
           pipelineFilter &&
           pipelineFilter !== "all" &&
           pipelineFilter !== "All pipelines"
-            ? `Activities of type "${
+            ? `${goalType} activities of type "${
                 activityTypeFilter || "any"
               }" linked to deals in "${pipelineFilter}" pipeline`
-            : `Activities of type "${activityTypeFilter || "any"}"${
+            : `${goalType} activities of type "${activityTypeFilter || "any"}"${
                 pipelineFilter ? " (any pipeline)" : ""
               }`,
         progress: {
@@ -2303,13 +2320,34 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate monthly breakdown based on goal's actual duration
-      monthlyBreakdown = generateMonthlyBreakdown(
+      // Generate weekly breakdown for Activity goals (not monthly)
+      monthlyBreakdown = generateWeeklyBreakdown(
         activities,
         goal,
         trackingMetric,
         "Activity"
       );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+        summary.periodSummary = monthlyBreakdown.map((period) => {
+          // period.label: e.g. "W31 2025" for weekly breakdown
+          // period.goalTarget: goal for this period
+          // period.result: actual value for this period
+          const goal = period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goal;
+          const goalProgress =
+            goal > 0 ? `${Math.round((result / goal) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
     } else if (entity === "Lead") {
       const leads = await Lead.findAll({
         where: whereClause,
@@ -3422,4 +3460,122 @@ function generateMonthlyBreakdownForProgressed(
     });
 
   return breakdown;
+}
+
+// Generate weekly breakdown specifically for Activity goals
+function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
+  const { startDate, endDate, period, targetValue } = goal;
+  const currentDate = new Date();
+  const isIndefinite = !endDate || endDate === null;
+
+  // Calculate effective end date for breakdown generation
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(endDate);
+  const goalStartDate = new Date(startDate);
+
+  // Calculate weekly target based on frequency
+  let weeklyTarget = parseFloat(targetValue);
+  if (period === "Monthly") {
+    weeklyTarget = parseFloat(targetValue) / 4.33; // Approximate weeks per month
+  } else if (period === "Quarterly") {
+    weeklyTarget = parseFloat(targetValue) / 13; // Approximate weeks per quarter
+  } else if (period === "Yearly") {
+    weeklyTarget = parseFloat(targetValue) / 52; // Weeks per year
+  }
+
+  const weeklyBreakdown = [];
+
+  // Helper function to get week number
+  function getWeekNumber(date) {
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    );
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  }
+
+  // Helper function to get start of week (Monday)
+  function getStartOfWeek(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+    return new Date(d.setDate(diff));
+  }
+
+  // Helper function to get end of week (Sunday)
+  function getEndOfWeek(date) {
+    const startOfWeek = getStartOfWeek(date);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+    return endOfWeek;
+  }
+
+  // Start from the week containing the goal start date
+  let currentWeekStart = getStartOfWeek(goalStartDate);
+
+  while (currentWeekStart <= effectiveEndDate) {
+    const weekStart = new Date(currentWeekStart);
+    const weekEnd = getEndOfWeek(currentWeekStart);
+
+    // Adjust first week to start from goal start date
+    if (currentWeekStart <= goalStartDate && weekEnd >= goalStartDate) {
+      weekStart.setTime(goalStartDate.getTime());
+    }
+
+    // Adjust last week to end at goal end date (if not indefinite)
+    if (!isIndefinite && weekEnd >= new Date(endDate)) {
+      weekEnd.setTime(new Date(endDate).getTime());
+    }
+
+    // Don't process weeks that are entirely in the future beyond effective end date
+    if (weekStart > effectiveEndDate) {
+      break;
+    }
+
+    // Filter records for this week
+    const weekRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= weekStart && recordDate <= weekEnd;
+    });
+
+    // Calculate result (Activity goals are always count-based)
+    const weekResult = weekRecords.length;
+
+    // Calculate progress metrics
+    const difference = weekResult - weeklyTarget;
+    const percentage =
+      weekResult > 0 ? Math.round((weekResult / weeklyTarget) * 100) : 0;
+
+    // Format period display (W31 2025 format)
+    const weekNumber = getWeekNumber(currentWeekStart);
+    const year = currentWeekStart.getFullYear();
+    const periodDisplay = `W${weekNumber} ${year}`;
+
+    // Check if this is the current week
+    const currentWeekStart_check = getStartOfWeek(currentDate);
+    const isCurrentWeek =
+      currentWeekStart.getTime() === currentWeekStart_check.getTime();
+
+    weeklyBreakdown.push({
+      period: periodDisplay,
+      goal: Math.round(weeklyTarget),
+      result: weekResult,
+      difference: difference,
+      percentage: percentage,
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+      recordCount: weekRecords.length,
+      isCurrentWeek: isCurrentWeek,
+      isFutureWeek: currentWeekStart > currentDate,
+      weekNumber: weekNumber,
+      year: year,
+    });
+
+    // Move to next week
+    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+  }
+
+  return weeklyBreakdown;
 }
