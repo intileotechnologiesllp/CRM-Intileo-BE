@@ -2235,7 +2235,6 @@ exports.getGoalData = async (req, res) => {
       ) {
         includeClause.push({
           model: Deal,
-          as: "deal",
           where: {
             pipeline: pipelineFilter,
           },
@@ -2246,7 +2245,6 @@ exports.getGoalData = async (req, res) => {
         // If no pipeline filter, still include deal info but make it optional
         includeClause.push({
           model: Deal,
-          as: "deal",
           required: false, // LEFT JOIN - include activities even if not linked to deals
           attributes: ["dealId", "pipeline", "title"],
         });
@@ -2272,8 +2270,8 @@ exports.getGoalData = async (req, res) => {
         type: activity.type, // Use 'type' instead of 'activityType'
         subject: activity.subject,
         dealId: activity.dealId,
-        dealTitle: activity.deal ? activity.deal.title : null, // Include linked deal title
-        pipeline: activity.deal ? activity.deal.pipeline : null, // Include pipeline from linked deal
+        dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
+        pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
         owner: activity.masterUserID,
         createdAt: activity.createdAt,
         updatedAt: activity.updatedAt,
