@@ -1928,7 +1928,19 @@ exports.getGoalData = async (req, res) => {
 
     // Add pipeline filter if specified
     if (pipeline && entity === "Deal") {
-      whereClause.pipeline = pipeline;
+      if (pipeline.includes(",")) {
+        // Multiple pipelines (comma-separated)
+        const pipelines = pipeline
+          .split(",")
+          .map((p) => p.trim())
+          .filter((p) => p !== "");
+        whereClause.pipeline = {
+          [Op.in]: pipelines,
+        };
+      } else {
+        // Single pipeline
+        whereClause.pipeline = pipeline;
+      }
     }
 
     let data = [];
@@ -1963,7 +1975,18 @@ exports.getGoalData = async (req, res) => {
                   (!assignId || assignId === "everyone")
                     ? { masterUserID: assignee }
                     : {}),
-                  ...(pipeline ? { pipeline: pipeline } : {}),
+                  ...(pipeline
+                    ? pipeline.includes(",")
+                      ? {
+                          pipeline: {
+                            [Op.in]: pipeline
+                              .split(",")
+                              .map((p) => p.trim())
+                              .filter((p) => p !== ""),
+                          },
+                        }
+                      : { pipeline: pipeline }
+                    : {}),
                 },
                 attributes: [
                   "dealId",
@@ -2018,12 +2041,19 @@ exports.getGoalData = async (req, res) => {
             },
           };
 
-          // Generate monthly breakdown by stage entry date
-          monthlyBreakdown = generateMonthlyBreakdownForProgressed(
-            stageEntries,
-            goal,
-            trackingMetric
-          );
+          // Generate breakdown by stage entry date (weekly or monthly based on period)
+          monthlyBreakdown =
+            goal.period === "Weekly"
+              ? generateWeeklyBreakdownForProgressed(
+                  stageEntries,
+                  goal,
+                  trackingMetric
+                )
+              : generateMonthlyBreakdownForProgressed(
+                  stageEntries,
+                  goal,
+                  trackingMetric
+                );
         } else {
           return res.status(400).json({
             success: false,
@@ -2076,12 +2106,15 @@ exports.getGoalData = async (req, res) => {
             ),
           },
         };
-        monthlyBreakdown = generateMonthlyBreakdown(
-          addedDeals,
-          goal,
-          trackingMetric,
-          "Deal"
-        );
+        monthlyBreakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(addedDeals, goal, trackingMetric, "Deal")
+            : generateMonthlyBreakdown(
+                addedDeals,
+                goal,
+                trackingMetric,
+                "Deal"
+              );
       } else if (goalType === "Won") {
         // Efficiently get only won deals in the period, applying all filters
         const wonWhereClause = {
@@ -2135,12 +2168,10 @@ exports.getGoalData = async (req, res) => {
             ),
           },
         };
-        monthlyBreakdown = generateMonthlyBreakdown(
-          wonDeals,
-          goal,
-          trackingMetric,
-          "Deal"
-        );
+        monthlyBreakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(wonDeals, goal, trackingMetric, "Deal")
+            : generateMonthlyBreakdown(wonDeals, goal, trackingMetric, "Deal");
       } else {
         data = deals.map((deal) => ({
           id: deal.dealId,
@@ -2177,29 +2208,26 @@ exports.getGoalData = async (req, res) => {
           },
         };
 
-        monthlyBreakdown = generateMonthlyBreakdown(
-          wonDeals,
-          goal,
-          trackingMetric,
-          "Deal"
-        );
+        monthlyBreakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(wonDeals, goal, trackingMetric, "Deal")
+            : generateMonthlyBreakdown(wonDeals, goal, trackingMetric, "Deal");
       }
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
         summary.periodSummary = monthlyBreakdown.map((period) => {
-          // period.label: e.g. "Jul 2025" or similar
-          // period.goalTarget: goal for this period
+          // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+          // period.label: e.g. "Jul 2025" or "W31 2025" based on breakdown type
           // period.result: actual value for this period
-          // If your monthlyBreakdown uses different keys, adjust accordingly
-          const goal = period.goalTarget || 0;
+          const goalValue = period.goal || period.goalTarget || 0;
           const result = period.result || 0;
-          const difference = result - goal;
+          const difference = result - goalValue;
           const goalProgress =
-            goal > 0 ? `${Math.round((result / goal) * 100)}%` : "0%";
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
           return {
             period: period.label || period.period || "",
-            goal,
+            goal: goalValue,
             result,
             difference,
             goalProgress,
@@ -2240,19 +2268,33 @@ exports.getGoalData = async (req, res) => {
       }
 
       // Add pipeline filter by checking linked deals
-      // Activities must be linked to deals in the specified pipeline
+      // Activities must be linked to deals in the specified pipeline(s)
       let includeClause = [];
       if (
         pipelineFilter &&
         pipelineFilter !== "All pipelines" &&
         pipelineFilter !== "all"
       ) {
+        let pipelineWhereClause = {};
+
+        if (pipelineFilter.includes(",")) {
+          // Multiple pipelines (comma-separated)
+          const pipelines = pipelineFilter
+            .split(",")
+            .map((pipeline) => pipeline.trim())
+            .filter((pipeline) => pipeline !== "");
+          pipelineWhereClause.pipeline = {
+            [Op.in]: pipelines,
+          };
+        } else {
+          // Single pipeline
+          pipelineWhereClause.pipeline = pipelineFilter;
+        }
+
         includeClause.push({
           model: Deal,
-          where: {
-            pipeline: pipelineFilter,
-          },
-          required: true, // INNER JOIN - only activities linked to deals in this pipeline
+          where: pipelineWhereClause,
+          required: true, // INNER JOIN - only activities linked to deals in these pipelines
           attributes: ["dealId", "pipeline", "title"], // Include deal info in response
         });
       } else {
@@ -2306,7 +2348,14 @@ exports.getGoalData = async (req, res) => {
           pipelineFilter !== "All pipelines"
             ? `${goalType} activities of type "${
                 activityTypeFilter || "any"
-              }" linked to deals in "${pipelineFilter}" pipeline`
+              }" linked to deals in "${
+                pipelineFilter.includes(",")
+                  ? pipelineFilter
+                      .split(",")
+                      .map((p) => p.trim())
+                      .join(", ") + " pipelines"
+                  : pipelineFilter + " pipeline"
+              }"`
             : `${goalType} activities of type "${activityTypeFilter || "any"}"${
                 pipelineFilter ? " (any pipeline)" : ""
               }`,
@@ -2320,28 +2369,36 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate weekly breakdown for Activity goals (not monthly)
-      monthlyBreakdown = generateWeeklyBreakdown(
-        activities,
-        goal,
-        trackingMetric,
-        "Activity"
-      );
+      // Generate breakdown for Activity goals based on period setting
+      monthlyBreakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(
+              activities,
+              goal,
+              trackingMetric,
+              "Activity"
+            )
+          : generateMonthlyBreakdown(
+              activities,
+              goal,
+              trackingMetric,
+              "Activity"
+            );
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
         summary.periodSummary = monthlyBreakdown.map((period) => {
-          // period.label: e.g. "W31 2025" for weekly breakdown
-          // period.goal: goal for this period (from weekly breakdown)
+          // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+          // period.label: e.g. "W31 2025" for weekly or "Jul 2025" for monthly
           // period.result: actual value for this period
-          const goal = period.goal || 0;
+          const goalValue = period.goal || period.goalTarget || 0;
           const result = period.result || 0;
-          const difference = result - goal;
+          const difference = result - goalValue;
           const goalProgress =
-            goal > 0 ? `${Math.round((result / goal) * 100)}%` : "0%";
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
           return {
             period: period.label || period.period || "",
-            goal,
+            goal: goalValue,
             result,
             difference,
             goalProgress,
@@ -2388,13 +2445,11 @@ exports.getGoalData = async (req, res) => {
         },
       };
 
-      // Generate monthly breakdown based on goal's actual duration
-      monthlyBreakdown = generateMonthlyBreakdown(
-        leads,
-        goal,
-        trackingMetric,
-        "Lead"
-      );
+      // Generate breakdown based on goal's period setting
+      monthlyBreakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(leads, goal, trackingMetric, "Lead")
+          : generateMonthlyBreakdown(leads, goal, trackingMetric, "Lead");
     }
 
     // Calculate comprehensive duration information
@@ -2657,7 +2712,19 @@ exports.getProgressedGoalData = async (req, res) => {
 
     // Add pipeline filter
     if (pipeline) {
-      whereClause.pipeline = pipeline;
+      if (pipeline.includes(",")) {
+        // Multiple pipelines (comma-separated)
+        const pipelines = pipeline
+          .split(",")
+          .map((p) => p.trim())
+          .filter((p) => p !== "");
+        whereClause.pipeline = {
+          [Op.in]: pipelines,
+        };
+      } else {
+        // Single pipeline
+        whereClause.pipeline = pipeline;
+      }
     }
 
     let data = [];
@@ -3142,7 +3209,19 @@ async function calculateGoalProgress(goal, ownerId) {
 
   // Add pipeline filter if specified
   if (pipeline && entity === "Deal") {
-    whereClause.pipeline = pipeline;
+    if (pipeline.includes(",")) {
+      // Multiple pipelines (comma-separated)
+      const pipelines = pipeline
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      whereClause.pipeline = {
+        [Op.in]: pipelines,
+      };
+    } else {
+      // Single pipeline
+      whereClause.pipeline = pipeline;
+    }
   }
 
   let currentValue = 0;
@@ -3462,6 +3541,87 @@ function generateMonthlyBreakdownForProgressed(
   return breakdown;
 }
 
+// Generate weekly breakdown for progressed goals based on stage entry dates
+function generateWeeklyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const weeklyData = new Map();
+
+  // Helper function to get week number
+  function getWeekNumber(date) {
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    );
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  }
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const weekNumber = getWeekNumber(entryDate);
+    const year = entryDate.getFullYear();
+    const weekKey = `${year}-W${weekNumber}`;
+    const weekLabel = `W${weekNumber} ${year}`;
+
+    if (!weeklyData.has(weekKey)) {
+      weeklyData.set(weekKey, {
+        period: weekLabel,
+        label: weekLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const weekData = weeklyData.get(weekKey);
+    weekData.count += 1;
+    weekData.value += parseFloat(entry.Deal?.value || 0);
+    weekData.deals.push(entry);
+  });
+
+  // Calculate weekly target based on goal duration
+  const currentDate = new Date();
+  const isIndefinite = !goal.endDate || goal.endDate === null;
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
+  const goalStartDate = new Date(goal.startDate);
+  const totalDays = Math.ceil(
+    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalWeeks = Math.ceil(totalDays / 7);
+  const weeklyTarget = parseFloat(goal.targetValue) / totalWeeks;
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(weeklyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekKey, data]) => {
+      const goalTarget = weeklyTarget;
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const goalProgress =
+        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
+
+      return {
+        period: data.period,
+        label: data.label,
+        goal: goalTarget, // Use 'goal' key to match weekly breakdown format
+        result: result,
+        difference: difference,
+        goalProgress: goalProgress,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
+}
+
 // Generate weekly breakdown specifically for Activity goals
 function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
   const { startDate, endDate, period, targetValue } = goal;
@@ -3546,8 +3706,16 @@ function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
       return recordDate >= weekStart && recordDate <= weekEnd;
     });
 
-    // Calculate result (Activity goals are always count-based)
-    const weekResult = weekRecords.length;
+    // Calculate result based on tracking metric and entity type
+    let weekResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      weekResult = weekRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      weekResult = weekRecords.length; // Count for all other cases
+    }
 
     // Calculate progress metrics
     const difference = weekResult - weeklyTarget;
