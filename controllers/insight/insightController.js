@@ -2225,15 +2225,41 @@ exports.getGoalData = async (req, res) => {
         }
       }
 
-      // Note: Pipeline field doesn't exist in Activity model - removing pipeline filter
-      // Activities are not associated with pipelines in the current schema
+      // Add pipeline filter by checking linked deals
+      // Activities must be linked to deals in the specified pipeline
+      let includeClause = [];
+      if (
+        pipelineFilter &&
+        pipelineFilter !== "All pipelines" &&
+        pipelineFilter !== "all"
+      ) {
+        includeClause.push({
+          model: Deal,
+          as: "deal",
+          where: {
+            pipeline: pipelineFilter,
+          },
+          required: true, // INNER JOIN - only activities linked to deals in this pipeline
+          attributes: ["dealId", "pipeline", "title"], // Include deal info in response
+        });
+      } else {
+        // If no pipeline filter, still include deal info but make it optional
+        includeClause.push({
+          model: Deal,
+          as: "deal",
+          required: false, // LEFT JOIN - include activities even if not linked to deals
+          attributes: ["dealId", "pipeline", "title"],
+        });
+      }
 
       const activities = await Activity.findAll({
         where: activityWhereClause,
+        include: includeClause, // Include deal information for pipeline filtering
         attributes: [
           "activityId",
           "type", // Use 'type' instead of 'activityType'
           "subject",
+          "dealId", // Include dealId to show linked deal
           "masterUserID",
           "createdAt",
           "updatedAt",
@@ -2245,6 +2271,9 @@ exports.getGoalData = async (req, res) => {
         id: activity.activityId,
         type: activity.type, // Use 'type' instead of 'activityType'
         subject: activity.subject,
+        dealId: activity.dealId,
+        dealTitle: activity.deal ? activity.deal.title : null, // Include linked deal title
+        pipeline: activity.deal ? activity.deal.pipeline : null, // Include pipeline from linked deal
         owner: activity.masterUserID,
         createdAt: activity.createdAt,
         updatedAt: activity.updatedAt,
@@ -2255,6 +2284,17 @@ exports.getGoalData = async (req, res) => {
         goalTarget: parseFloat(goal.targetValue),
         trackingMetric: trackingMetric,
         activityTypeFilter: activityTypeFilter, // Include filter info in response
+        pipelineFilter: pipelineFilter, // Include pipeline filter info
+        filterDescription:
+          pipelineFilter &&
+          pipelineFilter !== "all" &&
+          pipelineFilter !== "All pipelines"
+            ? `Activities of type "${
+                activityTypeFilter || "any"
+              }" linked to deals in "${pipelineFilter}" pipeline`
+            : `Activities of type "${activityTypeFilter || "any"}"${
+                pipelineFilter ? " (any pipeline)" : ""
+              }`,
         progress: {
           current: activities.length,
           target: parseFloat(goal.targetValue),
@@ -2443,7 +2483,7 @@ exports.getGoalData = async (req, res) => {
           goalType: goalType,
           assignee: assignee,
           assignId: assignId,
-          pipeline: entity === "Deal" ? pipeline : null, // Only show pipeline for Deal goals (Activities don't have pipelines)
+          pipeline: pipeline, // Show pipeline for all entities (Activity goals filter by linked deal pipeline)
           pipelineStage: pipelineStage,
           activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
         },
