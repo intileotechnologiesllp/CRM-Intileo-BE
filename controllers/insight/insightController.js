@@ -2332,9 +2332,9 @@ exports.getGoalData = async (req, res) => {
       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
         summary.periodSummary = monthlyBreakdown.map((period) => {
           // period.label: e.g. "W31 2025" for weekly breakdown
-          // period.goalTarget: goal for this period
+          // period.goal: goal for this period (from weekly breakdown)
           // period.result: actual value for this period
-          const goal = period.goalTarget || 0;
+          const goal = period.goal || 0;
           const result = period.result || 0;
           const difference = result - goal;
           const goalProgress =
@@ -3472,15 +3472,21 @@ function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
   const effectiveEndDate = isIndefinite ? currentDate : new Date(endDate);
   const goalStartDate = new Date(startDate);
 
-  // Calculate weekly target based on frequency
+  // Calculate weekly target based on goal duration and frequency
   let weeklyTarget = parseFloat(targetValue);
-  if (period === "Monthly") {
-    weeklyTarget = parseFloat(targetValue) / 4.33; // Approximate weeks per month
-  } else if (period === "Quarterly") {
-    weeklyTarget = parseFloat(targetValue) / 13; // Approximate weeks per quarter
-  } else if (period === "Yearly") {
-    weeklyTarget = parseFloat(targetValue) / 52; // Weeks per year
+
+  // Calculate total weeks in the goal period
+  const totalDays = Math.ceil(
+    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalWeeks = Math.ceil(totalDays / 7);
+
+  if (period === "Monthly" || period === "Quarterly" || period === "Yearly") {
+    // For any frequency, distribute the total target across the actual weeks in the goal period
+    weeklyTarget = parseFloat(targetValue) / totalWeeks;
   }
+  // Round to reasonable decimal places
+  weeklyTarget = Math.round(weeklyTarget * 100) / 100;
 
   const weeklyBreakdown = [];
 
@@ -3546,7 +3552,7 @@ function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
     // Calculate progress metrics
     const difference = weekResult - weeklyTarget;
     const percentage =
-      weekResult > 0 ? Math.round((weekResult / weeklyTarget) * 100) : 0;
+      weeklyTarget > 0 ? Math.round((weekResult / weeklyTarget) * 100) : 0;
 
     // Format period display (W31 2025 format)
     const weekNumber = getWeekNumber(currentWeekStart);
@@ -3560,7 +3566,7 @@ function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
 
     weeklyBreakdown.push({
       period: periodDisplay,
-      goal: Math.round(weeklyTarget),
+      goal: weeklyTarget, // Keep the actual weekly target (with decimals)
       result: weekResult,
       difference: difference,
       percentage: percentage,
