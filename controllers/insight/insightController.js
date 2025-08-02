@@ -2108,12 +2108,21 @@ exports.getGoalData = async (req, res) => {
         };
         monthlyBreakdown =
           goal.period === "Weekly"
-            ? generateWeeklyBreakdown(addedDeals, goal, trackingMetric, "Deal")
+            ? generateWeeklyBreakdown(
+                addedDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              )
             : generateMonthlyBreakdown(
                 addedDeals,
                 goal,
                 trackingMetric,
-                "Deal"
+                "Deal",
+                start,
+                end
               );
       } else if (goalType === "Won") {
         // Efficiently get only won deals in the period, applying all filters
@@ -2170,48 +2179,28 @@ exports.getGoalData = async (req, res) => {
         };
         monthlyBreakdown =
           goal.period === "Weekly"
-            ? generateWeeklyBreakdown(wonDeals, goal, trackingMetric, "Deal")
-            : generateMonthlyBreakdown(wonDeals, goal, trackingMetric, "Deal");
+            ? generateWeeklyBreakdown(
+                wonDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              )
+            : generateMonthlyBreakdown(
+                wonDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              );
       } else {
-        data = deals.map((deal) => ({
-          id: deal.dealId,
-          title: deal.title,
-          value: parseFloat(deal.value || 0),
-          pipeline: deal.pipeline,
-          stage: deal.pipelineStage,
-          status: deal.status,
-          owner: deal.masterUserID,
-          createdAt: deal.createdAt,
-          updatedAt: deal.updatedAt,
-        }));
-
-        const currentValue =
-          trackingMetric === "Value"
-            ? deals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0)
-            : deals.length;
-
-        summary = {
-          totalCount: deals.length,
-          totalValue: deals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-
-        monthlyBreakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(wonDeals, goal, trackingMetric, "Deal")
-            : generateMonthlyBreakdown(wonDeals, goal, trackingMetric, "Deal");
+        // Unsupported goal type for Deal entity
+        return res.status(400).json({
+          success: false,
+          message: `Unsupported goal type '${goalType}' for Deal entity. Supported types: Added, Progressed, Won`,
+        });
       }
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
@@ -2376,13 +2365,17 @@ exports.getGoalData = async (req, res) => {
               activities,
               goal,
               trackingMetric,
-              "Activity"
+              "Activity",
+              start,
+              end
             )
           : generateMonthlyBreakdown(
               activities,
               goal,
               trackingMetric,
-              "Activity"
+              "Activity",
+              start,
+              end
             );
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
@@ -2448,8 +2441,22 @@ exports.getGoalData = async (req, res) => {
       // Generate breakdown based on goal's period setting
       monthlyBreakdown =
         goal.period === "Weekly"
-          ? generateWeeklyBreakdown(leads, goal, trackingMetric, "Lead")
-          : generateMonthlyBreakdown(leads, goal, trackingMetric, "Lead");
+          ? generateWeeklyBreakdown(
+              leads,
+              goal,
+              trackingMetric,
+              "Lead",
+              start,
+              end
+            )
+          : generateMonthlyBreakdown(
+              leads,
+              goal,
+              trackingMetric,
+              "Lead",
+              start,
+              end
+            );
     }
 
     // Calculate comprehensive duration information
@@ -2651,9 +2658,30 @@ exports.getProgressedGoalData = async (req, res) => {
           end = new Date(today);
           end.setHours(23, 59, 59, 999);
           break;
+        case "tomorrow":
+          start = new Date(today);
+          start.setDate(start.getDate() + 1);
+          end = new Date(today);
+          end.setDate(end.getDate() + 1);
+          end.setHours(23, 59, 59, 999);
+          break;
         case "this_week":
           start = new Date(today);
           start.setDate(start.getDate() - start.getDay());
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "last_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay() - 7);
+          end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_week":
+          start = new Date(today);
+          start.setDate(start.getDate() - start.getDay() + 7);
           end = new Date(start);
           end.setDate(start.getDate() + 6);
           end.setHours(23, 59, 59, 999);
@@ -2669,6 +2697,129 @@ exports.getProgressedGoalData = async (req, res) => {
             59,
             999
           );
+          break;
+        case "last_month":
+          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+          break;
+        case "next_month":
+          start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+          end = new Date(
+            now.getFullYear(),
+            now.getMonth() + 2,
+            0,
+            23,
+            59,
+            59,
+            999
+          );
+          break;
+        case "this_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "last_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+          const quarter = q === 0 ? 3 : q - 1;
+          start = new Date(year, quarter * 3, 1);
+          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "next_quarter": {
+          const q = Math.floor(now.getMonth() / 3);
+          const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+          const quarter = q === 3 ? 0 : q + 1;
+          start = new Date(year, quarter * 3, 1);
+          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+          break;
+        }
+        case "this_year":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+          break;
+        case "last_year":
+          start = new Date(now.getFullYear() - 1, 0, 1);
+          end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+          break;
+        case "next_year":
+          start = new Date(now.getFullYear() + 1, 0, 1);
+          end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+          break;
+        case "month_to_date":
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          end = now;
+          break;
+        case "quarter_to_date": {
+          const q = Math.floor(now.getMonth() / 3);
+          start = new Date(now.getFullYear(), q * 3, 1);
+          end = now;
+          break;
+        }
+        case "year_to_date":
+          start = new Date(now.getFullYear(), 0, 1);
+          end = now;
+          break;
+        case "past_7_days":
+          start = new Date(today);
+          start.setDate(start.getDate() - 6);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "past_2_weeks":
+          start = new Date(today);
+          start.setDate(start.getDate() - 13);
+          end = new Date(today);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_7_days":
+          start = new Date(today);
+          end = new Date(today);
+          end.setDate(end.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "next_2_weeks":
+          start = new Date(today);
+          end = new Date(today);
+          end.setDate(end.getDate() + 13);
+          end.setHours(23, 59, 59, 999);
+          break;
+        case "past_1_month":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 1);
+          end = now;
+          break;
+        case "past_3_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 3);
+          end = now;
+          break;
+        case "past_6_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 6);
+          end = now;
+          break;
+        case "next_3_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 3);
+          break;
+        case "next_6_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 6);
+          break;
+        case "past_12_months":
+          start = new Date(now);
+          start.setMonth(start.getMonth() - 12);
+          end = now;
+          break;
+        case "next_12_months":
+          start = now;
+          end = new Date(now);
+          end.setMonth(end.getMonth() + 12);
           break;
         case "goal_duration":
         default:
@@ -3349,14 +3500,27 @@ function getDateRange(period) {
 }
 
 // Generate monthly breakdown based on goal's actual duration and frequency
-function generateMonthlyBreakdown(records, goal, trackingMetric, entityType) {
+function generateMonthlyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
   const { startDate, endDate, period, targetValue } = goal;
   const currentDate = new Date();
   const isIndefinite = !endDate || endDate === null;
 
-  // Calculate effective end date for breakdown generation
-  const effectiveEndDate = isIndefinite ? currentDate : new Date(endDate);
-  const goalStartDate = new Date(startDate);
+  // Use filter dates if provided, otherwise use goal dates
+  const effectiveStartDate = filterStartDate
+    ? new Date(filterStartDate)
+    : new Date(startDate);
+  const effectiveEndDate = filterEndDate
+    ? new Date(filterEndDate)
+    : isIndefinite
+    ? currentDate
+    : new Date(endDate);
 
   // Calculate monthly target based on frequency
   let monthlyTarget = parseFloat(targetValue);
@@ -3369,10 +3533,10 @@ function generateMonthlyBreakdown(records, goal, trackingMetric, entityType) {
 
   const monthlyBreakdown = [];
 
-  // Generate months from start date to effective end date
+  // Generate months from effective start date to effective end date
   let currentMonth = new Date(
-    goalStartDate.getFullYear(),
-    goalStartDate.getMonth(),
+    effectiveStartDate.getFullYear(),
+    effectiveStartDate.getMonth(),
     1
   );
 
@@ -3384,21 +3548,20 @@ function generateMonthlyBreakdown(records, goal, trackingMetric, entityType) {
       0
     );
 
-    // Adjust first month to start from goal start date
+    // Adjust first month to start from effective start date
     if (
-      monthStart.getMonth() === goalStartDate.getMonth() &&
-      monthStart.getFullYear() === goalStartDate.getFullYear()
+      monthStart.getMonth() === effectiveStartDate.getMonth() &&
+      monthStart.getFullYear() === effectiveStartDate.getFullYear()
     ) {
-      monthStart.setDate(goalStartDate.getDate());
+      monthStart.setDate(effectiveStartDate.getDate());
     }
 
-    // Adjust last month to end at goal end date (if not indefinite)
+    // Adjust last month to end at effective end date
     if (
-      !isIndefinite &&
-      monthEnd.getMonth() === new Date(endDate).getMonth() &&
-      monthEnd.getFullYear() === new Date(endDate).getFullYear()
+      monthEnd.getMonth() === effectiveEndDate.getMonth() &&
+      monthEnd.getFullYear() === effectiveEndDate.getFullYear()
     ) {
-      monthEnd.setDate(new Date(endDate).getDate());
+      monthEnd.setDate(effectiveEndDate.getDate());
     }
 
     // Filter records for this month
@@ -3623,21 +3786,34 @@ function generateWeeklyBreakdownForProgressed(
 }
 
 // Generate weekly breakdown specifically for Activity goals
-function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
+function generateWeeklyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
   const { startDate, endDate, period, targetValue } = goal;
   const currentDate = new Date();
   const isIndefinite = !endDate || endDate === null;
 
-  // Calculate effective end date for breakdown generation
-  const effectiveEndDate = isIndefinite ? currentDate : new Date(endDate);
-  const goalStartDate = new Date(startDate);
+  // Use filter dates if provided, otherwise use goal dates
+  const effectiveStartDate = filterStartDate
+    ? new Date(filterStartDate)
+    : new Date(startDate);
+  const effectiveEndDate = filterEndDate
+    ? new Date(filterEndDate)
+    : isIndefinite
+    ? currentDate
+    : new Date(endDate);
 
   // Calculate weekly target based on goal duration and frequency
   let weeklyTarget = parseFloat(targetValue);
 
-  // Calculate total weeks in the goal period
+  // Calculate total weeks in the effective period
   const totalDays = Math.ceil(
-    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+    (effectiveEndDate - effectiveStartDate) / (1000 * 60 * 60 * 24)
   );
   const totalWeeks = Math.ceil(totalDays / 7);
 
@@ -3678,21 +3854,24 @@ function generateWeeklyBreakdown(records, goal, trackingMetric, entityType) {
     return endOfWeek;
   }
 
-  // Start from the week containing the goal start date
-  let currentWeekStart = getStartOfWeek(goalStartDate);
+  // Start from the week containing the effective start date
+  let currentWeekStart = getStartOfWeek(effectiveStartDate);
 
   while (currentWeekStart <= effectiveEndDate) {
     const weekStart = new Date(currentWeekStart);
     const weekEnd = getEndOfWeek(currentWeekStart);
 
-    // Adjust first week to start from goal start date
-    if (currentWeekStart <= goalStartDate && weekEnd >= goalStartDate) {
-      weekStart.setTime(goalStartDate.getTime());
+    // Adjust first week to start from effective start date
+    if (
+      currentWeekStart <= effectiveStartDate &&
+      weekEnd >= effectiveStartDate
+    ) {
+      weekStart.setTime(effectiveStartDate.getTime());
     }
 
-    // Adjust last week to end at goal end date (if not indefinite)
-    if (!isIndefinite && weekEnd >= new Date(endDate)) {
-      weekEnd.setTime(new Date(endDate).getTime());
+    // Adjust last week to end at effective end date
+    if (weekEnd >= effectiveEndDate) {
+      weekEnd.setTime(effectiveEndDate.getTime());
     }
 
     // Don't process weeks that are entirely in the future beyond effective end date
