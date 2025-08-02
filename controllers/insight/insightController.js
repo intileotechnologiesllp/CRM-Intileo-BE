@@ -3519,7 +3519,7 @@ function generateMonthlyBreakdown(
   const effectiveEndDate = filterEndDate
     ? new Date(filterEndDate)
     : isIndefinite
-    ? currentDate
+    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
     : new Date(endDate);
 
   // Calculate monthly target based on frequency
@@ -3805,7 +3805,7 @@ function generateWeeklyBreakdown(
   const effectiveEndDate = filterEndDate
     ? new Date(filterEndDate)
     : isIndefinite
-    ? currentDate
+    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
     : new Date(endDate);
 
   // Calculate weekly target based on goal duration and frequency
