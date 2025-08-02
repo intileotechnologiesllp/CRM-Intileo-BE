@@ -1087,8 +1087,20 @@ exports.createGoal = async (req, res) => {
       trackingMetric,
       count,
       value,
+      activityType, // Add activityType field for Activity goals
+      activityTypes, // Support multiple activity types
     } = req.body;
     const ownerId = req.adminId;
+
+    // Log Activity goal creation flow
+    if (entity === "Activity") {
+      console.log("=== ACTIVITY GOAL CREATION FLOW ===");
+      console.log("Step 1: Request received");
+      console.log("Request Body:", JSON.stringify(req.body, null, 2));
+      console.log("Admin ID:", ownerId);
+      console.log("Timestamp:", new Date().toISOString());
+      console.log("========================================");
+    }
 
     // Validate required fields - dashboardId is now optional
     if (!entity || !goalType) {
@@ -1252,6 +1264,20 @@ exports.createGoal = async (req, res) => {
       finalTargetValue = value;
     }
 
+    // Handle activity types for Activity goals
+    let finalActivityType = null;
+    if (entity === "Activity") {
+      // Use activityTypes (multiple) or activityType (single)
+      const selectedActivityTypes = activityTypes || activityType;
+      if (selectedActivityTypes) {
+        if (Array.isArray(selectedActivityTypes)) {
+          finalActivityType = selectedActivityTypes.join(",");
+        } else {
+          finalActivityType = selectedActivityTypes;
+        }
+      }
+    }
+
     const newGoal = await Goal.create({
       dashboardId: dashboardId || null,
       entity,
@@ -1267,6 +1293,7 @@ exports.createGoal = async (req, res) => {
       assignId: assignId || null, // Add assignId field
       pipeline: pipeline || null,
       pipelineStage: pipelineStage || null, // Add pipelineStage field for "Progressed" goals
+      activityType: finalActivityType || null, // Add activityType field for Activity goals
       trackingMetric: trackingMetric || "Count",
       count: trackingMetric === "Count" ? count || finalTargetValue : null,
       value: trackingMetric === "Value" ? value || finalTargetValue : null,
@@ -1979,7 +2006,7 @@ exports.getGoalData = async (req, res) => {
               ? data.reduce((sum, deal) => sum + deal.value, 0)
               : data.length;
 
-          // Calculate summary for progressed goals
+          // Calculate summary
           summary = {
             totalCount: data.length,
             totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
@@ -1996,7 +2023,7 @@ exports.getGoalData = async (req, res) => {
             },
           };
 
-          // Generate monthly breakdown by stage entry date for progressed goals
+          // Generate monthly breakdown by stage entry date
           monthlyBreakdown = generateMonthlyBreakdownForProgressed(
             stageEntries,
             goal,
@@ -2009,7 +2036,7 @@ exports.getGoalData = async (req, res) => {
           });
         }
       } else if (goalType === "Added") {
-        // Track deals that were added (created) during the period
+        // ...existing code for Added...
         const addedDeals = await Deal.findAll({
           where: whereClause,
           attributes: [
@@ -2025,8 +2052,6 @@ exports.getGoalData = async (req, res) => {
           ],
           order: [["createdAt", "DESC"]],
         });
-
-        // Format the data for frontend
         data = addedDeals.map((deal) => ({
           id: deal.dealId,
           title: deal.title,
@@ -2038,14 +2063,10 @@ exports.getGoalData = async (req, res) => {
           createdAt: deal.createdAt,
           updatedAt: deal.updatedAt,
         }));
-
-        // Calculate current value based on tracking metric
         const currentValue =
           trackingMetric === "Value"
             ? data.reduce((sum, deal) => sum + deal.value, 0)
             : data.length;
-
-        // Calculate summary for added goals
         summary = {
           totalCount: data.length,
           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
@@ -2060,8 +2081,6 @@ exports.getGoalData = async (req, res) => {
             ),
           },
         };
-
-        // Generate monthly breakdown for added deals
         monthlyBreakdown = generateMonthlyBreakdown(
           addedDeals,
           goal,
@@ -2069,9 +2088,16 @@ exports.getGoalData = async (req, res) => {
           "Deal"
         );
       } else if (goalType === "Won") {
-        // Get deals based on goal criteria
-        const deals = await Deal.findAll({
-          where: whereClause,
+        // Efficiently get only won deals in the period, applying all filters
+        const wonWhereClause = {
+          ...whereClause,
+          status: "won",
+          updatedAt: {
+            [Op.between]: [start, end],
+          },
+        };
+        const wonDeals = await Deal.findAll({
+          where: wonWhereClause,
           attributes: [
             "dealId",
             "title",
@@ -2083,13 +2109,9 @@ exports.getGoalData = async (req, res) => {
             "createdAt",
             "updatedAt",
           ],
-          order: [["createdAt", "DESC"]],
+          order: [["updatedAt", "DESC"]],
         });
-
-        // Filter only won deals
-        const filteredDeals = deals.filter((deal) => deal.status === "won");
-
-        data = filteredDeals.map((deal) => ({
+        data = wonDeals.map((deal) => ({
           id: deal.dealId,
           title: deal.title,
           value: parseFloat(deal.value || 0),
@@ -2100,23 +2122,13 @@ exports.getGoalData = async (req, res) => {
           createdAt: deal.createdAt,
           updatedAt: deal.updatedAt,
         }));
-
-        // Calculate current value based on tracking metric
         const currentValue =
           trackingMetric === "Value"
-            ? filteredDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : filteredDeals.length;
-
-        // Calculate summary for won goals
+            ? data.reduce((sum, deal) => sum + deal.value, 0)
+            : data.length;
         summary = {
-          totalCount: filteredDeals.length,
-          totalValue: filteredDeals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
+          totalCount: data.length,
+          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
           goalTarget: parseFloat(goal.targetValue),
           trackingMetric: trackingMetric,
           progress: {
@@ -2128,32 +2140,13 @@ exports.getGoalData = async (req, res) => {
             ),
           },
         };
-
-        // Generate monthly breakdown for won deals
         monthlyBreakdown = generateMonthlyBreakdown(
-          filteredDeals,
+          wonDeals,
           goal,
           trackingMetric,
           "Deal"
         );
       } else {
-        // Default behavior for other goal types
-        const deals = await Deal.findAll({
-          where: whereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "createdAt",
-            "updatedAt",
-          ],
-          order: [["createdAt", "DESC"]],
-        });
-
         data = deals.map((deal) => ({
           id: deal.dealId,
           title: deal.title,
@@ -2190,7 +2183,7 @@ exports.getGoalData = async (req, res) => {
         };
 
         monthlyBreakdown = generateMonthlyBreakdown(
-          deals,
+          wonDeals,
           goal,
           trackingMetric,
           "Deal"
@@ -2219,12 +2212,45 @@ exports.getGoalData = async (req, res) => {
         });
       }
     } else if (entity === "Activity") {
+      // For Activity goals, use separate activityType and pipeline fields
+      const activityTypeFilter = goal.activityType; // Use dedicated activityType field
+      const pipelineFilter = goal.pipeline; // Pipeline is separate for Activity goals
+
+      // Build where clause for activities
+      const activityWhereClause = { ...whereClause };
+
+      // Add activity type filter if specified
+      if (activityTypeFilter && activityTypeFilter !== "all") {
+        if (activityTypeFilter.includes(",")) {
+          // Multiple activity types (comma-separated)
+          const activityTypes = activityTypeFilter
+            .split(",")
+            .map((type) => type.trim());
+          activityWhereClause.activityType = {
+            [Op.in]: activityTypes,
+          };
+        } else {
+          // Single activity type
+          activityWhereClause.activityType = activityTypeFilter;
+        }
+      }
+
+      // Add pipeline filter if specified (separate from activity type)
+      if (
+        pipelineFilter &&
+        pipelineFilter !== "All pipelines" &&
+        pipelineFilter !== "all"
+      ) {
+        activityWhereClause.pipeline = pipelineFilter;
+      }
+
       const activities = await Activity.findAll({
-        where: whereClause,
+        where: activityWhereClause,
         attributes: [
           "activityId",
           "activityType",
           "subject",
+          "pipeline",
           "masterUserID",
           "createdAt",
           "updatedAt",
@@ -2236,6 +2262,7 @@ exports.getGoalData = async (req, res) => {
         id: activity.activityId,
         type: activity.activityType,
         subject: activity.subject,
+        pipeline: activity.pipeline,
         owner: activity.masterUserID,
         createdAt: activity.createdAt,
         updatedAt: activity.updatedAt,
@@ -2245,6 +2272,8 @@ exports.getGoalData = async (req, res) => {
         totalCount: activities.length,
         goalTarget: parseFloat(goal.targetValue),
         trackingMetric: trackingMetric,
+        activityTypeFilter: activityTypeFilter, // Include filter info in response
+        pipelineFilter: pipelineFilter, // Include pipeline filter info
         progress: {
           current: activities.length,
           target: parseFloat(goal.targetValue),
@@ -2433,8 +2462,9 @@ exports.getGoalData = async (req, res) => {
           goalType: goalType,
           assignee: assignee,
           assignId: assignId,
-          pipeline: pipeline,
+          pipeline: pipeline, // Show pipeline for all entities
           pipelineStage: pipelineStage,
+          activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
         },
       },
     });
