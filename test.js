@@ -2184,6 +2184,9 @@ async function processGoalData(goal, ownerId, periodFilter) {
         order: [["createdAt", "DESC"]],
       });
 
+      // Assign fetched deals to data array for records
+      data = addedDeals;
+
       const currentValue =
         trackingMetric === "Value"
           ? addedDeals.reduce(
@@ -2237,6 +2240,166 @@ async function processGoalData(goal, ownerId, periodFilter) {
               start,
               end
             );
+    } else if (goalType === "Won") {
+      const wonWhereClause = {
+        ...whereClause,
+        status: "won",
+        updatedAt: {
+          [Op.between]: [start, end],
+        },
+      };
+
+      const wonDeals = await Deal.findAll({
+        where: wonWhereClause,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "pipeline",
+          "pipelineStage",
+          "status",
+          "masterUserID",
+          "updatedAt",
+        ],
+        order: [["updatedAt", "DESC"]],
+      });
+
+      // Assign fetched deals to data array for records
+      data = wonDeals;
+
+      const currentValue =
+        trackingMetric === "Value"
+          ? wonDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0)
+          : wonDeals.length;
+
+      summary = {
+        totalCount: wonDeals.length,
+        totalValue: wonDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      monthlyBreakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : goal.period === "Quarterly"
+          ? generateQuarterlyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : generateMonthlyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            );
+    } else if (goalType === "Progressed") {
+      // Count deals that moved to specific stage or progressed beyond qualified
+      let progressedWhereClause = { ...whereClause };
+      if (pipelineStage) {
+        // Track deals entering specific pipeline stage
+        progressedWhereClause.pipelineStage = pipelineStage;
+      } else {
+        // Fallback: deals that progressed beyond "Qualified"
+        progressedWhereClause.pipelineStage = { [Op.ne]: "Qualified" };
+      }
+
+      const progressedDeals = await Deal.findAll({
+        where: progressedWhereClause,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "pipeline",
+          "pipelineStage",
+          "status",
+          "masterUserID",
+          "createdAt",
+          "updatedAt",
+        ],
+        order: [["updatedAt", "DESC"]],
+      });
+
+      // Assign fetched deals to data array for records
+      data = progressedDeals;
+
+      const currentValue =
+        trackingMetric === "Value"
+          ? progressedDeals.reduce(
+              (sum, deal) => sum + parseFloat(deal.value || 0),
+              0
+            )
+          : progressedDeals.length;
+
+      summary = {
+        totalCount: progressedDeals.length,
+        totalValue: progressedDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      monthlyBreakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdownForProgressed(
+              progressedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : goal.period === "Quarterly"
+          ? generateQuarterlyBreakdownForProgressed(
+              progressedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : generateMonthlyBreakdownForProgressed(
+              progressedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            );
     }
     // Add other goal types as needed...
   } else if (entity === "Activity") {
@@ -2264,6 +2427,9 @@ async function processGoalData(goal, ownerId, periodFilter) {
       attributes: ["activityId", "type", "subject", "isDone", "createdAt"],
       order: [["createdAt", "DESC"]],
     });
+
+    // Assign fetched activities to data array for records
+    data = activities;
 
     summary = {
       totalCount: activities.length,
@@ -2303,6 +2469,57 @@ async function processGoalData(goal, ownerId, periodFilter) {
             goal,
             trackingMetric,
             "Activity",
+            start,
+            end
+          );
+  } else if (entity === "Lead") {
+    const leads = await Lead.findAll({
+      where: whereClause,
+      attributes: ["leadId", "firstName", "lastName", "status", "createdAt"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Assign fetched leads to data array for records
+    data = leads;
+
+    summary = {
+      totalCount: leads.length,
+      goalTarget: parseFloat(goal.targetValue),
+      trackingMetric: trackingMetric,
+      progress: {
+        current: leads.length,
+        target: parseFloat(goal.targetValue),
+        percentage: Math.min(
+          100,
+          Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
+        ),
+      },
+    };
+
+    monthlyBreakdown =
+      goal.period === "Weekly"
+        ? generateWeeklyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
+            start,
+            end
+          )
+        : goal.period === "Quarterly"
+        ? generateQuarterlyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
+            start,
+            end
+          )
+        : generateMonthlyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
             start,
             end
           );
@@ -2346,8 +2563,6 @@ async function processGoalData(goal, ownerId, periodFilter) {
     },
   };
 }
-
-// Get progressed goal data (legacy endpoint)
 exports.getProgressedGoalData = async (req, res) => {
   try {
     const { goalId } = req.params;
@@ -3832,6 +4047,7 @@ exports.getProgressedGoalData = async (req, res) => {
     });
   }
 };
+// Get progressed goal data (legacy endpoint)
 
 // =============== HELPER FUNCTIONS ===============
 
@@ -4294,14 +4510,6 @@ async function generateGoalBreakdownData(
                   start,
                   end
                 )
-              : goal.period === "Quarterly"
-              ? generateQuarterlyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric,
-                  start,
-                  end
-                )
               : generateMonthlyBreakdownForProgressed(
                   stageEntries,
                   goal,
@@ -4355,15 +4563,6 @@ async function generateGoalBreakdownData(
         breakdown =
           goal.period === "Weekly"
             ? generateWeeklyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
                 addedDeals,
                 goal,
                 trackingMetric,
@@ -4432,15 +4631,6 @@ async function generateGoalBreakdownData(
         breakdown =
           goal.period === "Weekly"
             ? generateWeeklyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
                 wonDeals,
                 goal,
                 trackingMetric,
@@ -4542,15 +4732,6 @@ async function generateGoalBreakdownData(
                 start,
                 end
               )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
-                addedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
             : generateMonthlyBreakdown(
                 addedActivities,
                 goal,
@@ -4595,15 +4776,6 @@ async function generateGoalBreakdownData(
         breakdown =
           goal.period === "Weekly"
             ? generateWeeklyBreakdown(
-                completedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
                 completedActivities,
                 goal,
                 "Count",
@@ -5116,7 +5288,145 @@ function generateWeeklyBreakdownForProgressed(
 
   return breakdown;
 }
+function generateQuarterlyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  if (!records || records.length === 0) return [];
 
+  const now = new Date();
+  const startDate = filterStartDate || new Date(goal.startDate);
+  const endDate =
+    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
+
+  // Use the filtered date range, not the goal's full duration
+  const effectiveStartDate = new Date(
+    Math.max(startDate.getTime(), new Date(goal.startDate).getTime())
+  );
+  const effectiveEndDate = new Date(
+    Math.min(
+      endDate.getTime(),
+      goal.endDate ? new Date(goal.endDate).getTime() : now.getTime()
+    )
+  );
+
+  const quarterlyBreakdown = [];
+
+  // Helper function to get quarter start date
+  function getQuarterStart(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
+    return new Date(year, quarterStartMonth, 1);
+  }
+
+  // Helper function to get quarter end date
+  function getQuarterEnd(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterEndMonth = Math.floor(month / 3) * 3 + 2; // 2, 5, 8, or 11
+    return new Date(year, quarterEndMonth + 1, 0, 23, 59, 59, 999); // Last day of quarter
+  }
+
+  // Helper function to get quarter number (1-4)
+  function getQuarterNumber(date) {
+    return Math.floor(date.getMonth() / 3) + 1;
+  }
+
+  // Calculate quarterly target based on goal's target and period
+  let quarterlyTarget = parseFloat(goal.targetValue);
+  if (goal.period === "Monthly") {
+    quarterlyTarget = quarterlyTarget * 3; // 3 months per quarter
+  } else if (goal.period === "Weekly") {
+    quarterlyTarget = quarterlyTarget * 13; // ~13 weeks per quarter
+  } else if (goal.period === "Yearly") {
+    quarterlyTarget = quarterlyTarget / 4; // 4 quarters per year
+  }
+  // If goal.period === "Quarterly", use the target as-is
+
+  // Start from the first quarter that intersects with effective start date
+  let currentQuarterStart = getQuarterStart(effectiveStartDate);
+
+  // Generate breakdown for each quarter within the effective period
+  while (currentQuarterStart <= effectiveEndDate) {
+    const quarterEnd = getQuarterEnd(currentQuarterStart);
+
+    // Adjust quarter boundaries to fit within effective date range
+    let quarterStart = new Date(
+      Math.max(currentQuarterStart.getTime(), effectiveStartDate.getTime())
+    );
+    let quarterEndAdjusted = new Date(
+      Math.min(quarterEnd.getTime(), effectiveEndDate.getTime())
+    );
+
+    // Don't process quarters that are entirely in the future beyond effective end date
+    if (quarterStart > effectiveEndDate) {
+      break;
+    }
+
+    // Filter records for this quarter
+    const quarterRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= quarterStart && recordDate <= quarterEndAdjusted;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let quarterResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      quarterResult = quarterRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      quarterResult = quarterRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = quarterResult - quarterlyTarget;
+    const percentage =
+      quarterlyTarget > 0
+        ? Math.round((quarterResult / quarterlyTarget) * 100)
+        : 0;
+
+    // Format period display (Q3 2025 format)
+    const quarterNumber = getQuarterNumber(currentQuarterStart);
+    const year = currentQuarterStart.getFullYear();
+    const periodDisplay = `Q${quarterNumber} ${year}`;
+
+    // Check if this is the current quarter
+    const currentQuarterStart_check = getQuarterStart(now);
+    const isCurrentQuarter =
+      currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
+
+    quarterlyBreakdown.push({
+      period: periodDisplay,
+      goal: quarterlyTarget, // Keep the actual quarterly target
+      result: quarterResult,
+      difference: difference,
+      percentage: percentage,
+      quarterStart: quarterStart.toISOString(),
+      quarterEnd: quarterEndAdjusted.toISOString(),
+      recordCount: quarterRecords.length,
+      isCurrentQuarter: isCurrentQuarter,
+      isFutureQuarter: currentQuarterStart > now,
+      quarterNumber: quarterNumber,
+      year: year,
+    });
+
+    // Move to next quarter
+    currentQuarterStart = new Date(
+      currentQuarterStart.getFullYear(),
+      currentQuarterStart.getMonth() + 3,
+      1
+    );
+  }
+
+  return quarterlyBreakdown;
+}
 // Generate weekly breakdown specifically for Activity goals
 function generateWeeklyBreakdown(
   records,
@@ -5263,239 +5573,4 @@ function generateWeeklyBreakdown(
   }
 
   return weeklyBreakdown;
-}
-
-// Generate quarterly breakdown based on goal's actual duration and frequency
-function generateQuarterlyBreakdown(
-  records,
-  goal,
-  trackingMetric,
-  entityType,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  if (!records || records.length === 0) return [];
-
-  const now = new Date();
-  const startDate = filterStartDate || new Date(goal.startDate);
-  const endDate =
-    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
-
-  // Use the filtered date range, not the goal's full duration
-  const effectiveStartDate = new Date(
-    Math.max(startDate.getTime(), new Date(goal.startDate).getTime())
-  );
-  const effectiveEndDate = new Date(
-    Math.min(
-      endDate.getTime(),
-      goal.endDate ? new Date(goal.endDate).getTime() : now.getTime()
-    )
-  );
-
-  const quarterlyBreakdown = [];
-
-  // Helper function to get quarter start date
-  function getQuarterStart(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
-    return new Date(year, quarterStartMonth, 1);
-  }
-
-  // Helper function to get quarter end date
-  function getQuarterEnd(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const quarterEndMonth = Math.floor(month / 3) * 3 + 2; // 2, 5, 8, or 11
-    return new Date(year, quarterEndMonth + 1, 0, 23, 59, 59, 999); // Last day of quarter
-  }
-
-  // Helper function to get quarter number (1-4)
-  function getQuarterNumber(date) {
-    return Math.floor(date.getMonth() / 3) + 1;
-  }
-
-  // Calculate quarterly target based on goal's target and period
-  let quarterlyTarget = parseFloat(goal.targetValue);
-  if (goal.period === "Monthly") {
-    quarterlyTarget = quarterlyTarget * 3; // 3 months per quarter
-  } else if (goal.period === "Weekly") {
-    quarterlyTarget = quarterlyTarget * 13; // ~13 weeks per quarter
-  } else if (goal.period === "Yearly") {
-    quarterlyTarget = quarterlyTarget / 4; // 4 quarters per year
-  }
-  // If goal.period === "Quarterly", use the target as-is
-
-  // Start from the first quarter that intersects with effective start date
-  let currentQuarterStart = getQuarterStart(effectiveStartDate);
-
-  // Generate breakdown for each quarter within the effective period
-  while (currentQuarterStart <= effectiveEndDate) {
-    const quarterEnd = getQuarterEnd(currentQuarterStart);
-
-    // Adjust quarter boundaries to fit within effective date range
-    let quarterStart = new Date(
-      Math.max(currentQuarterStart.getTime(), effectiveStartDate.getTime())
-    );
-    let quarterEndAdjusted = new Date(
-      Math.min(quarterEnd.getTime(), effectiveEndDate.getTime())
-    );
-
-    // Don't process quarters that are entirely in the future beyond effective end date
-    if (quarterStart > effectiveEndDate) {
-      break;
-    }
-
-    // Filter records for this quarter
-    const quarterRecords = records.filter((record) => {
-      const recordDate = new Date(record.createdAt);
-      return recordDate >= quarterStart && recordDate <= quarterEndAdjusted;
-    });
-
-    // Calculate result based on tracking metric and entity type
-    let quarterResult = 0;
-    if (entityType === "Deal" && trackingMetric === "Value") {
-      quarterResult = quarterRecords.reduce(
-        (sum, deal) => sum + parseFloat(deal.value || 0),
-        0
-      );
-    } else {
-      quarterResult = quarterRecords.length; // Count for all other cases
-    }
-
-    // Calculate progress metrics
-    const difference = quarterResult - quarterlyTarget;
-    const percentage =
-      quarterlyTarget > 0
-        ? Math.round((quarterResult / quarterlyTarget) * 100)
-        : 0;
-
-    // Format period display (Q3 2025 format)
-    const quarterNumber = getQuarterNumber(currentQuarterStart);
-    const year = currentQuarterStart.getFullYear();
-    const periodDisplay = `Q${quarterNumber} ${year}`;
-
-    // Check if this is the current quarter
-    const currentQuarterStart_check = getQuarterStart(now);
-    const isCurrentQuarter =
-      currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
-
-    quarterlyBreakdown.push({
-      period: periodDisplay,
-      goal: quarterlyTarget, // Keep the actual quarterly target
-      result: quarterResult,
-      difference: difference,
-      percentage: percentage,
-      quarterStart: quarterStart.toISOString(),
-      quarterEnd: quarterEndAdjusted.toISOString(),
-      recordCount: quarterRecords.length,
-      isCurrentQuarter: isCurrentQuarter,
-      isFutureQuarter: currentQuarterStart > now,
-      quarterNumber: quarterNumber,
-      year: year,
-    });
-
-    // Move to next quarter
-    currentQuarterStart = new Date(
-      currentQuarterStart.getFullYear(),
-      currentQuarterStart.getMonth() + 3,
-      1
-    );
-  }
-
-  return quarterlyBreakdown;
-}
-
-// Generate quarterly breakdown for progressed goals based on stage entry dates
-function generateQuarterlyBreakdownForProgressed(
-  stageEntries,
-  goal,
-  trackingMetric,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  if (!stageEntries || stageEntries.length === 0) return [];
-
-  const now = new Date();
-  const startDate = filterStartDate || new Date(goal.startDate);
-  const endDate =
-    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
-
-  const quarterlyData = new Map();
-
-  // Helper function to get quarter key
-  function getQuarterKey(date) {
-    const year = date.getFullYear();
-    const quarter = Math.floor(date.getMonth() / 3) + 1;
-    return `${year}-Q${quarter}`;
-  }
-
-  // Helper function to get quarter display label
-  function getQuarterLabel(date) {
-    const year = date.getFullYear();
-    const quarter = Math.floor(date.getMonth() / 3) + 1;
-    return `Q${quarter} ${year}`;
-  }
-
-  // Calculate quarterly target
-  let quarterlyTarget = parseFloat(goal.targetValue);
-  if (goal.period === "Monthly") {
-    quarterlyTarget = quarterlyTarget * 3;
-  } else if (goal.period === "Weekly") {
-    quarterlyTarget = quarterlyTarget * 13;
-  } else if (goal.period === "Yearly") {
-    quarterlyTarget = quarterlyTarget / 4;
-  }
-
-  // Process stage entries
-  stageEntries.forEach((entry) => {
-    const entryDate = new Date(entry.enteredAt || entry.updatedAt);
-
-    // Skip entries outside the filtered date range
-    if (entryDate < startDate || entryDate > endDate) {
-      return;
-    }
-
-    const quarterKey = getQuarterKey(entryDate);
-
-    if (!quarterlyData.has(quarterKey)) {
-      quarterlyData.set(quarterKey, {
-        period: getQuarterLabel(entryDate),
-        label: getQuarterLabel(entryDate),
-        count: 0,
-        value: 0,
-        deals: [],
-      });
-    }
-
-    const quarterData = quarterlyData.get(quarterKey);
-    quarterData.count += 1;
-    quarterData.value += parseFloat(entry.dealValue || entry.Deal?.value || 0);
-    quarterData.deals.push(entry);
-  });
-
-  // Convert to array and sort by date
-  const breakdown = Array.from(quarterlyData.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([quarterKey, data]) => {
-      const goalTarget = quarterlyTarget;
-      const result = trackingMetric === "Value" ? data.value : data.count;
-      const difference = result - goalTarget;
-      const goalProgress =
-        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
-
-      return {
-        period: data.period,
-        label: data.label,
-        goalTarget: goalTarget,
-        result: result,
-        difference: difference,
-        goalProgress: goalProgress,
-        count: data.count,
-        value: data.value,
-        deals: data.deals.length,
-      };
-    });
-
-  return breakdown;
 }

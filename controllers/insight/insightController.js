@@ -2166,7 +2166,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
 
   let data = [];
   let summary = {};
-  let monthlyBreakdown = [];
+  let breakdown = [];
 
   // Process based on entity type - using simplified logic for dashboard view
   if (entity === "Deal") {
@@ -2213,7 +2213,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
         },
       };
 
-      monthlyBreakdown =
+      breakdown =
         goal.period === "Weekly"
           ? generateWeeklyBreakdown(
               addedDeals,
@@ -2240,6 +2240,27 @@ async function processGoalData(goal, ownerId, periodFilter) {
               start,
               end
             );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          // For different breakdown types: period.goal, period.goalTarget
+          // period.label: e.g. "Jul 2025" or "W31 2025" or "Q3 2025" based on breakdown type
+          // period.result: actual value for this period
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
     } else if (goalType === "Won") {
       const wonWhereClause = {
         ...whereClause,
@@ -2290,7 +2311,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
         },
       };
 
-      monthlyBreakdown =
+      breakdown =
         goal.period === "Weekly"
           ? generateWeeklyBreakdown(
               wonDeals,
@@ -2317,6 +2338,24 @@ async function processGoalData(goal, ownerId, periodFilter) {
               start,
               end
             );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
     } else if (goalType === "Progressed") {
       // Count deals that moved to specific stage or progressed beyond qualified
       let progressedWhereClause = { ...whereClause };
@@ -2373,7 +2412,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
         },
       };
 
-      monthlyBreakdown =
+      breakdown =
         goal.period === "Weekly"
           ? generateWeeklyBreakdownForProgressed(
               progressedDeals,
@@ -2400,6 +2439,24 @@ async function processGoalData(goal, ownerId, periodFilter) {
               start,
               end
             );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
     }
     // Add other goal types as needed...
   } else if (entity === "Activity") {
@@ -2445,7 +2502,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
       },
     };
 
-    monthlyBreakdown =
+    breakdown =
       goal.period === "Weekly"
         ? generateWeeklyBreakdown(
             activities,
@@ -2472,6 +2529,24 @@ async function processGoalData(goal, ownerId, periodFilter) {
             start,
             end
           );
+
+    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      summary.periodSummary = breakdown.map((period) => {
+        const goalValue = period.goal || period.goalTarget || 0;
+        const result = period.result || 0;
+        const difference = result - goalValue;
+        const goalProgress =
+          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+        return {
+          period: period.label || period.period || "",
+          goal: goalValue,
+          result,
+          difference,
+          goalProgress,
+        };
+      });
+    }
   } else if (entity === "Lead") {
     const leads = await Lead.findAll({
       where: whereClause,
@@ -2496,7 +2571,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
       },
     };
 
-    monthlyBreakdown =
+    breakdown =
       goal.period === "Weekly"
         ? generateWeeklyBreakdown(
             leads,
@@ -2523,6 +2598,24 @@ async function processGoalData(goal, ownerId, periodFilter) {
             start,
             end
           );
+
+    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      summary.periodSummary = breakdown.map((period) => {
+        const goalValue = period.goal || period.goalTarget || 0;
+        const result = period.result || 0;
+        const difference = result - goalValue;
+        const goalProgress =
+          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+        return {
+          period: period.label || period.period || "",
+          goal: goalValue,
+          result,
+          difference,
+          goalProgress,
+        };
+      });
+    }
   }
 
   // Calculate duration info
@@ -2549,7 +2642,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
     goal: goal.toJSON(),
     records: data,
     summary: summary,
-    monthlyBreakdown: monthlyBreakdown,
+    monthlyBreakdown: breakdown,
     period: { startDate: start, endDate: end },
     duration: durationInfo,
     filters: {
@@ -2563,1490 +2656,1491 @@ async function processGoalData(goal, ownerId, periodFilter) {
     },
   };
 }
-exports.getProgressedGoalData = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const ownerId = req.adminId;
-    const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
+// DEPRECATED: exports.getProgressedGoalData - not used
+// exports.getProgressedGoalData = async (req, res) => {
+//   try {
+//     const { goalId } = req.params;
+//     const ownerId = req.adminId;
+//     const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
 
-    const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
-    });
+//     const goal = await Goal.findOne({
+//       where: {
+//         goalId,
+//         ownerId,
+//       },
+//     });
 
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
+//     if (!goal) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Goal not found or access denied",
+//       });
+//     }
 
-    const {
-      entity,
-      goalType,
-      assignee,
-      assignId,
-      pipeline,
-      pipelineStage,
-      startDate,
-      endDate,
-      trackingMetric,
-    } = goal;
+//     const {
+//       entity,
+//       goalType,
+//       assignee,
+//       assignId,
+//       pipeline,
+//       pipelineStage,
+//       startDate,
+//       endDate,
+//       trackingMetric,
+//     } = goal;
 
-    // Helper function to get date range for period filters
-    function getPeriodRange(filter) {
-      const now = new Date();
-      let start, end;
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+//     // Helper function to get date range for period filters
+//     function getPeriodRange(filter) {
+//       const now = new Date();
+//       let start, end;
+//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      switch ((filter || "").toLowerCase()) {
-        case "yesterday":
-          start = new Date(today);
-          start.setDate(start.getDate() - 1);
-          end = new Date(today);
-          end.setDate(end.getDate() - 1);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "today":
-          start = new Date(today);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "tomorrow":
-          start = new Date(today);
-          start.setDate(start.getDate() + 1);
-          end = new Date(today);
-          end.setDate(end.getDate() + 1);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "this_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay());
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "last_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay() - 7);
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay() + 7);
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "last_two_weeks":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay() - 14);
-          end = new Date(today);
-          end.setDate(end.getDate() - end.getDay() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "this_month":
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-          break;
-        case "last_month":
-          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-          break;
-        case "next_month":
-          start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-          end = new Date(
-            now.getFullYear(),
-            now.getMonth() + 2,
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-          break;
-        case "this_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          start = new Date(now.getFullYear(), q * 3, 1);
-          end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "last_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
-          const quarter = q === 0 ? 3 : q - 1;
-          start = new Date(year, quarter * 3, 1);
-          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "next_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
-          const quarter = q === 3 ? 0 : q + 1;
-          start = new Date(year, quarter * 3, 1);
-          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "this_year":
-          start = new Date(now.getFullYear(), 0, 1);
-          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-          break;
-        case "last_year":
-          start = new Date(now.getFullYear() - 1, 0, 1);
-          end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-          break;
-        case "next_year":
-          start = new Date(now.getFullYear() + 1, 0, 1);
-          end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-          break;
-        case "month_to_date":
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = now;
-          break;
-        case "quarter_to_date": {
-          const q = Math.floor(now.getMonth() / 3);
-          start = new Date(now.getFullYear(), q * 3, 1);
-          end = now;
-          break;
-        }
-        case "year_to_date":
-          start = new Date(now.getFullYear(), 0, 1);
-          end = now;
-          break;
-        case "past_7_days":
-          start = new Date(today);
-          start.setDate(start.getDate() - 6);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "past_2_weeks":
-          start = new Date(today);
-          start.setDate(start.getDate() - 13);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_7_days":
-          start = new Date(today);
-          end = new Date(today);
-          end.setDate(end.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_2_weeks":
-          start = new Date(today);
-          end = new Date(today);
-          end.setDate(end.getDate() + 13);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "past_1_month":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 1);
-          end = now;
-          break;
-        case "past_3_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 3);
-          end = now;
-          break;
-        case "past_6_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 6);
-          end = now;
-          break;
-        case "past_12_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 12);
-          end = now;
-          break;
-        case "next_3_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 3);
-          break;
-        case "next_6_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 6);
-          break;
-        case "next_12_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 12);
-          break;
-        case "goal_duration":
-        default:
-          // Use goal's startDate and endDate (or current date if indefinite)
-          start = startDate;
-          end = endDate || now;
-      }
-      return { start, end };
-    }
+//       switch ((filter || "").toLowerCase()) {
+//         case "yesterday":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "today":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "tomorrow":
+//           start = new Date(today);
+//           start.setDate(start.getDate() + 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay());
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() + 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_two_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 14);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - end.getDay() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_month":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 1,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "last_month":
+//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+//           break;
+//         case "next_month":
+//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 2,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "this_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "last_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+//           const quarter = q === 0 ? 3 : q - 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "next_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+//           const quarter = q === 3 ? 0 : q + 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "this_year":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "last_year":
+//           start = new Date(now.getFullYear() - 1, 0, 1);
+//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "next_year":
+//           start = new Date(now.getFullYear() + 1, 0, 1);
+//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "month_to_date":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = now;
+//           break;
+//         case "quarter_to_date": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = now;
+//           break;
+//         }
+//         case "year_to_date":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = now;
+//           break;
+//         case "past_7_days":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 6);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_2_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 13);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_7_days":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_2_weeks":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 13);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_1_month":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 1);
+//           end = now;
+//           break;
+//         case "past_3_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 3);
+//           end = now;
+//           break;
+//         case "past_6_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 6);
+//           end = now;
+//           break;
+//         case "past_12_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 12);
+//           end = now;
+//           break;
+//         case "next_3_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 3);
+//           break;
+//         case "next_6_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 6);
+//           break;
+//         case "next_12_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 12);
+//           break;
+//         case "goal_duration":
+//         default:
+//           // Use goal's startDate and endDate (or current date if indefinite)
+//           start = startDate;
+//           end = endDate || now;
+//       }
+//       return { start, end };
+//     }
 
-    // Build where clause based on goal criteria and period filter
-    let start, end;
-    try {
-      ({ start, end } = getPeriodRange(periodFilter));
-      // If start or end is invalid, fallback to goal duration
-      if (
-        !start ||
-        !end ||
-        isNaN(new Date(start).getTime()) ||
-        isNaN(new Date(end).getTime())
-      ) {
-        start = startDate;
-        end = endDate || new Date();
-      }
-    } catch (e) {
-      // Fallback to goal duration if getPeriodRange fails
-      start = startDate;
-      end = endDate || new Date();
-    }
-    const whereClause = {
-      createdAt: {
-        [Op.between]: [start, end],
-      },
-    };
+//     // Build where clause based on goal criteria and period filter
+//     let start, end;
+//     try {
+//       ({ start, end } = getPeriodRange(periodFilter));
+//       // If start or end is invalid, fallback to goal duration
+//       if (
+//         !start ||
+//         !end ||
+//         isNaN(new Date(start).getTime()) ||
+//         isNaN(new Date(end).getTime())
+//       ) {
+//         start = startDate;
+//         end = endDate || new Date();
+//       }
+//     } catch (e) {
+//       // Fallback to goal duration if getPeriodRange fails
+//       start = startDate;
+//       end = endDate || new Date();
+//     }
+//     const whereClause = {
+//       createdAt: {
+//         [Op.between]: [start, end],
+//       },
+//     };
 
-    // Add assignee filter based on assignId and assignee values
-    if (assignId && assignId !== "everyone") {
-      // Specific user assigned
-      whereClause.masterUserID = assignId;
-    } else if (
-      assignee &&
-      assignee !== "All" &&
-      assignee !== "Company (everyone)" &&
-      assignee !== "everyone"
-    ) {
-      // Legacy assignee field (for backward compatibility)
-      whereClause.masterUserID = assignee;
-    }
-    // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
+//     // Add assignee filter based on assignId and assignee values
+//     if (assignId && assignId !== "everyone") {
+//       // Specific user assigned
+//       whereClause.masterUserID = assignId;
+//     } else if (
+//       assignee &&
+//       assignee !== "All" &&
+//       assignee !== "Company (everyone)" &&
+//       assignee !== "everyone"
+//     ) {
+//       // Legacy assignee field (for backward compatibility)
+//       whereClause.masterUserID = assignee;
+//     }
+//     // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
 
-    // Add pipeline filter if specified
-    if (pipeline && entity === "Deal") {
-      if (pipeline.includes(",")) {
-        // Multiple pipelines (comma-separated)
-        const pipelines = pipeline
-          .split(",")
-          .map((p) => p.trim())
-          .filter((p) => p !== "");
-        whereClause.pipeline = {
-          [Op.in]: pipelines,
-        };
-      } else {
-        // Single pipeline
-        whereClause.pipeline = pipeline;
-      }
-    }
+//     // Add pipeline filter if specified
+//     if (pipeline && entity === "Deal") {
+//       if (pipeline.includes(",")) {
+//         // Multiple pipelines (comma-separated)
+//         const pipelines = pipeline
+//           .split(",")
+//           .map((p) => p.trim())
+//           .filter((p) => p !== "");
+//         whereClause.pipeline = {
+//           [Op.in]: pipelines,
+//         };
+//       } else {
+//         // Single pipeline
+//         whereClause.pipeline = pipeline;
+//       }
+//     }
 
-    let data = [];
-    let summary = {};
-    let monthlyBreakdown = [];
+//     let data = [];
+//     let summary = {};
+//     let monthlyBreakdown = [];
 
-    if (entity === "Deal") {
-      // Handle different goal types with specific logic
-      if (goalType === "Progressed") {
-        // Use DealStageHistory for accurate stage progression tracking
-        if (pipelineStage) {
-          // Query DealStageHistory to find deals that entered this stage during the period
-          const stageEntries = await DealStageHistory.findAll({
-            where: {
-              stageName: pipelineStage,
-              enteredAt: {
-                [Op.between]: [start, end],
-              },
-            },
-            include: [
-              {
-                model: Deal,
-                as: "Deal",
-                where: {
-                  ...(assignId && assignId !== "everyone"
-                    ? { masterUserID: assignId }
-                    : {}),
-                  ...(assignee &&
-                  assignee !== "All" &&
-                  assignee !== "Company (everyone)" &&
-                  assignee !== "everyone" &&
-                  (!assignId || assignId === "everyone")
-                    ? { masterUserID: assignee }
-                    : {}),
-                  ...(pipeline
-                    ? pipeline.includes(",")
-                      ? {
-                          pipeline: {
-                            [Op.in]: pipeline
-                              .split(",")
-                              .map((p) => p.trim())
-                              .filter((p) => p !== ""),
-                          },
-                        }
-                      : { pipeline: pipeline }
-                    : {}),
-                },
-                attributes: [
-                  "dealId",
-                  "title",
-                  "value",
-                  "pipeline",
-                  "pipelineStage",
-                  "status",
-                  "masterUserID",
-                  "createdAt",
-                  "updatedAt",
-                ],
-              },
-            ],
-            order: [["enteredAt", "DESC"]],
-          });
+//     if (entity === "Deal") {
+//       // Handle different goal types with specific logic
+//       if (goalType === "Progressed") {
+//         // Use DealStageHistory for accurate stage progression tracking
+//         if (pipelineStage) {
+//           // Query DealStageHistory to find deals that entered this stage during the period
+//           const stageEntries = await DealStageHistory.findAll({
+//             where: {
+//               stageName: pipelineStage,
+//               enteredAt: {
+//                 [Op.between]: [start, end],
+//               },
+//             },
+//             include: [
+//               {
+//                 model: Deal,
+//                 as: "Deal",
+//                 where: {
+//                   ...(assignId && assignId !== "everyone"
+//                     ? { masterUserID: assignId }
+//                     : {}),
+//                   ...(assignee &&
+//                   assignee !== "All" &&
+//                   assignee !== "Company (everyone)" &&
+//                   assignee !== "everyone" &&
+//                   (!assignId || assignId === "everyone")
+//                     ? { masterUserID: assignee }
+//                     : {}),
+//                   ...(pipeline
+//                     ? pipeline.includes(",")
+//                       ? {
+//                           pipeline: {
+//                             [Op.in]: pipeline
+//                               .split(",")
+//                               .map((p) => p.trim())
+//                               .filter((p) => p !== ""),
+//                           },
+//                         }
+//                       : { pipeline: pipeline }
+//                     : {}),
+//                 },
+//                 attributes: [
+//                   "dealId",
+//                   "title",
+//                   "value",
+//                   "pipeline",
+//                   "pipelineStage",
+//                   "status",
+//                   "masterUserID",
+//                   "createdAt",
+//                   "updatedAt",
+//                 ],
+//               },
+//             ],
+//             order: [["enteredAt", "DESC"]],
+//           });
 
-          // Format the data for frontend with stage entry information
-          data = stageEntries.map((entry) => ({
-            id: entry.Deal.dealId,
-            title: entry.Deal.title,
-            value: parseFloat(entry.Deal.value || 0),
-            pipeline: entry.Deal.pipeline,
-            stage: entry.Deal.pipelineStage,
-            status: entry.Deal.status,
-            owner: entry.Deal.masterUserID,
-            enteredStageAt: entry.enteredAt,
-            createdAt: entry.Deal.createdAt,
-            updatedAt: entry.Deal.updatedAt,
-          }));
+//           // Format the data for frontend with stage entry information
+//           data = stageEntries.map((entry) => ({
+//             id: entry.Deal.dealId,
+//             title: entry.Deal.title,
+//             value: parseFloat(entry.Deal.value || 0),
+//             pipeline: entry.Deal.pipeline,
+//             stage: entry.Deal.pipelineStage,
+//             status: entry.Deal.status,
+//             owner: entry.Deal.masterUserID,
+//             enteredStageAt: entry.enteredAt,
+//             createdAt: entry.Deal.createdAt,
+//             updatedAt: entry.Deal.updatedAt,
+//           }));
 
-          // Calculate current value based on tracking metric
-          const currentValue =
-            trackingMetric === "Value"
-              ? data.reduce((sum, deal) => sum + deal.value, 0)
-              : data.length;
+//           // Calculate current value based on tracking metric
+//           const currentValue =
+//             trackingMetric === "Value"
+//               ? data.reduce((sum, deal) => sum + deal.value, 0)
+//               : data.length;
 
-          // Calculate summary
-          summary = {
-            totalCount: data.length,
-            totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-            goalTarget: parseFloat(goal.targetValue),
-            trackingMetric: trackingMetric,
-            targetStage: pipelineStage,
-            progress: {
-              current: currentValue,
-              target: parseFloat(goal.targetValue),
-              percentage: Math.min(
-                100,
-                Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-              ),
-            },
-          };
+//           // Calculate summary
+//           summary = {
+//             totalCount: data.length,
+//             totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//             goalTarget: parseFloat(goal.targetValue),
+//             trackingMetric: trackingMetric,
+//             targetStage: pipelineStage,
+//             progress: {
+//               current: currentValue,
+//               target: parseFloat(goal.targetValue),
+//               percentage: Math.min(
+//                 100,
+//                 Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//               ),
+//             },
+//           };
 
-          // Generate breakdown by stage entry date (weekly, quarterly, or monthly based on period)
-          monthlyBreakdown =
-            goal.period === "Weekly"
-              ? generateWeeklyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric
-                )
-              : goal.period === "Quarterly"
-              ? generateQuarterlyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric
-                )
-              : generateMonthlyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric
-                );
-        } else {
-          return res.status(400).json({
-            success: false,
-            message: "Pipeline stage is required for progressed goals",
-          });
-        }
-      } else if (goalType === "Added") {
-        // ...existing code for Added...
-        const addedDeals = await Deal.findAll({
-          where: whereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "createdAt",
-            "updatedAt",
-          ],
-          order: [["createdAt", "DESC"]],
-        });
-        data = addedDeals.map((deal) => ({
-          id: deal.dealId,
-          title: deal.title,
-          value: parseFloat(deal.value || 0),
-          pipeline: deal.pipeline,
-          stage: deal.pipelineStage,
-          status: deal.status,
-          owner: deal.masterUserID,
-          createdAt: deal.createdAt,
-          updatedAt: deal.updatedAt,
-        }));
-        const currentValue =
-          trackingMetric === "Value"
-            ? data.reduce((sum, deal) => sum + deal.value, 0)
-            : data.length;
-        summary = {
-          totalCount: data.length,
-          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-        monthlyBreakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      } else if (goalType === "Won") {
-        // Efficiently get only won deals in the period, applying all filters
-        const wonWhereClause = {
-          ...whereClause,
-          status: "won",
-          updatedAt: {
-            [Op.between]: [start, end],
-          },
-        };
-        const wonDeals = await Deal.findAll({
-          where: wonWhereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "createdAt",
-            "updatedAt",
-          ],
-          order: [["updatedAt", "DESC"]],
-        });
-        data = wonDeals.map((deal) => ({
-          id: deal.dealId,
-          title: deal.title,
-          value: parseFloat(deal.value || 0),
-          pipeline: deal.pipeline,
-          stage: deal.pipelineStage,
-          status: deal.status,
-          owner: deal.masterUserID,
-          createdAt: deal.createdAt,
-          updatedAt: deal.updatedAt,
-        }));
-        const currentValue =
-          trackingMetric === "Value"
-            ? data.reduce((sum, deal) => sum + deal.value, 0)
-            : data.length;
-        summary = {
-          totalCount: data.length,
-          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-        monthlyBreakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : goal.period === "Quarterly"
-            ? generateQuarterlyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      } else {
-        // Unsupported goal type for Deal entity
-        return res.status(400).json({
-          success: false,
-          message: `Unsupported goal type '${goalType}' for Deal entity. Supported types: Added, Progressed, Won`,
-        });
-      }
+//           // Generate breakdown by stage entry date (weekly, quarterly, or monthly based on period)
+//           monthlyBreakdown =
+//             goal.period === "Weekly"
+//               ? generateWeeklyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 )
+//               : goal.period === "Quarterly"
+//               ? generateQuarterlyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 )
+//               : generateMonthlyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 );
+//         } else {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Pipeline stage is required for progressed goals",
+//           });
+//         }
+//       } else if (goalType === "Added") {
+//         // ...existing code for Added...
+//         const addedDeals = await Deal.findAll({
+//           where: whereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "createdAt",
+//             "updatedAt",
+//           ],
+//           order: [["createdAt", "DESC"]],
+//         });
+//         data = addedDeals.map((deal) => ({
+//           id: deal.dealId,
+//           title: deal.title,
+//           value: parseFloat(deal.value || 0),
+//           pipeline: deal.pipeline,
+//           stage: deal.pipelineStage,
+//           status: deal.status,
+//           owner: deal.masterUserID,
+//           createdAt: deal.createdAt,
+//           updatedAt: deal.updatedAt,
+//         }));
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
+//         monthlyBreakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : goal.period === "Quarterly"
+//             ? generateQuarterlyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       } else if (goalType === "Won") {
+//         // Efficiently get only won deals in the period, applying all filters
+//         const wonWhereClause = {
+//           ...whereClause,
+//           status: "won",
+//           updatedAt: {
+//             [Op.between]: [start, end],
+//           },
+//         };
+//         const wonDeals = await Deal.findAll({
+//           where: wonWhereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "createdAt",
+//             "updatedAt",
+//           ],
+//           order: [["updatedAt", "DESC"]],
+//         });
+//         data = wonDeals.map((deal) => ({
+//           id: deal.dealId,
+//           title: deal.title,
+//           value: parseFloat(deal.value || 0),
+//           pipeline: deal.pipeline,
+//           stage: deal.pipelineStage,
+//           status: deal.status,
+//           owner: deal.masterUserID,
+//           createdAt: deal.createdAt,
+//           updatedAt: deal.updatedAt,
+//         }));
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
+//         monthlyBreakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : goal.period === "Quarterly"
+//             ? generateQuarterlyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       } else {
+//         // Unsupported goal type for Deal entity
+//         return res.status(400).json({
+//           success: false,
+//           message: `Unsupported goal type '${goalType}' for Deal entity. Supported types: Added, Progressed, Won`,
+//         });
+//       }
 
-      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-      if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
-        summary.periodSummary = monthlyBreakdown.map((period) => {
-          // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
-          // period.label: e.g. "Jul 2025" or "W31 2025" based on breakdown type
-          // period.result: actual value for this period
-          const goalValue = period.goal || period.goalTarget || 0;
-          const result = period.result || 0;
-          const difference = result - goalValue;
-          const goalProgress =
-            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-          return {
-            period: period.label || period.period || "",
-            goal: goalValue,
-            result,
-            difference,
-            goalProgress,
-          };
-        });
-      }
-    } else if (entity === "Activity") {
-      // For Activity goals, use separate activityType and pipeline fields
-      const activityTypeFilter = goal.activityType; // Use dedicated activityType field
-      const pipelineFilter = goal.pipeline; // Pipeline is separate for Activity goals
+//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+//         summary.periodSummary = monthlyBreakdown.map((period) => {
+//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+//           // period.label: e.g. "Jul 2025" or "W31 2025" based on breakdown type
+//           // period.result: actual value for this period
+//           const goalValue = period.goal || period.goalTarget || 0;
+//           const result = period.result || 0;
+//           const difference = result - goalValue;
+//           const goalProgress =
+//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+//           return {
+//             period: period.label || period.period || "",
+//             goal: goalValue,
+//             result,
+//             difference,
+//             goalProgress,
+//           };
+//         });
+//       }
+//     } else if (entity === "Activity") {
+//       // For Activity goals, use separate activityType and pipeline fields
+//       const activityTypeFilter = goal.activityType; // Use dedicated activityType field
+//       const pipelineFilter = goal.pipeline; // Pipeline is separate for Activity goals
 
-      // Build where clause for activities
-      const activityWhereClause = { ...whereClause };
+//       // Build where clause for activities
+//       const activityWhereClause = { ...whereClause };
 
-      // Add activity type filter if specified
-      if (activityTypeFilter && activityTypeFilter !== "all") {
-        if (activityTypeFilter.includes(",")) {
-          // Multiple activity types (comma-separated)
-          const activityTypes = activityTypeFilter
-            .split(",")
-            .map((type) => type.trim());
-          activityWhereClause.type = {
-            [Op.in]: activityTypes,
-          };
-        } else {
-          // Single activity type
-          activityWhereClause.type = activityTypeFilter;
-        }
-      }
+//       // Add activity type filter if specified
+//       if (activityTypeFilter && activityTypeFilter !== "all") {
+//         if (activityTypeFilter.includes(",")) {
+//           // Multiple activity types (comma-separated)
+//           const activityTypes = activityTypeFilter
+//             .split(",")
+//             .map((type) => type.trim());
+//           activityWhereClause.type = {
+//             [Op.in]: activityTypes,
+//           };
+//         } else {
+//           // Single activity type
+//           activityWhereClause.type = activityTypeFilter;
+//         }
+//       }
 
-      // Handle goalType-specific filtering
-      if (goalType === "Completed") {
-        // For completed activities, filter by completion status
-        activityWhereClause.isDone = true; // Use 'isDone' field for completion status
-      } else if (goalType === "Added") {
-        // For added activities, no additional filter needed - count all activities in date range
-        // The date range filtering is already handled by whereClause
-      }
+//       // Handle goalType-specific filtering
+//       if (goalType === "Completed") {
+//         // For completed activities, filter by completion status
+//         activityWhereClause.isDone = true; // Use 'isDone' field for completion status
+//       } else if (goalType === "Added") {
+//         // For added activities, no additional filter needed - count all activities in date range
+//         // The date range filtering is already handled by whereClause
+//       }
 
-      // Add pipeline filter by checking linked deals
-      // Activities must be linked to deals in the specified pipeline(s)
-      let includeClause = [];
-      if (
-        pipelineFilter &&
-        pipelineFilter !== "All pipelines" &&
-        pipelineFilter !== "all"
-      ) {
-        let pipelineWhereClause = {};
+//       // Add pipeline filter by checking linked deals
+//       // Activities must be linked to deals in the specified pipeline(s)
+//       let includeClause = [];
+//       if (
+//         pipelineFilter &&
+//         pipelineFilter !== "All pipelines" &&
+//         pipelineFilter !== "all"
+//       ) {
+//         let pipelineWhereClause = {};
 
-        if (pipelineFilter.includes(",")) {
-          // Multiple pipelines (comma-separated)
-          const pipelines = pipelineFilter
-            .split(",")
-            .map((pipeline) => pipeline.trim())
-            .filter((pipeline) => pipeline !== "");
-          pipelineWhereClause.pipeline = {
-            [Op.in]: pipelines,
-          };
-        } else {
-          // Single pipeline
-          pipelineWhereClause.pipeline = pipelineFilter;
-        }
+//         if (pipelineFilter.includes(",")) {
+//           // Multiple pipelines (comma-separated)
+//           const pipelines = pipelineFilter
+//             .split(",")
+//             .map((pipeline) => pipeline.trim())
+//             .filter((pipeline) => pipeline !== "");
+//           pipelineWhereClause.pipeline = {
+//             [Op.in]: pipelines,
+//           };
+//         } else {
+//           // Single pipeline
+//           pipelineWhereClause.pipeline = pipelineFilter;
+//         }
 
-        includeClause.push({
-          model: Deal,
-          where: pipelineWhereClause,
-          required: true, // INNER JOIN - only activities linked to deals in these pipelines
-          attributes: ["dealId", "pipeline", "title"], // Include deal info in response
-        });
-      } else {
-        // If no pipeline filter, still include deal info but make it optional
-        includeClause.push({
-          model: Deal,
-          required: false, // LEFT JOIN - include activities even if not linked to deals
-          attributes: ["dealId", "pipeline", "title"],
-        });
-      }
+//         includeClause.push({
+//           model: Deal,
+//           where: pipelineWhereClause,
+//           required: true, // INNER JOIN - only activities linked to deals in these pipelines
+//           attributes: ["dealId", "pipeline", "title"], // Include deal info in response
+//         });
+//       } else {
+//         // If no pipeline filter, still include deal info but make it optional
+//         includeClause.push({
+//           model: Deal,
+//           required: false, // LEFT JOIN - include activities even if not linked to deals
+//           attributes: ["dealId", "pipeline", "title"],
+//         });
+//       }
 
-      const activities = await Activity.findAll({
-        where: activityWhereClause,
-        include: includeClause, // Include deal information for pipeline filtering
-        attributes: [
-          "activityId",
-          "type", // Use 'type' instead of 'activityType'
-          "subject",
-          "dealId", // Include dealId to show linked deal
-          "isDone", // Include completion status
-          "masterUserID",
-          "createdAt",
-          "updatedAt",
-        ],
-        order: [["createdAt", "DESC"]],
-      });
+//       const activities = await Activity.findAll({
+//         where: activityWhereClause,
+//         include: includeClause, // Include deal information for pipeline filtering
+//         attributes: [
+//           "activityId",
+//           "type", // Use 'type' instead of 'activityType'
+//           "subject",
+//           "dealId", // Include dealId to show linked deal
+//           "isDone", // Include completion status
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
 
-      data = activities.map((activity) => ({
-        id: activity.activityId,
-        type: activity.type, // Use 'type' instead of 'activityType'
-        subject: activity.subject,
-        dealId: activity.dealId,
-        dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
-        pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
-        isDone: activity.isDone, // Include completion status
-        owner: activity.masterUserID,
-        createdAt: activity.createdAt,
-        updatedAt: activity.updatedAt,
-      }));
+//       data = activities.map((activity) => ({
+//         id: activity.activityId,
+//         type: activity.type, // Use 'type' instead of 'activityType'
+//         subject: activity.subject,
+//         dealId: activity.dealId,
+//         dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
+//         pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
+//         isDone: activity.isDone, // Include completion status
+//         owner: activity.masterUserID,
+//         createdAt: activity.createdAt,
+//         updatedAt: activity.updatedAt,
+//       }));
 
-      summary = {
-        totalCount: activities.length,
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        activityTypeFilter: activityTypeFilter, // Include filter info in response
-        pipelineFilter: pipelineFilter, // Include pipeline filter info
-        goalType: goalType, // Include goal type in response
-        filterDescription:
-          pipelineFilter &&
-          pipelineFilter !== "all" &&
-          pipelineFilter !== "All pipelines"
-            ? `${goalType} activities of type "${
-                activityTypeFilter || "any"
-              }" linked to deals in "${
-                pipelineFilter.includes(",")
-                  ? pipelineFilter
-                      .split(",")
-                      .map((p) => p.trim())
-                      .join(", ") + " pipelines"
-                  : pipelineFilter + " pipeline"
-              }"`
-            : `${goalType} activities of type "${activityTypeFilter || "any"}"${
-                pipelineFilter ? " (any pipeline)" : ""
-              }`,
-        progress: {
-          current: activities.length,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
+//       summary = {
+//         totalCount: activities.length,
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         activityTypeFilter: activityTypeFilter, // Include filter info in response
+//         pipelineFilter: pipelineFilter, // Include pipeline filter info
+//         goalType: goalType, // Include goal type in response
+//         filterDescription:
+//           pipelineFilter &&
+//           pipelineFilter !== "all" &&
+//           pipelineFilter !== "All pipelines"
+//             ? `${goalType} activities of type "${
+//                 activityTypeFilter || "any"
+//               }" linked to deals in "${
+//                 pipelineFilter.includes(",")
+//                   ? pipelineFilter
+//                       .split(",")
+//                       .map((p) => p.trim())
+//                       .join(", ") + " pipelines"
+//                   : pipelineFilter + " pipeline"
+//               }"`
+//             : `${goalType} activities of type "${activityTypeFilter || "any"}"${
+//                 pipelineFilter ? " (any pipeline)" : ""
+//               }`,
+//         progress: {
+//           current: activities.length,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
 
-      // Generate breakdown for Activity goals based on period setting
-      monthlyBreakdown =
-        goal.period === "Weekly"
-          ? generateWeeklyBreakdown(
-              activities,
-              goal,
-              trackingMetric,
-              "Activity",
-              start,
-              end
-            )
-          : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdown(
-              activities,
-              goal,
-              trackingMetric,
-              "Activity",
-              start,
-              end
-            )
-          : generateMonthlyBreakdown(
-              activities,
-              goal,
-              trackingMetric,
-              "Activity",
-              start,
-              end
-            );
+//       // Generate breakdown for Activity goals based on period setting
+//       monthlyBreakdown =
+//         goal.period === "Weekly"
+//           ? generateWeeklyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             )
+//           : goal.period === "Quarterly"
+//           ? generateQuarterlyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             )
+//           : generateMonthlyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             );
 
-      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-      if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
-        summary.periodSummary = monthlyBreakdown.map((period) => {
-          // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
-          // period.label: e.g. "W31 2025" for weekly or "Jul 2025" for monthly
-          // period.result: actual value for this period
-          const goalValue = period.goal || period.goalTarget || 0;
-          const result = period.result || 0;
-          const difference = result - goalValue;
-          const goalProgress =
-            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-          return {
-            period: period.label || period.period || "",
-            goal: goalValue,
-            result,
-            difference,
-            goalProgress,
-          };
-        });
-      }
-    } else if (entity === "Lead") {
-      const leads = await Lead.findAll({
-        where: whereClause,
-        attributes: [
-          "leadId",
-          "firstName",
-          "lastName",
-          "email",
-          "status",
-          "masterUserID",
-          "createdAt",
-          "updatedAt",
-        ],
-        order: [["createdAt", "DESC"]],
-      });
+//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+//         summary.periodSummary = monthlyBreakdown.map((period) => {
+//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+//           // period.label: e.g. "W31 2025" for weekly or "Jul 2025" for monthly
+//           // period.result: actual value for this period
+//           const goalValue = period.goal || period.goalTarget || 0;
+//           const result = period.result || 0;
+//           const difference = result - goalValue;
+//           const goalProgress =
+//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+//           return {
+//             period: period.label || period.period || "",
+//             goal: goalValue,
+//             result,
+//             difference,
+//             goalProgress,
+//           };
+//         });
+//       }
+//     } else if (entity === "Lead") {
+//       const leads = await Lead.findAll({
+//         where: whereClause,
+//         attributes: [
+//           "leadId",
+//           "firstName",
+//           "lastName",
+//           "email",
+//           "status",
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
 
-      data = leads.map((lead) => ({
-        id: lead.leadId,
-        name: `${lead.firstName} ${lead.lastName}`,
-        email: lead.email,
-        status: lead.status,
-        owner: lead.masterUserID,
-        createdAt: lead.createdAt,
-        updatedAt: lead.updatedAt,
-      }));
+//       data = leads.map((lead) => ({
+//         id: lead.leadId,
+//         name: `${lead.firstName} ${lead.lastName}`,
+//         email: lead.email,
+//         status: lead.status,
+//         owner: lead.masterUserID,
+//         createdAt: lead.createdAt,
+//         updatedAt: lead.updatedAt,
+//       }));
 
-      summary = {
-        totalCount: leads.length,
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: leads.length,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
+//       summary = {
+//         totalCount: leads.length,
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         progress: {
+//           current: leads.length,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
 
-      // Generate breakdown based on goal's period setting
-      monthlyBreakdown =
-        goal.period === "Weekly"
-          ? generateWeeklyBreakdown(
-              leads,
-              goal,
-              trackingMetric,
-              "Lead",
-              start,
-              end
-            )
-          : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdown(
-              leads,
-              goal,
-              trackingMetric,
-              "Lead",
-              start,
-              end
-            )
-          : generateMonthlyBreakdown(
-              leads,
-              goal,
-              trackingMetric,
-              "Lead",
-              start,
-              end
-            );
-    }
+//       // Generate breakdown based on goal's period setting
+//       monthlyBreakdown =
+//         goal.period === "Weekly"
+//           ? generateWeeklyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             )
+//           : goal.period === "Quarterly"
+//           ? generateQuarterlyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             )
+//           : generateMonthlyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             );
+//     }
 
-    // Calculate comprehensive duration information
-    const nowTime = new Date();
-    const isIndefinite = !endDate || endDate === null;
-    const goalStartDate = new Date(startDate);
-    const goalEndDate = endDate ? new Date(endDate) : null;
+//     // Calculate comprehensive duration information
+//     const nowTime = new Date();
+//     const isIndefinite = !endDate || endDate === null;
+//     const goalStartDate = new Date(startDate);
+//     const goalEndDate = endDate ? new Date(endDate) : null;
 
-    // Calculate periods based on frequency
-    let totalPeriods = 1;
-    let currentPeriod = 1;
-    let periodType = goal.period || "Monthly";
+//     // Calculate periods based on frequency
+//     let totalPeriods = 1;
+//     let currentPeriod = 1;
+//     let periodType = goal.period || "Monthly";
 
-    if (!isIndefinite && goalEndDate) {
-      const totalMonths =
-        (goalEndDate.getFullYear() - goalStartDate.getFullYear()) * 12 +
-        (goalEndDate.getMonth() - goalStartDate.getMonth()) +
-        1;
+//     if (!isIndefinite && goalEndDate) {
+//       const totalMonths =
+//         (goalEndDate.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//         (goalEndDate.getMonth() - goalStartDate.getMonth()) +
+//         1;
 
-      if (periodType === "Monthly") {
-        totalPeriods = totalMonths;
-        currentPeriod = Math.min(
-          totalPeriods,
-          (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-            (nowTime.getMonth() - goalStartDate.getMonth()) +
-            1
-        );
-      } else if (periodType === "Quarterly") {
-        totalPeriods = Math.ceil(totalMonths / 3);
-        currentPeriod = Math.min(
-          totalPeriods,
-          Math.ceil(
-            ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-              (nowTime.getMonth() - goalStartDate.getMonth()) +
-              1) /
-              3
-          )
-        );
-      } else if (periodType === "Yearly") {
-        totalPeriods = Math.ceil(totalMonths / 12);
-        currentPeriod = Math.min(
-          totalPeriods,
-          Math.ceil(
-            ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-              (nowTime.getMonth() - goalStartDate.getMonth()) +
-              1) /
-              12
-          )
-        );
-      }
-    } else if (isIndefinite) {
-      // For indefinite goals, calculate current period from start
-      const monthsFromStart =
-        (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-        (nowTime.getMonth() - goalStartDate.getMonth()) +
-        1;
+//       if (periodType === "Monthly") {
+//         totalPeriods = totalMonths;
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//             (nowTime.getMonth() - goalStartDate.getMonth()) +
+//             1
+//         );
+//       } else if (periodType === "Quarterly") {
+//         totalPeriods = Math.ceil(totalMonths / 3);
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           Math.ceil(
+//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//               (nowTime.getMonth() - goalStartDate.getMonth()) +
+//               1) /
+//               3
+//           )
+//         );
+//       } else if (periodType === "Yearly") {
+//         totalPeriods = Math.ceil(totalMonths / 12);
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           Math.ceil(
+//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//               (nowTime.getMonth() - goalStartDate.getMonth()) +
+//               1) /
+//               12
+//           )
+//         );
+//       }
+//     } else if (isIndefinite) {
+//       // For indefinite goals, calculate current period from start
+//       const monthsFromStart =
+//         (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//         (nowTime.getMonth() - goalStartDate.getMonth()) +
+//         1;
 
-      if (periodType === "Monthly") {
-        currentPeriod = monthsFromStart;
-      } else if (periodType === "Quarterly") {
-        currentPeriod = Math.ceil(monthsFromStart / 3);
-      } else if (periodType === "Yearly") {
-        currentPeriod = Math.ceil(monthsFromStart / 12);
-      }
-      totalPeriods = null; // Indefinite
-    }
+//       if (periodType === "Monthly") {
+//         currentPeriod = monthsFromStart;
+//       } else if (periodType === "Quarterly") {
+//         currentPeriod = Math.ceil(monthsFromStart / 3);
+//       } else if (periodType === "Yearly") {
+//         currentPeriod = Math.ceil(monthsFromStart / 12);
+//       }
+//       totalPeriods = null; // Indefinite
+//     }
 
-    const durationInfo = {
-      startDate: startDate,
-      endDate: endDate,
-      isIndefinite: isIndefinite,
-      frequency: periodType,
-      totalPeriods: totalPeriods,
-      currentPeriod: currentPeriod,
-      durationDays: isIndefinite
-        ? null
-        : Math.ceil((goalEndDate - goalStartDate) / (1000 * 60 * 60 * 24)),
-      isActive:
-        nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
-      timeRemaining: isIndefinite
-        ? null
-        : Math.max(
-            0,
-            Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
-          ),
-      timeElapsed: Math.max(
-        0,
-        Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
-      ),
-      status: isIndefinite
-        ? "ongoing"
-        : nowTime <= goalEndDate
-        ? "active"
-        : "expired",
-      trackingPeriod: isIndefinite
-        ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
-        : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
-      periodProgress: totalPeriods
-        ? `${currentPeriod} of ${totalPeriods} ${periodType.toLowerCase()} periods`
-        : `${currentPeriod} ${periodType.toLowerCase()} period(s) elapsed`,
-      targetPerPeriod: calculateTargetPerPeriod(
-        goal.targetValue,
-        periodType,
-        totalPeriods
-      ),
-    };
+//     const durationInfo = {
+//       startDate: startDate,
+//       endDate: endDate,
+//       isIndefinite: isIndefinite,
+//       frequency: periodType,
+//       totalPeriods: totalPeriods,
+//       currentPeriod: currentPeriod,
+//       durationDays: isIndefinite
+//         ? null
+//         : Math.ceil((goalEndDate - goalStartDate) / (1000 * 60 * 60 * 24)),
+//       isActive:
+//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+//       timeRemaining: isIndefinite
+//         ? null
+//         : Math.max(
+//             0,
+//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+//           ),
+//       timeElapsed: Math.max(
+//         0,
+//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+//       ),
+//       status: isIndefinite
+//         ? "ongoing"
+//         : nowTime <= goalEndDate
+//         ? "active"
+//         : "expired",
+//       trackingPeriod: isIndefinite
+//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+//       periodProgress: totalPeriods
+//         ? `${currentPeriod} of ${totalPeriods} ${periodType.toLowerCase()} periods`
+//         : `${currentPeriod} ${periodType.toLowerCase()} period(s) elapsed`,
+//       targetPerPeriod: calculateTargetPerPeriod(
+//         goal.targetValue,
+//         periodType,
+//         totalPeriods
+//       ),
+//     };
 
-    res.status(200).json({
-      success: true,
-      data: {
-        goal: goal.toJSON(),
-        records: data,
-        summary: summary,
-        monthlyBreakdown: monthlyBreakdown,
-        period: {
-          startDate: startDate,
-          endDate: endDate,
-        },
-        duration: durationInfo,
-        filters: {
-          entity: entity,
-          goalType: goalType,
-          assignee: assignee,
-          assignId: assignId,
-          pipeline: pipeline, // Show pipeline for all entities (Activity goals filter by linked deal pipeline)
-          pipelineStage: pipelineStage,
-          activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching goal data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch goal data",
-      error: error.message,
-    });
-  }
-};
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         goal: goal.toJSON(),
+//         records: data,
+//         summary: summary,
+//         monthlyBreakdown: monthlyBreakdown,
+//         period: {
+//           startDate: startDate,
+//           endDate: endDate,
+//         },
+//         duration: durationInfo,
+//         filters: {
+//           entity: entity,
+//           goalType: goalType,
+//           assignee: assignee,
+//           assignId: assignId,
+//           pipeline: pipeline, // Show pipeline for all entities (Activity goals filter by linked deal pipeline)
+//           pipelineStage: pipelineStage,
+//           activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching goal data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch goal data",
+//       error: error.message,
+//     });
+//   }
+// };
 
-// Get progressed goal data with detailed stage tracking
-exports.getProgressedGoalData = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const ownerId = req.adminId;
-    const periodFilter = req.query.periodFilter;
+// // DEPRECATED: Get progressed goal data with detailed stage tracking - not used
+// exports.getProgressedGoalData = async (req, res) => {
+//   try {
+//     const { goalId } = req.params;
+//     const ownerId = req.adminId;
+//     const periodFilter = req.query.periodFilter;
 
-    const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
-    });
+//     const goal = await Goal.findOne({
+//       where: {
+//         goalId,
+//         ownerId,
+//       },
+//     });
 
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
+//     if (!goal) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Goal not found or access denied",
+//       });
+//     }
 
-    // Check if goal type is supported (Progressed or Added)
-    if (
-      (goal.goalType !== "Progressed" && goal.goalType !== "Added") ||
-      goal.entity !== "Deal"
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "This endpoint is only for 'Progressed' or 'Added' deal goals",
-      });
-    }
+//     // Check if goal type is supported (Progressed or Added)
+//     if (
+//       (goal.goalType !== "Progressed" && goal.goalType !== "Added") ||
+//       goal.entity !== "Deal"
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "This endpoint is only for 'Progressed' or 'Added' deal goals",
+//       });
+//     }
 
-    const {
-      assignee,
-      assignId,
-      pipeline,
-      pipelineStage,
-      startDate,
-      endDate,
-      trackingMetric,
-    } = goal;
+//     const {
+//       assignee,
+//       assignId,
+//       pipeline,
+//       pipelineStage,
+//       startDate,
+//       endDate,
+//       trackingMetric,
+//     } = goal;
 
-    // Use the same date range logic as getGoalData
-    function getPeriodRange(filter) {
-      const now = new Date();
-      let start, end;
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+//     // Use the same date range logic as getGoalData
+//     function getPeriodRange(filter) {
+//       const now = new Date();
+//       let start, end;
+//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      switch ((filter || "").toLowerCase()) {
-        case "yesterday":
-          start = new Date(today);
-          start.setDate(start.getDate() - 1);
-          end = new Date(today);
-          end.setDate(end.getDate() - 1);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "today":
-          start = new Date(today);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "tomorrow":
-          start = new Date(today);
-          start.setDate(start.getDate() + 1);
-          end = new Date(today);
-          end.setDate(end.getDate() + 1);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "this_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay());
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "last_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay() - 7);
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_week":
-          start = new Date(today);
-          start.setDate(start.getDate() - start.getDay() + 7);
-          end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "this_month":
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-          break;
-        case "last_month":
-          start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-          break;
-        case "next_month":
-          start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-          end = new Date(
-            now.getFullYear(),
-            now.getMonth() + 2,
-            0,
-            23,
-            59,
-            59,
-            999
-          );
-          break;
-        case "this_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          start = new Date(now.getFullYear(), q * 3, 1);
-          end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "last_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
-          const quarter = q === 0 ? 3 : q - 1;
-          start = new Date(year, quarter * 3, 1);
-          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "next_quarter": {
-          const q = Math.floor(now.getMonth() / 3);
-          const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
-          const quarter = q === 3 ? 0 : q + 1;
-          start = new Date(year, quarter * 3, 1);
-          end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-          break;
-        }
-        case "this_year":
-          start = new Date(now.getFullYear(), 0, 1);
-          end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-          break;
-        case "last_year":
-          start = new Date(now.getFullYear() - 1, 0, 1);
-          end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-          break;
-        case "next_year":
-          start = new Date(now.getFullYear() + 1, 0, 1);
-          end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-          break;
-        case "month_to_date":
-          start = new Date(now.getFullYear(), now.getMonth(), 1);
-          end = now;
-          break;
-        case "quarter_to_date": {
-          const q = Math.floor(now.getMonth() / 3);
-          start = new Date(now.getFullYear(), q * 3, 1);
-          end = now;
-          break;
-        }
-        case "year_to_date":
-          start = new Date(now.getFullYear(), 0, 1);
-          end = now;
-          break;
-        case "past_7_days":
-          start = new Date(today);
-          start.setDate(start.getDate() - 6);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "past_2_weeks":
-          start = new Date(today);
-          start.setDate(start.getDate() - 13);
-          end = new Date(today);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_7_days":
-          start = new Date(today);
-          end = new Date(today);
-          end.setDate(end.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "next_2_weeks":
-          start = new Date(today);
-          end = new Date(today);
-          end.setDate(end.getDate() + 13);
-          end.setHours(23, 59, 59, 999);
-          break;
-        case "past_1_month":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 1);
-          end = now;
-          break;
-        case "past_3_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 3);
-          end = now;
-          break;
-        case "past_6_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 6);
-          end = now;
-          break;
-        case "next_3_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 3);
-          break;
-        case "next_6_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 6);
-          break;
-        case "past_12_months":
-          start = new Date(now);
-          start.setMonth(start.getMonth() - 12);
-          end = now;
-          break;
-        case "next_12_months":
-          start = now;
-          end = new Date(now);
-          end.setMonth(end.getMonth() + 12);
-          break;
-        case "goal_duration":
-        default:
-          start = startDate;
-          end = endDate || now;
-      }
-      return { start, end };
-    }
+//       switch ((filter || "").toLowerCase()) {
+//         case "yesterday":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "today":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "tomorrow":
+//           start = new Date(today);
+//           start.setDate(start.getDate() + 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay());
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() + 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_month":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 1,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "last_month":
+//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+//           break;
+//         case "next_month":
+//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 2,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "this_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "last_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+//           const quarter = q === 0 ? 3 : q - 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "next_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+//           const quarter = q === 3 ? 0 : q + 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "this_year":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "last_year":
+//           start = new Date(now.getFullYear() - 1, 0, 1);
+//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "next_year":
+//           start = new Date(now.getFullYear() + 1, 0, 1);
+//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "month_to_date":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = now;
+//           break;
+//         case "quarter_to_date": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = now;
+//           break;
+//         }
+//         case "year_to_date":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = now;
+//           break;
+//         case "past_7_days":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 6);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_2_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 13);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_7_days":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_2_weeks":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 13);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_1_month":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 1);
+//           end = now;
+//           break;
+//         case "past_3_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 3);
+//           end = now;
+//           break;
+//         case "past_6_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 6);
+//           end = now;
+//           break;
+//         case "next_3_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 3);
+//           break;
+//         case "next_6_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 6);
+//           break;
+//         case "past_12_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 12);
+//           end = now;
+//           break;
+//         case "next_12_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 12);
+//           break;
+//         case "goal_duration":
+//         default:
+//           start = startDate;
+//           end = endDate || now;
+//       }
+//       return { start, end };
+//     }
 
-    let start, end;
-    try {
-      ({ start, end } = getPeriodRange(periodFilter));
-      if (
-        !start ||
-        !end ||
-        isNaN(new Date(start).getTime()) ||
-        isNaN(new Date(end).getTime())
-      ) {
-        start = startDate;
-        end = endDate || new Date();
-      }
-    } catch (e) {
-      start = startDate;
-      end = endDate || new Date();
-    }
+//     let start, end;
+//     try {
+//       ({ start, end } = getPeriodRange(periodFilter));
+//       if (
+//         !start ||
+//         !end ||
+//         isNaN(new Date(start).getTime()) ||
+//         isNaN(new Date(end).getTime())
+//       ) {
+//         start = startDate;
+//         end = endDate || new Date();
+//       }
+//     } catch (e) {
+//       start = startDate;
+//       end = endDate || new Date();
+//     }
 
-    // Build where clause for deals based on goal type
-    const whereClause = {};
+//     // Build where clause for deals based on goal type
+//     const whereClause = {};
 
-    // Add assignee filter
-    if (assignId && assignId !== "everyone") {
-      whereClause.masterUserID = assignId;
-    } else if (
-      assignee &&
-      assignee !== "All" &&
-      assignee !== "Company (everyone)" &&
-      assignee !== "everyone"
-    ) {
-      whereClause.masterUserID = assignee;
-    }
+//     // Add assignee filter
+//     if (assignId && assignId !== "everyone") {
+//       whereClause.masterUserID = assignId;
+//     } else if (
+//       assignee &&
+//       assignee !== "All" &&
+//       assignee !== "Company (everyone)" &&
+//       assignee !== "everyone"
+//     ) {
+//       whereClause.masterUserID = assignee;
+//     }
 
-    // Add pipeline filter
-    if (pipeline) {
-      if (pipeline.includes(",")) {
-        // Multiple pipelines (comma-separated)
-        const pipelines = pipeline
-          .split(",")
-          .map((p) => p.trim())
-          .filter((p) => p !== "");
-        whereClause.pipeline = {
-          [Op.in]: pipelines,
-        };
-      } else {
-        // Single pipeline
-        whereClause.pipeline = pipeline;
-      }
-    }
+//     // Add pipeline filter
+//     if (pipeline) {
+//       if (pipeline.includes(",")) {
+//         // Multiple pipelines (comma-separated)
+//         const pipelines = pipeline
+//           .split(",")
+//           .map((p) => p.trim())
+//           .filter((p) => p !== "");
+//         whereClause.pipeline = {
+//           [Op.in]: pipelines,
+//         };
+//       } else {
+//         // Single pipeline
+//         whereClause.pipeline = pipeline;
+//       }
+//     }
 
-    let data = [];
-    let summary = {};
-    let monthlyBreakdown = [];
+//     let data = [];
+//     let summary = {};
+//     let monthlyBreakdown = [];
 
-    // Handle different goal types
-    if (goal.goalType === "Progressed") {
-      // Track deals that entered the specific pipeline stage during the period
-      if (pipelineStage) {
-        // Query DealStageHistory to find deals that entered this stage during the period
-        const stageEntries = await DealStageHistory.findAll({
-          where: {
-            stageName: pipelineStage,
-            enteredAt: {
-              [Op.between]: [start, end],
-            },
-          },
-          include: [
-            {
-              model: Deal,
-              as: "Deal",
-              where: whereClause,
-              attributes: [
-                "dealId",
-                "title",
-                "value",
-                "pipeline",
-                "pipelineStage",
-                "status",
-                "masterUserID",
-                "createdAt",
-                "updatedAt",
-              ],
-            },
-          ],
-          order: [["enteredAt", "DESC"]],
-        });
+//     // Handle different goal types
+//     if (goal.goalType === "Progressed") {
+//       // Track deals that entered the specific pipeline stage during the period
+//       if (pipelineStage) {
+//         // Query DealStageHistory to find deals that entered this stage during the period
+//         const stageEntries = await DealStageHistory.findAll({
+//           where: {
+//             stageName: pipelineStage,
+//             enteredAt: {
+//               [Op.between]: [start, end],
+//             },
+//           },
+//           include: [
+//             {
+//               model: Deal,
+//               as: "Deal",
+//               where: whereClause,
+//               attributes: [
+//                 "dealId",
+//                 "title",
+//                 "value",
+//                 "pipeline",
+//                 "pipelineStage",
+//                 "status",
+//                 "masterUserID",
+//                 "createdAt",
+//                 "updatedAt",
+//               ],
+//             },
+//           ],
+//           order: [["enteredAt", "DESC"]],
+//         });
 
-        // Format the data for frontend
-        data = stageEntries.map((entry) => ({
-          id: entry.Deal.dealId,
-          title: entry.Deal.title,
-          value: parseFloat(entry.Deal.value || 0),
-          pipeline: entry.Deal.pipeline,
-          stage: entry.Deal.pipelineStage,
-          status: entry.Deal.status,
-          owner: entry.Deal.masterUserID,
-          enteredStageAt: entry.enteredAt,
-          createdAt: entry.Deal.createdAt,
-          updatedAt: entry.Deal.updatedAt,
-        }));
+//         // Format the data for frontend
+//         data = stageEntries.map((entry) => ({
+//           id: entry.Deal.dealId,
+//           title: entry.Deal.title,
+//           value: parseFloat(entry.Deal.value || 0),
+//           pipeline: entry.Deal.pipeline,
+//           stage: entry.Deal.pipelineStage,
+//           status: entry.Deal.status,
+//           owner: entry.Deal.masterUserID,
+//           enteredStageAt: entry.enteredAt,
+//           createdAt: entry.Deal.createdAt,
+//           updatedAt: entry.Deal.updatedAt,
+//         }));
 
-        // Calculate current value based on tracking metric
-        const currentValue =
-          trackingMetric === "Value"
-            ? data.reduce((sum, deal) => sum + deal.value, 0)
-            : data.length;
+//         // Calculate current value based on tracking metric
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
 
-        // Calculate summary
-        summary = {
-          totalCount: data.length,
-          totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          targetStage: pipelineStage,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
+//         // Calculate summary
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           targetStage: pipelineStage,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
 
-        // Generate monthly breakdown by stage entry date
-        monthlyBreakdown = generateMonthlyBreakdownForProgressed(
-          stageEntries,
-          goal,
-          trackingMetric
-        );
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "Pipeline stage is required for progressed goals",
-        });
-      }
-    } else if (goal.goalType === "Added") {
-      // Track deals that were added (created) during the period
-      const addedWhereClause = {
-        ...whereClause,
-        createdAt: {
-          [Op.between]: [start, end],
-        },
-      };
+//         // Generate monthly breakdown by stage entry date
+//         monthlyBreakdown = generateMonthlyBreakdownForProgressed(
+//           stageEntries,
+//           goal,
+//           trackingMetric
+//         );
+//       } else {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Pipeline stage is required for progressed goals",
+//         });
+//       }
+//     } else if (goal.goalType === "Added") {
+//       // Track deals that were added (created) during the period
+//       const addedWhereClause = {
+//         ...whereClause,
+//         createdAt: {
+//           [Op.between]: [start, end],
+//         },
+//       };
 
-      // Get all deals that were added during the period
-      const addedDeals = await Deal.findAll({
-        where: addedWhereClause,
-        attributes: [
-          "dealId",
-          "title",
-          "value",
-          "pipeline",
-          "pipelineStage",
-          "status",
-          "masterUserID",
-          "createdAt",
-          "updatedAt",
-        ],
-        order: [["createdAt", "DESC"]],
-      });
+//       // Get all deals that were added during the period
+//       const addedDeals = await Deal.findAll({
+//         where: addedWhereClause,
+//         attributes: [
+//           "dealId",
+//           "title",
+//           "value",
+//           "pipeline",
+//           "pipelineStage",
+//           "status",
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
 
-      // Format the data for frontend
-      data = addedDeals.map((deal) => ({
-        id: deal.dealId,
-        title: deal.title,
-        value: parseFloat(deal.value || 0),
-        pipeline: deal.pipeline,
-        stage: deal.pipelineStage,
-        status: deal.status,
-        owner: deal.masterUserID,
-        createdAt: deal.createdAt,
-        updatedAt: deal.updatedAt,
-      }));
+//       // Format the data for frontend
+//       data = addedDeals.map((deal) => ({
+//         id: deal.dealId,
+//         title: deal.title,
+//         value: parseFloat(deal.value || 0),
+//         pipeline: deal.pipeline,
+//         stage: deal.pipelineStage,
+//         status: deal.status,
+//         owner: deal.masterUserID,
+//         createdAt: deal.createdAt,
+//         updatedAt: deal.updatedAt,
+//       }));
 
-      // Calculate current value based on tracking metric
-      const currentValue =
-        trackingMetric === "Value"
-          ? data.reduce((sum, deal) => sum + deal.value, 0)
-          : data.length;
+//       // Calculate current value based on tracking metric
+//       const currentValue =
+//         trackingMetric === "Value"
+//           ? data.reduce((sum, deal) => sum + deal.value, 0)
+//           : data.length;
 
-      // Calculate summary
-      summary = {
-        totalCount: data.length,
-        totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: currentValue,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
+//       // Calculate summary
+//       summary = {
+//         totalCount: data.length,
+//         totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         progress: {
+//           current: currentValue,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
 
-      // Generate monthly breakdown for added deals
-      monthlyBreakdown = generateMonthlyBreakdown(
-        addedDeals,
-        goal,
-        trackingMetric,
-        "Deal"
-      );
-    }
+//       // Generate monthly breakdown for added deals
+//       monthlyBreakdown = generateMonthlyBreakdown(
+//         addedDeals,
+//         goal,
+//         trackingMetric,
+//         "Deal"
+//       );
+//     }
 
-    // Enhanced duration info
-    const nowTime = new Date();
-    const isIndefinite = !endDate || endDate === null;
-    const goalStartDate = new Date(startDate);
-    const goalEndDate = endDate ? new Date(endDate) : null;
+//     // Enhanced duration info
+//     const nowTime = new Date();
+//     const isIndefinite = !endDate || endDate === null;
+//     const goalStartDate = new Date(startDate);
+//     const goalEndDate = endDate ? new Date(endDate) : null;
 
-    const durationInfo = {
-      startDate: startDate,
-      endDate: endDate,
-      isIndefinite: isIndefinite,
-      frequency: goal.period || "Monthly",
-      isActive:
-        nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
-      timeRemaining: isIndefinite
-        ? null
-        : Math.max(
-            0,
-            Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
-          ),
-      timeElapsed: Math.max(
-        0,
-        Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
-      ),
-      status: isIndefinite
-        ? "ongoing"
-        : nowTime <= goalEndDate
-        ? "active"
-        : "expired",
-      trackingPeriod: isIndefinite
-        ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
-        : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
-    };
+//     const durationInfo = {
+//       startDate: startDate,
+//       endDate: endDate,
+//       isIndefinite: isIndefinite,
+//       frequency: goal.period || "Monthly",
+//       isActive:
+//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+//       timeRemaining: isIndefinite
+//         ? null
+//         : Math.max(
+//             0,
+//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+//           ),
+//       timeElapsed: Math.max(
+//         0,
+//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+//       ),
+//       status: isIndefinite
+//         ? "ongoing"
+//         : nowTime <= goalEndDate
+//         ? "active"
+//         : "expired",
+//       trackingPeriod: isIndefinite
+//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+//     };
 
-    res.status(200).json({
-      success: true,
-      data: {
-        goal: goal.toJSON(),
-        records: data,
-        summary: summary,
-        monthlyBreakdown: monthlyBreakdown,
-        period: {
-          startDate: start,
-          endDate: end,
-        },
-        duration: durationInfo,
-        filters: {
-          entity: goal.entity,
-          goalType: goal.goalType,
-          assignee: assignee,
-          assignId: assignId,
-          pipeline: pipeline,
-          pipelineStage: pipelineStage,
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching progressed goal data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch progressed goal data",
-      error: error.message,
-    });
-  }
-};
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         goal: goal.toJSON(),
+//         records: data,
+//         summary: summary,
+//         monthlyBreakdown: monthlyBreakdown,
+//         period: {
+//           startDate: start,
+//           endDate: end,
+//         },
+//         duration: durationInfo,
+//         filters: {
+//           entity: goal.entity,
+//           goalType: goal.goalType,
+//           assignee: assignee,
+//           assignId: assignId,
+//           pipeline: pipeline,
+//           pipelineStage: pipelineStage,
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching progressed goal data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch progressed goal data",
+//       error: error.message,
+//     });
+//   }
+// };
 // Get progressed goal data (legacy endpoint)
 
 // =============== HELPER FUNCTIONS ===============
@@ -5573,4 +5667,101 @@ function generateWeeklyBreakdown(
   }
 
   return weeklyBreakdown;
+}
+
+// Generate quarterly breakdown for progressed goals based on stage entry dates
+function generateQuarterlyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const quarterlyData = new Map();
+
+  // Helper function to get quarter number (1-4)
+  function getQuarterNumber(date) {
+    return Math.floor(date.getMonth() / 3) + 1;
+  }
+
+  // Helper function to get quarter start date
+  function getQuarterStart(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
+    return new Date(year, quarterStartMonth, 1);
+  }
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const quarterNumber = getQuarterNumber(entryDate);
+    const year = entryDate.getFullYear();
+    const quarterKey = `${year}-Q${quarterNumber}`;
+    const quarterLabel = `Q${quarterNumber} ${year}`;
+
+    if (!quarterlyData.has(quarterKey)) {
+      quarterlyData.set(quarterKey, {
+        period: quarterLabel,
+        label: quarterLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const quarterData = quarterlyData.get(quarterKey);
+    quarterData.count += 1;
+    quarterData.value += parseFloat(entry.Deal?.value || 0);
+    quarterData.deals.push(entry);
+  });
+
+  // Calculate quarterly target based on goal duration
+  const currentDate = new Date();
+  const isIndefinite = !goal.endDate || goal.endDate === null;
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
+  const goalStartDate = new Date(goal.startDate);
+  const totalDays = Math.ceil(
+    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalQuarters = Math.ceil(totalDays / 91); // Approximate 91 days per quarter
+  let quarterlyTarget = parseFloat(goal.targetValue) / totalQuarters;
+
+  // Adjust target based on goal period
+  if (goal.period === "Monthly") {
+    quarterlyTarget = parseFloat(goal.targetValue) * 3; // 3 months per quarter
+  } else if (goal.period === "Weekly") {
+    quarterlyTarget = parseFloat(goal.targetValue) * 13; // ~13 weeks per quarter
+  } else if (goal.period === "Yearly") {
+    quarterlyTarget = parseFloat(goal.targetValue) / 4; // 4 quarters per year
+  } else if (goal.period === "Quarterly") {
+    quarterlyTarget = parseFloat(goal.targetValue); // Use as-is for quarterly goals
+  }
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(quarterlyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([quarterKey, data]) => {
+      const goalTarget = quarterlyTarget;
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const percentage =
+        goalTarget > 0 ? Math.round((result / goalTarget) * 100) : 0;
+
+      return {
+        period: data.period,
+        label: data.label,
+        goal: goalTarget, // Use 'goal' key to match quarterly breakdown format
+        result: result,
+        difference: difference,
+        percentage: percentage,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
 }
