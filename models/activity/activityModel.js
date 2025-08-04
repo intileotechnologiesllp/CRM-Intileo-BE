@@ -112,6 +112,10 @@ const Activity = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    markedAsDoneTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "Activities",
