@@ -5288,7 +5288,145 @@ function generateWeeklyBreakdownForProgressed(
 
   return breakdown;
 }
+function generateQuarterlyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  if (!records || records.length === 0) return [];
 
+  const now = new Date();
+  const startDate = filterStartDate || new Date(goal.startDate);
+  const endDate =
+    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
+
+  // Use the filtered date range, not the goal's full duration
+  const effectiveStartDate = new Date(
+    Math.max(startDate.getTime(), new Date(goal.startDate).getTime())
+  );
+  const effectiveEndDate = new Date(
+    Math.min(
+      endDate.getTime(),
+      goal.endDate ? new Date(goal.endDate).getTime() : now.getTime()
+    )
+  );
+
+  const quarterlyBreakdown = [];
+
+  // Helper function to get quarter start date
+  function getQuarterStart(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
+    return new Date(year, quarterStartMonth, 1);
+  }
+
+  // Helper function to get quarter end date
+  function getQuarterEnd(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterEndMonth = Math.floor(month / 3) * 3 + 2; // 2, 5, 8, or 11
+    return new Date(year, quarterEndMonth + 1, 0, 23, 59, 59, 999); // Last day of quarter
+  }
+
+  // Helper function to get quarter number (1-4)
+  function getQuarterNumber(date) {
+    return Math.floor(date.getMonth() / 3) + 1;
+  }
+
+  // Calculate quarterly target based on goal's target and period
+  let quarterlyTarget = parseFloat(goal.targetValue);
+  if (goal.period === "Monthly") {
+    quarterlyTarget = quarterlyTarget * 3; // 3 months per quarter
+  } else if (goal.period === "Weekly") {
+    quarterlyTarget = quarterlyTarget * 13; // ~13 weeks per quarter
+  } else if (goal.period === "Yearly") {
+    quarterlyTarget = quarterlyTarget / 4; // 4 quarters per year
+  }
+  // If goal.period === "Quarterly", use the target as-is
+
+  // Start from the first quarter that intersects with effective start date
+  let currentQuarterStart = getQuarterStart(effectiveStartDate);
+
+  // Generate breakdown for each quarter within the effective period
+  while (currentQuarterStart <= effectiveEndDate) {
+    const quarterEnd = getQuarterEnd(currentQuarterStart);
+
+    // Adjust quarter boundaries to fit within effective date range
+    let quarterStart = new Date(
+      Math.max(currentQuarterStart.getTime(), effectiveStartDate.getTime())
+    );
+    let quarterEndAdjusted = new Date(
+      Math.min(quarterEnd.getTime(), effectiveEndDate.getTime())
+    );
+
+    // Don't process quarters that are entirely in the future beyond effective end date
+    if (quarterStart > effectiveEndDate) {
+      break;
+    }
+
+    // Filter records for this quarter
+    const quarterRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= quarterStart && recordDate <= quarterEndAdjusted;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let quarterResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      quarterResult = quarterRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      quarterResult = quarterRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = quarterResult - quarterlyTarget;
+    const percentage =
+      quarterlyTarget > 0
+        ? Math.round((quarterResult / quarterlyTarget) * 100)
+        : 0;
+
+    // Format period display (Q3 2025 format)
+    const quarterNumber = getQuarterNumber(currentQuarterStart);
+    const year = currentQuarterStart.getFullYear();
+    const periodDisplay = `Q${quarterNumber} ${year}`;
+
+    // Check if this is the current quarter
+    const currentQuarterStart_check = getQuarterStart(now);
+    const isCurrentQuarter =
+      currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
+
+    quarterlyBreakdown.push({
+      period: periodDisplay,
+      goal: quarterlyTarget, // Keep the actual quarterly target
+      result: quarterResult,
+      difference: difference,
+      percentage: percentage,
+      quarterStart: quarterStart.toISOString(),
+      quarterEnd: quarterEndAdjusted.toISOString(),
+      recordCount: quarterRecords.length,
+      isCurrentQuarter: isCurrentQuarter,
+      isFutureQuarter: currentQuarterStart > now,
+      quarterNumber: quarterNumber,
+      year: year,
+    });
+
+    // Move to next quarter
+    currentQuarterStart = new Date(
+      currentQuarterStart.getFullYear(),
+      currentQuarterStart.getMonth() + 3,
+      1
+    );
+  }
+
+  return quarterlyBreakdown;
+}
 // Generate weekly breakdown specifically for Activity goals
 function generateWeeklyBreakdown(
   records,
