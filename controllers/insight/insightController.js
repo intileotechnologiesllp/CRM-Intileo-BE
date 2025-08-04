@@ -1355,18 +1355,24 @@ exports.getAllGoals = async (req, res) => {
       })
     );
 
-    // Group into Active and Past using createdAt date (1 month cutoff)
+    // Group into Active and Past using endDate logic
     const activeGoals = [];
     const pastGoals = [];
     goalsWithProgress.forEach((goal) => {
-      const createdAt = new Date(goal.createdAt);
-      // If createdAt is more than 1 month ago, show in Past
-      const oneMonthAgo = new Date(now);
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      if (createdAt < oneMonthAgo) {
-        pastGoals.push(goal);
-      } else {
+      const endDate = goal.endDate ? new Date(goal.endDate) : null;
+      if (!endDate) {
+        // Ongoing goal (no end date)
         activeGoals.push(goal);
+      } else {
+        // Compare endDate to current date (today)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        if (endDate >= today) {
+          activeGoals.push(goal);
+        } else {
+          pastGoals.push(goal);
+        }
       }
     });
 
@@ -1546,12 +1552,11 @@ exports.updateGoal = async (req, res) => {
       isActive,
     } = req.body;
     const ownerId = req.adminId;
+    const role = req.role;
 
+    // If admin, do not filter by ownerId
     const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
+      where: role === "admin" ? { goalId } : { goalId, ownerId },
     });
 
     if (!goal) {
