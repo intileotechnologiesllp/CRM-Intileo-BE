@@ -1379,13 +1379,11 @@ exports.addGoalToDashboard = async (req, res) => {
     const { goalId } = req.params;
     const { dashboardId } = req.body;
     const ownerId = req.adminId;
+    const role = req.role;
 
-    // Verify goal ownership
+    // For admin, do not filter by ownerId
     const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
+      where: role === "admin" ? { goalId } : { goalId, ownerId },
     });
 
     if (!goal) {
@@ -1395,12 +1393,9 @@ exports.addGoalToDashboard = async (req, res) => {
       });
     }
 
-    // Verify dashboard ownership
+    // For admin, do not filter by ownerId
     const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
+      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
     });
 
     if (!dashboard) {
