@@ -105,6 +105,7 @@ router.get(
 // );
 router.post("/edit-goals/:goalId", verifyToken, insightController.updateGoal);
 router.post("/delete-goals/:goalId", verifyToken, insightController.deleteGoal);
+router.post("/bulk-delete-goals", verifyToken, insightController.bulkDeleteGoal);
 router.post(
   "/dashboards/:dashboardId/goals/reorder",
   verifyToken,
