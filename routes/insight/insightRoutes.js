@@ -98,11 +98,11 @@ router.get(
   verifyToken,
   insightController.getGoalData
 );
-router.get(
-  "/goals/:goalId/progressed-data",
-  verifyToken,
-  insightController.getProgressedGoalData
-);
+// router.get(
+//   "/goals/:goalId/progressed-data",
+//   verifyToken,
+//   insightController.getProgressedGoalData
+// );
 router.post("/goals/:goalId", verifyToken, insightController.updateGoal);
 router.post("/goals/:goalId", verifyToken, insightController.deleteGoal);
 router.post(
