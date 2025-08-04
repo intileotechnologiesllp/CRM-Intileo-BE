@@ -816,6 +816,7 @@ exports.markActivityAsDone = async (req, res) => {
     }
 
     activity.isDone = true;
+    activity.markedAsDoneTime = new Date();
     await activity.save();
 
     // Update next activity date for the lead if this activity was linked to a lead
