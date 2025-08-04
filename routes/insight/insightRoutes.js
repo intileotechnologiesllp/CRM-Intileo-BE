@@ -94,12 +94,22 @@ router.get(
 );
 router.get("/goals/:goalId/data", verifyToken, insightController.getGoalData);
 router.get(
+  "/dashboards/:dashboardId/goals-data",
+  verifyToken,
+  insightController.getGoalData
+);
+router.get(
   "/goals/:goalId/progressed-data",
   verifyToken,
   insightController.getProgressedGoalData
 );
-router.put("/goals/:goalId", verifyToken, insightController.updateGoal);
-router.delete("/goals/:goalId", verifyToken, insightController.deleteGoal);
+router.post("/goals/:goalId", verifyToken, insightController.updateGoal);
+router.post("/goals/:goalId", verifyToken, insightController.deleteGoal);
+router.post(
+  "/dashboards/:dashboardId/goals/reorder",
+  verifyToken,
+  insightController.reorderGoals
+);
 
 // =============== UTILITY ROUTES ===============
 router.get("/report-types", (req, res) => {

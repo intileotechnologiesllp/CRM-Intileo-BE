@@ -81,6 +81,11 @@ const Goal = sequelize.define(
       type: DataTypes.DECIMAL(15, 2),
       allowNull: true,
     }, // Target value when trackingMetric is "Value"
+    position: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 0,
+    }, // Position for drag-and-drop ordering within dashboard
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
