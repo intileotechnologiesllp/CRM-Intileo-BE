@@ -103,8 +103,8 @@ router.get(
 //   verifyToken,
 //   insightController.getProgressedGoalData
 // );
-router.post("/goals/:goalId", verifyToken, insightController.updateGoal);
-router.post("/goals/:goalId", verifyToken, insightController.deleteGoal);
+router.post("/edit-goals/:goalId", verifyToken, insightController.updateGoal);
+router.post("/delete-goals/:goalId", verifyToken, insightController.deleteGoal);
 router.post(
   "/dashboards/:dashboardId/goals/reorder",
   verifyToken,
