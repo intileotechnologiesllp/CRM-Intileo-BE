@@ -2399,9 +2399,8 @@ async function processGoalData(goal, ownerId, periodFilter) {
         attributes: [
           "dealId",
           "stageName",
-          "pipeline",
           "enteredAt",
-          "masterUserID",
+          // "masterUserID",
         ],
         order: [["enteredAt", "DESC"]],
       });
