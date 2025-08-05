@@ -2423,17 +2423,19 @@ async function processGoalData(goal, ownerId, periodFilter) {
         });
       }
 
-      // Merge DealStageHistory and Deal info for records
-      data = progressedStages
-        .map((stage) => {
-          const deal = progressedDeals.find((d) => d.dealId === stage.dealId);
-          if (!deal) return null;
-          return {
-            ...stage.toJSON(),
-            deal: deal ? deal.toJSON() : null,
-          };
-        })
-        .filter((item) => item !== null);
+      // Deduplicate deals by dealId for records array
+      const uniqueDealsMap = new Map();
+      progressedDeals.forEach((deal) => {
+        uniqueDealsMap.set(deal.dealId, deal);
+      });
+      data = Array.from(uniqueDealsMap.values()).map((deal) => ({
+        dealId: deal.dealId,
+        title: deal.title,
+        value: deal.value,
+        pipeline: deal.pipeline,
+        status: deal.status,
+        createdAt: deal.createdAt,
+      }));
 
       // Calculate current value
       const currentValue =
