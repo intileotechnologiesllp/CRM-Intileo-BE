@@ -2364,7 +2364,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
     } else if (goalType === "Progressed") {
       // Use DealStageHistory for accurate tracking of deals entering a stage
       const stageWhere = {
-        stageId: pipelineStage,
+        stageName: pipelineStage,
         enteredAt: {
           [Op.between]: [start, end],
         },
@@ -2398,8 +2398,8 @@ async function processGoalData(goal, ownerId, periodFilter) {
         where: stageWhere,
         attributes: [
           "dealId",
-          "stageId",
-          "pipeline",
+          "dealstageId",
+          "stageName",
           "enteredAt",
           "masterUserID",
         ],
