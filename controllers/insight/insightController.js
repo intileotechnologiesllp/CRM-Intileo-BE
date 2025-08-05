@@ -4588,41 +4588,37 @@ async function generateGoalBreakdownData(
             },
           };
 
-          // Add pipeline filter to stage history
+          // Build Deal include where clause for pipeline and assignee
+          const dealWhere = {};
           if (pipeline) {
             if (pipeline.includes(",")) {
               const pipelines = pipeline
                 .split(",")
                 .map((p) => p.trim())
                 .filter((p) => p !== "");
-              stageHistoryWhereClause.pipeline = {
-                [Op.in]: pipelines,
-              };
+              dealWhere.pipeline = { [Op.in]: pipelines };
             } else {
-              stageHistoryWhereClause.pipeline = pipeline;
+              dealWhere.pipeline = pipeline;
             }
           }
-
-          // Add assignee filter by joining with Deal
-          const includeClause = [];
           if (assignId && assignId !== "everyone") {
-            includeClause.push({
-              model: Deal,
-              where: { masterUserID: assignId },
-              required: true,
-            });
+            dealWhere.masterUserID = assignId;
           } else if (
             assignee &&
             assignee !== "All" &&
             assignee !== "Company (everyone)" &&
             assignee !== "everyone"
           ) {
-            includeClause.push({
-              model: Deal,
-              where: { masterUserID: assignee },
-              required: true,
-            });
+            dealWhere.masterUserID = assignee;
           }
+
+          const includeClause = [
+            {
+              model: Deal,
+              where: Object.keys(dealWhere).length > 0 ? dealWhere : undefined,
+              required: true,
+            },
+          ];
 
           const stageEntries = await DealStageHistory.findAll({
             where: stageHistoryWhereClause,
@@ -4631,7 +4627,6 @@ async function generateGoalBreakdownData(
               "dealId",
               "oldStage",
               "newStage",
-              "pipeline",
               "updatedAt",
               "dealValue",
             ],
