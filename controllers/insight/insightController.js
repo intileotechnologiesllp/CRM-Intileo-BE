@@ -2398,8 +2398,8 @@ async function processGoalData(goal, ownerId, periodFilter) {
         where: stageWhere,
         attributes: [
           "dealId",
-          "dealstageId",
           "stageName",
+          "pipeline",
           "enteredAt",
           "masterUserID",
         ],
