@@ -1,4 +1,3 @@
-
 const DASHBOARD = require("../../models/insight/dashboardModel");
 const Report = require("../../models/insight/reportModel");
 const Goal = require("../../models/insight/goalModel");
@@ -2363,35 +2362,81 @@ async function processGoalData(goal, ownerId, periodFilter) {
         });
       }
     } else if (goalType === "Progressed") {
-      // Count deals that moved to specific stage or progressed beyond qualified
-      let progressedWhereClause = { ...whereClause };
-      if (pipelineStage) {
-        // Track deals entering specific pipeline stage
-        progressedWhereClause.pipelineStage = pipelineStage;
-      } else {
-        // Fallback: deals that progressed beyond "Qualified"
-        progressedWhereClause.pipelineStage = { [Op.ne]: "Qualified" };
+      // Use DealStageHistory for accurate tracking of deals entering a stage
+      const stageWhere = {
+        stageId: pipelineStage,
+        enteredAt: {
+          [Op.between]: [start, end],
+        },
+      };
+      // Add pipeline filter if present
+      if (pipeline) {
+        if (pipeline.includes(",")) {
+          const pipelines = pipeline
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          stageWhere.pipeline = { [Op.in]: pipelines };
+        } else {
+          stageWhere.pipeline = pipeline;
+        }
+      }
+      // Add assignee filter if present
+      if (assignId && assignId !== "everyone") {
+        stageWhere.masterUserID = assignId;
+      } else if (
+        assignee &&
+        assignee !== "All" &&
+        assignee !== "Company (everyone)" &&
+        assignee !== "everyone"
+      ) {
+        stageWhere.masterUserID = assignee;
       }
 
-      const progressedDeals = await Deal.findAll({
-        where: progressedWhereClause,
+      // Find all DealStageHistory records for deals that entered the stage in the period
+      const progressedStages = await DealStageHistory.findAll({
+        where: stageWhere,
         attributes: [
           "dealId",
-          "title",
-          "value",
+          "stageId",
           "pipeline",
-          "pipelineStage",
-          "status",
+          "enteredAt",
           "masterUserID",
-          "createdAt",
-          "updatedAt",
         ],
-        order: [["updatedAt", "DESC"]],
+        order: [["enteredAt", "DESC"]],
       });
 
-      // Assign fetched deals to data array for records
-      data = progressedDeals;
+      // Get unique dealIds
+      const progressedDealIds = progressedStages.map((s) => s.dealId);
 
+      // Fetch deal details for those deals
+      let progressedDeals = [];
+      if (progressedDealIds.length > 0) {
+        progressedDeals = await Deal.findAll({
+          where: {
+            dealId: { [Op.in]: progressedDealIds },
+          },
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "status",
+            "createdAt",
+          ],
+        });
+      }
+
+      // Merge DealStageHistory and Deal info for records
+      data = progressedStages.map((stage) => {
+        const deal = progressedDeals.find((d) => d.dealId === stage.dealId);
+        return {
+          ...stage.toJSON(),
+          deal: deal ? deal.toJSON() : null,
+        };
+      });
+
+      // Calculate current value
       const currentValue =
         trackingMetric === "Value"
           ? progressedDeals.reduce(
@@ -2418,32 +2463,36 @@ async function processGoalData(goal, ownerId, periodFilter) {
         },
       };
 
+      // For breakdown, use enteredAt dates
       breakdown =
         goal.period === "Weekly"
-          ? generateWeeklyBreakdownForProgressed(
-              progressedDeals,
+          ? generateWeeklyBreakdown(
+              progressedStages,
               goal,
               trackingMetric,
-              "Deal",
+              "DealProgressed",
               start,
-              end
+              end,
+              "enteredAt"
             )
           : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdownForProgressed(
-              progressedDeals,
+          ? generateQuarterlyBreakdown(
+              progressedStages,
               goal,
               trackingMetric,
-              "Deal",
+              "DealProgressed",
               start,
-              end
+              end,
+              "enteredAt"
             )
-          : generateMonthlyBreakdownForProgressed(
-              progressedDeals,
+          : generateMonthlyBreakdown(
+              progressedStages,
               goal,
               trackingMetric,
-              "Deal",
+              "DealProgressed",
               start,
-              end
+              end,
+              "enteredAt"
             );
 
       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
@@ -2487,16 +2536,24 @@ async function processGoalData(goal, ownerId, periodFilter) {
 
     const activities = await Activity.findAll({
       where: activityWhereClause,
-      attributes: ["activityId", "type", "subject", "isDone", "createdAt","assignedTo","markedAsDoneTime"],
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "isDone",
+        "createdAt",
+        "assignedTo",
+        "markedAsDoneTime",
+      ],
       order: [["createdAt", "DESC"]],
       include: [
-    {
-      model: MasterUser,
-      attributes: [["name", "assignToUser"]],
-      as: "assignedUser", // <-- must match the alias in the association
-      required: false,
-    }
-  ],
+        {
+          model: MasterUser,
+          attributes: [["name", "assignToUser"]],
+          as: "assignedUser", // <-- must match the alias in the association
+          required: false,
+        },
+      ],
     });
 
     // Assign fetched activities to data array for records
@@ -4813,14 +4870,14 @@ async function generateGoalBreakdownData(
             "assignedTo",
             "markedAsDoneTime",
           ],
-         include: [
-    {
-      model: MasterUser,
-      attributes: [["name", "assignToUser"]],
-      as: "assignedUser", // <-- must match the alias in the association
-      required: false,
-    }
-  ],
+          include: [
+            {
+              model: MasterUser,
+              attributes: [["name", "assignToUser"]],
+              as: "assignedUser", // <-- must match the alias in the association
+              required: false,
+            },
+          ],
           order: [["createdAt", "DESC"]],
         });
 
@@ -4874,14 +4931,14 @@ async function generateGoalBreakdownData(
             "assignedTo",
             "markedAsDoneTime",
           ],
-        include: [
-    {
-      model: MasterUser,
-      attributes: [["name", "assignToUser"]],
-      as: "assignedUser", // <-- must match the alias in the association
-      required: false,
-    }
-  ],
+          include: [
+            {
+              model: MasterUser,
+              attributes: [["name", "assignToUser"]],
+              as: "assignedUser", // <-- must match the alias in the association
+              required: false,
+            },
+          ],
           order: [["updatedAt", "DESC"]],
         });
 
