@@ -2369,51 +2369,48 @@ async function processGoalData(goal, ownerId, periodFilter) {
           [Op.between]: [start, end],
         },
       };
-      // Add pipeline filter if present
-      if (pipeline) {
-        if (pipeline.includes(",")) {
-          const pipelines = pipeline
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p !== "");
-          stageWhere.pipeline = { [Op.in]: pipelines };
-        } else {
-          stageWhere.pipeline = pipeline;
-        }
-      }
-      // Add assignee filter if present
-      if (assignId && assignId !== "everyone") {
-        stageWhere.masterUserID = assignId;
-      } else if (
-        assignee &&
-        assignee !== "All" &&
-        assignee !== "Company (everyone)" &&
-        assignee !== "everyone"
-      ) {
-        stageWhere.masterUserID = assignee;
-      }
 
       // Find all DealStageHistory records for deals that entered the stage in the period
       const progressedStages = await DealStageHistory.findAll({
         where: stageWhere,
-        attributes: [
-          "dealId",
-          "stageName",
-          "enteredAt",
-          // "masterUserID",
-        ],
+        attributes: ["dealId", "stageName", "enteredAt"],
         order: [["enteredAt", "DESC"]],
       });
 
       // Get unique dealIds
       const progressedDealIds = progressedStages.map((s) => s.dealId);
 
-      // Fetch deal details for those deals
+      // Build Deal filter for pipeline and assignee
+      const dealWhere = {};
+      if (pipeline) {
+        if (pipeline.includes(",")) {
+          const pipelines = pipeline
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          dealWhere.pipeline = { [Op.in]: pipelines };
+        } else {
+          dealWhere.pipeline = pipeline;
+        }
+      }
+      if (assignId && assignId !== "everyone") {
+        dealWhere.masterUserID = assignId;
+      } else if (
+        assignee &&
+        assignee !== "All" &&
+        assignee !== "Company (everyone)" &&
+        assignee !== "everyone"
+      ) {
+        dealWhere.masterUserID = assignee;
+      }
+
+      // Fetch deal details for those deals, applying filters
       let progressedDeals = [];
       if (progressedDealIds.length > 0) {
         progressedDeals = await Deal.findAll({
           where: {
             dealId: { [Op.in]: progressedDealIds },
+            ...dealWhere,
           },
           attributes: [
             "dealId",
@@ -2427,13 +2424,16 @@ async function processGoalData(goal, ownerId, periodFilter) {
       }
 
       // Merge DealStageHistory and Deal info for records
-      data = progressedStages.map((stage) => {
-        const deal = progressedDeals.find((d) => d.dealId === stage.dealId);
-        return {
-          ...stage.toJSON(),
-          deal: deal ? deal.toJSON() : null,
-        };
-      });
+      data = progressedStages
+        .map((stage) => {
+          const deal = progressedDeals.find((d) => d.dealId === stage.dealId);
+          if (!deal) return null;
+          return {
+            ...stage.toJSON(),
+            deal: deal ? deal.toJSON() : null,
+          };
+        })
+        .filter((item) => item !== null);
 
       // Calculate current value
       const currentValue =
