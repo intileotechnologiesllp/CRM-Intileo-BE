@@ -2566,7 +2566,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
 
     const activities = await Activity.findAll({
       where: activityWhereClause,
-      attributes: ["activityId", "type", "subject", "isDone", "createdAt"],
+      attributes: ["activityId", "type", "subject", "isDone", "createdAt","assignedTo","markedAsDoneTime"],
       order: [["createdAt", "DESC"]],
     });
 
@@ -4881,6 +4881,8 @@ async function generateGoalBreakdownData(
             "masterUserID",
             "dealId",
             "createdAt",
+            "assignedTo",
+            "markedAsDoneTime",
           ],
           order: [["createdAt", "DESC"]],
         });
@@ -4932,6 +4934,8 @@ async function generateGoalBreakdownData(
             "masterUserID",
             "dealId",
             "updatedAt",
+            "assignedTo",
+            "markedAsDoneTime",
           ],
           order: [["updatedAt", "DESC"]],
         });
