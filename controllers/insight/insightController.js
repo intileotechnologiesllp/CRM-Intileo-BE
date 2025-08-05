@@ -1,83 +1,4 @@
-// Bulk delete multiple or single goals
-exports.bulkDeleteGoal = async (req, res) => {
-  try {
-    let { goalIds } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
 
-    // Support both single and multiple deletion
-    if (!goalIds) {
-      // Try to get from query or params for single delete
-      if (req.body.goalId) {
-        goalIds = [req.body.goalId];
-      } else if (req.query.goalId) {
-        goalIds = [req.query.goalId];
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "goalIds array or goalId is required",
-        });
-      }
-    } else if (!Array.isArray(goalIds)) {
-      goalIds = [goalIds];
-    }
-
-    // Find goals to delete (admin: all, non-admin: only own)
-    let goalsToDelete;
-    if (role === "admin") {
-      goalsToDelete = await Goal.findAll({
-        where: {
-          goalId: { [Op.in]: goalIds },
-        },
-      });
-    } else {
-      goalsToDelete = await Goal.findAll({
-        where: {
-          goalId: { [Op.in]: goalIds },
-          ownerId,
-        },
-      });
-    }
-
-    if (!goalsToDelete || goalsToDelete.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No goals found to delete",
-      });
-    }
-
-    // Check if some goals were not found or not accessible
-    const foundIds = goalsToDelete.map((g) => g.goalId);
-    const notFoundIds = goalIds.filter((id) => !foundIds.includes(id));
-
-    // Delete the goals
-    let deleteWhere = { goalId: { [Op.in]: foundIds } };
-    if (role !== "admin") deleteWhere.ownerId = ownerId;
-    const deletedCount = await Goal.destroy({ where: deleteWhere });
-
-    let message = `Successfully deleted ${deletedCount} goal(s)`;
-    if (notFoundIds.length > 0) {
-      message += `. Note: ${notFoundIds.length} goal(s) were not found or not accessible.`;
-    }
-
-    res.status(200).json({
-      success: true,
-      message: message,
-      data: {
-        deletedCount: deletedCount,
-        deletedIds: foundIds,
-        notFoundIds: notFoundIds,
-      },
-    });
-  } catch (error) {
-    console.error("Error bulk deleting goals:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete goals",
-      error: error.message,
-    });
-  }
-};
 const DASHBOARD = require("../../models/insight/dashboardModel");
 const Report = require("../../models/insight/reportModel");
 const Goal = require("../../models/insight/goalModel");
@@ -2568,6 +2489,14 @@ async function processGoalData(goal, ownerId, periodFilter) {
       where: activityWhereClause,
       attributes: ["activityId", "type", "subject", "isDone", "createdAt","assignedTo","markedAsDoneTime"],
       order: [["createdAt", "DESC"]],
+      include: [
+    {
+      model: MasterUser,
+      attributes: [["name", "assignToUser"]],
+      as: "assignedUser", // <-- must match the alias in the association
+      required: false,
+    }
+  ],
     });
 
     // Assign fetched activities to data array for records
@@ -4884,6 +4813,14 @@ async function generateGoalBreakdownData(
             "assignedTo",
             "markedAsDoneTime",
           ],
+         include: [
+    {
+      model: MasterUser,
+      attributes: [["name", "assignToUser"]],
+      as: "assignedUser", // <-- must match the alias in the association
+      required: false,
+    }
+  ],
           order: [["createdAt", "DESC"]],
         });
 
@@ -4937,6 +4874,14 @@ async function generateGoalBreakdownData(
             "assignedTo",
             "markedAsDoneTime",
           ],
+        include: [
+    {
+      model: MasterUser,
+      attributes: [["name", "assignToUser"]],
+      as: "assignedUser", // <-- must match the alias in the association
+      required: false,
+    }
+  ],
           order: [["updatedAt", "DESC"]],
         });
 
@@ -5854,3 +5799,83 @@ function generateQuarterlyBreakdownForProgressed(
 
   return breakdown;
 }
+// Bulk delete multiple or single goals
+exports.bulkDeleteGoal = async (req, res) => {
+  try {
+    let { goalIds } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Support both single and multiple deletion
+    if (!goalIds) {
+      // Try to get from query or params for single delete
+      if (req.body.goalId) {
+        goalIds = [req.body.goalId];
+      } else if (req.query.goalId) {
+        goalIds = [req.query.goalId];
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "goalIds array or goalId is required",
+        });
+      }
+    } else if (!Array.isArray(goalIds)) {
+      goalIds = [goalIds];
+    }
+
+    // Find goals to delete (admin: all, non-admin: only own)
+    let goalsToDelete;
+    if (role === "admin") {
+      goalsToDelete = await Goal.findAll({
+        where: {
+          goalId: { [Op.in]: goalIds },
+        },
+      });
+    } else {
+      goalsToDelete = await Goal.findAll({
+        where: {
+          goalId: { [Op.in]: goalIds },
+          ownerId,
+        },
+      });
+    }
+
+    if (!goalsToDelete || goalsToDelete.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No goals found to delete",
+      });
+    }
+
+    // Check if some goals were not found or not accessible
+    const foundIds = goalsToDelete.map((g) => g.goalId);
+    const notFoundIds = goalIds.filter((id) => !foundIds.includes(id));
+
+    // Delete the goals
+    let deleteWhere = { goalId: { [Op.in]: foundIds } };
+    if (role !== "admin") deleteWhere.ownerId = ownerId;
+    const deletedCount = await Goal.destroy({ where: deleteWhere });
+
+    let message = `Successfully deleted ${deletedCount} goal(s)`;
+    if (notFoundIds.length > 0) {
+      message += `. Note: ${notFoundIds.length} goal(s) were not found or not accessible.`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: message,
+      data: {
+        deletedCount: deletedCount,
+        deletedIds: foundIds,
+        notFoundIds: notFoundIds,
+      },
+    });
+  } catch (error) {
+    console.error("Error bulk deleting goals:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete goals",
+      error: error.message,
+    });
+  }
+};
