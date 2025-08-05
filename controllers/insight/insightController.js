@@ -4581,6 +4581,7 @@ async function generateGoalBreakdownData(
       if (goalType === "Progressed") {
         // Use DealStageHistory for accurate stage progression tracking
         if (pipelineStage) {
+          // Only filter by columns that exist in DealStageHistory
           const stageHistoryWhereClause = {
             newStage: pipelineStage,
             updatedAt: {
