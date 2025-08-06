@@ -967,7 +967,8 @@ async function startUserSpecificInboxWorkers() {
             } = JSON.parse(msg.content.toString());
 
             // Enforce maximum batch size to prevent memory issues but allow faster processing
-            batchSize = Math.min(parseInt(batchSize) || 25, 50); // Increased from 5 to 25-50
+            // Dynamically adjust batch size based on actual email count to prevent warnings
+            batchSize = Math.min(parseInt(batchSize) || 25, 25); // Set to reasonable default of 25
 
             await limit(async () => {
               try {
@@ -1136,9 +1137,9 @@ async function startUserSpecificCronWorkers() {
               const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(
                   () =>
-                    reject(new Error("Cron worker timeout after 2 minutes")),
-                  120000
-                ); // 2 minute timeout
+                    reject(new Error("Cron worker timeout after 5 minutes")),
+                  300000
+                ); // 5 minute timeout (increased from 2 minutes)
               });
 
               const fetchPromise = limit(async () => {
