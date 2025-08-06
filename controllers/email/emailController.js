@@ -656,6 +656,13 @@ exports.queueFetchInboxEmails = async (req, res) => {
       const endUID = batchUIDs[batchUIDs.length - 1];
       const allUIDsInBatch = batchUIDs.join(","); // e.g., "1001,1003,1005,1007"
 
+      // Set a more realistic expected count - account for potential duplicates/processed emails
+      // Reduce expectation by 10-20% to account for already processed emails
+      const realisticExpectedCount = Math.max(
+        1,
+        Math.floor(batchUIDs.length * 0.8)
+      );
+
       // Use user-specific queue name for parallel processing
       const userQueueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
 
@@ -676,11 +683,12 @@ exports.queueFetchInboxEmails = async (req, res) => {
         startUID,
         endUID,
         allUIDsInBatch, // Send all UIDs in the batch
-        expectedCount: batchUIDs.length, // Expected number of emails in this batch
+        expectedCount: realisticExpectedCount, // More realistic expected count
+        originalUIDCount: batchUIDs.length, // Keep track of original UIDs for debugging
       });
 
       console.log(
-        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} emails to ${userQueueName}, UIDs: ${startUID}-${endUID} (processing ${safeBatchSize} emails per batch)`
+        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} UIDs (expecting ~${realisticExpectedCount} emails) to ${userQueueName}, UIDs: ${startUID}-${endUID}`
       );
     }
 
@@ -952,22 +960,36 @@ exports.fetchInboxEmails = async (req, res) => {
           // In batch mode with specific UIDs or UID range, process ALL emails found
           actualBatchSize = messages.length;
           if (expectedCount && messages.length !== parseInt(expectedCount)) {
-            // Only warn if the difference is significant (more than 20% difference)
+            // Only warn if the difference is significant (more than 50% difference)
+            // AND if we found significantly fewer emails than expected
             const expectedCountNum = parseInt(expectedCount);
             const difference = Math.abs(messages.length - expectedCountNum);
             const percentDifference = (difference / expectedCountNum) * 100;
 
-            if (percentDifference > 20) {
+            if (
+              percentDifference > 50 &&
+              messages.length < expectedCountNum * 0.5
+            ) {
               console.warn(
                 `[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${
                   messages.length
-                } (${percentDifference.toFixed(1)}% difference)`
+                } (${percentDifference.toFixed(
+                  1
+                )}% difference). This may indicate UIDs were deleted/moved.`
               );
-            } else {
+            } else if (percentDifference > 20) {
               console.log(
                 `[Batch ${page}] INFO: Expected ${expectedCount} emails, found ${
                   messages.length
                 } (${percentDifference.toFixed(
+                  1
+                )}% difference - likely due to duplicates or processed emails)`
+              );
+            } else {
+              console.log(
+                `[Batch ${page}] SUCCESS: Expected ${expectedCount} emails, found ${
+                  messages.length
+                } emails (${percentDifference.toFixed(
                   1
                 )}% difference - within normal range)`
               );
@@ -1308,8 +1330,11 @@ exports.fetchInboxEmails = async (req, res) => {
 exports.fetchRecentEmail = async (adminId, options = {}) => {
   // Enforce max batch size if options.batchSize is provided (for worker safety)
   const batchSize = Math.min(Number(options.batchSize) || 10, MAX_BATCH_SIZE);
+  let connection = null; // Track connection for proper cleanup
 
   try {
+    console.log(`[fetchRecentEmail] Starting for adminId: ${adminId}`);
+
     // Fetch the user's email and app password from the UserCredential model
     const userCredential = await UserCredential.findOne({
       where: { masterUserID: adminId },
@@ -1372,243 +1397,318 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       };
     }
 
-    const connection = await Imap.connect(imapConfig);
+    // Add connection timeout wrapper
+    const connectWithTimeout = async () => {
+      console.log(
+        `[fetchRecentEmail] Connecting to IMAP server for adminId: ${adminId}...`
+      );
 
-    console.log("Opening INBOX...");
-    await connection.openBox("INBOX");
-
-    console.log("Fetching the most recent email...");
-
-    // // Fetch all emails, then get the most recent one
-    // const fetchOptions = { bodies: "", struct: true };
-    // const messages = await connection.search(["ALL"], fetchOptions);
-
-    // if (!messages.length) {
-    //   connection.end();
-    //   return { message: "No emails found." };
-    // }
-
-    //...................original code.................
-    const sinceDate = formatDateForIMAP(
-      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    );
-    console.log(`Using SINCE date: ${sinceDate}`);
-
-    const searchCriteria = [["SINCE", sinceDate]];
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    console.log(`Total emails found: ${messages.length}`);
-
-    if (messages.length === 0) {
-      console.log("No emails found.");
-      return { message: "No emails found." };
-    }
-
-    // Get the most recent email
-    const recentMessage = messages[messages.length - 1];
-    const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
-    const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-    // Determine read/unread status from IMAP flags
-    // If the message has the "\Seen" flag, it is read; otherwise, unread
-    let isRead = false;
-    if (
-      recentMessage.attributes &&
-      Array.isArray(recentMessage.attributes.flags)
-    ) {
-      isRead = recentMessage.attributes.flags.includes("\\Seen");
-    }
-
-    if (!rawBody) {
-      console.log("No body found for the most recent email.");
-      return { message: "No body found for the most recent email." };
-    }
-
-    // Parse the raw email body using simpleParser
-    const parsedEmail = await simpleParser(rawBody);
-
-    let blockedList = [];
-    if (userCredential && userCredential.blockedEmail) {
-      blockedList = Array.isArray(userCredential.blockedEmail)
-        ? userCredential.blockedEmail
-            .map((e) => String(e).trim().toLowerCase())
-            .filter(Boolean)
-        : [];
-    }
-    const senderEmail = parsedEmail.from
-      ? parsedEmail.from.value[0].address.toLowerCase()
-      : null;
-    // Sponsored patterns (add more as needed)
-    const sponsoredPatterns = [
-      /no-?reply/i,
-      /mailer-?daemon/i,
-      /demon\.mailer/i,
-      /sponsored/i,
-    ];
-    const isSponsored = sponsoredPatterns.some((pattern) =>
-      pattern.test(senderEmail)
-    );
-    if (blockedList.includes(senderEmail) || isSponsored) {
-      console.log(`Blocked email from: ${senderEmail}`);
-      connection.end();
-      return { message: `Blocked email from: ${senderEmail}` };
-    }
-
-    const referencesHeader = parsedEmail.headers.get("references");
-    const references = Array.isArray(referencesHeader)
-      ? referencesHeader.join(" ") // Convert array to string
-      : referencesHeader || null;
-    //................................
-
-    const emailData = {
-      messageId: parsedEmail.messageId || null,
-      inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-      references,
-      sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-      senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-      recipient: parsedEmail.to
-        ? parsedEmail.to.value.map((to) => to.address).join(", ")
-        : null,
-      cc: parsedEmail.cc
-        ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-        : null,
-      bcc: parsedEmail.bcc
-        ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-        : null,
-      masterUserID: adminId,
-      subject: parsedEmail.subject || null,
-      // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-      body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-      folder: "inbox", // Add folder field
-      // threadId,
-      createdAt: parsedEmail.date || new Date(),
-      isRead: isRead, // Save read/unread status
-    };
-
-    console.log(`Processing recent email: ${emailData.messageId}`);
-    // Check if the email exists in the trash folder
-    const trashedEmail = await Email.findOne({
-      where: { messageId: emailData.messageId, folder: "trash" },
-    });
-
-    let existingEmail;
-    if (trashedEmail) {
-      existingEmail = trashedEmail;
-    } else {
-      existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId, folder: emailData.folder },
+      const connectionPromise = Imap.connect(imapConfig);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `IMAP connection timeout after 60 seconds for adminId ${adminId}`
+              )
+            ),
+          60000
+        );
       });
-    }
 
-    // const existingEmail = await Email.findOne({
-    //   where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
-    // });
+      try {
+        connection = await Promise.race([connectionPromise, timeoutPromise]);
+        console.log(
+          `[fetchRecentEmail] IMAP connected successfully for adminId: ${adminId}`
+        );
+        return connection;
+      } catch (error) {
+        console.error(
+          `[fetchRecentEmail] IMAP connection failed for adminId ${adminId}:`,
+          error.message
+        );
+        throw error;
+      }
+    };
 
-    let savedEmail;
-    if (!existingEmail) {
-      savedEmail = await Email.create(emailData);
-      console.log(`Recent email saved: ${emailData.messageId}`);
-    } else {
+    connection = await connectWithTimeout();
+
+    // Add overall operation timeout wrapper
+    const operationWithTimeout = async () => {
       console.log(
-        `Recent email already exists in folder ${emailData.folder}: ${emailData.messageId}`
-      );
-      savedEmail = existingEmail;
-    }
-
-    // Save attachments
-    const attachments = [];
-    if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-      console.log(
-        `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
+        `[fetchRecentEmail] Starting email fetch operation for adminId: ${adminId}...`
       );
 
-      // Filter out icon/image attachments and inline (body/html) attachments
-      const filteredAttachments = parsedEmail.attachments.filter(
-        (att) =>
-          !isIconAttachment(att) &&
-          !att.contentDisposition?.toLowerCase().includes("inline") &&
-          att.contentType !== "text/html" &&
-          att.contentType !== "text/plain" &&
-          att.size > 0 &&
-          att.size < 10 * 1024 * 1024 // Max 10MB per attachment
-      );
+      const operationPromise = performEmailFetch();
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Email fetch operation timeout after 2.5 minutes for adminId ${adminId}`
+              )
+            ),
+          150000
+        ); // 2.5 minutes
+      });
 
-      console.log(
-        `Filtered to ${filteredAttachments.length} real attachments for email: ${emailData.messageId}`
-      );
+      return await Promise.race([operationPromise, timeoutPromise]);
+    };
 
-      if (filteredAttachments.length > 0 && filteredAttachments.length <= 5) {
-        // Max 5 attachments per email
-        try {
-          const savedAttachments = await saveAttachments(
-            filteredAttachments,
-            savedEmail.emailID
-          );
-          attachments.push(...savedAttachments);
+    const performEmailFetch = async () => {
+      console.log("Opening INBOX...");
+      await connection.openBox("INBOX");
+
+      console.log("Fetching the most recent email...");
+
+      // // Fetch all emails, then get the most recent one
+      // const fetchOptions = { bodies: "", struct: true };
+      // const messages = await connection.search(["ALL"], fetchOptions);
+
+      // if (!messages.length) {
+      //   connection.end();
+      //   return { message: "No emails found." };
+      // }
+
+      //...................original code.................
+      const sinceDate = formatDateForIMAP(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      );
+      console.log(`Using SINCE date: ${sinceDate}`);
+
+      const searchCriteria = [["SINCE", sinceDate]];
+      const fetchOptions = {
+        bodies: "",
+        struct: true,
+      };
+
+      const messages = await connection.search(searchCriteria, fetchOptions);
+
+      console.log(`Total emails found: ${messages.length}`);
+
+      if (messages.length === 0) {
+        console.log("No emails found.");
+        return { message: "No emails found." };
+      }
+
+      // Get the most recent email
+      const recentMessage = messages[messages.length - 1];
+      const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+
+      // Determine read/unread status from IMAP flags
+      // If the message has the "\Seen" flag, it is read; otherwise, unread
+      let isRead = false;
+      if (
+        recentMessage.attributes &&
+        Array.isArray(recentMessage.attributes.flags)
+      ) {
+        isRead = recentMessage.attributes.flags.includes("\\Seen");
+      }
+
+      if (!rawBody) {
+        console.log("No body found for the most recent email.");
+        return { message: "No body found for the most recent email." };
+      }
+
+      // Parse the raw email body using simpleParser
+      const parsedEmail = await simpleParser(rawBody);
+
+      let blockedList = [];
+      if (userCredential && userCredential.blockedEmail) {
+        blockedList = Array.isArray(userCredential.blockedEmail)
+          ? userCredential.blockedEmail
+              .map((e) => String(e).trim().toLowerCase())
+              .filter(Boolean)
+          : [];
+      }
+      const senderEmail = parsedEmail.from
+        ? parsedEmail.from.value[0].address.toLowerCase()
+        : null;
+      // Sponsored patterns (add more as needed)
+      const sponsoredPatterns = [
+        /no-?reply/i,
+        /mailer-?daemon/i,
+        /demon\.mailer/i,
+        /sponsored/i,
+      ];
+      const isSponsored = sponsoredPatterns.some((pattern) =>
+        pattern.test(senderEmail)
+      );
+      if (blockedList.includes(senderEmail) || isSponsored) {
+        console.log(`Blocked email from: ${senderEmail}`);
+        connection.end();
+        return { message: `Blocked email from: ${senderEmail}` };
+      }
+
+      const referencesHeader = parsedEmail.headers.get("references");
+      const references = Array.isArray(referencesHeader)
+        ? referencesHeader.join(" ") // Convert array to string
+        : referencesHeader || null;
+      //................................
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+        references,
+        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
+        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
+        recipient: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.address).join(", ")
+          : null,
+        cc: parsedEmail.cc
+          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+          : null,
+        bcc: parsedEmail.bcc
+          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+          : null,
+        masterUserID: adminId,
+        subject: parsedEmail.subject || null,
+        // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
+        body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
+        folder: "inbox", // Add folder field
+        // threadId,
+        createdAt: parsedEmail.date || new Date(),
+        isRead: isRead, // Save read/unread status
+      };
+
+      console.log(`Processing recent email: ${emailData.messageId}`);
+      // Check if the email exists in the trash folder
+      const trashedEmail = await Email.findOne({
+        where: { messageId: emailData.messageId, folder: "trash" },
+      });
+
+      let existingEmail;
+      if (trashedEmail) {
+        existingEmail = trashedEmail;
+      } else {
+        existingEmail = await Email.findOne({
+          where: { messageId: emailData.messageId, folder: emailData.folder },
+        });
+      }
+
+      // const existingEmail = await Email.findOne({
+      //   where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
+      // });
+
+      let savedEmail;
+      if (!existingEmail) {
+        savedEmail = await Email.create(emailData);
+        console.log(`Recent email saved: ${emailData.messageId}`);
+      } else {
+        console.log(
+          `Recent email already exists in folder ${emailData.folder}: ${emailData.messageId}`
+        );
+        savedEmail = existingEmail;
+      }
+
+      // Save attachments
+      const attachments = [];
+      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        console.log(
+          `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
+        );
+
+        // Filter out icon/image attachments and inline (body/html) attachments
+        const filteredAttachments = parsedEmail.attachments.filter(
+          (att) =>
+            !isIconAttachment(att) &&
+            !att.contentDisposition?.toLowerCase().includes("inline") &&
+            att.contentType !== "text/html" &&
+            att.contentType !== "text/plain" &&
+            att.size > 0 &&
+            att.size < 10 * 1024 * 1024 // Max 10MB per attachment
+        );
+
+        console.log(
+          `Filtered to ${filteredAttachments.length} real attachments for email: ${emailData.messageId}`
+        );
+
+        if (filteredAttachments.length > 0 && filteredAttachments.length <= 5) {
+          // Max 5 attachments per email
+          try {
+            const savedAttachments = await saveAttachments(
+              filteredAttachments,
+              savedEmail.emailID
+            );
+            attachments.push(...savedAttachments);
+            console.log(
+              `Saved ${attachments.length} attachment metadata records for email: ${emailData.messageId}`
+            );
+          } catch (attachmentError) {
+            console.error(
+              `Error saving attachment metadata for email ${emailData.messageId}:`,
+              attachmentError.message
+            );
+          }
+        } else if (filteredAttachments.length > 5) {
           console.log(
-            `Saved ${attachments.length} attachment metadata records for email: ${emailData.messageId}`
+            `Too many attachments (${filteredAttachments.length}) for email: ${emailData.messageId}, skipping attachment metadata processing`
           );
-        } catch (attachmentError) {
-          console.error(
-            `Error saving attachment metadata for email ${emailData.messageId}:`,
-            attachmentError.message
+        } else {
+          console.log(
+            `No real attachments to save metadata for email: ${emailData.messageId}`
           );
         }
-      } else if (filteredAttachments.length > 5) {
-        console.log(
-          `Too many attachments (${filteredAttachments.length}) for email: ${emailData.messageId}, skipping attachment metadata processing`
-        );
-      } else {
-        console.log(
-          `No real attachments to save metadata for email: ${emailData.messageId}`
-        );
       }
-    }
 
-    // Fetch related emails in the same thread
-    const relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: emailData.inReplyTo }, // Parent email
-          { inReplyTo: emailData.messageId }, // Replies to this email
-          {
-            references: {
-              [Sequelize.Op.like]: `%${emailData.messageId}%`,
-            },
-          }, // Emails in the same thread
-        ],
-      },
-      order: [["createdAt", "ASC"]], // Sort by date
-    });
-    // Save related emails in the database
-    for (const relatedEmail of relatedEmails) {
-      const existingRelatedEmail = await Email.findOne({
-        where: { messageId: relatedEmail.messageId },
+      // Fetch related emails in the same thread
+      const relatedEmails = await Email.findAll({
+        where: {
+          [Sequelize.Op.or]: [
+            { messageId: emailData.inReplyTo }, // Parent email
+            { inReplyTo: emailData.messageId }, // Replies to this email
+            {
+              references: {
+                [Sequelize.Op.like]: `%${emailData.messageId}%`,
+              },
+            }, // Emails in the same thread
+          ],
+        },
+        order: [["createdAt", "ASC"]], // Sort by date
       });
+      // Save related emails in the database
+      for (const relatedEmail of relatedEmails) {
+        const existingRelatedEmail = await Email.findOne({
+          where: { messageId: relatedEmail.messageId },
+        });
 
-      if (!existingRelatedEmail) {
-        await Email.create(relatedEmail);
-        console.log(`Related email saved: ${relatedEmail.messageId}`);
-      } else {
-        console.log(`Related email already exists: ${relatedEmail.messageId}`);
+        if (!existingRelatedEmail) {
+          await Email.create(relatedEmail);
+          console.log(`Related email saved: ${relatedEmail.messageId}`);
+        } else {
+          console.log(
+            `Related email already exists: ${relatedEmail.messageId}`
+          );
+        }
       }
-    }
 
-    connection.end(); // Close the connection
-    console.log("IMAP connection closed.");
+      connection.end(); // Close the connection
+      console.log("IMAP connection closed.");
 
-    return {
-      message: "Fetched and saved the most recent email.",
-      email: emailData,
-      relatedEmails,
-    };
+      return {
+        message: "Fetched and saved the most recent email.",
+        email: emailData,
+        relatedEmails,
+      };
+    }; // End of performEmailFetch function
+
+    // Execute the operation with timeout
+    const result = await operationWithTimeout();
+    return result;
   } catch (error) {
     console.error("Error fetching recent email:", error);
+
+    // Ensure connection is closed on error
+    if (connection) {
+      try {
+        connection.end();
+        console.log("IMAP connection closed due to error.");
+      } catch (closeError) {
+        console.error("Error closing IMAP connection:", closeError.message);
+      }
+    }
+
     return { message: "Internal server error.", error: error.message };
   }
 };

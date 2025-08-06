@@ -964,6 +964,7 @@ async function startUserSpecificInboxWorkers() {
               endUID,
               allUIDsInBatch, // Add missing field
               expectedCount, // Add missing field
+              originalUIDCount, // Track original UID count for debugging
             } = JSON.parse(msg.content.toString());
 
             // Enforce maximum batch size to prevent memory issues but allow faster processing
@@ -974,7 +975,9 @@ async function startUserSpecificInboxWorkers() {
               try {
                 // Log memory usage before fetch
                 logMemoryUsage(
-                  `Before fetchInboxEmails batch for user ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`
+                  `Before fetchInboxEmails batch for user ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID} (${
+                    originalUIDCount || "unknown"
+                  } original UIDs)`
                 );
 
                 // Add delay between batches to prevent overwhelming the system
@@ -1014,6 +1017,7 @@ async function startUserSpecificInboxWorkers() {
                       endUID,
                       allUIDsInBatch, // Add missing field
                       expectedCount, // Add missing field
+                      originalUIDCount, // Add missing field for debugging
                     },
                   },
                   {
@@ -1133,29 +1137,64 @@ async function startUserSpecificCronWorkers() {
             const { adminId } = JSON.parse(msg.content.toString());
             logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
             try {
-              // Add timeout to prevent hanging cron workers
+              // Add timeout to prevent hanging cron workers with enhanced error handling
               const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(
                   () =>
-                    reject(new Error("Cron worker timeout after 5 minutes")),
-                  300000
-                ); // 5 minute timeout (increased from 2 minutes)
+                    reject(
+                      new Error(
+                        `Cron worker timeout after 3 minutes for adminId ${adminId}`
+                      )
+                    ),
+                  180000
+                ); // 3 minute timeout (reduced from 5 minutes for faster recovery)
               });
 
+              // Add connection-specific timeout for IMAP operations
               const fetchPromise = limit(async () => {
-                // Pass smaller batch size to fetchRecentEmail for memory safety
-                await fetchRecentEmail(adminId, { batchSize: 5 });
+                console.log(
+                  `[CronWorker] Starting email fetch for adminId ${adminId}`
+                );
+                try {
+                  // Pass smaller batch size to fetchRecentEmail for memory safety
+                  const result = await fetchRecentEmail(adminId, {
+                    batchSize: 5,
+                  });
+                  console.log(
+                    `[CronWorker] Completed email fetch for adminId ${adminId}: ${
+                      result?.message || "success"
+                    }`
+                  );
+                  return result;
+                } catch (fetchError) {
+                  console.error(
+                    `[CronWorker] fetchRecentEmail error for adminId ${adminId}:`,
+                    fetchError.message
+                  );
+                  throw fetchError;
+                }
               });
 
-              // Race between fetch and timeout
-              await Promise.race([fetchPromise, timeoutPromise]);
+              // Race between fetch and timeout with better error context
+              const result = await Promise.race([fetchPromise, timeoutPromise]);
 
               channel.ack(msg);
+              console.log(
+                `[CronWorker] Successfully processed cron job for adminId ${adminId}`
+              );
             } catch (error) {
               console.error(
                 `Error processing cron email fetch for adminId ${adminId}:`,
                 error
               );
+
+              // For timeout errors, add specific handling
+              if (error.message.includes("timeout")) {
+                console.warn(
+                  `[CronWorker] Timeout detected for adminId ${adminId}, this user may have IMAP connection issues`
+                );
+              }
+
               channel.nack(msg, false, false); // Discard the message on error
             } finally {
               logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
