@@ -656,7 +656,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
       const endUID = batchUIDs[batchUIDs.length - 1];
       const allUIDsInBatch = batchUIDs.join(","); // e.g., "1001,1003,1005,1007"
 
-      await publishToQueue("FETCH_INBOX_QUEUE", {
+      // Use user-specific queue name for parallel processing
+      const userQueueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
+
+      await publishToQueue(userQueueName, {
         masterUserID,
         email,
         appPassword,
@@ -677,7 +680,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
       });
 
       console.log(
-        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} emails, UIDs: ${startUID}-${endUID} (processing ${safeBatchSize} emails per batch)`
+        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} emails to ${userQueueName}, UIDs: ${startUID}-${endUID} (processing ${safeBatchSize} emails per batch)`
       );
     }
 
