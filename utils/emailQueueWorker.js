@@ -962,6 +962,8 @@ async function startUserSpecificInboxWorkers() {
               smtpSecure,
               startUID,
               endUID,
+              allUIDsInBatch, // Add missing field
+              expectedCount, // Add missing field
             } = JSON.parse(msg.content.toString());
 
             // Enforce maximum batch size to prevent memory issues
@@ -982,7 +984,7 @@ async function startUserSpecificInboxWorkers() {
                 // Call fetchInboxEmails logic directly, but mock req/res
                 await fetchInboxEmails(
                   {
-                    adminId: masterUserID,
+                    adminId: masterUserID, // This is what fetchInboxEmails reads as req.adminId
                     email,
                     appPassword,
                     body: {
@@ -1002,6 +1004,8 @@ async function startUserSpecificInboxWorkers() {
                       days,
                       startUID,
                       endUID,
+                      allUIDsInBatch, // Add missing field
+                      expectedCount, // Add missing field
                     },
                   },
                   {
@@ -1171,5 +1175,5 @@ startUserSpecificInboxWorkers().catch(console.error); // Start user-specific wor
 startUserSpecificCronWorkers().catch(console.error); // Start user-specific cron workers
 startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
-startWorker().catch(console.error);
+// startWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificCronWorkers
 startScheduledEmailWorker().catch(console.error);
