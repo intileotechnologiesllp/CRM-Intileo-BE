@@ -1235,7 +1235,7 @@ async function startUserSpecificCronWorkers() {
 
 // startFetchInboxWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificInboxWorkers
 startUserSpecificInboxWorkers().catch(console.error); // Start user-specific workers
-startUserSpecificCronWorkers().catch(console.error); // Start user-specific cron workers
+// startUserSpecificCronWorkers().catch(console.error); // TEMPORARILY DISABLED: email-fetch-queue workers stopped to focus on fetch_inbox_queue
 startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 // startWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificCronWorkers
