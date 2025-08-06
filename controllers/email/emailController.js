@@ -527,7 +527,110 @@ exports.queueFetchInboxEmails = async (req, res) => {
 
     console.log(`[Queue] Found ${totalEmails} emails to process`);
 
-    // 2. Calculate UID ranges for batches - optimized for much better performance
+    // 2. Save user credentials immediately (so they're available for frontend calls)
+    console.log(
+      `[Queue] Saving user credentials for masterUserID: ${masterUserID}`
+    );
+
+    // Prepare SMTP config for saving
+    const smtpConfigByProvider = {
+      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
+      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
+      yahoo: {
+        smtpHost: "smtp.mail.yahoo.com",
+        smtpPort: 465,
+        smtpSecure: true,
+      },
+      outlook: {
+        smtpHost: "smtp.office365.com",
+        smtpPort: 587,
+        smtpSecure: false,
+      },
+    };
+
+    let smtpHost = null,
+      smtpPort = null,
+      smtpSecure = null;
+    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
+      const smtpConfig = smtpConfigByProvider[provider];
+      smtpHost = smtpConfig.smtpHost;
+      smtpPort = smtpConfig.smtpPort;
+      smtpSecure = smtpConfig.smtpSecure;
+    } else if (provider === "custom") {
+      smtpHost = req.body.smtpHost;
+      smtpPort = req.body.smtpPort;
+      smtpSecure = req.body.smtpSecure;
+    }
+
+    // Check if credentials already exist
+    const existingCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+
+    if (existingCredential) {
+      await existingCredential.update({
+        email,
+        appPassword,
+        provider,
+        imapHost: provider === "custom" ? req.body.imapHost : null,
+        imapPort: provider === "custom" ? req.body.imapPort : null,
+        imapTLS: provider === "custom" ? req.body.imapTLS : null,
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+      });
+      console.log(
+        `[Queue] User credentials updated for masterUserID: ${masterUserID}`
+      );
+    } else {
+      // Create new credentials with duplicate handling
+      try {
+        await UserCredential.create({
+          masterUserID,
+          email,
+          appPassword,
+          provider,
+          imapHost: provider === "custom" ? req.body.imapHost : null,
+          imapPort: provider === "custom" ? req.body.imapPort : null,
+          imapTLS: provider === "custom" ? req.body.imapTLS : null,
+          smtpHost,
+          smtpPort,
+          smtpSecure,
+        });
+        console.log(
+          `[Queue] User credentials created for masterUserID: ${masterUserID}`
+        );
+      } catch (createError) {
+        if (createError.name === "SequelizeUniqueConstraintError") {
+          console.log(
+            `[Queue] Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
+          );
+          const existingRecord = await UserCredential.findOne({
+            where: { masterUserID },
+          });
+          if (existingRecord) {
+            await existingRecord.update({
+              email,
+              appPassword,
+              provider,
+              imapHost: provider === "custom" ? req.body.imapHost : null,
+              imapPort: provider === "custom" ? req.body.imapPort : null,
+              imapTLS: provider === "custom" ? req.body.imapTLS : null,
+              smtpHost,
+              smtpPort,
+              smtpSecure,
+            });
+            console.log(
+              `[Queue] User credentials updated after duplicate error for masterUserID: ${masterUserID}`
+            );
+          }
+        } else {
+          throw createError; // Re-throw if it's not a duplicate error
+        }
+      }
+    }
+
+    // 3. Calculate UID ranges for batches - optimized for much better performance
     const safeBatchSize = Math.min(
       parseInt(batchSize),
       totalEmails > 5000 ? 50 : totalEmails > 2000 ? 75 : 100 // Much larger batches for faster processing

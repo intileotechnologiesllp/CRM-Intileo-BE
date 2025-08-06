@@ -111,7 +111,10 @@ router.post(
   verifyToken,
   insightController.reorderGoals
 );
-
+// router.post("/entity-columns", verifyToken, insightController.getEntityColumns);
+// router.post("/setColumnsVisibility", verifyToken, insightController.setColumnVisibility);
+// router.get("/getColumnsVisibility",verifyToken, insightController.getColumnVisibility);
+// router.post("/updateColumnsVisibility", verifyToken, insightController.updateColumnVisibility);
 // =============== UTILITY ROUTES ===============
 router.get("/report-types", (req, res) => {
   res.json({
