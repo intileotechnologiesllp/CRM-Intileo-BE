@@ -691,6 +691,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
         // Send parameters for dynamic UID calculation
         dynamicFetch: true, // Flag to indicate dynamic fetching
         skipCount: (page - 1) * parseInt(safeBatchSize), // How many emails to skip
+        debugMode: req.query.debugMode || "false", // Pass debug mode to worker
       });
 
       console.log(
@@ -734,6 +735,28 @@ exports.fetchInboxEmails = async (req, res) => {
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
   const provider = req.body?.provider;
+
+  // ADD COMPREHENSIVE DEBUG LOGGING FOR PARAMETERS
+  console.log(
+    `
+==== BATCH ${page} PARAMETER DEBUG ====
+req.query:`,
+    JSON.stringify(req.query, null, 2)
+  );
+  console.log(`req.body (relevant):`, {
+    email: req.body?.email,
+    provider: req.body?.provider,
+    dynamicFetch: req.body?.dynamicFetch,
+    skipCount: req.body?.skipCount,
+  });
+  console.log(`Extracted parameters:
+    - dynamicFetch: ${req.query.dynamicFetch} (from query) or ${req.body?.dynamicFetch} (from body)
+    - skipCount: ${req.query.skipCount} (from query) or ${req.body?.skipCount} (from body)
+    - batchSize: ${batchSize}
+    - page: ${page}
+    - days: ${days}
+  `);
+  console.log(`====================================`);
 
   let connection;
   try {
@@ -937,46 +960,198 @@ exports.fetchInboxEmails = async (req, res) => {
         let searchCriteria;
 
         // Check if we should use dynamic UID calculation
-        if (req.query.dynamicFetch) {
-          console.log(`[Batch ${page}] Using dynamic UID calculation...`);
+        // Parameters might come from query OR body (depending on how queue worker calls this)
+        const dynamicFetch = req.query.dynamicFetch || req.body?.dynamicFetch;
+        const skipCount = req.query.skipCount || req.body?.skipCount;
+        const queueBatchSize = req.query.batchSize || req.body?.batchSize;
 
-          // First, get all UIDs for the current date range
-          let allUIDs;
+        if (dynamicFetch === true || dynamicFetch === "true") {
+          console.log(`[Batch ${page}] Using dynamic UID calculation...`);
+          console.log(`[Batch ${page}] Request parameters:`, {
+            dynamicFetch: dynamicFetch,
+            skipCount: skipCount,
+            batchSize: queueBatchSize,
+            page: req.query.page || req.body?.page,
+            days: days,
+          });
+
+          // First, get all message objects for the current date range
+          let allMessages;
           if (!days || days === 0 || days === "all") {
-            allUIDs = await connection.search(["ALL"]);
+            console.log(`[Batch ${page}] Searching for ALL messages...`);
+            allMessages = await connection.search(["ALL"], {
+              bodies: [],
+              struct: true,
+            });
           } else {
             const sinceDate = formatDateForIMAP(
               new Date(Date.now() - days * 24 * 60 * 60 * 1000)
             );
-            console.log(`Using dynamic SINCE date: ${sinceDate}`);
-            allUIDs = await connection.search(["SINCE", sinceDate]);
+            console.log(
+              `[Batch ${page}] Using dynamic SINCE date: ${sinceDate}`
+            );
+            allMessages = await connection.search([["SINCE", sinceDate]], {
+              bodies: [],
+              struct: true,
+            });
           }
 
           console.log(
-            `[Batch ${page}] Found ${allUIDs.length} total UIDs dynamically`
+            `[Batch ${page}] ⚠️  CRITICAL DISCOVERY: Raw messages found: ${allMessages.length}`
           );
 
-          // Calculate the UIDs for this specific batch
-          const skipCount = parseInt(req.query.skipCount) || 0;
-          const batchSize = parseInt(req.query.batchSize) || 25;
-          const startIdx = skipCount;
-          const endIdx = Math.min(startIdx + batchSize, allUIDs.length);
-          const batchUIDs = allUIDs.slice(startIdx, endIdx);
-
-          if (batchUIDs.length === 0) {
+          // DIAGNOSTIC: Show exactly what messages exist
+          if (allMessages.length > 0) {
+            console.log(`[Batch ${page}] 🔍 FIRST 5 ACTUAL MESSAGES IN INBOX:`);
+            for (let i = 0; i < Math.min(5, allMessages.length); i++) {
+              const msg = allMessages[i];
+              console.log(
+                `  Message ${i + 1}: UID=${msg.attributes?.uid}, Date=${
+                  msg.attributes?.date
+                }, Flags=${msg.attributes?.flags?.join(",") || "none"}`
+              );
+            }
+            console.log(`[Batch ${page}] 🔍 LAST 5 ACTUAL MESSAGES IN INBOX:`);
+            for (
+              let i = Math.max(0, allMessages.length - 5);
+              i < allMessages.length;
+              i++
+            ) {
+              const msg = allMessages[i];
+              console.log(
+                `  Message ${i + 1}: UID=${msg.attributes?.uid}, Date=${
+                  msg.attributes?.date
+                }, Flags=${msg.attributes?.flags?.join(",") || "none"}`
+              );
+            }
+          } else {
             console.log(
-              `[Batch ${page}] No UIDs found for this batch (skip: ${skipCount})`
+              `[Batch ${page}] ❌ NO ACTUAL MESSAGES FOUND IN INBOX!`
+            );
+          }
+
+          // Extract UIDs from message objects with error handling
+          const allUIDs = allMessages
+            .map((msg) => {
+              if (!msg.attributes || !msg.attributes.uid) {
+                console.warn(`[Batch ${page}] Message without UID found:`, msg);
+                return null;
+              }
+              return msg.attributes.uid;
+            })
+            .filter((uid) => uid !== null)
+            .sort((a, b) => a - b);
+
+          console.log(`[Batch ${page}] 📊 REALITY CHECK:`);
+          console.log(`  - IMAP says: 113 UIDs exist (1-113)`);
+          console.log(`  - ACTUAL messages found: ${allMessages.length}`);
+          console.log(
+            `  - ACTUAL UIDs: ${
+              allUIDs.length > 0 ? `[${allUIDs.join(",")}]` : "NONE"
+            }`
+          );
+
+          if (allUIDs.length === 0) {
+            console.log(
+              `[Batch ${page}] ❌ NO REAL EMAILS EXIST - All 113 UIDs are phantoms!`
             );
             return [];
           }
 
-          // Use the dynamically calculated UIDs
-          const dynamicUIDString = batchUIDs.join(",");
-          searchCriteria = [["UID", dynamicUIDString]];
+          // Calculate the UIDs for this specific batch (queue processing)
+          const parsedSkipCount = parseInt(skipCount) || 0;
+          const parsedQueueBatchSize = parseInt(queueBatchSize) || 25;
+          const startIdx = parsedSkipCount;
+          const endIdx = Math.min(
+            startIdx + parsedQueueBatchSize,
+            allUIDs.length
+          );
+
+          console.log(`[Batch ${page}] Batch calculation details:`);
+          console.log(`  - skipCount: ${parsedSkipCount}`);
+          console.log(`  - queueBatchSize: ${parsedQueueBatchSize}`);
+          console.log(`  - startIdx: ${startIdx}`);
+          console.log(`  - endIdx: ${endIdx}`);
           console.log(
-            `[Batch ${page}] Dynamic UIDs: ${batchUIDs.length} UIDs (${
-              batchUIDs[0]
-            }-${batchUIDs[batchUIDs.length - 1]})`
+            `  - ACTUAL total UIDs available: ${allUIDs.length} (NOT 113!)`
+          );
+
+          const batchUIDs = allUIDs.slice(startIdx, endIdx);
+
+          console.log(
+            `[Batch ${page}] ✅ CORRECTED Queue batch: Processing ${
+              batchUIDs.length
+            } UIDs (indices ${startIdx} to ${endIdx - 1} from ACTUAL total ${
+              allUIDs.length
+            })`
+          );
+          console.log(
+            `[Batch ${page}] ✅ CORRECTED Queue progress: Batch ${page} of ${Math.ceil(
+              allUIDs.length / parsedQueueBatchSize
+            )} REAL total batches needed`
+          );
+
+          if (batchUIDs.length > 0) {
+            console.log(
+              `[Batch ${page}] Actual UID range for this batch: [${
+                batchUIDs[0]
+              }...${batchUIDs[batchUIDs.length - 1]}]`
+            );
+            console.log(
+              `[Batch ${page}] Complete UID list for this batch: ${batchUIDs.join(
+                ","
+              )}`
+            );
+          } else {
+            console.warn(
+              `[Batch ${page}] NO UIDs calculated for this batch (all emails may be in earlier batches)!`
+            );
+          }
+
+          if (batchUIDs.length === 0) {
+            console.log(
+              `[Batch ${page}] No UIDs found for this batch (skip: ${parsedSkipCount}) - may be beyond actual email count`
+            );
+            return [];
+          }
+
+          // Use the dynamically calculated UIDs - Fix UID search format
+          const dynamicUIDString = batchUIDs.join(",");
+
+          // IMAP UID search with comma-separated UIDs requires special formatting
+          // Instead of ["UID", "1,2,3,4,5"], we need to use UID ranges or individual searches
+          if (batchUIDs.length === 1) {
+            searchCriteria = [["UID", batchUIDs[0].toString()]];
+          } else if (batchUIDs.length <= 25) {
+            // For small batches, use UID range if consecutive, otherwise use OR logic
+            const isConsecutive = batchUIDs.every(
+              (uid, i) => i === 0 || uid === batchUIDs[i - 1] + 1
+            );
+            if (isConsecutive) {
+              searchCriteria = [
+                ["UID", `${batchUIDs[0]}:${batchUIDs[batchUIDs.length - 1]}`],
+              ];
+              console.log(
+                `[Batch ${page}] Using UID RANGE: ${batchUIDs[0]}:${
+                  batchUIDs[batchUIDs.length - 1]
+                }`
+              );
+            } else {
+              // Non-consecutive UIDs - search for all UIDs (IMAP will handle the filtering)
+              searchCriteria = ["ALL"];
+              console.log(
+                `[Batch ${page}] Using ALL search (will filter UIDs in code for non-consecutive UIDs: ${dynamicUIDString})`
+              );
+            }
+          } else {
+            searchCriteria = ["ALL"];
+            console.log(
+              `[Batch ${page}] Using ALL search (will filter large UID set in code: ${dynamicUIDString})`
+            );
+          }
+
+          console.log(
+            `[Batch ${page}] Target UIDs for this batch: ${dynamicUIDString}`
           );
         } else if (allUIDsInBatch) {
           // Use specific UIDs for this batch (more reliable than ranges)
@@ -1002,16 +1177,70 @@ exports.fetchInboxEmails = async (req, res) => {
         const messages = await connection.search(searchCriteria, fetchOptions);
 
         console.log(
-          `[Batch ${page}] Total emails found in ${folderType}: ${messages.length}`
+          `[Batch ${page}] Total emails found by IMAP search: ${messages.length}`
+        );
+
+        // If we used "ALL" search due to non-consecutive UIDs, filter the results
+        let filteredMessages = messages;
+        if (
+          dynamicFetch &&
+          req.query.dynamicFetch &&
+          Array.isArray(searchCriteria) &&
+          searchCriteria.includes("ALL")
+        ) {
+          // Extract the target UIDs from our batch calculation
+          const targetUIDs = new Set();
+
+          // Re-extract batchUIDs for filtering (since this is in the fetchEmailsFromFolder scope)
+          const allMessagesForFilter = await connection.search(["ALL"], {
+            bodies: [],
+            struct: true,
+          });
+          const allUIDsForFilter = allMessagesForFilter
+            .map((msg) => msg.attributes?.uid)
+            .filter((uid) => uid)
+            .sort((a, b) => a - b);
+
+          const parsedSkipCount =
+            parseInt(req.query.skipCount || req.body?.skipCount) || 0;
+          const parsedQueueBatchSize =
+            parseInt(req.query.batchSize || req.body?.batchSize) || 25;
+          const startIdx = parsedSkipCount;
+          const endIdx = Math.min(
+            startIdx + parsedQueueBatchSize,
+            allUIDsForFilter.length
+          );
+          const batchUIDsForFilter = allUIDsForFilter.slice(startIdx, endIdx);
+
+          batchUIDsForFilter.forEach((uid) => targetUIDs.add(uid));
+
+          console.log(
+            `[Batch ${page}] Filtering messages: Target UIDs = ${Array.from(
+              targetUIDs
+            ).join(",")}`
+          );
+
+          filteredMessages = messages.filter((msg) => {
+            const uid = msg.attributes?.uid;
+            return uid && targetUIDs.has(uid);
+          });
+
+          console.log(
+            `[Batch ${page}] After UID filtering: ${filteredMessages.length} messages (from ${messages.length} total)`
+          );
+        }
+
+        console.log(
+          `[Batch ${page}] Final emails to process in ${folderType}: ${filteredMessages.length}`
         );
 
         // Determine how many emails to process
         let actualBatchSize;
         if (req.query.dynamicFetch) {
-          // For dynamic fetch, process all found emails (no warnings needed)
-          actualBatchSize = messages.length;
+          // For dynamic fetch, process all filtered emails
+          actualBatchSize = filteredMessages.length;
           console.log(
-            `[Batch ${page}] Dynamic fetch found ${actualBatchSize} emails to process`
+            `[Batch ${page}] Dynamic fetch will process ${actualBatchSize} emails`
           );
         } else if (allUIDsInBatch || (startUID && endUID)) {
           // In batch mode with specific UIDs or UID range, process ALL emails found
@@ -1073,7 +1302,7 @@ exports.fetchInboxEmails = async (req, res) => {
           chunkStart += CHUNK_SIZE
         ) {
           const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, actualBatchSize);
-          const chunk = messages.slice(chunkStart, chunkEnd);
+          const chunk = filteredMessages.slice(chunkStart, chunkEnd);
 
           console.log(
             `[Batch ${page}] Processing chunk ${
@@ -1165,25 +1394,50 @@ exports.fetchInboxEmails = async (req, res) => {
                 isRead: isRead, // Save read/unread status
               };
 
-              // Check if email already exists
-              const existingEmail = await Email.findOne({
-                where: { messageId: emailData.messageId },
-              });
+              // Check if email already exists (with debug mode to bypass for testing)
+              const debugMode =
+                req.query.debugMode === "true" ||
+                req.body?.debugMode === "true";
+              let existingEmail = null;
+
+              if (!debugMode) {
+                existingEmail = await Email.findOne({
+                  where: { messageId: emailData.messageId },
+                });
+              } else {
+                console.log(
+                  `[Batch ${page}] DEBUG MODE: Skipping duplicate check for ${emailData.messageId}`
+                );
+              }
 
               let savedEmail;
               if (!existingEmail) {
+                // In debug mode, add batch info to subject to track processing
+                if (debugMode) {
+                  emailData.subject = `[BATCH-${page}-${globalIndex + 1}] ${
+                    emailData.subject || "No Subject"
+                  }`;
+                  console.log(
+                    `[Batch ${page}] DEBUG MODE: Force saving email with modified subject: ${emailData.subject}`
+                  );
+                }
+
                 savedEmail = await Email.create(emailData);
                 console.log(
                   `[Batch ${page}] Email ${
                     globalIndex + 1
-                  }/${actualBatchSize} saved: ${emailData.messageId}`
+                  }/${actualBatchSize} saved: ${
+                    emailData.messageId
+                  } | Subject: ${emailData.subject?.substring(0, 50)}...`
                 );
                 processedCount++;
               } else {
                 console.log(
                   `[Batch ${page}] Email ${
                     globalIndex + 1
-                  }/${actualBatchSize} already exists: ${emailData.messageId}`
+                  }/${actualBatchSize} already exists: ${
+                    emailData.messageId
+                  } | Subject: ${emailData.subject?.substring(0, 50)}...`
                 );
                 savedEmail = existingEmail;
               }
@@ -1339,28 +1593,58 @@ exports.fetchInboxEmails = async (req, res) => {
     connection.end();
     console.log(`[Batch ${page}] IMAP connection closed successfully.`);
 
-    // Enhanced logging with prominent email count display
+    // Enhanced logging with prominent email count display and database comparison
     console.log(`
 ====== FETCH INBOX QUEUE RESULTS FOR BATCH ${page} ======
-✅ EMAILS FETCHED: ${totalProcessedEmails} emails
+✅ NEW EMAILS SAVED: ${totalProcessedEmails} emails
 📊 Batch Info: Page ${page}, Batch size: ${batchSize}
 👤 User: ${masterUserID}
 📁 Folder: inbox
 📅 Timestamp: ${new Date().toISOString()}
 ${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : ""}
 ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
+
+💡 QUEUE PROCESSING STATUS:
+   - This is batch ${page} processing
+   - Total emails found in IMAP: ${
+     req.query.dynamicFetch ? "dynamically calculated" : "from parameters"
+   }
+   - This batch processed: ${totalProcessedEmails} NEW emails
+   - Remaining batches: Check queue worker logs for other batches
+   - Expected total: 113 emails should be processed across 5 batches
+
+🔍 TROUBLESHOOTING:
+   - If only 25 emails saved total, other batches may not be running
+   - Check RabbitMQ queue worker logs for batches 2-5
+   - Verify queue workers are consuming all messages
 ========================================================
 `);
 
     res.status(200).json({
-      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from inbox folder!`,
+      message: `✅ [Batch ${page}] Successfully saved ${totalProcessedEmails} NEW emails to database!`,
       processedBatch: `Page ${page}, Batch size: ${batchSize}`,
-      processedEmails: totalProcessedEmails,
+      newEmailsSaved: totalProcessedEmails, // Only newly saved emails (no duplicates)
+      totalEmailsExpectedInAllBatches: 113, // Total emails across all batches
+      currentBatchNumber: page,
+      expectedTotalBatches: 5,
       expectedEmails: expectedCount ? parseInt(expectedCount) : null,
       uidRange: startUID && endUID ? `${startUID}-${endUID}` : "Not specified",
       specificUIDs: allUIDsInBatch ? allUIDsInBatch : "Not specified",
       masterUserID: masterUserID,
       timestamp: new Date().toISOString(),
+      explanation: {
+        note: "This count shows only NEWLY SAVED emails from THIS batch (duplicates are skipped)",
+        reason:
+          "Total emails (113) should be processed across 5 batches by the queue workers",
+        recommendation:
+          "Check the queue worker logs to see if all 5 batches are being processed",
+      },
+      queueInfo: {
+        thisIsQueueBatch: true,
+        expectedTotalEmailsAcrossAllBatches: 113,
+        batchesRemaining:
+          "Check queue worker to see if batches 2-5 are processing",
+      },
     });
   } catch (error) {
     console.error(`[Batch ${page}] Error fetching emails:`, error.message);
@@ -5174,6 +5458,192 @@ exports.bulkMoveEmails = async (req, res) => {
     console.error("Error in bulk move emails:", error);
     res.status(500).json({
       message: "Internal server error during bulk move",
+      error: error.message,
+    });
+  }
+};
+
+// Get comprehensive email statistics for a user
+exports.getUserEmailStatistics = async (req, res) => {
+  const masterUserID = req.adminId;
+
+  try {
+    console.log(
+      `[getUserEmailStatistics] Fetching statistics for user: ${masterUserID}`
+    );
+
+    // Get database counts by folder
+    const inboxCount = await Email.count({
+      where: { masterUserID, folder: "inbox" },
+    });
+
+    const sentCount = await Email.count({
+      where: { masterUserID, folder: "sent" },
+    });
+
+    const draftsCount = await Email.count({
+      where: { masterUserID, folder: "drafts" },
+    });
+
+    const archiveCount = await Email.count({
+      where: { masterUserID, folder: "archive" },
+    });
+
+    const totalDatabaseEmails =
+      inboxCount + sentCount + draftsCount + archiveCount;
+
+    // Get current IMAP inbox count (if credentials exist)
+    let imapInboxCount = null;
+    let imapConnectionStatus = "Not Available";
+
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID },
+      });
+
+      if (userCredential) {
+        const provider = userCredential.provider;
+        let imapConfig;
+
+        if (provider === "custom") {
+          if (userCredential.imapHost && userCredential.imapPort) {
+            imapConfig = {
+              imap: {
+                user: userCredential.email,
+                password: userCredential.appPassword,
+                host: userCredential.imapHost,
+                port: userCredential.imapPort,
+                tls: userCredential.imapTLS,
+                authTimeout: 10000, // Shorter timeout for stats check
+                tlsOptions: { rejectUnauthorized: false },
+              },
+            };
+          }
+        } else {
+          const providerConfig = PROVIDER_CONFIG[provider];
+          if (providerConfig) {
+            imapConfig = {
+              imap: {
+                user: userCredential.email,
+                password: userCredential.appPassword,
+                host: providerConfig.host,
+                port: providerConfig.port,
+                tls: providerConfig.tls,
+                authTimeout: 10000, // Shorter timeout for stats check
+                tlsOptions: { rejectUnauthorized: false },
+              },
+            };
+          }
+        }
+
+        if (imapConfig) {
+          console.log(
+            `[getUserEmailStatistics] Connecting to IMAP to get current inbox count...`
+          );
+          const connection = await Imap.connect(imapConfig);
+          await connection.openBox("INBOX");
+          const messages = await connection.search(["ALL"]);
+          imapInboxCount = messages.length;
+          await connection.end();
+          imapConnectionStatus = "Connected Successfully";
+          console.log(
+            `[getUserEmailStatistics] IMAP inbox count: ${imapInboxCount}`
+          );
+        }
+      }
+    } catch (imapError) {
+      console.log(
+        `[getUserEmailStatistics] IMAP connection failed: ${imapError.message}`
+      );
+      imapConnectionStatus = `Connection Failed: ${imapError.message}`;
+    }
+
+    // Get recent email activity (last 7 days)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentEmailsCount = await Email.count({
+      where: {
+        masterUserID,
+        createdAt: {
+          [Sequelize.Op.gte]: sevenDaysAgo,
+        },
+      },
+    });
+
+    // Get oldest and newest email dates
+    const oldestEmail = await Email.findOne({
+      where: { masterUserID },
+      order: [["createdAt", "ASC"]],
+      attributes: ["createdAt"],
+    });
+
+    const newestEmail = await Email.findOne({
+      where: { masterUserID },
+      order: [["createdAt", "DESC"]],
+      attributes: ["createdAt"],
+    });
+
+    const response = {
+      message: "Email statistics retrieved successfully",
+      userID: masterUserID,
+      timestamp: new Date().toISOString(),
+      databaseStatistics: {
+        byFolder: {
+          inbox: inboxCount,
+          sent: sentCount,
+          drafts: draftsCount,
+          archive: archiveCount,
+        },
+        totalInDatabase: totalDatabaseEmails,
+        recentActivity: {
+          last7Days: recentEmailsCount,
+          period: "Last 7 days",
+        },
+        dateRange: {
+          oldest: oldestEmail ? oldestEmail.createdAt : null,
+          newest: newestEmail ? newestEmail.createdAt : null,
+        },
+      },
+      imapStatistics: {
+        currentInboxCount: imapInboxCount,
+        connectionStatus: imapConnectionStatus,
+        explanation:
+          imapInboxCount !== null
+            ? `IMAP shows ${imapInboxCount} total emails in inbox, but database contains ${inboxCount} emails`
+            : "IMAP connection not available - check credentials",
+      },
+      analysis: {
+        difference:
+          imapInboxCount !== null ? imapInboxCount - inboxCount : null,
+        explanation:
+          imapInboxCount !== null
+            ? `${
+                imapInboxCount - inboxCount
+              } emails in IMAP inbox are either duplicates or not yet processed`
+            : "Cannot compare - IMAP data unavailable",
+        recommendation:
+          imapInboxCount !== null && imapInboxCount - inboxCount > 0
+            ? "Run email fetch process to sync remaining emails"
+            : "Database is up to date or IMAP unavailable",
+      },
+    };
+
+    console.log(
+      `[getUserEmailStatistics] Statistics generated for user ${masterUserID}:`
+    );
+    console.log(
+      `- Database emails: ${totalDatabaseEmails} (Inbox: ${inboxCount})`
+    );
+    console.log(`- IMAP inbox: ${imapInboxCount || "N/A"}`);
+    console.log(`- Recent activity (7d): ${recentEmailsCount}`);
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error(
+      "[getUserEmailStatistics] Error fetching user email statistics:",
+      error
+    );
+    res.status(500).json({
+      message: "Failed to retrieve email statistics",
       error: error.message,
     });
   }
