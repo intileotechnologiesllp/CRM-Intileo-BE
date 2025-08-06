@@ -51,14 +51,15 @@ async function pushJobsToQueue() {
   await connection.close();
 }
 
-cron.schedule("*/2 * * * *", async () => {
-  console.log("Running cron job to queue email fetch jobs...");
-  try {
-    await pushJobsToQueue();
-  } catch (error) {
-    console.error("Error queueing email fetch jobs:", error);
-  }
-});
+// TEMPORARILY DISABLED: cron job for email-fetch-queue stopped to focus on fetch_inbox_queue
+// cron.schedule("*/2 * * * *", async () => {
+//   console.log("Running cron job to queue email fetch jobs...");
+//   try {
+//     await pushJobsToQueue();
+//   } catch (error) {
+//     console.error("Error queueing email fetch jobs:", error);
+//   }
+// });
 
 cron.schedule("* * * * *", async () => {
   // Every minute
