@@ -966,8 +966,8 @@ async function startUserSpecificInboxWorkers() {
               expectedCount, // Add missing field
             } = JSON.parse(msg.content.toString());
 
-            // Enforce maximum batch size to prevent memory issues
-            batchSize = Math.min(parseInt(batchSize) || 5, 5);
+            // Enforce maximum batch size to prevent memory issues but allow faster processing
+            batchSize = Math.min(parseInt(batchSize) || 25, 50); // Increased from 5 to 25-50
 
             await limit(async () => {
               try {
@@ -978,11 +978,18 @@ async function startUserSpecificInboxWorkers() {
 
                 // Add delay between batches to prevent overwhelming the system
                 if (page > 1) {
-                  await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
+                  await new Promise((resolve) => setTimeout(resolve, 500)); // Reduced delay for faster processing
                 }
 
-                // Call fetchInboxEmails logic directly, but mock req/res
-                await fetchInboxEmails(
+                // Add timeout to prevent hanging workers
+                const timeoutPromise = new Promise((_, reject) => {
+                  setTimeout(
+                    () => reject(new Error("Worker timeout after 5 minutes")),
+                    300000
+                  ); // 5 minute timeout
+                });
+
+                const fetchPromise = fetchInboxEmails(
                   {
                     adminId: masterUserID, // This is what fetchInboxEmails reads as req.adminId
                     email,
@@ -1018,6 +1025,9 @@ async function startUserSpecificInboxWorkers() {
                     }),
                   }
                 );
+
+                // Race between fetch and timeout
+                await Promise.race([fetchPromise, timeoutPromise]);
 
                 // Log memory usage after fetch
                 logMemoryUsage(
@@ -1122,10 +1132,23 @@ async function startUserSpecificCronWorkers() {
             const { adminId } = JSON.parse(msg.content.toString());
             logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
             try {
-              await limit(async () => {
+              // Add timeout to prevent hanging cron workers
+              const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(
+                  () =>
+                    reject(new Error("Cron worker timeout after 2 minutes")),
+                  120000
+                ); // 2 minute timeout
+              });
+
+              const fetchPromise = limit(async () => {
                 // Pass smaller batch size to fetchRecentEmail for memory safety
                 await fetchRecentEmail(adminId, { batchSize: 5 });
               });
+
+              // Race between fetch and timeout
+              await Promise.race([fetchPromise, timeoutPromise]);
+
               channel.ack(msg);
             } catch (error) {
               console.error(
