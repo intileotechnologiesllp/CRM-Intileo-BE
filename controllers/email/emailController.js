@@ -666,6 +666,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
       // Use user-specific queue name for parallel processing
       const userQueueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
 
+      // Instead of sending pre-calculated UIDs, send batch parameters for dynamic calculation
       await publishToQueue(userQueueName, {
         masterUserID,
         email,
@@ -680,15 +681,22 @@ exports.queueFetchInboxEmails = async (req, res) => {
         smtpHost: req.body.smtpHost,
         smtpPort: req.body.smtpPort,
         smtpSecure: req.body.smtpSecure,
-        startUID,
-        endUID,
-        allUIDsInBatch, // Send all UIDs in the batch
-        expectedCount: realisticExpectedCount, // More realistic expected count
-        originalUIDCount: batchUIDs.length, // Keep track of original UIDs for debugging
+        // Remove pre-calculated UIDs - let worker calculate them dynamically
+        // startUID,
+        // endUID,
+        // allUIDsInBatch,
+        // expectedCount: realisticExpectedCount,
+        // originalUIDCount: batchUIDs.length,
+
+        // Send parameters for dynamic UID calculation
+        dynamicFetch: true, // Flag to indicate dynamic fetching
+        skipCount: (page - 1) * parseInt(safeBatchSize), // How many emails to skip
       });
 
       console.log(
-        `[Queue] Queued batch ${page}/${numBatches} with ${batchUIDs.length} UIDs (expecting ~${realisticExpectedCount} emails) to ${userQueueName}, UIDs: ${startUID}-${endUID}`
+        `[Queue] Queued batch ${page}/${numBatches} for dynamic UID calculation to ${userQueueName}, skip: ${
+          (page - 1) * parseInt(safeBatchSize)
+        }, batchSize: ${safeBatchSize}`
       );
     }
 
@@ -922,12 +930,55 @@ exports.fetchInboxEmails = async (req, res) => {
       console.error("IMAP connection error:", err);
     });
 
-    // Helper function to fetch emails from a specific folder using UID range
+    // Helper function to fetch emails from a specific folder using dynamic calculation
     const fetchEmailsFromFolder = async (folderName, folderType) => {
       try {
         await connection.openBox(folderName);
         let searchCriteria;
-        if (allUIDsInBatch) {
+
+        // Check if we should use dynamic UID calculation
+        if (req.query.dynamicFetch) {
+          console.log(`[Batch ${page}] Using dynamic UID calculation...`);
+
+          // First, get all UIDs for the current date range
+          let allUIDs;
+          if (!days || days === 0 || days === "all") {
+            allUIDs = await connection.search(["ALL"]);
+          } else {
+            const sinceDate = formatDateForIMAP(
+              new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+            );
+            console.log(`Using dynamic SINCE date: ${sinceDate}`);
+            allUIDs = await connection.search(["SINCE", sinceDate]);
+          }
+
+          console.log(
+            `[Batch ${page}] Found ${allUIDs.length} total UIDs dynamically`
+          );
+
+          // Calculate the UIDs for this specific batch
+          const skipCount = parseInt(req.query.skipCount) || 0;
+          const batchSize = parseInt(req.query.batchSize) || 25;
+          const startIdx = skipCount;
+          const endIdx = Math.min(startIdx + batchSize, allUIDs.length);
+          const batchUIDs = allUIDs.slice(startIdx, endIdx);
+
+          if (batchUIDs.length === 0) {
+            console.log(
+              `[Batch ${page}] No UIDs found for this batch (skip: ${skipCount})`
+            );
+            return [];
+          }
+
+          // Use the dynamically calculated UIDs
+          const dynamicUIDString = batchUIDs.join(",");
+          searchCriteria = [["UID", dynamicUIDString]];
+          console.log(
+            `[Batch ${page}] Dynamic UIDs: ${batchUIDs.length} UIDs (${
+              batchUIDs[0]
+            }-${batchUIDs[batchUIDs.length - 1]})`
+          );
+        } else if (allUIDsInBatch) {
           // Use specific UIDs for this batch (more reliable than ranges)
           searchCriteria = [["UID", allUIDsInBatch]];
           console.log(
@@ -956,7 +1007,13 @@ exports.fetchInboxEmails = async (req, res) => {
 
         // Determine how many emails to process
         let actualBatchSize;
-        if (allUIDsInBatch || (startUID && endUID)) {
+        if (req.query.dynamicFetch) {
+          // For dynamic fetch, process all found emails (no warnings needed)
+          actualBatchSize = messages.length;
+          console.log(
+            `[Batch ${page}] Dynamic fetch found ${actualBatchSize} emails to process`
+          );
+        } else if (allUIDsInBatch || (startUID && endUID)) {
           // In batch mode with specific UIDs or UID range, process ALL emails found
           actualBatchSize = messages.length;
           if (expectedCount && messages.length !== parseInt(expectedCount)) {
