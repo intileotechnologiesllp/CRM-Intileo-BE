@@ -908,15 +908,20 @@ async function startFetchInboxWorker() {
 
                     console.log(`
 🚀 FETCH INBOX QUEUE WORKER COMPLETED BATCH!
-📧 This batch: ${emailCount} emails fetched
-👤 User ${masterUserID} total: ${
+📧 This batch: ${emailCount} NEW emails saved to database
+👤 User ${masterUserID} TOTAL SAVED: ${
                       emailStats.userStats[masterUserID].fetched
-                    } emails (${
+                    } emails (across ${
                       emailStats.userStats[masterUserID].batches
                     } batches)
-🌍 SESSION TOTAL: ${emailStats.totalFetched} emails fetched across all users
+🌍 SESSION TOTAL SAVED: ${emailStats.totalFetched} emails across all users
 ⏱️  Session duration: ${sessionDuration} minutes
 📋 Batch ${page} completed: ${data.message || "Success"}
+
+💡 IMPORTANT: These counts show NEWLY SAVED emails only
+   - Skips duplicates already in database
+   - Total inbox emails may be higher than saved count
+   - This is normal behavior for incremental processing
 `);
                   },
                 }),
@@ -1036,6 +1041,10 @@ async function startUserSpecificInboxWorkers() {
               allUIDsInBatch, // Add missing field
               expectedCount, // Add missing field
               originalUIDCount, // Track original UID count for debugging
+              // Add dynamic fetch parameters
+              dynamicFetch,
+              skipCount,
+              debugMode,
             } = JSON.parse(msg.content.toString());
 
             // Enforce maximum batch size to prevent memory issues but allow faster processing
@@ -1079,6 +1088,10 @@ async function startUserSpecificInboxWorkers() {
                       smtpHost,
                       smtpPort,
                       smtpSecure,
+                      // Add dynamic fetch parameters to body (since we check body in fetchInboxEmails)
+                      dynamicFetch,
+                      skipCount,
+                      debugMode,
                     },
                     query: {
                       batchSize,
@@ -1089,6 +1102,10 @@ async function startUserSpecificInboxWorkers() {
                       allUIDsInBatch, // Add missing field
                       expectedCount, // Add missing field
                       originalUIDCount, // Add missing field for debugging
+                      // Also add dynamic fetch parameters to query for compatibility
+                      dynamicFetch,
+                      skipCount,
+                      debugMode,
                     },
                   },
                   {

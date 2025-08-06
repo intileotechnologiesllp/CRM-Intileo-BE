@@ -23,6 +23,7 @@ router.get(
   emailController.getTemplateById
 );
 router.get("/unread-counts", verifyToken, emailController.getUnreadCounts);
+router.get("/statistics", verifyToken, emailController.getUserEmailStatistics);
 router.post("/add-credential", verifyToken, emailController.addUserCredential);
 router.get("/get-credential", verifyToken, emailController.getUserCredential);
 router.get("/delete-email/:emailId", verifyToken, emailController.deleteEmail);
