@@ -2,6 +2,49 @@ const amqp = require("amqplib");
 const pLimit = require("p-limit");
 // Reduce concurrency to 1 for all workers to minimize memory/connection usage
 const limit = pLimit(1);
+
+// Global counters for tracking email fetching statistics
+const emailStats = {
+  totalFetched: 0,
+  userStats: {}, // Track per-user statistics
+  sessionStartTime: new Date(),
+};
+
+// Function to get current email statistics
+const getEmailStatistics = () => {
+  const sessionDuration = Math.floor(
+    (new Date() - emailStats.sessionStartTime) / 1000 / 60
+  ); // minutes
+  return {
+    totalFetched: emailStats.totalFetched,
+    sessionDuration: `${sessionDuration} minutes`,
+    userStats: emailStats.userStats,
+    sessionStartTime: emailStats.sessionStartTime.toISOString(),
+  };
+};
+
+// Function to display current statistics
+const displayEmailStatistics = () => {
+  const stats = getEmailStatistics();
+  console.log(`
+════════════════════════════════════════════
+📊 CURRENT EMAIL FETCHING STATISTICS
+════════════════════════════════════════════
+🌍 SESSION TOTAL: ${stats.totalFetched} emails fetched
+⏱️  Session Duration: ${stats.sessionDuration}
+🕐 Started: ${stats.sessionStartTime}
+👥 Users: ${Object.keys(stats.userStats).length} active
+
+📋 USER BREAKDOWN:
+${Object.entries(stats.userStats)
+  .map(
+    ([userId, data]) =>
+      `   User ${userId}: ${data.fetched} emails (${data.batches} batches)`
+  )
+  .join("\n")}
+════════════════════════════════════════════
+`);
+};
 const { fetchRecentEmail } = require("../controllers/email/emailController");
 const {
   fetchSyncEmails,
@@ -844,9 +887,37 @@ async function startFetchInboxWorker() {
               {
                 status: (code) => ({
                   json: (data) => {
-                    console.log(
-                      `Inbox fetch completed for masterUserID ${masterUserID}, page ${page}: ${data.message}`
-                    );
+                    // Extract email count from response
+                    const emailCount = data.processedEmails || 0;
+
+                    // Update global statistics
+                    emailStats.totalFetched += emailCount;
+                    if (!emailStats.userStats[masterUserID]) {
+                      emailStats.userStats[masterUserID] = {
+                        fetched: 0,
+                        batches: 0,
+                      };
+                    }
+                    emailStats.userStats[masterUserID].fetched += emailCount;
+                    emailStats.userStats[masterUserID].batches += 1;
+
+                    // Calculate session duration
+                    const sessionDuration = Math.floor(
+                      (new Date() - emailStats.sessionStartTime) / 1000 / 60
+                    ); // minutes
+
+                    console.log(`
+🚀 FETCH INBOX QUEUE WORKER COMPLETED BATCH!
+📧 This batch: ${emailCount} emails fetched
+👤 User ${masterUserID} total: ${
+                      emailStats.userStats[masterUserID].fetched
+                    } emails (${
+                      emailStats.userStats[masterUserID].batches
+                    } batches)
+🌍 SESSION TOTAL: ${emailStats.totalFetched} emails fetched across all users
+⏱️  Session duration: ${sessionDuration} minutes
+📋 Batch ${page} completed: ${data.message || "Success"}
+`);
                   },
                 }),
               }
@@ -1095,6 +1166,12 @@ async function startUserSpecificInboxWorkers() {
   }
 
   console.log("User-specific inbox workers started and waiting for jobs...");
+  console.log(`
+📊 EMAIL STATISTICS TRACKING ENABLED
+🕐 Session started: ${emailStats.sessionStartTime.toISOString()}
+📧 Total emails fetched: ${emailStats.totalFetched}
+👥 Active users: ${Object.keys(emailStats.userStats).length}
+`);
 }
 
 // Add user-specific workers for cron job queues (email-fetch-queue-{userID})
@@ -1240,3 +1317,14 @@ startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 // startWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificCronWorkers
 startScheduledEmailWorker().catch(console.error);
+
+// Display statistics every 10 minutes
+setInterval(() => {
+  displayEmailStatistics();
+}, 10 * 60 * 1000); // 10 minutes
+
+// Export statistics functions for external use
+module.exports = {
+  getEmailStatistics,
+  displayEmailStatistics,
+};

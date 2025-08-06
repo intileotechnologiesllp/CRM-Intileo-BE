@@ -1284,7 +1284,7 @@ exports.fetchInboxEmails = async (req, res) => {
         }
 
         console.log(
-          `[Batch ${page}] Completed processing ${processedCount} new emails in ${folderType}`
+          `📧 [Batch ${page}] SUCCESSFULLY PROCESSED ${processedCount} NEW EMAILS in ${folderType} folder!`
         );
 
         return processedCount; // Return the count for tracking
@@ -1339,8 +1339,21 @@ exports.fetchInboxEmails = async (req, res) => {
     connection.end();
     console.log(`[Batch ${page}] IMAP connection closed successfully.`);
 
+    // Enhanced logging with prominent email count display
+    console.log(`
+====== FETCH INBOX QUEUE RESULTS FOR BATCH ${page} ======
+✅ EMAILS FETCHED: ${totalProcessedEmails} emails
+📊 Batch Info: Page ${page}, Batch size: ${batchSize}
+👤 User: ${masterUserID}
+📁 Folder: inbox
+📅 Timestamp: ${new Date().toISOString()}
+${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : ""}
+${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
+========================================================
+`);
+
     res.status(200).json({
-      message: `[Batch ${page}] Fetched and saved ${totalProcessedEmails} new emails from inbox folder successfully.`,
+      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from inbox folder!`,
       processedBatch: `Page ${page}, Batch size: ${batchSize}`,
       processedEmails: totalProcessedEmails,
       expectedEmails: expectedCount ? parseInt(expectedCount) : null,
