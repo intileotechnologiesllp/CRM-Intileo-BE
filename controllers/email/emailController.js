@@ -630,10 +630,10 @@ exports.queueFetchInboxEmails = async (req, res) => {
       }
     }
 
-    // 3. Calculate UID ranges for batches - optimized for much better performance
+    // 3. Calculate UID ranges for batches - aligned with worker batch size limits
     const safeBatchSize = Math.min(
       parseInt(batchSize),
-      totalEmails > 5000 ? 50 : totalEmails > 2000 ? 75 : 100 // Much larger batches for faster processing
+      25 // Align with worker maximum batch size to prevent mismatches
     );
     const numBatches = Math.ceil(totalEmails / safeBatchSize);
 
@@ -952,9 +952,26 @@ exports.fetchInboxEmails = async (req, res) => {
           // In batch mode with specific UIDs or UID range, process ALL emails found
           actualBatchSize = messages.length;
           if (expectedCount && messages.length !== parseInt(expectedCount)) {
-            console.warn(
-              `[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${messages.length}`
-            );
+            // Only warn if the difference is significant (more than 20% difference)
+            const expectedCountNum = parseInt(expectedCount);
+            const difference = Math.abs(messages.length - expectedCountNum);
+            const percentDifference = (difference / expectedCountNum) * 100;
+
+            if (percentDifference > 20) {
+              console.warn(
+                `[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${
+                  messages.length
+                } (${percentDifference.toFixed(1)}% difference)`
+              );
+            } else {
+              console.log(
+                `[Batch ${page}] INFO: Expected ${expectedCount} emails, found ${
+                  messages.length
+                } (${percentDifference.toFixed(
+                  1
+                )}% difference - within normal range)`
+              );
+            }
           }
           console.log(
             `[Batch ${page}] Processing all ${actualBatchSize} emails in batch`
