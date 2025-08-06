@@ -721,9 +721,11 @@ async function startSyncEmailWorker() {
         const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
           msg.content.toString()
         );
-        
-        console.log(`[SyncEmailWorker] Processing batch for masterUserID: ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`);
-        
+
+        console.log(
+          `[SyncEmailWorker] Processing batch for masterUserID: ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
+        );
+
         await limit(async () => {
           try {
             logMemoryUsage(
@@ -741,7 +743,9 @@ async function startSyncEmailWorker() {
             );
 
             logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
-            console.log(`[SyncEmailWorker] Successfully processed batch for masterUserID: ${masterUserID}`);
+            console.log(
+              `[SyncEmailWorker] Successfully processed batch for masterUserID: ${masterUserID}`
+            );
 
             // Force garbage collection
             if (global.gc) {
@@ -750,7 +754,10 @@ async function startSyncEmailWorker() {
 
             channel.ack(msg);
           } catch (err) {
-            console.error(`[SyncEmailWorker] Failed to sync emails for masterUserID ${masterUserID}:`, err);
+            console.error(
+              `[SyncEmailWorker] Failed to sync emails for masterUserID ${masterUserID}:`,
+              err
+            );
             channel.nack(msg, false, false);
           }
         });
@@ -901,10 +908,267 @@ async function startFetchInboxWorker() {
   console.log("Inbox fetch worker started and waiting for jobs...");
 }
 
+// New function to handle user-specific queues for parallel processing
+async function startUserSpecificInboxWorkers() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+
+  // Get all users with credentials to create user-specific queues
+  let userCredentials = [];
+  try {
+    userCredentials = await UserCredential.findAll({
+      attributes: ["masterUserID"],
+      group: ["masterUserID"], // Ensure unique users
+    });
+    console.log(
+      `[UserWorker] Found ${userCredentials.length} users with email credentials`
+    );
+  } catch (error) {
+    console.error("[UserWorker] Error fetching user credentials:", error);
+    return;
+  }
+
+  // Create a worker for each user
+  for (const credential of userCredentials) {
+    const userQueueName = `FETCH_INBOX_QUEUE_${credential.masterUserID}`;
+
+    try {
+      const connection = await amqp.connect(amqpUrl);
+      const channel = await connection.createChannel();
+      await channel.assertQueue(userQueueName, { durable: true });
+
+      console.log(`[UserWorker] Listening to queue: ${userQueueName}`);
+
+      // Set prefetch to 1 to ensure only one message is processed at a time per user
+      channel.prefetch(1);
+
+      channel.consume(
+        userQueueName,
+        async (msg) => {
+          if (msg !== null) {
+            // Process message with same logic as original worker
+            let {
+              masterUserID,
+              email,
+              appPassword,
+              batchSize,
+              page,
+              days,
+              provider,
+              imapHost,
+              imapPort,
+              imapTLS,
+              smtpHost,
+              smtpPort,
+              smtpSecure,
+              startUID,
+              endUID,
+            } = JSON.parse(msg.content.toString());
+
+            // Enforce maximum batch size to prevent memory issues
+            batchSize = Math.min(parseInt(batchSize) || 5, 5);
+
+            await limit(async () => {
+              try {
+                // Log memory usage before fetch
+                logMemoryUsage(
+                  `Before fetchInboxEmails batch for user ${masterUserID}, page ${page}, UIDs ${startUID}-${endUID}`
+                );
+
+                // Add delay between batches to prevent overwhelming the system
+                if (page > 1) {
+                  await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second delay
+                }
+
+                // Call fetchInboxEmails logic directly, but mock req/res
+                await fetchInboxEmails(
+                  {
+                    adminId: masterUserID,
+                    email,
+                    appPassword,
+                    body: {
+                      email,
+                      appPassword,
+                      provider,
+                      imapHost,
+                      imapPort,
+                      imapTLS,
+                      smtpHost,
+                      smtpPort,
+                      smtpSecure,
+                    },
+                    query: {
+                      batchSize,
+                      page,
+                      days,
+                      startUID,
+                      endUID,
+                    },
+                  },
+                  {
+                    status: (code) => ({
+                      json: (data) => {
+                        console.log(
+                          `User ${masterUserID} inbox fetch completed, page ${page}: ${data.message}`
+                        );
+                      },
+                    }),
+                  }
+                );
+
+                // Log memory usage after fetch
+                logMemoryUsage(
+                  `After fetchInboxEmails batch for user ${masterUserID}, page ${page}`
+                );
+
+                // Force garbage collection after processing
+                if (global.gc) {
+                  global.gc();
+                  logMemoryUsage(
+                    `After garbage collection for user ${masterUserID}, page ${page}`
+                  );
+                }
+
+                // Additional memory cleanup
+                if (page % 10 === 0) {
+                  // Every 10 batches
+                  console.log(
+                    `User ${masterUserID} completed ${page} batches, forcing additional cleanup...`
+                  );
+                  if (global.gc) {
+                    global.gc();
+                    global.gc(); // Double GC for thorough cleanup
+                  }
+                  // Small delay to let system recover
+                  await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+
+                channel.ack(msg);
+              } catch (err) {
+                console.error(
+                  `Failed to fetch inbox emails for user ${masterUserID}, page ${page}:`,
+                  err
+                );
+                channel.nack(msg, false, false);
+              }
+            });
+          }
+        },
+        { noAck: false }
+      );
+
+      // Add connection error handling
+      connection.on("error", (err) => {
+        console.error(`AMQP connection error in ${userQueueName}:`, err);
+      });
+
+      connection.on("close", () => {
+        console.log(
+          `AMQP connection closed in ${userQueueName}. Attempting to reconnect...`
+        );
+        setTimeout(() => startUserSpecificInboxWorkers(), 5000);
+      });
+    } catch (error) {
+      console.error(
+        `[UserWorker] Error setting up queue ${userQueueName}:`,
+        error
+      );
+    }
+  }
+
+  console.log("User-specific inbox workers started and waiting for jobs...");
+}
+
+// Add user-specific workers for cron job queues (email-fetch-queue-{userID})
+async function startUserSpecificCronWorkers() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+
+  // Get all users with credentials to create user-specific cron queues
+  let userCredentials = [];
+  try {
+    userCredentials = await UserCredential.findAll({
+      attributes: ["masterUserID"],
+      group: ["masterUserID"], // Ensure unique users
+    });
+    console.log(
+      `[CronWorker] Found ${userCredentials.length} users for cron email queues`
+    );
+  } catch (error) {
+    console.error("[CronWorker] Error fetching user credentials:", error);
+    return;
+  }
+
+  // Create a worker for each user's cron queue
+  for (const credential of userCredentials) {
+    const userCronQueueName = `email-fetch-queue-${credential.masterUserID}`;
+
+    try {
+      const connection = await amqp.connect(amqpUrl);
+      const channel = await connection.createChannel();
+      await channel.assertQueue(userCronQueueName, { durable: true });
+
+      console.log(`[CronWorker] Listening to queue: ${userCronQueueName}`);
+
+      // Set prefetch to 1 to ensure only one message is processed at a time per user
+      channel.prefetch(1);
+
+      channel.consume(
+        userCronQueueName,
+        async (msg) => {
+          if (msg !== null) {
+            const { adminId } = JSON.parse(msg.content.toString());
+            logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
+            try {
+              await limit(async () => {
+                // Pass smaller batch size to fetchRecentEmail for memory safety
+                await fetchRecentEmail(adminId, { batchSize: 5 });
+              });
+              channel.ack(msg);
+            } catch (error) {
+              console.error(
+                `Error processing cron email fetch for adminId ${adminId}:`,
+                error
+              );
+              channel.nack(msg, false, false); // Discard the message on error
+            } finally {
+              logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
+              // Force garbage collection
+              if (global.gc) {
+                global.gc();
+              }
+            }
+          }
+        },
+        { noAck: false }
+      );
+
+      // Add connection error handling
+      connection.on("error", (err) => {
+        console.error(`AMQP connection error in ${userCronQueueName}:`, err);
+      });
+
+      connection.on("close", () => {
+        console.log(
+          `AMQP connection closed in ${userCronQueueName}. Attempting to reconnect...`
+        );
+        setTimeout(() => startUserSpecificCronWorkers(), 5000);
+      });
+    } catch (error) {
+      console.error(
+        `[CronWorker] Error setting up queue ${userCronQueueName}:`,
+        error
+      );
+    }
+  }
+
+  console.log("User-specific cron workers started and waiting for jobs...");
+}
+
 // In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
 // ...existing code...
 
 startFetchInboxWorker().catch(console.error);
+startUserSpecificInboxWorkers().catch(console.error); // Start user-specific workers
+startUserSpecificCronWorkers().catch(console.error); // Start user-specific cron workers
 startSyncEmailWorker().catch(console.error);
 startEmailWorker().catch(console.error);
 startWorker().catch(console.error);

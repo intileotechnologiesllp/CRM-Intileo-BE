@@ -20,7 +20,6 @@ async function pushJobsToQueue() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
   const connection = await amqp.connect(amqpUrl);
   const channel = await connection.createChannel();
-  await channel.assertQueue(QUEUE_NAME, { durable: true });
 
   const userCredentials = await UserCredential.findAll();
   if (!userCredentials || userCredentials.length === 0) {
@@ -32,11 +31,21 @@ async function pushJobsToQueue() {
 
   for (const credential of userCredentials) {
     const adminId = credential.masterUserID;
-    channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify({ adminId })), {
-      persistent: true,
-    });
+    // Use user-specific queue name for cron jobs too
+    const userQueueName = `email-fetch-queue-${adminId}`;
+
+    await channel.assertQueue(userQueueName, { durable: true });
+    channel.sendToQueue(
+      userQueueName,
+      Buffer.from(JSON.stringify({ adminId })),
+      {
+        persistent: true,
+      }
+    );
   }
-  console.log(`Queued ${userCredentials.length} email fetch jobs.`);
+  console.log(
+    `Queued ${userCredentials.length} email fetch jobs to user-specific queues.`
+  );
 
   await channel.close();
   await connection.close();
