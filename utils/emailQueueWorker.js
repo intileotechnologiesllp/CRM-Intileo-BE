@@ -1170,7 +1170,7 @@ async function startUserSpecificCronWorkers() {
 // In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
 // ...existing code...
 
-startFetchInboxWorker().catch(console.error);
+// startFetchInboxWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificInboxWorkers
 startUserSpecificInboxWorkers().catch(console.error); // Start user-specific workers
 startUserSpecificCronWorkers().catch(console.error); // Start user-specific cron workers
 startSyncEmailWorker().catch(console.error);
