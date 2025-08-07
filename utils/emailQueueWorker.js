@@ -116,9 +116,29 @@ function logMemoryUsage(context = "") {
   );
 
   // Warning if memory usage is high
-  if (mem.heapUsed > 500 * 1024 * 1024) {
-    // 500MB
-    console.warn(`[Memory Warning] High heap usage: ${heapUsed}MB`);
+  if (mem.heapUsed > 300 * 1024 * 1024) {
+    // Reduced from 500MB to 300MB for earlier warning
+    console.warn(
+      `[Memory Warning] High heap usage: ${heapUsed}MB - Consider restarting worker`
+    );
+
+    // Force garbage collection if memory is very high
+    if (mem.heapUsed > 400 * 1024 * 1024 && global.gc) {
+      console.log(
+        `[Memory] Forcing garbage collection due to high usage: ${heapUsed}MB`
+      );
+      global.gc();
+      global.gc(); // Double GC for thorough cleanup
+
+      // Log memory after cleanup
+      const memAfter = process.memoryUsage();
+      const heapAfter = (memAfter.heapUsed / 1024 / 1024).toFixed(1);
+      console.log(
+        `[Memory] After cleanup: ${heapAfter}MB (freed ${(
+          heapUsed - heapAfter
+        ).toFixed(1)}MB)`
+      );
+    }
   }
 }
 
@@ -1221,8 +1241,8 @@ async function startFetchInboxWorker() {
             }
 
             // Additional memory cleanup
-            if (page % 10 === 0) {
-              // Every 10 batches
+            if (page % 5 === 0) {
+              // Every 5 batches instead of 10
               console.log(
                 `Completed ${page} batches, forcing additional cleanup...`
               );
@@ -1230,10 +1250,9 @@ async function startFetchInboxWorker() {
                 global.gc();
                 global.gc(); // Double GC for thorough cleanup
               }
-              // Small delay to let system recover
-              await new Promise((resolve) => setTimeout(resolve, 2000));
+              // Longer delay to let system recover
+              await new Promise((resolve) => setTimeout(resolve, 3000)); // 3 seconds
             }
-
             channel.ack(msg);
           } catch (err) {
             console.error(
@@ -1328,7 +1347,7 @@ async function startUserSpecificInboxWorkers() {
 
             // Enforce maximum batch size to prevent memory issues but allow faster processing
             // Dynamically adjust batch size based on actual email count to prevent warnings
-            batchSize = Math.min(parseInt(batchSize) || 25, 25); // Set to reasonable default of 25
+            batchSize = Math.min(parseInt(batchSize) || 10, 10); // Reduced from 25 to 10 for better memory management
 
             await limit(async () => {
               try {
@@ -1341,7 +1360,16 @@ async function startUserSpecificInboxWorkers() {
 
                 // Add delay between batches to prevent overwhelming the system
                 if (page > 1) {
-                  await new Promise((resolve) => setTimeout(resolve, 500)); // Reduced delay for faster processing
+                  await new Promise((resolve) => setTimeout(resolve, 1000)); // Increased delay for memory recovery
+                }
+
+                // Force memory cleanup every 5 batches
+                if (page % 5 === 0 && global.gc) {
+                  console.log(
+                    `[Memory] Batch ${page}: Forcing garbage collection...`
+                  );
+                  global.gc();
+                  logMemoryUsage(`After GC - Batch ${page}`);
                 }
 
                 // Add timeout to prevent hanging workers
