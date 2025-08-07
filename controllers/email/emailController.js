@@ -846,52 +846,44 @@ exports.fetchInboxEmails = async (req, res) => {
         if (req.query.dynamicFetch) {
           console.log(`[Batch ${page}] Using dynamic UID calculation...`);
 
-          // For dynamic fetch, get all emails and then slice for this batch
-          let allMessages;
+          // First, get all UIDs for the current date range
+          let allUIDs;
           if (!days || days === 0 || days === "all") {
-            allMessages = await connection.search(["ALL"], {
-              bodies: "HEADER",
-              struct: true,
-            });
+            allUIDs = await connection.search(["ALL"]);
           } else {
             const sinceDate = formatDateForIMAP(
               new Date(Date.now() - days * 24 * 60 * 60 * 1000)
             );
             console.log(`Using dynamic SINCE date: ${sinceDate}`);
-            allMessages = await connection.search([["SINCE", sinceDate]], {
-              bodies: "HEADER",
-              struct: true,
-            });
+            allUIDs = await connection.search(["SINCE", sinceDate]);
           }
 
           console.log(
-            `[Batch ${page}] Found ${allMessages.length} total emails dynamically`
+            `[Batch ${page}] Found ${allUIDs.length} total UIDs dynamically`
           );
 
-          // Calculate pagination for this specific batch
+          // Calculate the UIDs for this specific batch
           const skipCount = parseInt(req.query.skipCount) || 0;
           const batchSize = parseInt(req.query.batchSize) || 25;
           const startIdx = skipCount;
-          const endIdx = Math.min(startIdx + batchSize, allMessages.length);
+          const endIdx = Math.min(startIdx + batchSize, allUIDs.length);
+          const batchUIDs = allUIDs.slice(startIdx, endIdx);
 
-          // Slice the messages array to get this batch
-          const batchMessages = allMessages.slice(startIdx, endIdx);
-
-          if (batchMessages.length === 0) {
+          if (batchUIDs.length === 0) {
             console.log(
-              `[Batch ${page}] No emails found for this batch (skip: ${skipCount}, total: ${allMessages.length})`
+              `[Batch ${page}] No UIDs found for this batch (skip: ${skipCount})`
             );
             return [];
           }
 
+          // Use the dynamically calculated UIDs
+          const dynamicUIDString = batchUIDs.join(",");
+          searchCriteria = [["UID", dynamicUIDString]];
           console.log(
-            `[Batch ${page}] Dynamic pagination: Processing emails ${
-              startIdx + 1
-            }-${endIdx} out of ${allMessages.length} total`
+            `[Batch ${page}] Dynamic UIDs: ${batchUIDs.length} UIDs (${
+              batchUIDs[0]
+            }-${batchUIDs[batchUIDs.length - 1]})`
           );
-
-          // Use the sliced messages directly (no second search needed)
-          messages = batchMessages;
         } else if (allUIDsInBatch) {
           // Use specific UIDs for this batch (more reliable than ranges)
           searchCriteria = [["UID", allUIDsInBatch]];
@@ -911,12 +903,9 @@ exports.fetchInboxEmails = async (req, res) => {
           searchCriteria = [["SINCE", sinceDate]];
         }
 
-        // Only do additional search if not using dynamic fetch (which already has messages)
-        if (!req.query.dynamicFetch) {
-          // Fetch only headers and structure, not full bodies yet
-          const fetchOptions = { bodies: "HEADER", struct: true };
-          messages = await connection.search(searchCriteria, fetchOptions);
-        }
+        // Fetch only headers and structure, not full bodies yet
+        const fetchOptions = { bodies: "HEADER", struct: true };
+        const messages = await connection.search(searchCriteria, fetchOptions);
 
         console.log(
           `[Batch ${page}] Total emails found in ${folderType}: ${messages.length}`
