@@ -299,8 +299,16 @@ exports.queueSyncEmails = async (req, res) => {
 
   try {
     console.debug(
-      `[queueSyncEmails] masterUserID: ${masterUserID}, syncStartDate: ${syncStartDate}, batchSize: ${batchSize}`
+      `[queueSyncEmails] masterUserID: ${masterUserID} (type: ${typeof masterUserID}), syncStartDate: ${syncStartDate}, batchSize: ${batchSize}`
     );
+
+    // Early validation of masterUserID
+    if (!masterUserID) {
+      console.error(
+        "[queueSyncEmails] ERROR: masterUserID is undefined or null!"
+      );
+      return res.status(400).json({ message: "User ID is required." });
+    }
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -403,14 +411,42 @@ exports.queueSyncEmails = async (req, res) => {
           i + 1
         }/${numBatches}: startUID=${startUID}, endUID=${endUID}`
       );
-      await publishToQueue("SYNC_EMAIL_QUEUE", {
+
+      // Use user-specific sync queue for parallel processing
+      const userSyncQueueName = `SYNC_EMAIL_QUEUE_${masterUserID}`;
+
+      // Additional debug logging and validation
+      console.debug(
+        `[queueSyncEmails] Queue name constructed: "${userSyncQueueName}"`
+      );
+      console.debug(
+        `[queueSyncEmails] masterUserID value: "${masterUserID}" (type: ${typeof masterUserID})`
+      );
+
+      if (!userSyncQueueName.includes(masterUserID)) {
+        console.error(
+          `[queueSyncEmails] ERROR: Queue name doesn't contain user ID!`
+        );
+        return res
+          .status(500)
+          .json({ message: "Queue name construction failed." });
+      }
+
+      console.debug(
+        `[queueSyncEmails] Publishing to queue: ${userSyncQueueName}`
+      );
+      await publishToQueue(userSyncQueueName, {
         masterUserID,
         syncStartDate,
         batchSize,
         startUID,
         endUID,
       });
+      console.debug(
+        `[queueSyncEmails] Successfully published batch to queue: ${userSyncQueueName}`
+      );
     }
+
     res.status(200).json({
       message: `Sync jobs queued: ${numBatches} batches for ${totalEmails} emails.`,
     });

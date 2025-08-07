@@ -1,7 +1,34 @@
+// Load environment variables
+require("dotenv").config();
+
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-// Reduce concurrency to 1 for all workers to minimize memory/connection usage
-const limit = pLimit(1);
+// Create a concurrency limiter for better resource management
+const limit = pLimit(3);
+
+// Helper function to publish jobs to queue
+async function publishToQueue(queueName, data) {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+  let connection, channel;
+
+  try {
+    connection = await amqp.connect(amqpUrl);
+    channel = await connection.createChannel();
+    await channel.assertQueue(queueName, { durable: true });
+
+    channel.sendToQueue(queueName, Buffer.from(JSON.stringify(data)), {
+      persistent: true,
+    });
+
+    await channel.close();
+    await connection.close();
+  } catch (error) {
+    console.error(`Error publishing to queue ${queueName}:`, error);
+    if (channel) await channel.close().catch(() => {});
+    if (connection) await connection.close().catch(() => {});
+    throw error;
+  }
+}
 
 // Global counters for tracking email fetching statistics
 const emailStats = {
@@ -246,6 +273,176 @@ async function startScheduledEmailWorker() {
   );
 
   console.log("Scheduled email worker started and waiting for jobs...");
+}
+
+// Add user-specific scheduled email workers for parallel processing
+async function startUserSpecificScheduledWorkers() {
+  const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
+
+  // Get all users with credentials to create user-specific scheduled queues
+  let userCredentials = [];
+  try {
+    userCredentials = await UserCredential.findAll({
+      attributes: ["masterUserID"],
+      group: ["masterUserID"], // Ensure unique users
+    });
+    console.log(
+      `[ScheduledWorker] Found ${userCredentials.length} users for scheduled email queues`
+    );
+  } catch (error) {
+    console.error("[ScheduledWorker] Error fetching user credentials:", error);
+    return;
+  }
+
+  // Create a worker for each user's scheduled queue
+  for (const credential of userCredentials) {
+    const userScheduledQueueName = `SCHEDULED_EMAIL_QUEUE_${credential.masterUserID}`;
+
+    try {
+      const connection = await amqp.connect(amqpUrl);
+      const channel = await connection.createChannel();
+      await channel.assertQueue(userScheduledQueueName, { durable: true });
+
+      console.log(
+        `[ScheduledWorker] Listening to queue: ${userScheduledQueueName}`
+      );
+
+      // Set prefetch to 1 to ensure only one message is processed at a time per user
+      channel.prefetch(1);
+
+      channel.consume(
+        userScheduledQueueName,
+        async (msg) => {
+          if (msg !== null) {
+            const { emailID } = JSON.parse(msg.content.toString());
+
+            try {
+              const email = await Email.findByPk(emailID, {
+                include: [{ model: Attachment, as: "attachments" }],
+              });
+              if (!email) {
+                console.log(
+                  `[ScheduledWorker] Email ${emailID} not found, skipping`
+                );
+                return channel.ack(msg);
+              }
+
+              console.log(
+                `[ScheduledWorker] Processing scheduled email ${emailID} for user ${email.masterUserID}`
+              );
+
+              // Fetch sender credentials
+              const userCredential = await UserCredential.findOne({
+                where: { masterUserID: email.masterUserID },
+              });
+              if (!userCredential) {
+                console.error(
+                  `[ScheduledWorker] No credentials found for user ${email.masterUserID}`
+                );
+                return channel.ack(msg);
+              }
+
+              const provider = userCredential.provider || "gmail";
+
+              // Send email
+              let transporterConfig;
+              if (provider === "gmail" || provider === "yandex") {
+                const smtp = PROVIDER_SMTP_CONFIG[provider];
+                transporterConfig = {
+                  host: smtp.host,
+                  port: smtp.port,
+                  secure: smtp.secure,
+                  auth: {
+                    user: userCredential.email,
+                    pass: userCredential.appPassword,
+                  },
+                };
+              } else if (provider === "custom") {
+                transporterConfig = {
+                  host: userCredential.smtpHost,
+                  port: userCredential.smtpPort,
+                  secure: userCredential.smtpSecure,
+                  auth: {
+                    user: userCredential.email,
+                    pass: userCredential.appPassword,
+                  },
+                };
+              } else {
+                // fallback to gmail
+                transporterConfig = {
+                  service: "gmail",
+                  auth: {
+                    user: userCredential.email,
+                    pass: userCredential.appPassword,
+                  },
+                };
+              }
+
+              const transporter =
+                nodemailer.createTransporter(transporterConfig);
+
+              const info = await transporter.sendMail({
+                from: userCredential.email,
+                to: email.recipient,
+                cc: email.cc,
+                bcc: email.bcc,
+                subject: email.subject,
+                text: email.body,
+                html: email.body,
+                attachments: email.attachments.map((att) => ({
+                  filename: att.filename,
+                  path: att.path,
+                })),
+              });
+
+              // Move email to sent
+              await email.update({
+                folder: "sent",
+                createdAt: new Date(),
+                messageId: info.messageId,
+              });
+
+              console.log(
+                `[ScheduledWorker] Scheduled email sent for user ${email.masterUserID}: ${email.subject}`
+              );
+              channel.ack(msg);
+            } catch (err) {
+              console.error(
+                `[ScheduledWorker] Failed to send scheduled email ${emailID}:`,
+                err
+              );
+              channel.nack(msg, false, false); // Discard on error
+            }
+          }
+        },
+        { noAck: false }
+      );
+
+      // Add connection error handling
+      connection.on("error", (err) => {
+        console.error(
+          `AMQP connection error in ${userScheduledQueueName}:`,
+          err
+        );
+      });
+
+      connection.on("close", () => {
+        console.log(
+          `AMQP connection closed in ${userScheduledQueueName}. Attempting to reconnect...`
+        );
+        setTimeout(() => startUserSpecificScheduledWorkers(), 5000);
+      });
+    } catch (error) {
+      console.error(
+        `[ScheduledWorker] Error setting up queue ${userScheduledQueueName}:`,
+        error
+      );
+    }
+  }
+
+  console.log(
+    "User-specific scheduled workers started and waiting for jobs..."
+  );
 }
 
 //......................................................................
@@ -747,69 +944,151 @@ async function sendEmailJob(emailData) {
 //   console.log(`Email sent and updated: ${info.messageId}`);
 // }
 
-async function startSyncEmailWorker() {
+// OLD SYNC WORKER - DISABLED (replaced by user-specific sync workers)
+// async function startSyncEmailWorker() {
+//   console.log("⚠️  OLD SYNC WORKER DISABLED - Use user-specific sync workers instead");
+// }
+
+// Add user-specific sync workers for parallel processing
+async function startUserSpecificSyncWorkers() {
   const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost";
-  const connection = await amqp.connect(amqpUrl);
-  const channel = await connection.createChannel();
-  await channel.assertQueue("SYNC_EMAIL_QUEUE", { durable: true });
 
-  // Set prefetch to 1 to ensure only one message is processed at a time
-  channel.prefetch(1);
+  // Get all users with credentials to create user-specific sync queues
+  let userCredentials = [];
+  try {
+    userCredentials = await UserCredential.findAll({
+      attributes: ["masterUserID"],
+      group: ["masterUserID"], // Ensure unique users
+    });
+    console.log(
+      `[SyncWorker] Found ${userCredentials.length} users for sync email queues`
+    );
+  } catch (error) {
+    console.error("[SyncWorker] Error fetching user credentials:", error);
+    return;
+  }
 
-  channel.consume(
-    "SYNC_EMAIL_QUEUE",
-    async (msg) => {
-      if (msg !== null) {
-        // Expect startUID and endUID in the message for batching
-        const { masterUserID, syncStartDate, startUID, endUID } = JSON.parse(
-          msg.content.toString()
-        );
+  // Create a single connection that will handle all user queues for this worker instance
+  try {
+    const connection = await amqp.connect(amqpUrl);
 
-        console.log(
-          `[SyncEmailWorker] Processing batch for masterUserID: ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
-        );
+    // Create multiple channels for parallel processing
+    const channels = [];
+    const channelCount = Math.min(userCredentials.length, 5); // Max 5 channels per worker
 
-        await limit(async () => {
-          try {
-            logMemoryUsage(
-              `Before syncEmails for masterUserID ${masterUserID}`
-            );
+    for (let i = 0; i < channelCount; i++) {
+      const channel = await connection.createChannel();
+      channel.prefetch(1); // Only process one message at a time per channel
+      channels.push(channel);
+    }
 
-            // Pass startUID and endUID to fetchSyncEmails for batch processing
-            await fetchSyncEmails(
-              {
-                adminId: masterUserID,
-                body: { syncStartDate }, // syncStartDate goes in body
-                query: { batchSize: 10, startUID, endUID }, // startUID and endUID go in query
-              },
-              { status: () => ({ json: () => {} }) }
-            );
+    console.log(
+      `[SyncWorker] Created ${channels.length} channels for parallel processing`
+    );
 
-            logMemoryUsage(`After syncEmails for masterUserID ${masterUserID}`);
+    // Distribute user queues across channels
+    for (let i = 0; i < userCredentials.length; i++) {
+      const credential = userCredentials[i];
+      const userSyncQueueName = `SYNC_EMAIL_QUEUE_${credential.masterUserID}`;
+      const channel = channels[i % channels.length]; // Round-robin distribution
+
+      await channel.assertQueue(userSyncQueueName, { durable: true });
+      console.log(`[SyncWorker] Listening to queue: ${userSyncQueueName}`);
+
+      channel.consume(
+        userSyncQueueName,
+        async (msg) => {
+          if (msg !== null) {
+            const { masterUserID, syncStartDate, startUID, endUID } =
+              JSON.parse(msg.content.toString());
+
             console.log(
-              `[SyncEmailWorker] Successfully processed batch for masterUserID: ${masterUserID}`
+              `[SyncWorker] Processing sync batch for user ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
             );
 
-            // Force garbage collection
-            if (global.gc) {
-              global.gc();
+            try {
+              // Add timeout to prevent hanging sync workers
+              const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(
+                  () =>
+                    reject(
+                      new Error(
+                        `Sync worker timeout after 5 minutes for user ${masterUserID}`
+                      )
+                    ),
+                  300000
+                ); // 5 minute timeout
+              });
+
+              const syncPromise = (async () => {
+                logMemoryUsage(
+                  `Before fetchSyncEmails for user ${masterUserID}`
+                );
+
+                // Pass startUID and endUID to fetchSyncEmails for batch processing
+                await fetchSyncEmails(
+                  {
+                    adminId: masterUserID,
+                    body: { syncStartDate }, // syncStartDate goes in body
+                    query: { batchSize: 10, startUID, endUID }, // startUID and endUID go in query
+                  },
+                  { status: () => ({ json: () => {} }) }
+                );
+
+                logMemoryUsage(
+                  `After fetchSyncEmails for user ${masterUserID}`
+                );
+                console.log(
+                  `[SyncWorker] Successfully processed sync batch for user ${masterUserID}`
+                );
+              })();
+
+              // Race between sync and timeout
+              await Promise.race([syncPromise, timeoutPromise]);
+
+              channel.ack(msg);
+            } catch (error) {
+              console.error(
+                `[SyncWorker] Error processing sync batch for user ${masterUserID}:`,
+                error
+              );
+
+              // For timeout errors, add specific handling
+              if (error.message.includes("timeout")) {
+                console.warn(
+                  `[SyncWorker] Timeout detected for user ${masterUserID}, this user may have IMAP connection issues`
+                );
+              }
+
+              channel.nack(msg, false, false); // Discard the message on error
+            } finally {
+              // Force garbage collection
+              if (global.gc) {
+                global.gc();
+              }
             }
-
-            channel.ack(msg);
-          } catch (err) {
-            console.error(
-              `[SyncEmailWorker] Failed to sync emails for masterUserID ${masterUserID}:`,
-              err
-            );
-            channel.nack(msg, false, false);
           }
-        });
-      }
-    },
-    { noAck: false }
-  );
+        },
+        { noAck: false }
+      );
+    }
 
-  console.log("Sync email worker started and waiting for jobs...");
+    // Add connection error handling
+    connection.on("error", (err) => {
+      console.error(`AMQP connection error in sync workers:`, err);
+    });
+
+    connection.on("close", () => {
+      console.log(
+        `AMQP connection closed in sync workers. Attempting to reconnect...`
+      );
+      setTimeout(() => startUserSpecificSyncWorkers(), 5000);
+    });
+  } catch (error) {
+    console.error(`[SyncWorker] Error setting up sync workers:`, error);
+  }
+
+  console.log("User-specific sync workers started and waiting for jobs...");
 }
 
 async function startFetchInboxWorker() {
@@ -1122,6 +1401,185 @@ async function startUserSpecificInboxWorkers() {
                 // Race between fetch and timeout
                 await Promise.race([fetchPromise, timeoutPromise]);
 
+                // Check if we need to queue more batches (only for first batch with dynamic fetch)
+                if (page === 1 && dynamicFetch) {
+                  try {
+                    // Get total email count dynamically by connecting to IMAP
+                    console.log(
+                      `[AutoPagination] Connecting to IMAP to get actual email count for user ${masterUserID}...`
+                    );
+
+                    // Set up IMAP configuration - use already imported UserCredential
+                    const userCredential = await UserCredential.findOne({
+                      where: { masterUserID },
+                    });
+
+                    if (!userCredential) {
+                      console.log(
+                        `[AutoPagination] No credentials found for user ${masterUserID}, skipping auto-pagination`
+                      );
+                      return;
+                    }
+
+                    const providerConfig = {
+                      gmail: { host: "imap.gmail.com", port: 993, tls: true },
+                      yandex: { host: "imap.yandex.com", port: 993, tls: true },
+                    };
+
+                    let imapConfig;
+                    if (provider === "custom") {
+                      imapConfig = {
+                        imap: {
+                          user: email,
+                          password: appPassword,
+                          host: imapHost,
+                          port: imapPort,
+                          tls: imapTLS,
+                          authTimeout: 30000,
+                          tlsOptions: { rejectUnauthorized: false },
+                        },
+                      };
+                    } else {
+                      const config =
+                        providerConfig[provider] || providerConfig.gmail;
+                      imapConfig = {
+                        imap: {
+                          user: email,
+                          password: appPassword,
+                          host: config.host,
+                          port: config.port,
+                          tls: config.tls,
+                          authTimeout: 30000,
+                          tlsOptions: { rejectUnauthorized: false },
+                        },
+                      };
+                    }
+
+                    const Imap = require("imap-simple");
+                    const connection = await Imap.connect(imapConfig);
+                    await connection.openBox("INBOX");
+
+                    // Get actual total email count
+                    let totalEmails;
+                    if (!days || days === 0 || days === "all") {
+                      const allMessages = await connection.search(["ALL"]);
+                      totalEmails = allMessages.length;
+                    } else {
+                      const formatDateForIMAP = (date) => {
+                        const months = [
+                          "Jan",
+                          "Feb",
+                          "Mar",
+                          "Apr",
+                          "May",
+                          "Jun",
+                          "Jul",
+                          "Aug",
+                          "Sep",
+                          "Oct",
+                          "Nov",
+                          "Dec",
+                        ];
+                        const day = date.getDate();
+                        const month = months[date.getMonth()];
+                        const year = date.getFullYear();
+                        return `${day}-${month}-${year}`;
+                      };
+
+                      const sinceDate = formatDateForIMAP(
+                        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+                      );
+                      const recentMessages = await connection.search([
+                        ["SINCE", sinceDate],
+                      ]);
+                      totalEmails = recentMessages.length;
+                    }
+
+                    await connection.end();
+                    console.log(
+                      `[AutoPagination] User ${masterUserID}: Found ${totalEmails} total emails in inbox`
+                    );
+
+                    // Calculate how many batches we need
+                    const totalBatches = Math.ceil(totalEmails / batchSize);
+                    console.log(
+                      `[AutoPagination] User ${masterUserID}: Need ${totalBatches} total batches (${batchSize} emails per batch)`
+                    );
+
+                    // Only queue additional batches if we need more than 1 batch
+                    if (totalBatches > 1) {
+                      const amqpUrl =
+                        process.env.RABBITMQ_URL || "amqp://localhost";
+                      const tempConnection = await amqp.connect(amqpUrl);
+                      const tempChannel = await tempConnection.createChannel();
+
+                      // Queue remaining batches (pages 2, 3, 4, etc.)
+                      for (
+                        let nextPage = 2;
+                        nextPage <= totalBatches;
+                        nextPage++
+                      ) {
+                        const nextSkipCount = (nextPage - 1) * batchSize;
+
+                        if (nextSkipCount < totalEmails) {
+                          const nextJobData = {
+                            masterUserID,
+                            email,
+                            appPassword,
+                            batchSize,
+                            page: nextPage,
+                            days,
+                            provider,
+                            imapHost,
+                            imapPort,
+                            imapTLS,
+                            smtpHost,
+                            smtpPort,
+                            smtpSecure,
+                            dynamicFetch: true,
+                            skipCount: nextSkipCount,
+                            debugMode,
+                          };
+
+                          await tempChannel.assertQueue(userQueueName, {
+                            durable: true,
+                          });
+                          tempChannel.sendToQueue(
+                            userQueueName,
+                            Buffer.from(JSON.stringify(nextJobData)),
+                            { persistent: true }
+                          );
+
+                          console.log(
+                            `[AutoPagination] Queued batch ${nextPage} for user ${masterUserID} (skip: ${nextSkipCount})`
+                          );
+                        }
+                      }
+
+                      await tempChannel.close();
+                      await tempConnection.close();
+
+                      console.log(
+                        `[AutoPagination] Successfully queued ${
+                          totalBatches - 1
+                        } additional batches for user ${masterUserID}`
+                      );
+                    } else {
+                      console.log(
+                        `[AutoPagination] User ${masterUserID}: Only 1 batch needed, no additional batches to queue`
+                      );
+                    }
+                  } catch (paginationError) {
+                    console.error(
+                      `[AutoPagination] Error queuing additional batches for user ${masterUserID}:`,
+                      paginationError
+                    );
+                    console.log(
+                      `[AutoPagination] Continuing with single batch processing for user ${masterUserID}`
+                    );
+                  }
+                }
+
                 // Log memory usage after fetch
                 logMemoryUsage(
                   `After fetchInboxEmails batch for user ${masterUserID}, page ${page}`
@@ -1327,18 +1785,83 @@ async function startUserSpecificCronWorkers() {
 // In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
 // ...existing code...
 
-// startFetchInboxWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificInboxWorkers
-startUserSpecificInboxWorkers().catch(console.error); // Start user-specific workers
-// startUserSpecificCronWorkers().catch(console.error); // TEMPORARILY DISABLED: email-fetch-queue workers stopped to focus on fetch_inbox_queue
-startSyncEmailWorker().catch(console.error);
-startEmailWorker().catch(console.error);
-// startWorker().catch(console.error); // DISABLED: Replaced by startUserSpecificCronWorkers
-startScheduledEmailWorker().catch(console.error);
+// Parse command line arguments to determine which workers to start
+const args = process.argv.slice(2);
+const workerType =
+  args.find((arg) => arg.startsWith("--"))?.substring(2) || "all";
 
-// Display statistics every 10 minutes
-setInterval(() => {
-  displayEmailStatistics();
-}, 10 * 60 * 1000); // 10 minutes
+console.log(`🚀 EMAIL QUEUE WORKER STARTING...`);
+console.log(`📋 Worker Type: ${workerType.toUpperCase()}`);
+console.log(`🕐 Started at: ${new Date().toISOString()}`);
+
+// Start workers based on command line arguments
+async function startWorkers() {
+  try {
+    switch (workerType) {
+      case "inbox":
+        console.log("🔄 Starting INBOX workers only...");
+        await startUserSpecificInboxWorkers();
+        console.log("✅ Inbox workers started successfully");
+        break;
+
+      case "cron":
+        console.log("⏰ Starting CRON workers only...");
+        await startUserSpecificCronWorkers();
+        console.log("✅ Cron workers started successfully");
+        break;
+
+      case "sync":
+        console.log("🔄 Starting USER-SPECIFIC SYNC workers only...");
+        await startUserSpecificSyncWorkers();
+        console.log("✅ User-specific sync workers started successfully");
+        break;
+
+      case "scheduled":
+        console.log("📅 Starting USER-SPECIFIC SCHEDULED workers only...");
+        await startUserSpecificScheduledWorkers();
+        console.log("✅ User-specific scheduled workers started successfully");
+        break;
+
+      case "legacy-sync":
+        console.log("🔄 Starting LEGACY SYNC and EMAIL workers only...");
+        await Promise.all([
+          // startSyncEmailWorker(), // DISABLED: Now using user-specific sync workers
+          startEmailWorker(),
+          startScheduledEmailWorker(),
+        ]);
+        console.log("✅ Legacy sync and email workers started successfully");
+        break;
+
+      case "all":
+      default:
+        console.log("🔄 Starting ALL workers...");
+        await Promise.all([
+          startUserSpecificInboxWorkers(),
+          startUserSpecificCronWorkers(),
+          startUserSpecificSyncWorkers(),
+          startUserSpecificScheduledWorkers(),
+          startEmailWorker(),
+        ]);
+        console.log("✅ All workers started successfully");
+        break;
+    }
+
+    // Display statistics every 10 minutes (only for inbox and all modes)
+    if (workerType === "inbox" || workerType === "all") {
+      setInterval(() => {
+        displayEmailStatistics();
+      }, 10 * 60 * 1000); // 10 minutes
+    }
+
+    console.log(`🎯 Worker process ready and listening for jobs...`);
+  } catch (error) {
+    console.error("❌ Failed to start workers:", error);
+    process.exit(1);
+  }
+}
+
+// Start the workers
+startWorkers();
 
 // Export statistics functions for external use
 module.exports = {
