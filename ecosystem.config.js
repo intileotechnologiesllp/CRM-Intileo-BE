@@ -7,7 +7,7 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: "1G",
+      max_memory_restart: "500M", // Reduced from 1G for better memory management
       env: {
         NODE_ENV: "production",
         NODE_OPTIONS: "--expose-gc", // Enable garbage collection
@@ -48,7 +48,7 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: "1G",
+      max_memory_restart: "500M", // Reduced from 1G for better memory management
       env: {
         NODE_ENV: "production",
         NODE_OPTIONS: "--expose-gc", // Enable garbage collection
@@ -89,7 +89,7 @@ module.exports = {
       instances: 1, // Single instance with internal parallelism
       autorestart: true,
       watch: false,
-      max_memory_restart: "1G",
+      max_memory_restart: "500M", // Reduced from 1G for better memory management
       env: {
         NODE_ENV: "production",
         NODE_OPTIONS: "--expose-gc",
@@ -130,7 +130,7 @@ module.exports = {
       instances: 1, // Single instance with internal parallelism
       autorestart: true,
       watch: false,
-      max_memory_restart: "1G",
+      max_memory_restart: "500M", // Reduced from 1G for better memory management
       env: {
         NODE_ENV: "production",
         NODE_OPTIONS: "--expose-gc",
