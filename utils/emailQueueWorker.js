@@ -3,8 +3,60 @@ require("dotenv").config();
 
 const amqp = require("amqplib");
 const pLimit = require("p-limit");
-// Create a concurrency limiter for better resource management
-const limit = pLimit(3);
+// Create a concurrency limiter for better resource management - reduced to 1 for IMAP stability
+const limit = pLimit(1);
+
+// Create a separate IMAP connection limiter for cron jobs to prevent connection timeouts
+const imapConnectionLimit = pLimit(1); // Only 1 IMAP connection at a time
+
+// Circuit breaker for problematic users - tracks failed connections
+const userFailureTracker = new Map(); // Map<userId, { failures: number, lastFailure: timestamp, blocked: boolean }>
+
+// Function to check if user should be temporarily blocked
+function shouldSkipUser(adminId) {
+  const userInfo = userFailureTracker.get(adminId);
+  if (!userInfo) return false;
+
+  // Block user for 10 minutes after 3 consecutive failures
+  if (userInfo.failures >= 3) {
+    const timeSinceLastFailure = Date.now() - userInfo.lastFailure;
+    if (timeSinceLastFailure < 10 * 60 * 1000) {
+      // 10 minutes
+      return true;
+    } else {
+      // Reset after cooldown period
+      userFailureTracker.delete(adminId);
+      return false;
+    }
+  }
+  return false;
+}
+
+// Function to record user failure
+function recordUserFailure(adminId, error) {
+  const userInfo = userFailureTracker.get(adminId) || {
+    failures: 0,
+    lastFailure: 0,
+  };
+  userInfo.failures += 1;
+  userInfo.lastFailure = Date.now();
+  userFailureTracker.set(adminId, userInfo);
+
+  console.warn(
+    `[CronWorker] User ${adminId} failure count: ${userInfo.failures}/3 (${error})`
+  );
+
+  if (userInfo.failures >= 3) {
+    console.error(
+      `[CronWorker] User ${adminId} temporarily blocked for 10 minutes due to repeated failures`
+    );
+  }
+}
+
+// Function to record user success
+function recordUserSuccess(adminId) {
+  userFailureTracker.delete(adminId); // Clear failure tracking on success
+}
 
 // Helper function to publish jobs to queue
 async function publishToQueue(queueName, data) {
@@ -104,7 +156,7 @@ const PROVIDER_SMTP_CONFIG = {
 // const limit = pLimit(5); // Limit concurrency to 5
 
 // Utility: Log memory usage for diagnostics
-function logMemoryUsage(context = "") {
+async function logMemoryUsage(context = "") {
   const mem = process.memoryUsage();
   const rss = (mem.rss / 1024 / 1024).toFixed(1);
   const heapUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
@@ -115,15 +167,15 @@ function logMemoryUsage(context = "") {
     `[Memory] ${context} RSS: ${rss}MB, Heap: ${heapUsed}MB / ${heapTotal}MB, External: ${external}MB`
   );
 
-  // Warning if memory usage is high
-  if (mem.heapUsed > 300 * 1024 * 1024) {
-    // Reduced from 500MB to 300MB for earlier warning
+  // Warning if memory usage is high - reduced threshold for earlier intervention
+  if (mem.heapUsed > 250 * 1024 * 1024) {
+    // Reduced from 300MB to 250MB for earlier warning
     console.warn(
       `[Memory Warning] High heap usage: ${heapUsed}MB - Consider restarting worker`
     );
 
-    // Force garbage collection if memory is very high
-    if (mem.heapUsed > 400 * 1024 * 1024 && global.gc) {
+    // Force garbage collection if memory is high
+    if (mem.heapUsed > 300 * 1024 * 1024 && global.gc) {
       console.log(
         `[Memory] Forcing garbage collection due to high usage: ${heapUsed}MB`
       );
@@ -138,6 +190,27 @@ function logMemoryUsage(context = "") {
           heapUsed - heapAfter
         ).toFixed(1)}MB)`
       );
+    }
+
+    // Emergency cleanup if memory is very high (approaching PM2 restart threshold)
+    if (mem.heapUsed > 450 * 1024 * 1024) {
+      console.error(
+        `[Memory CRITICAL] Memory usage ${heapUsed}MB approaching 500MB restart limit - forcing emergency cleanup`
+      );
+      if (global.gc) {
+        global.gc();
+        global.gc();
+        global.gc(); // Triple GC for emergency cleanup
+
+        // Wait for GC to complete
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        const memEmergency = process.memoryUsage();
+        const heapEmergency = (memEmergency.heapUsed / 1024 / 1024).toFixed(1);
+        console.log(
+          `[Memory CRITICAL] After emergency cleanup: ${heapEmergency}MB`
+        );
+      }
     }
   }
 }
@@ -1715,43 +1788,133 @@ async function startUserSpecificCronWorkers() {
         async (msg) => {
           if (msg !== null) {
             const { adminId } = JSON.parse(msg.content.toString());
-            logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
+
+            // Check circuit breaker - skip problematic users temporarily
+            if (shouldSkipUser(adminId)) {
+              console.warn(
+                `[CronWorker] Skipping adminId ${adminId} - temporarily blocked due to repeated failures`
+              );
+              channel.ack(msg); // Acknowledge to remove from queue
+              return;
+            }
+
+            await logMemoryUsage(
+              `Before fetchRecentEmail for adminId ${adminId}`
+            );
             try {
-              // Add timeout to prevent hanging cron workers with enhanced error handling
+              // Add timeout to prevent hanging cron workers - increased for better reliability
               const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(
                   () =>
                     reject(
                       new Error(
-                        `Cron worker timeout after 3 minutes for adminId ${adminId}`
+                        `Cron worker timeout after 5 minutes for adminId ${adminId}`
                       )
                     ),
-                  180000
-                ); // 3 minute timeout (reduced from 5 minutes for faster recovery)
+                  300000
+                ); // 5 minute timeout (increased from 2 minutes for better reliability with large inboxes)
               });
 
-              // Add connection-specific timeout for IMAP operations
-              const fetchPromise = limit(async () => {
+              // Add connection-specific timeout for IMAP operations with dedicated IMAP limiter
+              const fetchPromise = imapConnectionLimit(async () => {
                 console.log(
-                  `[CronWorker] Starting email fetch for adminId ${adminId}`
+                  `[CronWorker] Starting email fetch for adminId ${adminId} (IMAP queue: ${
+                    imapConnectionLimit.pendingCount +
+                    imapConnectionLimit.activeCount
+                  })`
                 );
-                try {
-                  // Pass smaller batch size to fetchRecentEmail for memory safety
-                  const result = await fetchRecentEmail(adminId, {
-                    batchSize: 5,
-                  });
-                  console.log(
-                    `[CronWorker] Completed email fetch for adminId ${adminId}: ${
-                      result?.message || "success"
-                    }`
-                  );
-                  return result;
-                } catch (fetchError) {
-                  console.error(
-                    `[CronWorker] fetchRecentEmail error for adminId ${adminId}:`,
-                    fetchError.message
-                  );
-                  throw fetchError;
+
+                let retryCount = 0;
+                const maxRetries = 2; // Reduced retries to prevent queue buildup
+
+                while (retryCount <= maxRetries) {
+                  try {
+                    // Create individual operation timeout for fetchRecentEmail
+                    const individualTimeout = new Promise((_, reject) => {
+                      setTimeout(
+                        () =>
+                          reject(
+                            new Error(
+                              `fetchRecentEmail IMAP timeout after 2 minutes for adminId ${adminId}`
+                            )
+                          ),
+                        120000 // 2 minute timeout for each individual attempt
+                      );
+                    });
+
+                    // Race the actual fetch against the individual timeout
+                    const fetchOperation = fetchRecentEmail(adminId, {
+                      batchSize: 3, // Reduced batch size for faster processing
+                      imapTimeout: 60000, // 1 minute IMAP connection timeout
+                      enableRetry: false, // Disable internal retries since we handle them here
+                    });
+
+                    const result = await Promise.race([
+                      fetchOperation,
+                      individualTimeout,
+                    ]);
+
+                    console.log(
+                      `[CronWorker] Completed email fetch for adminId ${adminId}: ${
+                        result?.message || "success"
+                      }`
+                    );
+                    return result;
+                  } catch (fetchError) {
+                    retryCount++;
+
+                    // Categorize error types for better handling
+                    const errorType =
+                      fetchError.message.includes("timeout") ||
+                      fetchError.message.includes("Timed out")
+                        ? "TIMEOUT"
+                        : fetchError.message.includes("connect") ||
+                          fetchError.message.includes("IMAP")
+                        ? "CONNECTION"
+                        : "OTHER";
+
+                    console.error(
+                      `[CronWorker] fetchRecentEmail attempt ${retryCount}/${
+                        maxRetries + 1
+                      } failed for adminId ${adminId} [${errorType}]:`,
+                      fetchError.message
+                    );
+
+                    if (retryCount > maxRetries) {
+                      // After all retries failed, log the final error with suggestions
+                      if (errorType === "TIMEOUT") {
+                        console.warn(
+                          `[CronWorker] Final TIMEOUT failure for adminId ${adminId} - Consider:
+                          - Reducing cron frequency for this user
+                          - User may have very large inbox
+                          - Email provider may be slow`
+                        );
+                      } else if (errorType === "CONNECTION") {
+                        console.warn(
+                          `[CronWorker] Final CONNECTION failure for adminId ${adminId} - Check:
+                          - User's email credentials and IMAP settings
+                          - Network connectivity to email provider
+                          - Email provider service status`
+                        );
+                      }
+                      throw fetchError; // Final failure after all retries
+                    }
+
+                    // Dynamic retry delay based on error type
+                    let delay;
+                    if (errorType === "TIMEOUT") {
+                      delay = Math.min(2000 * retryCount, 10000); // Longer delays for timeouts (max 10s)
+                    } else if (errorType === "CONNECTION") {
+                      delay = Math.min(3000 * retryCount, 15000); // Even longer for connection issues (max 15s)
+                    } else {
+                      delay = Math.min(1000 * retryCount, 5000); // Standard delays for other errors (max 5s)
+                    }
+
+                    console.log(
+                      `[CronWorker] Retrying in ${delay}ms for adminId ${adminId} (${errorType} error)...`
+                    );
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                  }
                 }
               });
 
@@ -1759,29 +1922,55 @@ async function startUserSpecificCronWorkers() {
               const result = await Promise.race([fetchPromise, timeoutPromise]);
 
               channel.ack(msg);
+              recordUserSuccess(adminId); // Clear failure tracking on success
               console.log(
                 `[CronWorker] Successfully processed cron job for adminId ${adminId}`
               );
             } catch (error) {
+              recordUserFailure(adminId, error.message); // Track failure for circuit breaker
               console.error(
                 `Error processing cron email fetch for adminId ${adminId}:`,
                 error
               );
 
-              // For timeout errors, add specific handling
+              // Enhanced error handling with specific guidance
               if (error.message.includes("timeout")) {
                 console.warn(
-                  `[CronWorker] Timeout detected for adminId ${adminId}, this user may have IMAP connection issues`
+                  `[CronWorker] Timeout detected for adminId ${adminId} - User may have:
+                  - Large inbox requiring more time to process
+                  - Slow IMAP server response
+                  - Network connectivity issues
+                  - Consider increasing fetchRecentEmail frequency or reducing batch size`
+                );
+              } else if (
+                error.message.includes("IMAP") ||
+                error.message.includes("connect")
+              ) {
+                console.warn(
+                  `[CronWorker] IMAP connection issue for adminId ${adminId}:
+                  - Check user's email credentials
+                  - Verify IMAP server settings
+                  - Network connectivity to email provider`
+                );
+              } else {
+                console.warn(
+                  `[CronWorker] Unexpected error for adminId ${adminId}, will retry in next cron cycle`
                 );
               }
 
               channel.nack(msg, false, false); // Discard the message on error
             } finally {
-              logMemoryUsage(`After fetchRecentEmail for adminId ${adminId}`);
-              // Force garbage collection
+              await logMemoryUsage(
+                `After fetchRecentEmail for adminId ${adminId}`
+              );
+              // Force aggressive garbage collection after each cron job
               if (global.gc) {
                 global.gc();
+                global.gc(); // Double GC for thorough cleanup
               }
+
+              // Add small delay between cron jobs to allow memory cleanup
+              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           }
         },
