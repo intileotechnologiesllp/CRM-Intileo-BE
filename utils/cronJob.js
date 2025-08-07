@@ -51,15 +51,16 @@ async function pushJobsToQueue() {
   await connection.close();
 }
 
-// TEMPORARILY DISABLED: cron job for email-fetch-queue stopped to focus on fetch_inbox_queue
-// cron.schedule("*/2 * * * *", async () => {
-//   console.log("Running cron job to queue email fetch jobs...");
-//   try {
-//     await pushJobsToQueue();
-//   } catch (error) {
-//     console.error("Error queueing email fetch jobs:", error);
-//   }
-// });
+// Re-enabled: Email fetch cron jobs queue jobs for dedicated PM2 cron workers to process
+// This runs only in the main app process and queues jobs for the cron workers
+cron.schedule("*/2 * * * *", async () => {
+  console.log("Running cron job to queue email fetch jobs...");
+  try {
+    await pushJobsToQueue();
+  } catch (error) {
+    console.error("Error queueing email fetch jobs:", error);
+  }
+});
 
 cron.schedule("* * * * *", async () => {
   // Every minute
