@@ -9,6 +9,32 @@ const limit = pLimit(1);
 // Create a separate IMAP connection limiter for cron jobs to prevent connection timeouts
 const imapConnectionLimit = pLimit(1); // Only 1 IMAP connection at a time
 
+// Global IMAP operation lock to prevent ANY concurrent IMAP operations across ALL processes
+let globalImapLock = false;
+let currentImapOperation = null;
+
+// Global IMAP lock with enhanced logging
+async function acquireGlobalImapLock(adminId, operation = "UNKNOWN") {
+  while (globalImapLock) {
+    console.log(
+      `[IMAP-LOCK] AdminId ${adminId} waiting for global IMAP lock (currently held by ${currentImapOperation})`
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
+  }
+
+  globalImapLock = true;
+  currentImapOperation = `AdminId-${adminId}-${operation}`;
+  console.log(`[IMAP-LOCK] 🔒 ACQUIRED by ${currentImapOperation}`);
+}
+
+function releaseGlobalImapLock(adminId, operation = "UNKNOWN") {
+  if (globalImapLock) {
+    console.log(`[IMAP-LOCK] 🔓 RELEASED by AdminId-${adminId}-${operation}`);
+    globalImapLock = false;
+    currentImapOperation = null;
+  }
+}
+
 // Circuit breaker for problematic users - tracks failed connections
 const userFailureTracker = new Map(); // Map<userId, { failures: number, lastFailure: timestamp, blocked: boolean }>
 
@@ -1769,19 +1795,21 @@ async function startUserSpecificCronWorkers() {
     return;
   }
 
-  // Create a worker for each user's cron queue
-  for (const credential of userCredentials) {
-    const userCronQueueName = `email-fetch-queue-${credential.masterUserID}`;
+  // Use SINGLE connection with ONE channel for true sequential processing across ALL users
+  try {
+    const connection = await amqp.connect(amqpUrl);
+    const channel = await connection.createChannel();
+    channel.prefetch(1); // Only process one message at a time globally
 
-    try {
-      const connection = await amqp.connect(amqpUrl);
-      const channel = await connection.createChannel();
+    console.log(
+      `[CronWorker] Created single connection with one channel for sequential IMAP processing across all ${userCredentials.length} users`
+    );
+
+    // Create queues for all users but process through single channel for true sequencing
+    for (const credential of userCredentials) {
+      const userCronQueueName = `email-fetch-queue-${credential.masterUserID}`;
       await channel.assertQueue(userCronQueueName, { durable: true });
-
-      console.log(`[CronWorker] Listening to queue: ${userCronQueueName}`);
-
-      // Set prefetch to 1 to ensure only one message is processed at a time per user
-      channel.prefetch(1);
+      console.log(`[CronWorker] Queue ${userCronQueueName} created`);
 
       channel.consume(
         userCronQueueName,
@@ -1794,15 +1822,62 @@ async function startUserSpecificCronWorkers() {
               console.warn(
                 `[CronWorker] Skipping adminId ${adminId} - temporarily blocked due to repeated failures`
               );
-              channel.ack(msg); // Acknowledge to remove from queue
+              channel.ack(msg);
               return;
             }
 
             await logMemoryUsage(
               `Before fetchRecentEmail for adminId ${adminId}`
             );
+
             try {
-              // Add timeout to prevent hanging cron workers - increased for better reliability
+              // Enhanced IMAP connection with global lock, timeout and retry
+              const fetchPromise = imapConnectionLimit(async () => {
+                console.log(
+                  `[CronWorker] Processing adminId ${adminId} - Sequential IMAP (${
+                    imapConnectionLimit.pendingCount +
+                    imapConnectionLimit.activeCount
+                  }/1)`
+                );
+
+                // Acquire global IMAP lock to prevent any concurrent operations
+                await acquireGlobalImapLock(adminId, "CRON-FETCH");
+
+                try {
+                  let retryCount = 0;
+                  const maxRetries = 2;
+
+                  while (retryCount <= maxRetries) {
+                    try {
+                      await fetchRecentEmail(adminId);
+                      recordUserSuccess(adminId);
+                      return true;
+                    } catch (error) {
+                      retryCount++;
+                      console.error(
+                        `[CronWorker] Attempt ${retryCount}/${
+                          maxRetries + 1
+                        } failed for adminId ${adminId}:`,
+                        error.message
+                      );
+
+                      if (retryCount > maxRetries) {
+                        recordUserFailure(adminId);
+                        throw error;
+                      }
+
+                      await new Promise((resolve) =>
+                        setTimeout(resolve, 2000 * retryCount)
+                      );
+                    }
+                  }
+                } finally {
+                  // Always release the global lock
+                  releaseGlobalImapLock(adminId, "CRON-FETCH");
+                }
+              });
+
+              // 5 minute timeout
               const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(
                   () =>
@@ -1812,191 +1887,52 @@ async function startUserSpecificCronWorkers() {
                       )
                     ),
                   300000
-                ); // 5 minute timeout (increased from 2 minutes for better reliability with large inboxes)
-              });
-
-              // Add connection-specific timeout for IMAP operations with dedicated IMAP limiter
-              const fetchPromise = imapConnectionLimit(async () => {
-                console.log(
-                  `[CronWorker] Starting email fetch for adminId ${adminId} (IMAP queue: ${
-                    imapConnectionLimit.pendingCount +
-                    imapConnectionLimit.activeCount
-                  })`
                 );
-
-                let retryCount = 0;
-                const maxRetries = 2; // Reduced retries to prevent queue buildup
-
-                while (retryCount <= maxRetries) {
-                  try {
-                    // Create individual operation timeout for fetchRecentEmail
-                    const individualTimeout = new Promise((_, reject) => {
-                      setTimeout(
-                        () =>
-                          reject(
-                            new Error(
-                              `fetchRecentEmail IMAP timeout after 2 minutes for adminId ${adminId}`
-                            )
-                          ),
-                        120000 // 2 minute timeout for each individual attempt
-                      );
-                    });
-
-                    // Race the actual fetch against the individual timeout
-                    const fetchOperation = fetchRecentEmail(adminId, {
-                      batchSize: 3, // Reduced batch size for faster processing
-                      imapTimeout: 60000, // 1 minute IMAP connection timeout
-                      enableRetry: false, // Disable internal retries since we handle them here
-                    });
-
-                    const result = await Promise.race([
-                      fetchOperation,
-                      individualTimeout,
-                    ]);
-
-                    console.log(
-                      `[CronWorker] Completed email fetch for adminId ${adminId}: ${
-                        result?.message || "success"
-                      }`
-                    );
-                    return result;
-                  } catch (fetchError) {
-                    retryCount++;
-
-                    // Categorize error types for better handling
-                    const errorType =
-                      fetchError.message.includes("timeout") ||
-                      fetchError.message.includes("Timed out")
-                        ? "TIMEOUT"
-                        : fetchError.message.includes("connect") ||
-                          fetchError.message.includes("IMAP")
-                        ? "CONNECTION"
-                        : "OTHER";
-
-                    console.error(
-                      `[CronWorker] fetchRecentEmail attempt ${retryCount}/${
-                        maxRetries + 1
-                      } failed for adminId ${adminId} [${errorType}]:`,
-                      fetchError.message
-                    );
-
-                    if (retryCount > maxRetries) {
-                      // After all retries failed, log the final error with suggestions
-                      if (errorType === "TIMEOUT") {
-                        console.warn(
-                          `[CronWorker] Final TIMEOUT failure for adminId ${adminId} - Consider:
-                          - Reducing cron frequency for this user
-                          - User may have very large inbox
-                          - Email provider may be slow`
-                        );
-                      } else if (errorType === "CONNECTION") {
-                        console.warn(
-                          `[CronWorker] Final CONNECTION failure for adminId ${adminId} - Check:
-                          - User's email credentials and IMAP settings
-                          - Network connectivity to email provider
-                          - Email provider service status`
-                        );
-                      }
-                      throw fetchError; // Final failure after all retries
-                    }
-
-                    // Dynamic retry delay based on error type
-                    let delay;
-                    if (errorType === "TIMEOUT") {
-                      delay = Math.min(2000 * retryCount, 10000); // Longer delays for timeouts (max 10s)
-                    } else if (errorType === "CONNECTION") {
-                      delay = Math.min(3000 * retryCount, 15000); // Even longer for connection issues (max 15s)
-                    } else {
-                      delay = Math.min(1000 * retryCount, 5000); // Standard delays for other errors (max 5s)
-                    }
-
-                    console.log(
-                      `[CronWorker] Retrying in ${delay}ms for adminId ${adminId} (${errorType} error)...`
-                    );
-                    await new Promise((resolve) => setTimeout(resolve, delay));
-                  }
-                }
               });
 
-              // Race between fetch and timeout with better error context
-              const result = await Promise.race([fetchPromise, timeoutPromise]);
-
-              channel.ack(msg);
-              recordUserSuccess(adminId); // Clear failure tracking on success
+              await Promise.race([fetchPromise, timeoutPromise]);
               console.log(
-                `[CronWorker] Successfully processed cron job for adminId ${adminId}`
+                `[CronWorker] Successfully processed adminId ${adminId}`
               );
             } catch (error) {
-              recordUserFailure(adminId, error.message); // Track failure for circuit breaker
               console.error(
-                `Error processing cron email fetch for adminId ${adminId}:`,
-                error
+                `[CronWorker] Error processing adminId ${adminId}:`,
+                error.message
               );
-
-              // Enhanced error handling with specific guidance
-              if (error.message.includes("timeout")) {
-                console.warn(
-                  `[CronWorker] Timeout detected for adminId ${adminId} - User may have:
-                  - Large inbox requiring more time to process
-                  - Slow IMAP server response
-                  - Network connectivity issues
-                  - Consider increasing fetchRecentEmail frequency or reducing batch size`
-                );
-              } else if (
-                error.message.includes("IMAP") ||
-                error.message.includes("connect")
-              ) {
-                console.warn(
-                  `[CronWorker] IMAP connection issue for adminId ${adminId}:
-                  - Check user's email credentials
-                  - Verify IMAP server settings
-                  - Network connectivity to email provider`
-                );
-              } else {
-                console.warn(
-                  `[CronWorker] Unexpected error for adminId ${adminId}, will retry in next cron cycle`
-                );
-              }
-
-              channel.nack(msg, false, false); // Discard the message on error
+              recordUserFailure(adminId);
             } finally {
+              channel.ack(msg);
               await logMemoryUsage(
                 `After fetchRecentEmail for adminId ${adminId}`
               );
-              // Force aggressive garbage collection after each cron job
+
               if (global.gc) {
                 global.gc();
-                global.gc(); // Double GC for thorough cleanup
+                console.log(`[GC] Triggered for adminId ${adminId}`);
               }
-
-              // Add small delay between cron jobs to allow memory cleanup
-              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           }
         },
         { noAck: false }
       );
-
-      // Add connection error handling
-      connection.on("error", (err) => {
-        console.error(`AMQP connection error in ${userCronQueueName}:`, err);
-      });
-
-      connection.on("close", () => {
-        console.log(
-          `AMQP connection closed in ${userCronQueueName}. Attempting to reconnect...`
-        );
-        setTimeout(() => startUserSpecificCronWorkers(), 5000);
-      });
-    } catch (error) {
-      console.error(
-        `[CronWorker] Error setting up queue ${userCronQueueName}:`,
-        error
-      );
     }
+
+    // Connection error handling
+    connection.on("error", (err) => {
+      console.error(`[CronWorker] AMQP connection error:`, err);
+    });
+
+    connection.on("close", () => {
+      console.log(`[CronWorker] AMQP connection closed. Reconnecting...`);
+      setTimeout(() => startUserSpecificCronWorkers(), 5000);
+    });
+  } catch (error) {
+    console.error(`[CronWorker] Error setting up cron workers:`, error);
   }
 
-  console.log("User-specific cron workers started and waiting for jobs...");
+  console.log(
+    "✅ User-specific cron workers started with TRUE SEQUENTIAL IMAP processing"
+  );
 }
 
 // In fetchInboxEmails/fetchSyncEmails/fetchRecentEmail, ensure IMAP connections are closed in finally blocks (edit those files if needed)
