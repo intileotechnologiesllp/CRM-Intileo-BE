@@ -462,7 +462,7 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
   return thread;
 }
 
-exports.queueFetchInboxEmails = async (req, res) => {
+exports.queueFetchAllEmails = async (req, res) => {
   const { batchSize = 50, days = 7 } = req.query;
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
@@ -475,7 +475,7 @@ exports.queueFetchInboxEmails = async (req, res) => {
     }
 
     console.log(
-      `[Queue] Queuing email fetch job for masterUserID: ${masterUserID} (delegated to workers)`
+      `[Queue] Queuing all folders email fetch job for masterUserID: ${masterUserID} (delegated to workers)`
     );
 
     // Save user credentials for workers to use
@@ -604,25 +604,29 @@ exports.queueFetchInboxEmails = async (req, res) => {
     });
 
     console.log(
-      `[Queue] Successfully queued inbox fetch job to ${userQueueName} - workers will handle all processing`
+      `[Queue] Successfully queued all folders fetch job to ${userQueueName} - workers will handle all processing`
     );
 
     return res.status(200).json({
       message:
-        "Email fetch job queued successfully. Workers will process the emails.",
+        "All folders email fetch job queued successfully. Workers will process emails from inbox, sent, drafts, and archive.",
       queueName: userQueueName,
       masterUserID,
+      folders: ["inbox", "sent", "drafts", "archive"],
     });
   } catch (error) {
-    console.error("[Queue] Error queuing inbox fetch job:", error);
+    console.error("[Queue] Error queuing all folders fetch job:", error);
     res.status(500).json({
-      message: "Failed to queue inbox fetch job.",
+      message: "Failed to queue all folders fetch job.",
       error: error.message,
     });
   }
 };
 
-// Fetch emails from the inbox in batches
+// Backward compatibility - alias for the old function name
+exports.queueFetchInboxEmails = exports.queueFetchAllEmails;
+
+// Fetch emails from all folders (inbox, sent, drafts, archive) in batches
 exports.fetchInboxEmails = async (req, res) => {
   // Optimized batch size for better performance
   let {
@@ -1217,26 +1221,57 @@ exports.fetchInboxEmails = async (req, res) => {
     const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
 
     console.log(
-      `[Batch ${page}] Processing inbox folder for masterUserID: ${masterUserID}`
+      `[Batch ${page}] Processing all folders for masterUserID: ${masterUserID}`
     );
 
-    // Process folders one by one to avoid memory issues
-    const folderTypes = ["inbox"];
+    // Process all folders (inbox, sent, drafts, archive)
+    const folderTypes = ["inbox", "sent", "drafts", "archive"];
     let totalProcessedEmails = 0;
+    const folderResults = {};
 
     for (const type of folderTypes) {
       const folderName = folderMap[type];
       if (allFoldersArr.includes(folderName.toLowerCase())) {
-        console.log(`[Batch ${page}] Processing ${type} folder...`);
-        const folderProcessedCount = await fetchEmailsFromFolder(
-          folderName,
-          type
+        console.log(
+          `[Batch ${page}] Processing ${type} folder (${folderName})...`
         );
-        totalProcessedEmails += folderProcessedCount || 0;
+        try {
+          const folderProcessedCount = await fetchEmailsFromFolder(
+            folderName,
+            type
+          );
+          totalProcessedEmails += folderProcessedCount || 0;
+          folderResults[type] = {
+            folderName: folderName,
+            processedCount: folderProcessedCount || 0,
+            status: "success",
+          };
+          console.log(
+            `[Batch ${page}] ✅ ${type} folder: ${
+              folderProcessedCount || 0
+            } emails processed`
+          );
+        } catch (folderError) {
+          console.error(
+            `[Batch ${page}] ❌ Error processing ${type} folder (${folderName}):`,
+            folderError.message
+          );
+          folderResults[type] = {
+            folderName: folderName,
+            processedCount: 0,
+            status: "error",
+            error: folderError.message,
+          };
+        }
       } else {
         console.log(
-          `[Batch ${page}] Folder "${folderName}" not found for provider ${provider}. Skipping.`
+          `[Batch ${page}] Folder "${folderName}" not found for provider ${providerd}. Skipping ${type}.`
         );
+        folderResults[type] = {
+          folderName: folderName,
+          processedCount: 0,
+          status: "not_found",
+        };
       }
     }
 
@@ -1256,13 +1291,21 @@ exports.fetchInboxEmails = async (req, res) => {
     connection.end();
     console.log(`[Batch ${page}] IMAP connection closed successfully.`);
 
-    // Enhanced logging with prominent email count display
+    // Enhanced logging with prominent email count display for all folders
     console.log(`
-====== FETCH INBOX QUEUE RESULTS FOR BATCH ${page} ======
-✅ EMAILS FETCHED: ${totalProcessedEmails} emails
+====== FETCH ALL FOLDERS QUEUE RESULTS FOR BATCH ${page} ======
+✅ TOTAL EMAILS FETCHED: ${totalProcessedEmails} emails
 📊 Batch Info: Page ${page}, Batch size: ${batchSize}
 👤 User: ${masterUserID}
-📁 Folder: inbox
+📁 Folders Processed:
+${Object.entries(folderResults)
+  .map(
+    ([type, result]) =>
+      `   ${type.toUpperCase()}: ${result.processedCount} emails (${
+        result.status
+      }) - ${result.folderName}`
+  )
+  .join("\n")}
 📅 Timestamp: ${new Date().toISOString()}
 ${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : ""}
 ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
@@ -1270,9 +1313,10 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
 `);
 
     res.status(200).json({
-      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from inbox folder!`,
+      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from all folders!`,
       processedBatch: `Page ${page}, Batch size: ${batchSize}`,
       processedEmails: totalProcessedEmails,
+      folderResults: folderResults,
       expectedEmails: expectedCount ? parseInt(expectedCount) : null,
       uidRange: startUID && endUID ? `${startUID}-${endUID}` : "Not specified",
       specificUIDs: allUIDsInBatch ? allUIDsInBatch : "Not specified",
