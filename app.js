@@ -44,7 +44,8 @@ const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js");
-require("./utils/emailQueueWorker");
+// REMOVED: Email queue workers are now handled by dedicated PM2 processes
+// require("./utils/emailQueueWorker");
 app.use(express.static(path.join(__dirname, "public")));
 // Serve static files from the "uploads" directory
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
