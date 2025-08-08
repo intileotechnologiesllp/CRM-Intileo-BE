@@ -14,21 +14,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "Intileo@123",
-        DB_HOST: "164.52.223.86",
-        DB_PORT: "3308",
+        DB_PASSWORD: "mridul@123",
+        DB_HOST: "localhost",
+        DB_PORT: "3306",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://mridul:5672",
+        RABBITMQ_URL: "amqp://localhost:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://103.185.212.105:3500",
+        LOCALHOST_URL: "http://localhost:3056",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://103.185.212.105:3500",
+        FRONTEND_URL: "http://localhost:3056",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -48,28 +48,30 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: "500M", // Reduced from 1G for better memory management
+      max_memory_restart: "400M", // Reduced from 500M for more aggressive restarts to prevent memory buildup
+      max_restarts: 10, // Allow more restarts
+      min_uptime: "30s", // Minimum uptime before considering a restart
       env: {
         NODE_ENV: "production",
-        NODE_OPTIONS: "--expose-gc", // Enable garbage collection
+        NODE_OPTIONS: "--expose-gc --max-old-space-size=400", // Limit memory and enable GC
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "Intileo@123",
-        DB_HOST: "164.52.223.86",
-        DB_PORT: "3308",
+        DB_PASSWORD: "mridul@123",
+        DB_HOST: "localhost",
+        DB_PORT: "3306",
         DB_DIALECT: "mysql",
-        // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://mridul:5672",
+        // RabbitMQ Configurationpm2 
+        RABBITMQ_URL: "amqp://localhost:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://103.185.212.105:3500",
+        LOCALHOST_URL: "http://localhost:3056",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://103.185.212.105:3500",
+        FRONTEND_URL: "http://localhost:3056",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -79,8 +81,8 @@ module.exports = {
       error_file: "./logs/email-cron-workers-error.log",
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",
       merge_logs: true,
-      kill_timeout: 5000,
-      restart_delay: 2000,
+      kill_timeout: 3000, // Reduced kill timeout for faster restarts
+      restart_delay: 1000, // Reduced restart delay for faster recovery
     },
     {
       name: "email-sync-workers",
@@ -96,21 +98,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "Intileo@123",
-        DB_HOST: "164.52.223.86",
-        DB_PORT: "3308",
+        DB_PASSWORD: "mridul@123",
+        DB_HOST: "localhost",
+        DB_PORT: "3306",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://mridul:5672",
+        RABBITMQ_URL: "amqp://localhost:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://103.185.212.105:3500",
+        LOCALHOST_URL: "http://localhost:3056",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://103.185.212.105:3500",
+        FRONTEND_URL: "http://localhost:3056",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -137,21 +139,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "Intileo@123",
-        DB_HOST: "164.52.223.86",
-        DB_PORT: "3308",
+        DB_PASSWORD: "mridul@123",
+        DB_HOST: "localhost",
+        DB_PORT: "3306",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://mridul:5672",
+        RABBITMQ_URL: "amqp://localhost:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://103.185.212.105:3500",
+        LOCALHOST_URL: "http://localhost:3056",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://103.185.212.105:3500",
+        FRONTEND_URL: "http://localhost:3056",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -166,3 +168,4 @@ module.exports = {
     },
   ],
 };
+//hello
