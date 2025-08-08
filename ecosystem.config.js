@@ -14,21 +14,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "mridul@123",
-        DB_HOST: "localhost",
-        DB_PORT: "3306",
+        DB_PASSWORD: "Intileo@123",
+        DB_HOST: "164.52.223.86",
+        DB_PORT: "3308",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://localhost:5672",
+        RABBITMQ_URL: "amqp://mridul:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://localhost:3056",
+        LOCALHOST_URL: "http://103.185.212.105:3500",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://localhost:3056",
+        FRONTEND_URL: "http://103.185.212.105:3500",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -57,21 +57,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "mridul@123",
-        DB_HOST: "localhost",
-        DB_PORT: "3306",
+        DB_PASSWORD: "Intileo@123",
+        DB_HOST: "164.52.223.86",
+        DB_PORT: "3308",
         DB_DIALECT: "mysql",
-        // RabbitMQ Configurationpm2 
-        RABBITMQ_URL: "amqp://localhost:5672",
+        // RabbitMQ Configuration
+        RABBITMQ_URL: "amqp://mridul:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://localhost:3056",
+        LOCALHOST_URL: "http://103.185.212.105:3500",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://localhost:3056",
+        FRONTEND_URL: "http://103.185.212.105:3500",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -98,21 +98,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "mridul@123",
-        DB_HOST: "localhost",
-        DB_PORT: "3306",
+        DB_PASSWORD: "Intileo@123",
+        DB_HOST: "164.52.223.86",
+        DB_PORT: "3308",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://localhost:5672",
+        RABBITMQ_URL: "amqp://mridul:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://localhost:3056",
+        LOCALHOST_URL: "http://103.185.212.105:3500",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://localhost:3056",
+        FRONTEND_URL: "http://103.185.212.105:3500",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -139,21 +139,21 @@ module.exports = {
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
-        DB_PASSWORD: "mridul@123",
-        DB_HOST: "localhost",
-        DB_PORT: "3306",
+        DB_PASSWORD: "Intileo@123",
+        DB_HOST: "164.52.223.86",
+        DB_PORT: "3308",
         DB_DIALECT: "mysql",
         // RabbitMQ Configuration
-        RABBITMQ_URL: "amqp://localhost:5672",
+        RABBITMQ_URL: "amqp://mridul:5672",
         // Application Configuration
-        LOCALHOST_URL: "http://localhost:3056",
+        LOCALHOST_URL: "http://103.185.212.105:3500",
         PORT: "3056",
         // Email Configuration (if needed)
         EMAIL_USER: "mridulverma2533@gmail.com",
         EMAIL_PASS: "rbtb kmmo hjdk hbub",
         SENDER_EMAIL: "vermamridul641@gmail.com",
         SENDER_PASSWORD: "yktw lbwo hasg elei",
-        FRONTEND_URL: "http://localhost:3056",
+        FRONTEND_URL: "http://103.185.212.105:3500",
         SENDER_NAME: "Mridul verma",
         JWT_SECRET:
           "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
@@ -168,4 +168,3 @@ module.exports = {
     },
   ],
 };
-//hello
