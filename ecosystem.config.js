@@ -48,12 +48,10 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: "400M", // Reduced from 500M for more aggressive restarts to prevent memory buildup
-      max_restarts: 10, // Allow more restarts
-      min_uptime: "30s", // Minimum uptime before considering a restart
+      max_memory_restart: "500M", // Reduced from 1G for better memory management
       env: {
         NODE_ENV: "production",
-        NODE_OPTIONS: "--expose-gc --max-old-space-size=400", // Limit memory and enable GC
+        NODE_OPTIONS: "--expose-gc", // Enable garbage collection
         // Database Configuration
         DB_NAME: "crm",
         DB_USER: "root",
@@ -81,8 +79,8 @@ module.exports = {
       error_file: "./logs/email-cron-workers-error.log",
       log_date_format: "YYYY-MM-DD HH:mm:ss Z",
       merge_logs: true,
-      kill_timeout: 3000, // Reduced kill timeout for faster restarts
-      restart_delay: 1000, // Reduced restart delay for faster recovery
+      kill_timeout: 5000,
+      restart_delay: 2000,
     },
     {
       name: "email-sync-workers",
