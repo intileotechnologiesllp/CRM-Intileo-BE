@@ -25,9 +25,8 @@ module.exports = {
         FRONTEND_URL: "http://103.185.212.105:3500",
         LOCALHOST_URL: "http://103.185.212.105:3500",
         RABBITMQ_URL: "amqp://mridul:5672",
-        JWT_SECRET:
-          "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
-        SENDER_NAME: "Mridul verma",
+        JWT_SECRET: "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
+        SENDER_NAME: "Mridul verma"
       },
       log_file: "./logs/email-inbox-workers.log",
       out_file: "./logs/email-inbox-workers-out.log",
@@ -64,9 +63,8 @@ module.exports = {
         FRONTEND_URL: "http://103.185.212.105:3500",
         LOCALHOST_URL: "http://103.185.212.105:3500",
         RABBITMQ_URL: "amqp://mridul:5672",
-        JWT_SECRET:
-          "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
-        SENDER_NAME: "Mridul verma",
+        JWT_SECRET: "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
+        SENDER_NAME: "Mridul verma"
       },
       log_file: "./logs/email-cron-workers.log",
       out_file: "./logs/email-cron-workers-out.log",
@@ -101,9 +99,8 @@ module.exports = {
         FRONTEND_URL: "http://103.185.212.105:3500",
         LOCALHOST_URL: "http://103.185.212.105:3500",
         RABBITMQ_URL: "amqp://mridul:5672",
-        JWT_SECRET:
-          "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
-        SENDER_NAME: "Mridul verma",
+        JWT_SECRET: "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
+        SENDER_NAME: "Mridul verma"
       },
       log_file: "./logs/email-sync-workers.log",
       out_file: "./logs/email-sync-workers-out.log",
@@ -138,9 +135,8 @@ module.exports = {
         FRONTEND_URL: "http://103.185.212.105:3500",
         LOCALHOST_URL: "http://103.185.212.105:3500",
         RABBITMQ_URL: "amqp://mridul:5672",
-        JWT_SECRET:
-          "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
-        SENDER_NAME: "Mridul verma",
+        JWT_SECRET: "1d5d2abb3d7d78ed56d186b490a82267a88b5d3ddb3c8f3db9701310527b1be4a089cf8be2957576bb3b99bebbec00a18606d430ad954479e9c6012fd6bd346f",
+        SENDER_NAME: "Mridul verma"
       },
       log_file: "./logs/email-scheduled-workers.log",
       out_file: "./logs/email-scheduled-workers-out.log",
