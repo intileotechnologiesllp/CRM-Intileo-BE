@@ -198,7 +198,7 @@ const CustomField = sequelize.define(
     },
     sortOrder: {
   type: DataTypes.INTEGER,
-  defaultValue: 0,
+  allowNull: true,
 },
     createdAt: {
       type: DataTypes.DATE,
