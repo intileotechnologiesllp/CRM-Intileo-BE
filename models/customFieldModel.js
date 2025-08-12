@@ -196,6 +196,10 @@ const CustomField = sequelize.define(
       comment:
         "JSON object with quality rules (required, important, unique, minLength, maxLength, etc.)",
     },
+    sortOrder: {
+  type: DataTypes.INTEGER,
+  defaultValue: 0,
+},
     createdAt: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
