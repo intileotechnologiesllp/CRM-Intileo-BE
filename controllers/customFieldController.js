@@ -4340,3 +4340,17 @@ exports.getPipelineOptions = async (req, res) => {
     });
   }
 };
+// POST /api/custom-fields/reorder
+exports.reorderCustomFields = async (req, res) => {
+  const { orderedIds } = req.body; // e.g., [3, 1, 2, 4]
+  try {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await CustomField.update({ sortOrder: i }, { where: { fieldId: orderedIds[i] } });
+    }
+    res.json({ message: 'Order updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update order' });
+  }
+};
+
+
