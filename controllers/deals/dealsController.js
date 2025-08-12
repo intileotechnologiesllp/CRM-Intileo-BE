@@ -445,11 +445,11 @@ exports.createDeal = async (req, res) => {
                 fieldName: fieldKey,
                 entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
                 isActive: true,
-                [Op.or]: [
-                  { masterUserID: req.adminId },
-                  { fieldSource: "default" },
-                  { fieldSource: "system" },
-                ],
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
               },
             });
           } else {
@@ -460,11 +460,11 @@ exports.createDeal = async (req, res) => {
                 fieldId: parseInt(fieldKey),
                 entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
                 isActive: true,
-                [Op.or]: [
-                  { masterUserID: req.adminId },
-                  { fieldSource: "default" },
-                  { fieldSource: "system" },
-                ],
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
               },
             });
           }
