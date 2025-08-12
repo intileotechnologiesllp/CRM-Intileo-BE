@@ -3252,27 +3252,40 @@ exports.getAllLeadDetails = async (req, res) => {
       order: [["startDateTime", "DESC"]],
     });
 
-    // Fetch custom fields for this lead
+    // Fetch all custom fields for this lead (for all users, not just current admin)
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
         entityId: leadId,
         entityType: "lead",
-        masterUserID: req.adminId,
       },
       include: [
         {
           model: CustomField,
           as: "CustomField",
-          attributes: ["fieldId", "fieldName", "fieldType", "isRequired"],
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldType",
+            "isRequired",
+            "entityType",
+            "fieldLabel",
+          ],
+          where: {
+            isActive: true,
+            entityType: { [Op.in]: ["lead", "both"] },
+          },
         },
       ],
     });
 
-    // Format custom fields for response
+    // Format custom fields for response (by fieldId and by fieldName)
     const customFields = {};
     customFieldValues.forEach((cfv) => {
-      customFields[cfv.fieldId] = {
+      if (!cfv.CustomField) return;
+      customFields[cfv.CustomField.fieldName] = {
+        fieldId: cfv.CustomField.fieldId,
         fieldName: cfv.CustomField.fieldName,
+        fieldLabel: cfv.CustomField.fieldLabel,
         fieldType: cfv.CustomField.fieldType,
         isRequired: cfv.CustomField.isRequired,
         value: cfv.value,
