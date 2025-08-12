@@ -376,6 +376,8 @@ exports.createLead = async (req, res) => {
       // Add visibility settings
       visibilityLevel,
       visibilityGroupId: userGroup ? userGroup.groupId : null,
+      valueCurrency: req.body.valueCurrency || "INR",
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR"
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
