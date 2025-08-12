@@ -906,14 +906,17 @@ exports.getCustomFields = async (req, res) => {
       ],
     });
 
-    // Sort by sortOrder if present, with sortOrder=1 first, then others ascending
+    // Sort by sortOrder: 1 first, then ascending, null/undefined always last
     customFields = customFields.sort((a, b) => {
-      const aSort = typeof a.sortOrder === "number" ? a.sortOrder : 9999;
-      const bSort = typeof b.sortOrder === "number" ? b.sortOrder : 9999;
-      // If either is 1, put it first
-      if (aSort === 1 && bSort !== 1) return -1;
-      if (bSort === 1 && aSort !== 1) return 1;
-      return aSort - bSort;
+      const aNull = a.sortOrder === null || a.sortOrder === undefined;
+      const bNull = b.sortOrder === null || b.sortOrder === undefined;
+      if (aNull && !bNull) return 1;
+      if (!aNull && bNull) return -1;
+      if (aNull && bNull) return 0;
+      // Both have sortOrder, put 1 first, then ascending
+      if (a.sortOrder === 1 && b.sortOrder !== 1) return -1;
+      if (b.sortOrder === 1 && a.sortOrder !== 1) return 1;
+      return a.sortOrder - b.sortOrder;
     });
 
     // Get specific default fields from database models if requested
