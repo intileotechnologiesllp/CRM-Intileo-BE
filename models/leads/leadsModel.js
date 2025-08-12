@@ -212,6 +212,16 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.FLOAT,
     allowNull: true, // Value of the lead
   },
+  proposalValueCurrency: {
+    type: DataTypes.STRING,
+    allowNull: true, // Currency for the proposal value
+    defaultValue: "INR", // Default to INR
+  },
+  valueCurrency: {
+    type: DataTypes.STRING,
+    allowNull: true, // Currency for the lead value
+    defaultValue: "INR", // Default to INR
+  },
 
   // Visibility management fields
   visibilityLevel: {
