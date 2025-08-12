@@ -1772,14 +1772,17 @@ exports.getLeads = async (req, res) => {
     // Group custom field values by leadId
     const customFieldsByLead = {};
     customFieldValues.forEach((value) => {
+      if (!value.CustomField) return;
       if (!customFieldsByLead[value.entityId]) {
         customFieldsByLead[value.entityId] = {};
       }
       customFieldsByLead[value.entityId][value.CustomField.fieldName] = {
-        label: value.CustomField.fieldLabel,
-        value: value.value,
-        type: value.CustomField.fieldType,
+        fieldId: value.CustomField.fieldId,
+        fieldName: value.CustomField.fieldName,
+        fieldLabel: value.CustomField.fieldLabel,
+        fieldType: value.CustomField.fieldType,
         isImportant: value.CustomField.isImportant,
+        value: value.value,
       };
     });
 
@@ -3252,49 +3255,83 @@ exports.getAllLeadDetails = async (req, res) => {
       order: [["startDateTime", "DESC"]],
     });
 
-    // Fetch all custom fields for this lead (for all users, not just current admin)
+    // Fetch all active custom fields for leads (for all users, not just current admin)
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        isActive: true,
+        entityType: { [Op.in]: ["lead", "both"] },
+      },
+      attributes: [
+        "fieldId",
+        "fieldName",
+        "fieldType",
+        "isRequired",
+        "entityType",
+        "fieldLabel",
+      ],
+      order: [["sortOrder", "ASC"]],
+    });
+
+    // Fetch all custom field values for this lead
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
         entityId: leadId,
         entityType: "lead",
       },
-      include: [
-        {
-          model: CustomField,
-          as: "CustomField",
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldType",
-            "isRequired",
-            "entityType",
-            "fieldLabel",
-          ],
-          where: {
-            isActive: true,
-            entityType: { [Op.in]: ["lead", "both"] },
-          },
-        },
-      ],
     });
 
-    // Format custom fields for response (by fieldId and by fieldName)
-    const customFields = {};
+    // Map values by fieldId
+    const valueMap = {};
     customFieldValues.forEach((cfv) => {
-      if (!cfv.CustomField) return;
-      customFields[cfv.CustomField.fieldName] = {
-        fieldId: cfv.CustomField.fieldId,
-        fieldName: cfv.CustomField.fieldName,
-        fieldLabel: cfv.CustomField.fieldLabel,
-        fieldType: cfv.CustomField.fieldType,
-        isRequired: cfv.CustomField.isRequired,
-        value: cfv.value,
+      valueMap[cfv.fieldId] = cfv.value;
+    });
+
+    // Merge all custom fields with values (value: null if not present)
+    const customFields = {};
+    allCustomFields.forEach((field) => {
+      customFields[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldName: field.fieldName,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        value:
+          valueMap[field.fieldId] !== undefined
+            ? valueMap[field.fieldId]
+            : null,
       };
     });
 
+    // Only include specified fields in the lead object
+    const allowedFields = [
+      "value",
+      "expectedCloseDate",
+      "sourceOrigin",
+      "sourceChannel",
+      "sourceChannelID",
+      "ownerId",
+      "ownerName",
+      "email",
+      "phone",
+      "contactPerson",
+      "notes",
+      "jobTitle",
+      "birthday",
+      "organization",
+      "address",
+    ];
+    const filteredLead = {};
+    if (lead) {
+      allowedFields.forEach((field) => {
+        if (lead[field] !== undefined) {
+          filteredLead[field] = lead[field];
+        }
+      });
+    }
+
     res.status(200).json({
       message: "Lead details fetched successfully.",
-      lead,
+      lead: filteredLead,
       leadDetails,
       customFields,
       notes: notesWithCreator,
