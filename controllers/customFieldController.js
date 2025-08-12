@@ -4355,24 +4355,38 @@ exports.getPipelineOptions = async (req, res) => {
   }
 };
 // POST /api/custom-fields/update-sort-order
+// exports.reorderCustomFields = async (req, res) => {
+//   const { fieldId, sortOrder } = req.body;
+//   if (typeof fieldId === "undefined" || typeof sortOrder === "undefined") {
+//     return res
+//       .status(400)
+//       .json({ error: "fieldId and sortOrder are required" });
+//   }
+//   try {
+//     const [updated] = await CustomField.update(
+//       { sortOrder },
+//       { where: { fieldId } }
+//     );
+//     if (updated) {
+//       res.json({ message: "Sort order updated successfully" });
+//     } else {
+//       res.status(404).json({ error: "Custom field not found" });
+//     }
+//   } catch (err) {
+//     res.status(500).json({ error: "Failed to update sort order" });
+//   }
+// };
+
+
+// POST /api/custom-fields/reorder
 exports.reorderCustomFields = async (req, res) => {
-  const { fieldId, sortOrder } = req.body;
-  if (typeof fieldId === "undefined" || typeof sortOrder === "undefined") {
-    return res
-      .status(400)
-      .json({ error: "fieldId and sortOrder are required" });
-  }
+  const { orderedIds } = req.body; // e.g., [3, 1, 2, 4]
   try {
-    const [updated] = await CustomField.update(
-      { sortOrder },
-      { where: { fieldId } }
-    );
-    if (updated) {
-      res.json({ message: "Sort order updated successfully" });
-    } else {
-      res.status(404).json({ error: "Custom field not found" });
+    for (let i = 0; i < orderedIds.length; i++) {
+      await CustomField.update({ sortOrder: i }, { where: { fieldId: orderedIds[i] } });
     }
+    res.json({ message: 'Order updated successfully' });
   } catch (err) {
-    res.status(500).json({ error: "Failed to update sort order" });
+    res.status(500).json({ error: 'Failed to update order' });
   }
 };
