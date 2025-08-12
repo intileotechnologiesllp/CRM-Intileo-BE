@@ -895,7 +895,8 @@ exports.getCustomFields = async (req, res) => {
       whereClause.isActive = true;
     }
 
-    const customFields = await CustomField.findAll({
+    // Fetch all custom fields with existing order
+    let customFields = await CustomField.findAll({
       where: whereClause,
       order: [
         ["category", "ASC"],
@@ -903,6 +904,16 @@ exports.getCustomFields = async (req, res) => {
         ["displayOrder", "ASC"],
         ["fieldLabel", "ASC"],
       ],
+    });
+
+    // Sort by sortOrder if present, with sortOrder=1 first, then others ascending
+    customFields = customFields.sort((a, b) => {
+      const aSort = typeof a.sortOrder === "number" ? a.sortOrder : 9999;
+      const bSort = typeof b.sortOrder === "number" ? b.sortOrder : 9999;
+      // If either is 1, put it first
+      if (aSort === 1 && bSort !== 1) return -1;
+      if (bSort === 1 && aSort !== 1) return 1;
+      return aSort - bSort;
     });
 
     // Get specific default fields from database models if requested
@@ -4344,7 +4355,9 @@ exports.getPipelineOptions = async (req, res) => {
 exports.reorderCustomFields = async (req, res) => {
   const { fieldId, sortOrder } = req.body;
   if (typeof fieldId === "undefined" || typeof sortOrder === "undefined") {
-    return res.status(400).json({ error: "fieldId and sortOrder are required" });
+    return res
+      .status(400)
+      .json({ error: "fieldId and sortOrder are required" });
   }
   try {
     const [updated] = await CustomField.update(
@@ -4360,5 +4373,3 @@ exports.reorderCustomFields = async (req, res) => {
     res.status(500).json({ error: "Failed to update sort order" });
   }
 };
-
-
