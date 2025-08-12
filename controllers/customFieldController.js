@@ -4340,16 +4340,24 @@ exports.getPipelineOptions = async (req, res) => {
     });
   }
 };
-// POST /api/custom-fields/reorder
+// POST /api/custom-fields/update-sort-order
 exports.reorderCustomFields = async (req, res) => {
-  const { orderedIds } = req.body; // e.g., [3, 1, 2, 4]
+  const { fieldId, sortOrder } = req.body;
+  if (typeof fieldId === "undefined" || typeof sortOrder === "undefined") {
+    return res.status(400).json({ error: "fieldId and sortOrder are required" });
+  }
   try {
-    for (let i = 0; i < orderedIds.length; i++) {
-      await CustomField.update({ sortOrder: i }, { where: { fieldId: orderedIds[i] } });
+    const [updated] = await CustomField.update(
+      { sortOrder },
+      { where: { fieldId } }
+    );
+    if (updated) {
+      res.json({ message: "Sort order updated successfully" });
+    } else {
+      res.status(404).json({ error: "Custom field not found" });
     }
-    res.json({ message: 'Order updated successfully' });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to update order' });
+    res.status(500).json({ error: "Failed to update sort order" });
   }
 };
 

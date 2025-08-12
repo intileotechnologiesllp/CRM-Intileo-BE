@@ -79,6 +79,6 @@ router.post(
   customFieldController.bulkUpdateFieldVisibility
 );
 router.post("/migrate", customFieldController.migrateFieldsToNewStructure);
-router.post("/reorder", customFieldController.reorderCustomFields);
+router.post("/reorder", verifyToken,customFieldController.reorderCustomFields);
 
 module.exports = router;
