@@ -2706,14 +2706,15 @@ exports.updateLead = async (req, res) => {
 
             if (existingValue) {
               // Update existing value
-              if (value !== null && value !== undefined && value !== "") {
-                await existingValue.update({ value: value });
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
+                await existingValue.update({ value: valueToSave });
                 console.log(
-                  `Updated custom field value for ${customField.fieldName}: ${value}`
+                  `Updated custom field value for ${customField.fieldName}: ${valueToSave}`
                 );
                 savedCustomFields[customField.fieldName] = {
                   label: customField.fieldLabel,
-                  value: value,
+                  value: valueToSave,
                   type: customField.fieldType,
                   isImportant: customField.isImportant,
                 };
@@ -2726,20 +2727,21 @@ exports.updateLead = async (req, res) => {
               }
             } else {
               // Create new value
-              if (value !== null && value !== undefined && value !== "") {
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
                 await CustomFieldValue.create({
                   fieldId: customField.fieldId,
                   entityId: leadId,
                   entityType: "lead",
-                  value: value,
+                  value: valueToSave,
                    masterUserID: req.adminId // <-- add this line
                 });
                 console.log(
-                  `Created custom field value for ${customField.fieldName}: ${value}`
+                  `Created custom field value for ${customField.fieldName}: ${valueToSave}`
                 );
                 savedCustomFields[customField.fieldName] = {
                   label: customField.fieldLabel,
-                  value: value,
+                  value: valueToSave,
                   type: customField.fieldType,
                   isImportant: customField.isImportant,
                 };
@@ -2786,7 +2788,7 @@ exports.updateLead = async (req, res) => {
     // Prepare response with updated lead and custom fields
     const leadResponse = {
       ...lead.toJSON(),
-      customFields: savedCustomFields,
+      // customFields: savedCustomFields,
     };
 
     res.status(200).json({
@@ -2796,6 +2798,7 @@ exports.updateLead = async (req, res) => {
       person: personRecord,
       organization: orgRecord,
       customFieldsUpdated: Object.keys(savedCustomFields).length,
+      customFields: savedCustomFields,
     });
   } catch (error) {
     console.error("Error updating lead:", error);
