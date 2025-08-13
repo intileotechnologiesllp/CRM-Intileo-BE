@@ -155,6 +155,7 @@ exports.createLead = async (req, res) => {
   } = req.body;
 
   // Collect custom fields from root level (not in standardFields)
+  
   let customFields = { ...(customFieldsFromBody || {}) };
   for (const key in req.body) {
     if (!standardFields.includes(key)) {
