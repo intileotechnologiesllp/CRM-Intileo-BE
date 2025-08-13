@@ -2732,6 +2732,7 @@ exports.updateLead = async (req, res) => {
                   entityId: leadId,
                   entityType: "lead",
                   value: value,
+                   masterUserID: req.adminId // <-- add this line
                 });
                 console.log(
                   `Created custom field value for ${customField.fieldName}: ${value}`
