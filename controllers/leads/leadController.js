@@ -3303,6 +3303,7 @@ exports.getAllLeadDetails = async (req, res) => {
         fieldLabel: field.fieldLabel,
         fieldType: field.fieldType,
         isRequired: field.isRequired,
+        options: field.options,
         value:
           valueMap[field.fieldId] !== undefined
             ? valueMap[field.fieldId]
