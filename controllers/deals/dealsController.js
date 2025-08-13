@@ -818,11 +818,11 @@ exports.getDeals = async (req, res) => {
         const allCustomFields = await CustomField.findAll({
           where: {
             isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+            // [Op.or]: [
+            //   { masterUserID: req.adminId },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            // ],
           },
           attributes: [
             "fieldId",
@@ -1002,11 +1002,11 @@ exports.getDeals = async (req, res) => {
         isActive: true,
         entityType: { [Op.in]: ["deal", "both", "lead"] },
         dealCheck: true, // Only include custom fields where dealCheck is true
-        [Op.or]: [
-          { masterUserID: req.adminId },
-          { fieldSource: "default" },
-          { fieldSource: "system" },
-        ],
+        // [Op.or]: [
+        //   { masterUserID: req.adminId },
+        //   { fieldSource: "default" },
+        //   { fieldSource: "system" },
+        // ],
       },
       attributes: [
         "fieldId",
@@ -1042,11 +1042,11 @@ exports.getDeals = async (req, res) => {
             isActive: true,
             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
             dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+            // [Op.or]: [
+            //   { masterUserID: req.adminId },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            // ],
           },
           required: true,
         },
@@ -1086,6 +1086,17 @@ exports.getDeals = async (req, res) => {
     });
 
     // Attach custom fields and status to each deal
+    // Build a map of all active custom fields (deal/both/lead, dealCheck: true)
+    const allActiveCustomFields = {};
+    allCustomFields.forEach((field) => {
+      allActiveCustomFields[field.fieldName] = {
+        label: field.fieldLabel,
+        value: "",
+        type: field.fieldType,
+        isImportant: field.isImportant,
+      };
+    });
+
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
 
@@ -1095,12 +1106,19 @@ exports.getDeals = async (req, res) => {
         delete dealObj.details;
       }
 
-      // Add custom fields
-      dealObj.customFields = customFieldsByDeal[dealObj.dealId] || {};
+      // Merge all active custom fields with values for this deal
+      const customFieldsForDeal = { ...allActiveCustomFields };
+      const valuesForDeal = customFieldsByDeal[dealObj.dealId] || {};
+      Object.keys(valuesForDeal).forEach((fieldName) => {
+        customFieldsForDeal[fieldName] = {
+          ...customFieldsForDeal[fieldName],
+          ...valuesForDeal[fieldName],
+        };
+      });
+      dealObj.customFields = customFieldsForDeal;
 
       // Ensure status is present (from deal or details)
       if (!("status" in dealObj)) {
-        // Try to get status from original deal instance if not present
         dealObj.status = deal.status || null;
       }
 
@@ -1197,11 +1215,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
           entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
           isActive: true,
           dealCheck: true, // Only include custom fields where dealCheck is true
-          [Op.or]: [
-            { masterUserID: masterUserID },
-            { fieldSource: "default" },
-            { fieldSource: "system" },
-          ],
+          // [Op.or]: [
+          //   { masterUserID: masterUserID },
+          //   { fieldSource: "default" },
+          //   { fieldSource: "system" },
+          // ],
         },
       });
 
@@ -1213,11 +1231,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
             isActive: true,
             dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: masterUserID },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+            // [Op.or]: [
+            //   { masterUserID: masterUserID },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            // ],
           },
         });
       }
@@ -1268,11 +1286,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
           entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
           isActive: true,
           dealCheck: true, // Only include custom fields where dealCheck is true
-          [Op.or]: [
-            { masterUserID: masterUserID },
-            { fieldSource: "default" },
-            { fieldSource: "system" },
-          ],
+          // [Op.or]: [
+          //   { masterUserID: masterUserID },
+          //   { fieldSource: "default" },
+          //   { fieldSource: "system" },
+          // ],
         },
       });
 
@@ -1284,11 +1302,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
             isActive: true,
             dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: masterUserID },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+            // [Op.or]: [
+            //   { masterUserID: masterUserID },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            // ],
           },
         });
       }
@@ -3389,11 +3407,11 @@ exports.updateDealColumnChecks = async (req, res) => {
           where: {
             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
             isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+            // [Op.or]: [
+            //   { masterUserID: req.adminId },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            // ],
           },
           attributes: [
             "fieldId",
@@ -3576,12 +3594,12 @@ exports.updateDealColumnChecks = async (req, res) => {
           where: {
             fieldId: update.fieldId,
             // Make the WHERE clause more flexible - either the user owns it OR it's a default/system field
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-              { fieldSource: "custom" }, // Add custom fields that might belong to this user
-            ],
+            // [Op.or]: [
+            //   { masterUserID: req.adminId },
+            //   { fieldSource: "default" },
+            //   { fieldSource: "system" },
+            //   { fieldSource: "custom" }, // Add custom fields that might belong to this user
+            // ],
           },
         });
 
