@@ -2458,6 +2458,15 @@ exports.updateLead = async (req, res) => {
   console.log("Request body:", updateObj);
 
   try {
+    // Declare owner change tracking variables
+    let ownerChanged = false;
+    let newOwner = null;
+    let assigner = null;
+    // Fetch lead record at the start
+    const lead = await Lead.findByPk(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
     // Get all columns for Lead, LeadDetails, Person, and Organization
     const leadFields = Object.keys(Lead.rawAttributes);
     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
@@ -2581,6 +2590,28 @@ exports.updateLead = async (req, res) => {
             // Don't fail the entire update if custom fields fail
           }
         }
+      }
+    }
+
+    // Update or create Organization
+    let orgRecord;
+    if (Object.keys(organizationData).length > 0) {
+      orgRecord = await Organization.findOne({
+        where: { leadOrganizationId: lead.leadOrganizationId },
+      });
+      console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
+      if (orgRecord) {
+        await orgRecord.update(organizationData);
+        console.log("Organization updated:", orgRecord.toJSON());
+      } else {
+        orgRecord = await Organization.create(organizationData);
+        console.log("Organization created:", orgRecord.toJSON());
+        leadData.leadOrganizationId = orgRecord.leadOrganizationId;
+        await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
+        console.log(
+          "Lead updated with new leadOrganizationId:",
+          orgRecord.leadOrganizationId
+        );
       }
     }
 
