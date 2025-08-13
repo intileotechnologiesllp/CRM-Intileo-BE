@@ -2788,7 +2788,7 @@ exports.updateLead = async (req, res) => {
     // Prepare response with updated lead and custom fields
     const leadResponse = {
       ...lead.toJSON(),
-      customFields: savedCustomFields,
+      // customFields: savedCustomFields,
     };
 
     res.status(200).json({
@@ -2798,7 +2798,7 @@ exports.updateLead = async (req, res) => {
       person: personRecord,
       organization: orgRecord,
       customFieldsUpdated: Object.keys(savedCustomFields).length,
-      // customFields: savedCustomFields,
+      customFields: savedCustomFields,
     });
   } catch (error) {
     console.error("Error updating lead:", error);
