@@ -2666,11 +2666,11 @@ exports.updateLead = async (req, res) => {
               fieldName: fieldKey,
               entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
               isActive: true,
-              [Op.or]: [
-                { masterUserID: req.adminId },
-                { fieldSource: "default" },
-                { fieldSource: "system" },
-              ],
+              // [Op.or]: [
+              //   { masterUserID: req.adminId },
+              //   { fieldSource: "default" },
+              //   { fieldSource: "system" },
+              // ],
             },
           });
 
@@ -2681,11 +2681,11 @@ exports.updateLead = async (req, res) => {
                 fieldId: fieldKey,
                 entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
                 isActive: true,
-                [Op.or]: [
-                  { masterUserID: req.adminId },
-                  { fieldSource: "default" },
-                  { fieldSource: "system" },
-                ],
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
               },
             });
           }
