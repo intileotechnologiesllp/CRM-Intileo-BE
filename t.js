@@ -1,6437 +1,4677 @@
-// =============== COLUMN VISIBILITY MANAGEMENT ===============
-const InsightColumn = require("../../models/insight/insightColumnModel");
+// const Lead = require("../../models/leads/leadsModel");
+const LeadFilter = require("../../models/leads/leadFiltersModel");
+//const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
+const { Op } = require("sequelize"); // Import Sequelize operators
+const Sequelize = require("sequelize");
+const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
+const PROGRAMS = require("../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
+const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
+//const Person = require("../../models/leads/leadPersonModel"); // Import Person model
+//const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
+const { Lead, LeadDetails, Person, Organization } = require("../../models");
+const Activity = require("../../models/activity/activityModel"); // Only import Activity where needed
+const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
+const Email = require("../../models/email/emailModel");
+const UserCredential = require("../../models/email/userCredentialModel");
+const Attachment = require("../../models/email/attachmentModel");
+const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
+const Deal = require("../../models/deals/dealsModels"); // Import Deal model
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
+const {
+  VisibilityGroup,
+  GroupMembership,
+  ItemVisibilityRule,
+} = require("../../models/admin/visibilityAssociations");
 
-// Get column visibility for a user/entity/context
-// Get all columns (Deal, Person, Organization) with checked status for a user/context
-exports.getColumnVisibility = async (req, res) => {
-  try {
-    const masterUserID = req.adminId;
-    const { contextId } = req.query;
-    const where = { masterUserID };
-    if (contextId) where.contextId = contextId;
-    const record = await InsightColumn.findOne({ where });
+const { sendEmail } = require("../../utils/emailSend");
 
-    // Only fetch columns for entities present in the record (based on contextId)
-    const CustomFieldModel = require("../../models/customFieldModel");
-    const getModelColumns = (model) => Object.keys(model.rawAttributes).filter(col => !/id$/i.test(col) && col !== 'createdAt' && col !== 'updatedAt');
-    async function getEntityColumns(entityType) {
-      let model, customFields;
-      if (entityType === 'Deal') {
-        model = require("../../models/deals/dealsModels");
-        customFields = await CustomFieldModel.findAll({ where: { entityType: 'Deal', isActive: true }, attributes: ["fieldName"] });
-      } else if (entityType === 'Person') {
-        model = require("../../models/leads/leadPersonModel");
-        customFields = await CustomFieldModel.findAll({ where: { entityType: 'Person', isActive: true }, attributes: ["fieldName"] });
-      } else if (entityType === 'Organization') {
-        model = require("../../models/leads/leadOrganizationModel");
-        customFields = await CustomFieldModel.findAll({ where: { entityType: 'Organization', isActive: true }, attributes: ["fieldName"] });
-      }
-      const modelColumns = getModelColumns(model);
-      const customFieldNames = customFields.map(f => f.fieldName);
-      return [...modelColumns, ...customFieldNames];
-    }
-
-    // Helper to merge checked status
-    function mergeColumns(allCols, savedCols) {
-      const checkedMap = {};
-      if (Array.isArray(savedCols)) {
-        savedCols.forEach(col => { checkedMap[col.key] = col.checked; });
-      }
-      return allCols.map(key => ({ key, checked: checkedMap.hasOwnProperty(key) ? checkedMap[key] : true }));
-    }
-
-    const saved = (record && record.columns) || {};
-    const result = {};
-    // Only return columns for entities present in the record
-    for (const entity of ['Deal', 'Person', 'Organization']) {
-      if (saved[entity]) {
-        const allCols = await getEntityColumns(entity);
-        result[entity] = mergeColumns(allCols, saved[entity]);
-      }
-    }
-    res.status(200).json({
-      success: true,
-      data: result
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch column visibility", error: error.message });
-  }
-};
-
-// Update (or create) column visibility for a user/entity/context
-// Save all columns (Deal, Person, Organization) with checked status for a user/context
-exports.setColumnVisibility = async (req, res) => {
-  try {
-    const masterUserID = req.adminId;
-    const { entityType, contextId } = req.body; // entityType: 'Deal', 'Person', 'Organization'
-    if (!entityType || !['Deal', 'Person', 'Organization'].includes(entityType)) {
-      return res.status(400).json({ success: false, message: "Valid entityType ('Deal', 'Person', 'Organization') is required" });
-    }
-
-    // Dynamically fetch all columns (excluding ID fields) for the given entityType
-    const CustomFieldModel = require("../../models/customFieldModel");
-    let model, customFields;
-    if (entityType === 'Deal') {
-      model = require("../../models/deals/dealsModels");
-      customFields = await CustomFieldModel.findAll({ where: { entityType: 'Deal', isActive: true }, attributes: ["fieldName"] });
-    } else if (entityType === 'Person') {
-      model = require("../../models/leads/leadPersonModel");
-      customFields = await CustomFieldModel.findAll({ where: { entityType: 'Person', isActive: true }, attributes: ["fieldName"] });
-    } else if (entityType === 'Organization') {
-      model = require("../../models/leads/leadOrganizationModel");
-      customFields = await CustomFieldModel.findAll({ where: { entityType: 'Organization', isActive: true }, attributes: ["fieldName"] });
-    }
-    const getModelColumns = (model) => Object.keys(model.rawAttributes).filter(col => !/id$/i.test(col) && col !== 'createdAt' && col !== 'updatedAt');
-    const modelColumns = getModelColumns(model);
-    const customFieldNames = customFields.map(f => f.fieldName);
-    const allColumns = [...modelColumns, ...customFieldNames];
-    // Set all columns to checked: false by default
-    const columnsArr = allColumns.map(key => ({ key, checked: false }));
-
-    // Prepare columns object for all entities
-    const columnsObj = { Deal: [], Person: [], Organization: [] };
-    columnsObj[entityType] = columnsArr;
-
-    const where = { masterUserID };
-    if (contextId) where.contextId = contextId;
-    let record = await InsightColumn.findOne({ where });
-    if (record) {
-      // Only update the relevant entity's columns, keep others as is
-      const updatedColumns = { ...record.columns, [entityType]: columnsArr };
-      await record.update({ columns: updatedColumns });
-    } else {
-      record = await InsightColumn.create({ masterUserID, contextId, entity: entityType, columns: columnsObj });
-    }
-    res.status(200).json({ success: true, data: record });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to set column visibility", error: error.message });
-  }
-};
-// Update a single column's checked status for a user/context/entity
-exports.updateColumnVisibility = async (req, res) => {
-  try {
-    const masterUserID = req.adminId;
-    const { entity, contextId, key, checked } = req.body;
-    console.log('[DEBUG] updateColumnVisibility called with:', { entity, contextId, key, checked });
-    if (!entity || !key || typeof checked !== 'boolean') {
-      console.log('[DEBUG] Missing required fields:', { entity, key, checked });
-      return res.status(400).json({ success: false, message: "entity, key, and checked(boolean) are required" });
-    }
-    const where = { masterUserID };
-    if (contextId) where.contextId = contextId;
-    let record = await InsightColumn.findOne({ where });
-    if (!record) {
-      console.log('[DEBUG] No InsightColumn record found for:', where);
-      return res.status(404).json({ success: false, message: "No column visibility record found for the given context/entity" });
-    } else {
-      const columns = record.columns || { Deal: [], Person: [], Organization: [] };
-      if (!Array.isArray(columns[entity])) columns[entity] = [];
-      const idx = columns[entity].findIndex(col => col.key === key);
-      console.log('[DEBUG] Existing columns for entity:', entity, columns[entity]);
-      if (idx >= 0) {
-        console.log(`[DEBUG] Found key '${key}' at index ${idx}, updating checked to`, checked);
-        columns[entity][idx].checked = checked;
-        record.columns = columns;
-        record.changed('columns', true);
-        await record.save();
-        console.log('[DEBUG] Updated columns:', columns[entity]);
-        return res.status(200).json({ success: true, data: record });
-      } else {
-        // Only add the key if it is a valid column for this entity/context
-        const CustomFieldModel = require("../../models/customFieldModel");
-        let model, customFields;
-        if (entity === 'Deal') {
-          model = require("../../models/deals/dealsModels");
-          customFields = await CustomFieldModel.findAll({ where: { entityType: 'Deal', isActive: true }, attributes: ["fieldName"] });
-        } else if (entity === 'Person') {
-          model = require("../../models/leads/leadPersonModel");
-          customFields = await CustomFieldModel.findAll({ where: { entityType: 'Person', isActive: true }, attributes: ["fieldName"] });
-        } else if (entity === 'Organization') {
-          model = require("../../models/leads/leadOrganizationModel");
-          customFields = await CustomFieldModel.findAll({ where: { entityType: 'Organization', isActive: true }, attributes: ["fieldName"] });
-        }
-        const getModelColumns = (model) => Object.keys(model.rawAttributes).filter(col => !/id$/i.test(col) && col !== 'createdAt' && col !== 'updatedAt');
-        const modelColumns = getModelColumns(model);
-        const customFieldNames = customFields.map(f => f.fieldName);
-        const validColumns = [...modelColumns, ...customFieldNames];
-        console.log('[DEBUG] Valid columns for entity:', entity, validColumns);
-        if (validColumns.includes(key)) {
-          console.log(`[DEBUG] Key '${key}' is valid, adding to columns with checked:`, checked);
-          columns[entity].push({ key, checked });
-          record.columns = columns;
-          record.changed('columns', true);
-          await record.save();
-          console.log('[DEBUG] Added and updated columns:', columns[entity]);
-          return res.status(200).json({ success: true, data: record });
-        } else {
-          console.log(`[DEBUG] Key '${key}' is NOT a valid column for entity '${entity}'.`);
-          return res.status(404).json({ success: false, message: `Column key '${key}' is not a valid column for entity '${entity}'.` });
-        }
-      }
-    }
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to update column visibility", error: error.message });
-  }
-};
-// =============== ENTITY COLUMNS API ===============
-// Returns available columns for Deal, Person, and Organization
-exports.getEntityColumns = async (req, res) => {
-  try {
-    // Dynamically fetch model attributes (excluding ID fields)
-    const getModelColumns = (model) => {
-      return Object.keys(model.rawAttributes).filter(
-        (col) =>
-          !/id$/i.test(col) && // Exclude fields ending with 'id' or 'ID'
-          col !== "createdAt" &&
-          col !== "updatedAt"
-      );
+// Helper function to get user's visibility permissions for leads
+async function getUserLeadVisibilityPermissions(userId, userRole) {
+  if (userRole === "admin") {
+    return {
+      canCreate: true,
+      canView: "all",
+      canEdit: "all",
+      canDelete: "all",
+      defaultVisibility: "everyone",
+      userGroup: null,
     };
+  }
 
-    // Fetch custom fields for each entity
-    const CustomFieldModel = require("../../models/customFieldModel");
-    async function getCustomFields(entityType) {
-      // entityType: 'Deal', 'Person', 'Organization'
-      const fields = await CustomFieldModel.findAll({
-        where: { entityType, isActive: true },
-        attributes: ["fieldName"],
-      });
-      return fields.map((f) => f.fieldName);
-    }
+  try {
+    const membership = await GroupMembership.findOne({
+      where: {
+        userId,
+        isActive: true,
+      },
+      include: [
+        {
+          model: VisibilityGroup,
+          as: "group",
+          where: { isActive: true },
+        },
+      ],
+    });
 
-    // Get columns for each entity
-    const dealModel = require("../../models/deals/dealsModels");
-    const personModel = require("../../models/leads/leadPersonModel");
-    const organizationModel = require("../../models/leads/leadOrganizationModel");
-
-    const [dealCustom, personCustom, orgCustom] = await Promise.all([
-      getCustomFields("Deal"),
-      getCustomFields("Person"),
-      getCustomFields("Organization"),
-    ]);
-
-    const dealColumns = [...getModelColumns(dealModel), ...dealCustom];
-    const personColumns = [...getModelColumns(personModel), ...personCustom];
-    const organizationColumns = [
-      ...getModelColumns(organizationModel),
-      ...orgCustom,
-    ];
-
-    // Accept selected columns from request (body or query)
-    const selected =
-      req.body.selectedColumns || req.query.selectedColumns || {};
-    const selectedDeal = Array.isArray(selected.Deal) ? selected.Deal : [];
-    const selectedPerson = Array.isArray(selected.Person)
-      ? selected.Person
-      : [];
-    const selectedOrganization = Array.isArray(selected.Organization)
-      ? selected.Organization
-      : [];
-
-    function splitColumns(all, selected) {
+    if (!membership) {
       return {
-        visibleColumns: all.filter((col) => selected.includes(col)),
-        availableColumns: all.filter((col) => !selected.includes(col)),
-        allColumns: all,
+        canCreate: false,
+        canView: "owner_only",
+        canEdit: "owner_only",
+        canDelete: "owner_only",
+        defaultVisibility: "owner_only",
+        userGroup: null,
       };
     }
 
-    const dealResult = splitColumns(dealColumns, selectedDeal);
-    const personResult = splitColumns(personColumns, selectedPerson);
-    const organizationResult = splitColumns(
-      organizationColumns,
-      selectedOrganization
-    );
-
-    res.status(200).json({
-      success: true,
-      data: {
-        Deal: dealResult,
-        Person: personResult,
-        Organization: organizationResult,
+    const leadVisibilityRule = await ItemVisibilityRule.findOne({
+      where: {
+        groupId: membership.groupId,
+        entityType: "leads",
+        isActive: true,
       },
     });
+
+    if (!leadVisibilityRule) {
+      return {
+        canCreate: true,
+        canView: "owner_only",
+        canEdit: "owner_only",
+        canDelete: "owner_only",
+        defaultVisibility: "item_owners_visibility_group",
+        userGroup: membership.group,
+      };
+    }
+
+    return {
+      canCreate: leadVisibilityRule.canCreate,
+      canView: leadVisibilityRule.canView
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      canEdit: leadVisibilityRule.canEdit
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      canDelete: leadVisibilityRule.canDelete
+        ? leadVisibilityRule.defaultVisibility
+        : "none",
+      defaultVisibility: leadVisibilityRule.defaultVisibility,
+      userGroup: membership.group,
+    };
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch entity columns",
-      error: error.message,
+    console.error("Error getting user visibility permissions:", error);
+    return {
+      canCreate: false,
+      canView: "owner_only",
+      canEdit: "owner_only",
+      canDelete: "owner_only",
+      defaultVisibility: "owner_only",
+      userGroup: null,
+    };
+  }
+}
+//.....................changes......original....................
+exports.createLead = async (req, res) => {
+  // Only use these fields as standard fields for root-level custom field extraction
+  const standardFields = [
+    "title",
+    "ownerId",
+    "sourceChannel",
+    "sourceChannelID",
+  ];
+
+  // Extract standard fields
+  const {
+    contactPerson,
+    organization,
+    title,
+    valueLabels,
+    expectedCloseDate,
+    sourceChannel,
+    sourceChannelID,
+    serviceType,
+    // scopeOfServiceType,
+    phone,
+    email,
+    company,
+    proposalValue,
+    esplProposalNo,
+    projectLocation,
+    organizationCountry,
+    proposalSentDate,
+    status,
+    sourceOrgin,
+    SBUClass,
+    numberOfReportsPrepared,
+    emailID,
+    customFields: customFieldsFromBody,
+    value,
+    pipeline,
+    stage,
+    productName,
+    sourceOriginID,
+  } = req.body;
+
+  // Collect custom fields from root level (not in standardFields)
+  
+  let customFields = { ...(customFieldsFromBody || {}) };
+  for (const key in req.body) {
+    if (!standardFields.includes(key)) {
+      customFields[key] = req.body[key];
+    }
+  }
+
+  console.log("Request body sourceOrgin:", sourceOrgin);
+
+  // Log emailID only when it's relevant (sourceOrgin is 0)
+  if (sourceOrgin === 0 || sourceOrgin === "0") {
+    console.log("Request body email ID:", req.body.emailID);
+  }
+
+  // --- Add validation here ---
+  if (!contactPerson || !organization || !title || !email) {
+    return res.status(400).json({
+      message: "contactPerson, organization, title, and email are required.",
     });
   }
-};
-const DASHBOARD = require("../../models/insight/dashboardModel");
-const Report = require("../../models/insight/reportModel");
-const Goal = require("../../models/insight/goalModel");
-const Deal = require("../../models/deals/dealsModels");
-const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
-const Lead = require("../../models/leads/leadsModel");
-const Activity = require("../../models/activity/activityModel");
-const MasterUser = require("../../models/master/masterUserModel");
-const { Op } = require("sequelize");
 
-// =============== DASHBOARD MANAGEMENT ===============
-
-exports.createDashboard = async (req, res) => {
-  try {
-    const { name, folder, type, parentId } = req.body;
-    const ownerId = req.adminId;
-
-    // Validate required fields
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: "Dashboard name is required",
-      });
-    }
-
-    // Determine the type (folder or dashboard/file)
-    const itemType = type || "dashboard"; // default to dashboard
-
-    let resolvedParentId = parentId || null;
-    let resolvedFolderName = null; // Start with null
-
-    // If folder name is provided, check if it's a valid existing folder
-    if (!parentId && folder) {
-      console.log(`[DEBUG] Processing folder request: "${folder}"`);
-
-      // Handle special cases
-      if (folder === "My dashboards") {
-        console.log("[DEBUG] Using My dashboards folder");
-        resolvedFolderName = "My dashboards";
-        // Don't set parentId - keep it null for root level
-      } else {
-        console.log(`[DEBUG] Looking for existing folder: "${folder}"`);
-
-        // Look for existing folder with the provided name
-        let existingFolder = await DASHBOARD.findOne({
-          where: {
-            name: folder,
-            ownerId,
-            type: "folder",
-            parentId: null,
-          },
-        });
-
-        console.log(
-          `[DEBUG] Existing folder found:`,
-          existingFolder
-            ? {
-                id: existingFolder.dashboardId,
-                name: existingFolder.name,
-                folder: existingFolder.folder,
-              }
-            : "None"
-        );
-
-        if (!existingFolder) {
-          console.log(`[DEBUG] Creating new folder: "${folder}"`);
-          // Auto-create the folder if it doesn't exist
-          existingFolder = await DASHBOARD.create({
-            name: folder,
-            folder: folder, // Set folder field to its own name
-            type: "folder",
-            parentId: null,
-            ownerId,
-          });
-          console.log(
-            `[DEBUG] Created folder with ID: ${existingFolder.dashboardId}`
-          );
-        }
-        // Use the existing or newly created folder
-        resolvedParentId = existingFolder.dashboardId;
-        resolvedFolderName = existingFolder.name;
-        console.log(
-          `[DEBUG] Resolved parentId: ${resolvedParentId}, folderName: ${resolvedFolderName}`
-        );
-      }
-    } else if (parentId) {
-      // If parentId is provided, validate it is a folder and get its name
-      const parentFolder = await DASHBOARD.findOne({
-        where: {
-          dashboardId: parentId,
-          ownerId,
-          type: "folder",
-        },
-      });
-      if (!parentFolder) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent folder not found",
-        });
-      }
-      resolvedFolderName = parentFolder.name;
-    } else {
-      // No folder specified and no parentId - this goes to "My dashboards"
-      resolvedFolderName = "My dashboards";
-    }
-
-    // Check if a dashboard with the same name already exists in the same folder
-    const existingDashboard = await DASHBOARD.findOne({
-      where: {
-        name,
-        ownerId,
-        parentId: resolvedParentId, // Check within the same folder/parent
-        type: itemType, // Also check for the same type (dashboard/folder)
-      },
-    });
-
-    if (existingDashboard) {
-      return res.status(400).json({
-        success: false,
-        message: `A ${
-          itemType === "folder" ? "folder" : "dashboard"
-        } with this name already exists in this location`,
-      });
-    }
-
-    const newDashboard = await DASHBOARD.create({
-      name,
-      folder: resolvedFolderName, // Allow null values
-      type: itemType,
-      parentId: resolvedParentId,
-      ownerId,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: `${
-        itemType === "folder" ? "Folder" : "Dashboard"
-      } created successfully`,
-      data: newDashboard,
-    });
-  } catch (error) {
-    console.error("Error creating dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create dashboard",
-      error: error.message,
+  // Validate emailID is required when sourceOrgin is 0 (email-created lead)
+  if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
+    return res.status(400).json({
+      message:
+        "emailID is required when sourceOrgin is 0 (email-created lead).",
     });
   }
-};
-
-exports.getDashboards = async (req, res) => {
-  try {
-    const ownerId = req.adminId;
-    const role = req.role;
-    let dashboards;
-    if (role === "admin") {
-      dashboards = await DASHBOARD.findAll({
-        include: [
-          {
-            model: Report,
-            as: "Reports",
-            required: false,
-          },
-          {
-            model: Goal,
-            as: "Goals",
-            required: false,
-          },
-        ],
-        order: [["createdAt", "DESC"]],
-      });
-    } else {
-      dashboards = await DASHBOARD.findAll({
-        where: { ownerId },
-        include: [
-          {
-            model: Report,
-            as: "Reports",
-            required: false,
-          },
-          {
-            model: Goal,
-            as: "Goals",
-            required: false,
-          },
-        ],
-        order: [["createdAt", "DESC"]],
-      });
-    }
-
-    // Group dashboards by folder for backward compatibility
-    const dashboardsByFolder = {};
-    console.log("[DEBUG] Grouping dashboards, total count:", dashboards.length);
-
-    dashboards.forEach((dashboard) => {
-      let folder;
-
-      console.log(
-        `[DEBUG] Processing item: ${dashboard.name} (type: ${dashboard.type}, folder: ${dashboard.folder})`
-      );
-
-      if (dashboard.type === "folder") {
-        // Folders should appear as their own categories, not under "My dashboards"
-        // Skip folders - they don't get grouped anywhere, they ARE the groups
-        console.log(
-          `[DEBUG] Skipping folder "${dashboard.name}" - folders are categories, not items`
-        );
-        return; // Skip processing folders
-      } else {
-        // Dashboards use their folder field value
-        folder =
-          dashboard.folder === null ||
-          dashboard.folder === undefined ||
-          dashboard.folder === ""
-            ? "My dashboards"
-            : dashboard.folder;
-        console.log(
-          `[DEBUG] Dashboard "${dashboard.name}" grouped under: ${folder}`
-        );
-      }
-
-      if (!dashboardsByFolder[folder]) {
-        dashboardsByFolder[folder] = [];
-      }
-      dashboardsByFolder[folder].push(dashboard);
-    });
-
-    console.log("[DEBUG] Final grouping:", Object.keys(dashboardsByFolder));
-
-    res.status(200).json({
-      success: true,
-      byFolder: dashboardsByFolder,
-    });
-  } catch (error) {
-    console.error("Error fetching dashboards:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch dashboards",
-      error: error.message,
-    });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Invalid email format." });
   }
-};
-
-exports.getDashboard = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const ownerId = req.adminId;
-
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-      include: [
-        {
-          model: Report,
-          as: "Reports",
-          required: false,
-          order: [["position", "ASC"]],
-        },
-        {
-          model: Goal,
-          as: "Goals",
-          where: { isActive: true },
-          required: false,
-          order: [["createdAt", "DESC"]],
-        },
-      ],
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: dashboard,
-    });
-  } catch (error) {
-    console.error("Error fetching dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch dashboard",
-      error: error.message,
-    });
+  if (proposalValue && proposalValue < 0) {
+    return res
+      .status(400)
+      .json({ message: "Proposal value must be positive." });
   }
-};
 
-exports.updateDashboard = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const { name, folder } = req.body;
-    const ownerId = req.adminId;
+  // Note: Removed email uniqueness check to allow multiple leads per contact person
+  // Each contact can have multiple projects/leads with different titles
 
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found",
-      });
-    }
-
-    await dashboard.update({
-      name: name || dashboard.name,
-      folder: folder || dashboard.folder,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Dashboard updated successfully",
-      data: dashboard,
-    });
-  } catch (error) {
-    console.error("Error updating dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update dashboard",
-      error: error.message,
-    });
-  }
-};
-
-exports.deleteDashboard = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const ownerId = req.adminId;
-
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found",
-      });
-    }
-
-    // Delete associated reports and goals
-    await Report.destroy({ where: { dashboardId } });
-    await Goal.destroy({ where: { dashboardId } });
-    await dashboard.destroy();
-
-    res.status(200).json({
-      success: true,
-      message: "Dashboard deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete dashboard",
-      error: error.message,
-    });
-  }
-};
-
-// Bulk delete multiple dashboards
-exports.bulkDeleteDashboards = async (req, res) => {
-  try {
-    const { dashboardIds } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // Validate input
-    if (
-      !dashboardIds ||
-      !Array.isArray(dashboardIds) ||
-      dashboardIds.length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Dashboard IDs array is required",
-      });
-    }
-
-    // Get all dashboards for admin, or only user's dashboards for non-admin
-    let allUserDashboards;
-    if (role === "admin") {
-      allUserDashboards = await DASHBOARD.findAll({
-        where: {
-          type: { [Op.ne]: "folder" },
-        },
-      });
-    } else {
-      allUserDashboards = await DASHBOARD.findAll({
-        where: {
-          ownerId,
-          type: { [Op.ne]: "folder" },
-        },
-      });
-    }
-
-    // Check if user is trying to delete all dashboards
-    const remainingDashboards = allUserDashboards.filter(
-      (dashboard) => !dashboardIds.includes(dashboard.dashboardId)
-    );
-
-    if (remainingDashboards.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "It's required to keep at least one dashboard. Cannot delete all dashboards.",
-      });
-    }
-
-    // Find dashboards to delete (admin: all, non-admin: only own)
-    let dashboardsToDelete;
-    if (role === "admin") {
-      dashboardsToDelete = await DASHBOARD.findAll({
-        where: {
-          dashboardId: { [Op.in]: dashboardIds },
-        },
-      });
-    } else {
-      dashboardsToDelete = await DASHBOARD.findAll({
-        where: {
-          dashboardId: { [Op.in]: dashboardIds },
-          ownerId,
-        },
-      });
-    }
-
-    if (dashboardsToDelete.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No dashboards found to delete",
-      });
-    }
-
-    // Check if some dashboards were not found or not accessible
-    const foundIds = dashboardsToDelete.map((d) => d.dashboardId);
-    const notFoundIds = dashboardIds.filter((id) => !foundIds.includes(id));
-
-    // Delete associated reports and goals for all dashboards
-    await Report.destroy({
-      where: {
-        dashboardId: { [Op.in]: foundIds },
-      },
-    });
-
-    await Goal.destroy({
-      where: {
-        dashboardId: { [Op.in]: foundIds },
-      },
-    });
-
-    // Delete the dashboards
-    let deleteWhere = { dashboardId: { [Op.in]: foundIds } };
-    if (role !== "admin") deleteWhere.ownerId = ownerId;
-    const deletedCount = await DASHBOARD.destroy({
-      where: deleteWhere,
-    });
-
-    let message = `Successfully deleted ${deletedCount} dashboard(s)`;
-    if (notFoundIds.length > 0) {
-      message += `. Note: ${notFoundIds.length} dashboard(s) were not found or not accessible.`;
-    }
-
-    res.status(200).json({
-      success: true,
-      message: message,
-      data: {
-        deletedCount: deletedCount,
-        deletedIds: foundIds,
-        notFoundIds: notFoundIds,
-        remainingDashboards: remainingDashboards.length,
-      },
-    });
-  } catch (error) {
-    console.error("Error bulk deleting dashboards:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete dashboards",
-      error: error.message,
-    });
-  }
-};
-
-// =============== FOLDER MANAGEMENT ===============
-
-exports.createFolder = async (req, res) => {
-  try {
-    const { name, parentId, folder } = req.body;
-    const ownerId = req.adminId;
-
-    // Validate required fields
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: "Folder name is required",
-      });
-    }
-
-    // Check if a folder with the same name already exists in the same location
-    const existingFolder = await DASHBOARD.findOne({
-      where: {
-        name,
-        ownerId,
-        type: "folder",
-        parentId: parentId || null,
-      },
-    });
-
-    if (existingFolder) {
-      return res.status(400).json({
-        success: false,
-        message: "A folder with this name already exists in this location",
-      });
-    }
-
-    // If creating subfolder, validate parent exists
-    if (parentId) {
-      const parentFolder = await DASHBOARD.findOne({
-        where: {
-          dashboardId: parentId,
-          ownerId,
-          type: "folder",
-        },
-      });
-
-      if (!parentFolder) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent folder not found",
-        });
-      }
-    }
-
-    const newFolder = await DASHBOARD.create({
-      name,
-      folder: name, // Set folder field to its own name
-      type: "folder",
-      parentId: parentId || null,
-      ownerId,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Folder created successfully",
-      data: newFolder,
-    });
-  } catch (error) {
-    console.error("Error creating folder:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create folder",
-      error: error.message,
-    });
-  }
-};
-
-exports.getFolderContents = async (req, res) => {
-  try {
-    const { folderId } = req.params;
-    const ownerId = req.adminId;
-
-    // Verify folder ownership
-    const folder = await DASHBOARD.findOne({
-      where: {
-        dashboardId: folderId,
-        ownerId,
-        type: "folder",
-      },
-    });
-
-    if (!folder) {
-      return res.status(404).json({
-        success: false,
-        message: "Folder not found or access denied",
-      });
-    }
-
-    // Get all items in this folder
-    const contents = await DASHBOARD.findAll({
-      where: {
-        parentId: folderId,
-        ownerId,
-      },
-      include: [
-        {
-          model: Report,
-          as: "Reports",
-          required: false,
-        },
-        {
-          model: Goal,
-          as: "Goals",
-          required: false,
-        },
-      ],
-      order: [
-        ["type", "ASC"], // Folders first
-        ["name", "ASC"],
-      ],
-    });
-
-    res.status(200).json({
-      success: true,
-      data: {
-        folder,
-        contents,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching folder contents:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch folder contents",
-      error: error.message,
-    });
-  }
-};
-
-exports.moveToFolder = async (req, res) => {
-  try {
-    const { itemId } = req.params;
-    const { targetFolderId } = req.body;
-    const ownerId = req.adminId;
-
-    // Verify item ownership
-    const item = await DASHBOARD.findOne({
-      where: {
-        dashboardId: itemId,
-        ownerId,
-      },
-    });
-
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: "Item not found or access denied",
-      });
-    }
-
-    // If moving to a folder, verify folder exists
-    if (targetFolderId) {
-      const targetFolder = await DASHBOARD.findOne({
-        where: {
-          dashboardId: targetFolderId,
-          ownerId,
-          type: "folder",
-        },
-      });
-
-      if (!targetFolder) {
-        return res.status(404).json({
-          success: false,
-          message: "Target folder not found",
-        });
-      }
-
-      // Prevent moving folder into itself or its descendants
-      if (item.type === "folder") {
-        const isDescendant = await checkIfDescendant(
-          targetFolderId,
-          itemId,
-          ownerId
-        );
-        if (isDescendant || targetFolderId === itemId) {
-          return res.status(400).json({
-            success: false,
-            message: "Cannot move folder into itself or its descendants",
-          });
-        }
-      }
-    }
-
-    await item.update({
-      parentId: targetFolderId || null,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Item moved successfully",
-      data: item,
-    });
-  } catch (error) {
-    console.error("Error moving item:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to move item",
-      error: error.message,
-    });
-  }
-};
-
-// Helper function to check if target is a descendant of source
-async function checkIfDescendant(targetId, sourceId, ownerId) {
-  const descendants = await DASHBOARD.findAll({
+  // Check for duplicate combination of contactPerson, organization, AND title (allow multiple projects per contact)
+  const existingContactOrgTitleLead = await Lead.findOne({
     where: {
-      parentId: sourceId,
-      ownerId,
+      contactPerson: contactPerson,
+      organization: organization,
+      title: title,
     },
   });
+  if (existingContactOrgTitleLead) {
+    return res.status(409).json({
+      message:
+        "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
+      existingLeadId: existingContactOrgTitleLead.leadId,
+      existingLeadTitle: existingContactOrgTitleLead.title,
+      existingContactPerson: existingContactOrgTitleLead.contactPerson,
+      existingOrganization: existingContactOrgTitleLead.organization,
+    });
+  }
+  // --- End validation ---
 
-  for (const descendant of descendants) {
-    if (descendant.dashboardId === targetId) {
-      return true;
-    }
-    if (descendant.type === "folder") {
-      const isSubDescendant = await checkIfDescendant(
-        targetId,
-        descendant.dashboardId,
-        ownerId
+  console.log(req.role, "role of the user............");
+
+  try {
+    // Check if user can create leads based on visibility rules
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_CREATION", // Mode
+        null, // No user ID for failed sign-in
+        "Access denied. You do not have permission to create leads.", // Error description
+        null
       );
-      if (isSubDescendant) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-// =============== REPORT MANAGEMENT ===============
-
-exports.createReport = async (req, res) => {
-  try {
-    const { dashboardId, entity, type, config, position, name, description } =
-      req.body;
-    const ownerId = req.adminId;
-
-    // Validate required fields
-    if (!dashboardId || !entity || !type) {
-      return res.status(400).json({
-        success: false,
-        message: "Dashboard ID, entity, and type are required",
+      return res.status(403).json({
+        message: "Access denied. You do not have permission to create leads.",
       });
     }
 
-    // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
+    // Get user's visibility group and check lead creation permissions
+    let userGroup = null;
+    let leadVisibilityRule = null;
 
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
-      });
-    }
-
-    // Default config based on report type
-    let defaultConfig = {};
-    switch (type) {
-      case "Performance":
-        defaultConfig = {
-          chartType: "pie",
-          metrics: ["win_rate", "loss_rate"],
-          period: "this_month",
-          groupBy: "status",
-        };
-        break;
-      case "Conversion":
-        defaultConfig = {
-          chartType: "funnel",
-          metrics: ["conversion_rate"],
-          period: "this_month",
-          stages: ["all"],
-        };
-        break;
-      case "Duration":
-        defaultConfig = {
-          chartType: "bar",
-          metrics: ["avg_days"],
-          period: "this_month",
-          groupBy: "pipeline_stage",
-        };
-        break;
-      case "Progress":
-        defaultConfig = {
-          chartType: "line",
-          metrics: ["deal_movement"],
-          period: "this_month",
-          groupBy: "stage",
-        };
-        break;
-      case "Products":
-        defaultConfig = {
-          chartType: "bar",
-          metrics: ["revenue", "quantity"],
-          period: "this_month",
-          groupBy: "product",
-        };
-        break;
-      default:
-        defaultConfig = {
-          chartType: "bar",
-          metrics: ["count"],
-          period: "this_month",
-        };
-    }
-
-    const finalConfig = { ...defaultConfig, ...config };
-
-    const newReport = await Report.create({
-      dashboardId,
-      entity,
-      type,
-      config: finalConfig,
-      position: position || 0,
-      name: name || `${entity} ${type} Report`,
-      description,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Report created successfully",
-      data: newReport,
-    });
-  } catch (error) {
-    console.error("Error creating report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create report",
-      error: error.message,
-    });
-  }
-};
-
-exports.getReportsForDashboard = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const ownerId = req.adminId;
-
-    // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
-      });
-    }
-
-    const reports = await Report.findAll({
-      where: { dashboardId },
-      order: [
-        ["position", "ASC"],
-        ["createdAt", "ASC"],
-      ],
-    });
-
-    // Generate report data for each report
-    const reportsWithData = await Promise.all(
-      reports.map(async (report) => {
-        const reportData = await generateReportData(report, ownerId);
-        return {
-          ...report.toJSON(),
-          data: reportData,
-        };
-      })
-    );
-
-    res.status(200).json({
-      success: true,
-      data: reportsWithData,
-    });
-  } catch (error) {
-    console.error("Error fetching reports:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch reports",
-      error: error.message,
-    });
-  }
-};
-
-exports.updateReport = async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const { entity, type, config, position, name, description } = req.body;
-    const ownerId = req.adminId;
-
-    const report = await Report.findOne({
-      where: { reportId },
-      include: [
-        {
-          model: DASHBOARD,
-          as: "Dashboard",
-          where: { ownerId },
-        },
-      ],
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or access denied",
-      });
-    }
-
-    await report.update({
-      entity: entity || report.entity,
-      type: type || report.type,
-      config: config ? { ...report.config, ...config } : report.config,
-      position: position !== undefined ? position : report.position,
-      name: name || report.name,
-      description: description !== undefined ? description : report.description,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Report updated successfully",
-      data: report,
-    });
-  } catch (error) {
-    console.error("Error updating report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update report",
-      error: error.message,
-    });
-  }
-};
-
-exports.deleteReport = async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const ownerId = req.adminId;
-
-    const report = await Report.findOne({
-      where: { reportId },
-      include: [
-        {
-          model: DASHBOARD,
-          as: "Dashboard",
-          where: { ownerId },
-        },
-      ],
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or access denied",
-      });
-    }
-
-    await report.destroy();
-
-    res.status(200).json({
-      success: true,
-      message: "Report deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete report",
-      error: error.message,
-    });
-  }
-};
-
-exports.getReportData = async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const ownerId = req.adminId;
-
-    const report = await Report.findOne({
-      where: { reportId },
-      include: [
-        {
-          model: DASHBOARD,
-          as: "Dashboard",
-          where: { ownerId },
-        },
-      ],
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or access denied",
-      });
-    }
-
-    const reportData = await generateReportData(report, ownerId);
-
-    res.status(200).json({
-      success: true,
-      data: reportData,
-    });
-  } catch (error) {
-    console.error("Error generating report data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to generate report data",
-      error: error.message,
-    });
-  }
-};
-
-// =============== GOAL MANAGEMENT ===============
-
-// Get available goal types for entity selection
-exports.getGoalTypes = async (req, res) => {
-  try {
-    const goalTypes = {
-      Deal: [
-        {
-          type: "Added",
-          description: "Based on the number or value of new deals",
-          metrics: ["count", "value"],
-        },
-        {
-          type: "Progressed",
-          description:
-            "Based on the number or value of deals entering a certain stage",
-          metrics: ["count", "value"],
-        },
-        {
-          type: "Won",
-          description: "Based on the number or value of won deals",
-          metrics: ["count", "value"],
-        },
-      ],
-      Activity: [
-        {
-          type: "Added",
-          description: "Based on the number of activities that were created",
-          metrics: ["count"],
-        },
-        {
-          type: "Completed",
-          description: "Based on the number of completed activities",
-          metrics: ["count"],
-        },
-      ],
-      Forecast: [
-        {
-          type: "Revenue",
-          description: "Based on forecasted revenue",
-          metrics: ["value"],
-        },
-      ],
-    };
-
-    res.status(200).json({
-      success: true,
-      data: goalTypes,
-    });
-  } catch (error) {
-    console.error("Error fetching goal types:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch goal types",
-      error: error.message,
-    });
-  }
-};
-
-exports.createGoal = async (req, res) => {
-  try {
-    const {
-      dashboardId,
-      entity,
-      goalType,
-      targetValue,
-      targetType,
-      period,
-      frequency,
-      startDate,
-      endDate,
-      description,
-      assignee,
-      assignId,
-      pipeline,
-      pipelineStage,
-      trackingMetric,
-      count,
-      value,
-      activityType, // Add activityType field for Activity goals
-      activityTypes, // Support multiple activity types
-    } = req.body;
-    const ownerId = req.adminId;
-
-    // Validate required fields - dashboardId is now optional
-    if (!entity || !goalType) {
-      return res.status(400).json({
-        success: false,
-        message: "Entity and goal type are required",
-      });
-    }
-
-    // Additional validation for "Progressed" goals
-    if (goalType === "Progressed" && entity === "Deal") {
-      if (!pipeline) {
-        return res.status(400).json({
-          success: false,
-          message: "Pipeline is required for 'Progressed' deal goals",
-        });
-      }
-      if (!pipelineStage) {
-        return res.status(400).json({
-          success: false,
-          message: "Pipeline stage is required for 'Progressed' deal goals",
-        });
-      }
-    }
-
-    // Validate target value or count/value based on tracking metric
-    if (!targetValue && !count && !value) {
-      return res.status(400).json({
-        success: false,
-        message: "Target value, count, or value is required",
-      });
-    }
-
-    // Validate start date is required
-    if (!startDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Start date is required",
-      });
-    }
-
-    // Verify dashboard ownership if dashboardId is provided
-    if (dashboardId) {
-      const dashboard = await DASHBOARD.findOne({
+    if (req.role !== "admin") {
+      // Get user's current group membership
+      const membership = await GroupMembership.findOne({
         where: {
-          dashboardId,
-          ownerId,
-        },
-      });
-
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: "Dashboard not found or access denied",
-        });
-      }
-    }
-
-    // Set default dates if not provided
-    const now = new Date();
-    let defaultStartDate, defaultEndDate;
-
-    // Parse startDate if provided
-    if (startDate) {
-      defaultStartDate = new Date(startDate);
-      // Validate startDate
-      if (isNaN(defaultStartDate.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid start date format",
-        });
-      }
-    }
-
-    // Parse endDate if provided, otherwise handle indefinite goals
-    if (endDate && endDate !== "" && endDate !== null) {
-      defaultEndDate = new Date(endDate);
-      // Validate endDate
-      if (isNaN(defaultEndDate.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid end date format",
-        });
-      }
-      // Validate end date is after start date
-      if (defaultEndDate <= defaultStartDate) {
-        return res.status(400).json({
-          success: false,
-          message: "End date must be after start date",
-        });
-      }
-    } else {
-      // No end date provided - goal continues indefinitely
-      // For display purposes, we can set a far future date or null
-      // Setting to null indicates an indefinite goal
-      defaultEndDate = null;
-
-      // If frequency is provided, we can calculate the current period's end date for tracking
-      // But the goal itself continues indefinitely
-      if (frequency === "Monthly") {
-        // For tracking current period only
-        const currentPeriodEnd = new Date(
-          defaultStartDate.getFullYear(),
-          defaultStartDate.getMonth() + 1,
-          0
-        );
-      } else if (frequency === "Quarterly") {
-        const currentPeriodEnd = new Date(
-          defaultStartDate.getFullYear(),
-          defaultStartDate.getMonth() + 3,
-          0
-        );
-      } else if (frequency === "Yearly") {
-        const currentPeriodEnd = new Date(
-          defaultStartDate.getFullYear() + 1,
-          0,
-          0
-        );
-      }
-      // Note: For indefinite goals, we track progress from start date to current date
-    }
-
-    // Determine display name for assignee
-    let assigneeDisplay = "Everyone";
-    if (assignId && assignId !== "everyone") {
-      // Try to fetch user name from MasterUser if assignId is present and not 'everyone'
-
-      const user = await MasterUser.findOne({
-        where: { masterUserID: assignId },
-      });
-      if (user && user.name) {
-        assigneeDisplay = user.name;
-      } else if (assignee && assignee !== "All" && assignee !== "everyone") {
-        assigneeDisplay = assignee;
-      }
-    } else if (assignee && assignee !== "All" && assignee !== "everyone") {
-      assigneeDisplay = assignee;
-    }
-
-    // Build goal name for UI as in screenshot
-    let goalName = description;
-    if (!goalName) {
-      if (entity === "Deal" && goalType === "Added") {
-        goalName = `Deals added ${assigneeDisplay}`;
-      } else if (entity === "Deal" && goalType === "Won") {
-        goalName = `Deals won ${assigneeDisplay}`;
-      } else if (entity === "Deal" && goalType === "Progressed") {
-        goalName = `Deals progressed ${assigneeDisplay}`;
-      } else if (entity === "Activity" && goalType === "Completed") {
-        goalName = `Activities completed ${assigneeDisplay}`;
-      } else {
-        goalName = `${entity} ${goalType} ${assigneeDisplay}`;
-      }
-    }
-
-    // Determine target value based on tracking metric
-    let finalTargetValue = targetValue;
-    if (trackingMetric === "Count" && count) {
-      finalTargetValue = count;
-    } else if (trackingMetric === "Value" && value) {
-      finalTargetValue = value;
-    }
-
-    // Handle activity types for Activity goals
-    let finalActivityType = null;
-    if (entity === "Activity") {
-      // Use activityTypes (multiple) or activityType (single)
-      const selectedActivityTypes = activityTypes || activityType;
-      if (selectedActivityTypes) {
-        if (Array.isArray(selectedActivityTypes)) {
-          finalActivityType = selectedActivityTypes.join(",");
-        } else {
-          finalActivityType = selectedActivityTypes;
-        }
-      }
-    }
-
-    // Get the next position for this dashboard
-    let nextPosition = 0;
-    if (dashboardId) {
-      const existingGoals = await Goal.findAll({
-        where: { dashboardId, isActive: true },
-        order: [["position", "DESC"]],
-        limit: 1,
-      });
-      if (existingGoals.length > 0) {
-        nextPosition = (existingGoals[0].position || 0) + 1;
-      }
-    }
-
-    const newGoal = await Goal.create({
-      dashboardId: dashboardId || null,
-      entity,
-      goalType,
-      targetValue: finalTargetValue,
-      targetType:
-        targetType || (trackingMetric === "Value" ? "currency" : "number"),
-      period: period || "Monthly", // Use period field as defined in model
-      startDate: defaultStartDate,
-      endDate: defaultEndDate,
-      description: goalName,
-      assignee: assignee || null,
-      assignId: assignId || null, // Add assignId field
-      pipeline: pipeline || null,
-      pipelineStage: pipelineStage || null, // Add pipelineStage field for "Progressed" goals
-      activityType: finalActivityType || null, // Add activityType field for Activity goals
-      trackingMetric: trackingMetric || "Count",
-      count: trackingMetric === "Count" ? count || finalTargetValue : null,
-      value: trackingMetric === "Value" ? value || finalTargetValue : null,
-      position: nextPosition, // Add position field
-      ownerId,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Goal created successfully",
-      data: {
-        ...newGoal.toJSON(),
-        isIndefinite: !defaultEndDate,
-        durationInfo: !defaultEndDate
-          ? `Indefinite goal starting from ${defaultStartDate.toLocaleDateString()}`
-          : `Goal from ${defaultStartDate.toLocaleDateString()} to ${defaultEndDate.toLocaleDateString()}`,
-      },
-    });
-  } catch (error) {
-    console.error("Error creating goal:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create goal",
-      error: error.message,
-    });
-  }
-};
-
-// Get all goals (not tied to specific dashboard)
-exports.getAllGoals = async (req, res) => {
-  try {
-    const ownerId = req.adminId;
-    const now = new Date();
-
-    const goals = await Goal.findAll({
-      where: {
-        ownerId,
-        isActive: true,
-      },
-      order: [["createdAt", "DESC"]],
-    });
-
-    // Calculate progress for each goal
-    const goalsWithProgress = await Promise.all(
-      goals.map(async (goal) => {
-        const progress = await calculateGoalProgress(goal, ownerId);
-        return {
-          ...goal.toJSON(),
-          progress,
-        };
-      })
-    );
-
-    // Group into Active and Past using endDate logic
-    const activeGoals = [];
-    const pastGoals = [];
-    goalsWithProgress.forEach((goal) => {
-      const endDate = goal.endDate ? new Date(goal.endDate) : null;
-      if (!endDate) {
-        // Ongoing goal (no end date)
-        activeGoals.push(goal);
-      } else {
-        // Compare endDate to current date (today)
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        endDate.setHours(0, 0, 0, 0);
-        if (endDate >= today) {
-          activeGoals.push(goal);
-        } else {
-          pastGoals.push(goal);
-        }
-      }
-    });
-
-    res.status(200).json({
-      success: true,
-      data: {
-        Active: activeGoals,
-        Past: pastGoals,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching goals:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch goals",
-      error: error.message,
-    });
-  }
-};
-
-// Add goal to dashboard
-exports.addGoalToDashboard = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const { dashboardId } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // For admin, do not filter by ownerId
-    const goal = await Goal.findOne({
-      where: role === "admin" ? { goalId } : { goalId, ownerId },
-    });
-
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
-
-    // For admin, do not filter by ownerId
-    const dashboard = await DASHBOARD.findOne({
-      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
-      });
-    }
-
-    await goal.update({
-      dashboardId,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Goal added to dashboard successfully",
-      data: goal,
-    });
-  } catch (error) {
-    console.error("Error adding goal to dashboard:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to add goal to dashboard",
-      error: error.message,
-    });
-  }
-};
-
-exports.getGoalsForDashboard = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // If no dashboardId provided, return all goals for user
-    if (!dashboardId || dashboardId === "all") {
-      const goals = await Goal.findAll({
-        where:
-          role === "admin" ? { isActive: true } : { ownerId, isActive: true },
-        order: [
-          ["position", "ASC"],
-          ["createdAt", "DESC"],
-        ],
-      });
-
-      // Calculate progress for each goal
-      const goalsWithProgress = await Promise.all(
-        goals.map(async (goal) => {
-          const progress = await calculateGoalProgress(goal, ownerId);
-          return {
-            ...goal.toJSON(),
-            progress,
-            isDraggable: true, // Add flag for frontend to show drag handle
-          };
-        })
-      );
-
-      return res.status(200).json({
-        success: true,
-        data: goalsWithProgress,
-      });
-    }
-
-    // Verify dashboard ownership (admin can access all dashboards)
-    const dashboard = await DASHBOARD.findOne({
-      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
-      });
-    }
-
-    const goals = await Goal.findAll({
-      where: {
-        dashboardId,
-        isActive: true,
-      },
-      order: [
-        ["position", "ASC"],
-        ["createdAt", "DESC"],
-      ],
-    });
-
-    // Calculate progress for each goal
-    const goalsWithProgress = await Promise.all(
-      goals.map(async (goal) => {
-        const progress = await calculateGoalProgress(goal, ownerId);
-        return {
-          ...goal.toJSON(),
-          progress,
-          isDraggable: true, // Add flag for frontend to show drag handle
-          position: goal.position || 0, // Ensure position is included
-        };
-      })
-    );
-
-    res.status(200).json({
-      success: true,
-      data: goalsWithProgress,
-    });
-  } catch (error) {
-    console.error("Error fetching goals:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch goals",
-      error: error.message,
-    });
-  }
-};
-
-exports.updateGoal = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const {
-      entity,
-      goalType,
-      targetValue,
-      targetType,
-      period,
-      frequency,
-      startDate,
-      endDate,
-      description,
-      assignee,
-      assignId,
-      pipeline,
-      pipelineStage,
-      trackingMetric,
-      count,
-      value,
-      isActive,
-    } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // If admin, do not filter by ownerId
-    const goal = await Goal.findOne({
-      where: role === "admin" ? { goalId } : { goalId, ownerId },
-    });
-
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
-
-    await goal.update({
-      entity: entity || goal.entity,
-      goalType: goalType || goal.goalType,
-      targetValue: targetValue !== undefined ? targetValue : goal.targetValue,
-      targetType: targetType || goal.targetType,
-      period: frequency || period || goal.period,
-      startDate: startDate || goal.startDate,
-      endDate: endDate || goal.endDate,
-      description: description !== undefined ? description : goal.description,
-      assignee: assignee !== undefined ? assignee : goal.assignee,
-      assignId: assignId !== undefined ? assignId : goal.assignId,
-      pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
-      pipelineStage:
-        pipelineStage !== undefined ? pipelineStage : goal.pipelineStage,
-      trackingMetric: trackingMetric || goal.trackingMetric,
-      count: count !== undefined ? count : goal.count,
-      value: value !== undefined ? value : goal.value,
-      isActive: isActive !== undefined ? isActive : goal.isActive,
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Goal updated successfully",
-      data: goal,
-    });
-  } catch (error) {
-    console.error("Error updating goal:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update goal",
-      error: error.message,
-    });
-  }
-};
-
-// Reorder goals on dashboard (for drag and drop functionality)
-exports.reorderGoals = async (req, res) => {
-  try {
-    const { dashboardId } = req.params;
-    const { goalOrders } = req.body; // Array of objects: [{goalId: 'id1', position: 0}, {goalId: 'id2', position: 1}, ...]
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // Validate input
-    if (!Array.isArray(goalOrders) || goalOrders.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Goal orders array is required",
-      });
-    }
-
-    // Verify dashboard ownership
-    const dashboard = await DASHBOARD.findOne({
-      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
-    });
-
-    if (!dashboard) {
-      return res.status(404).json({
-        success: false,
-        message: "Dashboard not found or access denied",
-      });
-    }
-
-    // Get all goals for this dashboard to verify they exist
-    const existingGoals = await Goal.findAll({
-      where: {
-        dashboardId,
-        isActive: true,
-      },
-    });
-
-    const existingGoalIds = existingGoals.map((goal) => goal.goalId);
-
-    // Validate that all provided goalIds exist in this dashboard
-    const providedGoalIds = goalOrders.map((order) => order.goalId);
-    const invalidGoalIds = providedGoalIds.filter(
-      (id) => !existingGoalIds.includes(id)
-    );
-
-    if (invalidGoalIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid goal IDs: ${invalidGoalIds.join(", ")}`,
-      });
-    }
-
-    // Update positions for each goal
-    const updatePromises = goalOrders.map(({ goalId, position }) => {
-      return Goal.update(
-        { position: position || 0 },
-        {
-          where:
-            role === "admin"
-              ? { goalId, dashboardId }
-              : { goalId, dashboardId, ownerId },
-        }
-      );
-    });
-
-    await Promise.all(updatePromises);
-
-    // Fetch updated goals to return
-    const updatedGoals = await Goal.findAll({
-      where: {
-        dashboardId,
-        isActive: true,
-      },
-      order: [
-        ["position", "ASC"],
-        ["createdAt", "DESC"],
-      ],
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Goals reordered successfully",
-      data: updatedGoals,
-    });
-  } catch (error) {
-    console.error("Error reordering goals:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to reorder goals",
-      error: error.message,
-    });
-  }
-};
-
-exports.deleteGoal = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const ownerId = req.adminId;
-
-    const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
-    });
-
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
-
-    await goal.destroy();
-
-    res.status(200).json({
-      success: true,
-      message: "Goal deleted successfully",
-    });
-  } catch (error) {
-    console.error("Error deleting goal:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete goal",
-      error: error.message,
-    });
-  }
-};
-
-exports.getGoalProgress = async (req, res) => {
-  try {
-    const { goalId } = req.params;
-    const ownerId = req.adminId;
-
-    const goal = await Goal.findOne({
-      where: {
-        goalId,
-        ownerId,
-      },
-    });
-
-    if (!goal) {
-      return res.status(404).json({
-        success: false,
-        message: "Goal not found or access denied",
-      });
-    }
-
-    const progress = await calculateGoalProgress(goal, ownerId);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        goal: goal.toJSON(),
-        progress,
-      },
-    });
-  } catch (error) {
-    console.error("Error calculating goal progress:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to calculate goal progress",
-      error: error.message,
-    });
-  }
-};
-
-// Get filtered data for a specific goal or all goals in a dashboard
-exports.getGoalData = async (req, res) => {
-  try {
-    const { goalId, dashboardId } = req.params;
-    const ownerId = req.adminId;
-    const role = req.role;
-    req.body = req.body || {};
-    req.query = req.query || {};
-    const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
-
-    // Accept selectedColumns from body or query (object with Deal, Person, Organization arrays)
-    let selectedColumns =
-      req.body.selectedColumns || req.query.selectedColumns || {};
-    if (typeof selectedColumns === "string") {
-      try {
-        selectedColumns = JSON.parse(selectedColumns);
-      } catch (e) {
-        selectedColumns = {};
-      }
-    }
-    // Always ensure keys exist for all entities
-    selectedColumns.Deal = Array.isArray(selectedColumns.Deal) ? selectedColumns.Deal : [];
-    selectedColumns.Person = Array.isArray(selectedColumns.Person) ? selectedColumns.Person : [];
-    selectedColumns.Organization = Array.isArray(selectedColumns.Organization) ? selectedColumns.Organization : [];
-
-    // Support both single goal and dashboard-level queries
-    let goals = [];
-
-    // If goalId is not present, do not show empty records array (return early)
-    if (!goalId || goalId === "dashboard") {
-      // For now, do not return empty records array if no goalId
-      return res.status(200).json({
-        success: true,
-        message: "No goalId provided. No records to show.",
-        data: null
-      });
-    }
-
-    if (goalId && goalId !== "dashboard") {
-      // Single goal query (existing functionality)
-      const goal = await Goal.findOne({
-        where: {
-          goalId,
-          ownerId,
-        },
-      });
-
-      if (!goal) {
-        return res.status(404).json({
-          success: false,
-          message: "Goal not found or access denied",
-        });
-      }
-
-      // Fetch checked columns for this goal's entity/context
-      const InsightColumn = require("../../models/insight/insightColumnModel");
-      const where = { masterUserID: ownerId };
-      // Use dashboardId as contextId if present
-      if (goal.dashboardId) where.contextId = goal.dashboardId;
-      const columnRecord = await InsightColumn.findOne({ where });
-
-      // If contextId (goal.dashboardId) is not present in InsightColumn, return empty records array
-      if (!columnRecord || !columnRecord.contextId || columnRecord.contextId !== goal.dashboardId) {
-        return res.status(200).json({
-          success: true,
-          data: {
-            records: []
-          }
-        });
-      }
-
-      let checkedColumns = [];
-      if (columnRecord && columnRecord.columns && columnRecord.columns[goal.entity]) {
-        checkedColumns = columnRecord.columns[goal.entity]
-          .filter(col => col.checked)
-          .map(col => col.key);
-      }
-      // If no checked columns, fallback to default logic (first 5 columns)
-      let entityColumns = checkedColumns;
-      if (!entityColumns || entityColumns.length === 0) {
-        // Use getDefaultColumns helper from above
-        async function getDefaultColumns(entity) {
-          const getModelColumns = (model) =>
-            Object.keys(model.rawAttributes).filter(
-              (col) =>
-                !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
-            );
-          const CustomFieldModel = require("../../models/customFieldModel");
-          async function getCustomFields(entityType) {
-            const fields = await CustomFieldModel.findAll({
-              where: { entityType, isActive: true },
-              attributes: ["fieldName"],
-            });
-            return fields.map((f) => f.fieldName);
-          }
-          let model, entityType;
-          if (entity === "Deal") {
-            model = require("../../models/deals/dealsModels");
-            entityType = "Deal";
-          } else if (entity === "Person") {
-            model = require("../../models/leads/leadPersonModel");
-            entityType = "Person";
-          } else if (entity === "Organization") {
-            model = require("../../models/leads/leadOrganizationModel");
-            entityType = "Organization";
-          }
-          const modelCols = getModelColumns(model);
-          const customCols = await getCustomFields(entityType);
-          return [...modelCols, ...customCols].slice(0, 5);
-        }
-        entityColumns = await getDefaultColumns(goal.entity);
-      }
-      goals = [goal];
-      // Overwrite selectedColumns for this entity for processGoalData
-      selectedColumns.Deal = [];
-      selectedColumns.Person = [];
-      selectedColumns.Organization = [];
-      selectedColumns[goal.entity] = entityColumns;
-    } else if (dashboardId || goalId === "dashboard") {
-      // Dashboard-level query (new functionality)
-      const targetDashboardId = dashboardId || req.query.dashboardId;
-
-      if (!targetDashboardId) {
-        return res.status(400).json({
-          success: false,
-          message: "Dashboard ID is required for dashboard-level goal data",
-        });
-      }
-
-      // Verify dashboard ownership (admin can access all dashboards)
-      const dashboard = await DASHBOARD.findOne({
-        where:
-          role === "admin"
-            ? { dashboardId: targetDashboardId }
-            : { dashboardId: targetDashboardId, ownerId },
-      });
-
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: "Dashboard not found or access denied",
-        });
-      }
-
-      // Get all goals for this dashboard
-      goals = await Goal.findAll({
-        where: {
-          dashboardId: targetDashboardId,
+          userId: req.adminId,
           isActive: true,
         },
-        order: [
-          ["position", "ASC"],
-          ["createdAt", "DESC"],
+        include: [
+          {
+            model: VisibilityGroup,
+            as: "group",
+            where: { isActive: true },
+          },
         ],
       });
 
-      if (goals.length === 0) {
-        return res.status(200).json({
-          success: true,
-          message: "No active goals found for this dashboard",
-          data: {
-            goals: [],
-            summary: {
-              totalGoals: 0,
-              completedGoals: 0,
-              avgProgress: 0,
+      if (membership) {
+        userGroup = membership.group;
+
+        // Check if user's group has permission to create leads
+        leadVisibilityRule = await ItemVisibilityRule.findOne({
+          where: {
+            groupId: userGroup.groupId,
+            entityType: "leads",
+            isActive: true,
+          },
+        });
+
+        if (leadVisibilityRule && !leadVisibilityRule.canCreate) {
+          await logAuditTrail(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "LEAD_CREATION",
+            req.adminId,
+            "Access denied. Your visibility group does not have permission to create leads.",
+            null
+          );
+          return res.status(403).json({
+            message:
+              "Access denied. Your visibility group does not have permission to create leads.",
+          });
+        }
+      }
+    }
+
+    // 1. Find or create Organization
+    let orgRecord = await Organization.findOne({ where: { organization } });
+    if (!orgRecord) {
+      orgRecord = await Organization.create({
+        organization,
+        masterUserID: req.adminId,
+      });
+    }
+    console.log(
+      "orgRecord after create/find:",
+      orgRecord?.organizationId,
+      orgRecord?.organization
+    );
+
+    // Defensive: If orgRecord is still not found, stop!
+    if (!orgRecord || !orgRecord.leadOrganizationId) {
+      return res
+        .status(500)
+        .json({ message: "Failed to create/find organization." });
+    }
+    // 2. Find or create Person (linked to organization)
+    let personRecord = await Person.findOne({ where: { email } });
+    if (!personRecord) {
+      personRecord = await Person.create({
+        contactPerson,
+        email,
+        phone,
+        leadOrganizationId: orgRecord.leadOrganizationId,
+        masterUserID: req.adminId,
+      });
+    }
+    //     const duplicateLead = await Lead.findOne({
+    //   where: {
+    //     organization,
+    //     contactPerson,
+    //     // email,
+    //     title
+    //   }
+    // });
+    // if (duplicateLead) {
+    //   return res.status(409).json({
+    //     message: "Lead Already Exist."
+    //   });
+    // }
+    // const duplicateByOrg = await Lead.findOne({ where: { organization } });
+
+    const owner = await MasterUser.findOne({
+      where: { masterUserID: req.adminId },
+    });
+    const ownerName = owner ? owner.name : null;
+
+    // Determine visibility level based on user's group settings or request
+    let visibilityLevel = req.body.visibilityLevel;
+    if (!visibilityLevel && leadVisibilityRule) {
+      visibilityLevel = leadVisibilityRule.defaultVisibility;
+    }
+    if (!visibilityLevel) {
+      visibilityLevel = "item_owners_visibility_group"; // Default fallback
+    }
+
+    const lead = await Lead.create({
+      personId: personRecord.personId, // <-- Add this
+      leadOrganizationId: orgRecord.leadOrganizationId,
+      contactPerson,
+      organization,
+      title,
+      valueLabels,
+      expectedCloseDate,
+      sourceChannel,
+      sourceChannelID,
+      serviceType,
+      // scopeOfServiceType,
+      phone,
+      email,
+      company,
+      proposalValue,
+      esplProposalNo,
+      projectLocation,
+      organizationCountry,
+      proposalSentDate,
+      status,
+      masterUserID: req.adminId,
+      ownerId: req.adminId, // Associate the lead with the authenticated user
+      ownerName, // Store the role of the user as ownerName,
+      sourceOrgin, // Indicate that the lead was created manually
+      SBUClass,
+      numberOfReportsPrepared,
+      // Add new Pipedrive-style default fields
+      pipeline: req.body.pipeline || "Default Pipeline",
+      stage: req.body.stage || "New Lead",
+      productName: req.body.productName,
+      sourceOriginID: req.body.sourceOriginID,
+      value,
+      // Add visibility settings
+      visibilityLevel,
+      visibilityGroupId: userGroup ? userGroup.groupId : null,
+      valueCurrency: req.body.valueCurrency || "INR",
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR"
+    });
+
+    // Link email to lead if sourceOrgin is 0 (email-created lead)
+    if ((sourceOrgin === 0 || sourceOrgin === "0") && emailID) {
+      try {
+        console.log(`Linking email ${emailID} to lead ${lead.leadId}`);
+        const emailUpdateResult = await Email.update(
+          { leadId: lead.leadId },
+          { where: { emailID: emailID } }
+        );
+        console.log(`Email link result: ${emailUpdateResult[0]} rows updated`);
+
+        if (emailUpdateResult[0] === 0) {
+          console.warn(`No email found with emailID: ${emailID}`);
+        }
+      } catch (emailError) {
+        console.error("Error linking email to lead:", emailError);
+        // Don't fail the lead creation, just log the error
+      }
+    }
+    // --- Add this block to link existing emails to the new lead ---
+    // await Email.update(
+    //   { leadId: lead.leadId },
+    //   {
+    //     where: {
+    //       [Op.or]: [
+    //         { sender: lead.email },
+    //         { recipient: { [Op.like]: `%${lead.email}%` } }
+    //       ]
+    //     }
+    //   }
+    // );
+    // --- End block ---
+    await LeadDetails.create({
+      leadId: lead.leadId,
+      responsiblePerson: req.adminId,
+      sourceOrgin: sourceOrgin,
+    });
+
+    // Handle custom fields if provided
+    const savedCustomFields = {};
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          // Try to find the custom field by fieldId first, then by fieldName
+          // Support both user-specific and system/default fields
+          // Now supports unified fields (entityType: "lead" or "both")
+          let customField = await CustomField.findOne({
+            where: {
+              fieldId: fieldKey,
+              entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+              isActive: true,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+              ],
             },
+          });
+
+          // If not found by fieldId, try to find by fieldName
+          if (!customField) {
+            customField = await CustomField.findOne({
+              where: {
+                fieldName: fieldKey,
+                entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+                isActive: true,
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
+              },
+            });
+          }
+
+          if (
+            customField &&
+            value !== null &&
+            value !== undefined &&
+            value !== ""
+          ) {
+            await CustomFieldValue.create({
+              fieldId: customField.fieldId, // Use the actual fieldId from database
+              entityId: lead.leadId,
+              entityType: "lead",
+              value: value,
+              masterUserID: req.adminId,
+            });
+
+            // Store the saved custom field for response using fieldName as key
+            savedCustomFields[customField.fieldName] = {
+              fieldName: customField.fieldName,
+              fieldType: customField.fieldType,
+              value: value,
+            };
+          } else if (!customField) {
+            console.warn(`Custom field not found for key: ${fieldKey}`);
+          }
+        }
+        console.log(
+          `Saved ${
+            Object.keys(savedCustomFields).length
+          } custom field values for lead ${lead.leadId}`
+        );
+      } catch (customFieldError) {
+        console.error("Error saving custom fields:", customFieldError);
+        // Don't fail the lead creation, just log the error
+      }
+    }
+
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_CREATION", // Mode
+      lead.masterUserID, // Created by (Admin ID)
+      lead.leadId, // Record ID (Country ID)
+      null,
+      `Lead is created by  ${req.role}`, // Description
+      null // Changes logged as JSON
+    );
+
+    // Prepare response with both default and custom fields
+    const leadResponse = {
+      ...lead.toJSON(),
+      customFields: savedCustomFields,
+    };
+
+    res.status(201).json({
+      message: "Lead created successfully",
+      lead: leadResponse,
+      customFieldsSaved: Object.keys(savedCustomFields).length,
+    });
+  } catch (error) {
+    console.error("Error creating lead:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_CREATION", // Mode
+      null, // No user ID for failed sign-in
+      "Error creating lead: " + error.message, // Error description
+      null
+    );
+    res.status(500).json(error);
+  }
+};
+
+exports.archiveLead = async (req, res) => {
+  const { leadId } = req.params; // Use leadId instead of id
+
+  try {
+    const lead = await Lead.findByPk(leadId); // Find lead by leadId
+    if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_ARCHIVE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    lead.isArchived = true; // Set the lead as archived
+    lead.archiveTime = new Date(); // Set the archive time to now
+    await lead.save();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_ARCHIVE", // Mode
+      lead.masterUserID, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead is archived by "${req.role}"`, // Description
+      null
+    );
+    res.status(200).json({ message: "Lead archived successfully", lead });
+  } catch (error) {
+    console.error("Error archiving lead:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_ARCHIVE", // Mode
+      null, // No user ID for failed sign-in
+      "Error archiving lead: " + error.message, // Error description
+      null
+    );
+    res.status(500).json(error);
+  }
+};
+
+exports.unarchiveLead = async (req, res) => {
+  const { leadId } = req.params; // Use leadId instead of id
+
+  try {
+    const lead = await Lead.findByPk(leadId); // Find lead by leadId
+    if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UNARCHIVE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    lead.isArchived = false; // Set the lead as unarchived
+    await lead.save();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_UNARCHIVE", // Mode
+      lead.masterUserID, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead is unarchived by "${req.role}"`, // Description
+      null
+    );
+    res.status(200).json({ message: "Lead unarchived successfully", lead });
+  } catch (error) {
+    console.error("Error unarchiving lead:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UNARCHIVE", // Mode
+      null, // No user ID for failed sign-in
+      "Error unarchiving lead: " + error.message, // Error description
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getLeads = async (req, res) => {
+  const {
+    isArchived,
+    search,
+    page = 1,
+    limit = 20,
+    sortBy = "createdAt",
+    order = "DESC",
+    masterUserID: queryMasterUserID,
+    filterId,
+  } = req.query;
+  console.log(req.role, "role of the user............");
+
+  try {
+    // Get user's visibility group and rules
+    let userGroup = null;
+    let leadVisibilityRule = null;
+
+    if (req.role !== "admin") {
+      const membership = await GroupMembership.findOne({
+        where: {
+          userId: req.adminId,
+          isActive: true,
+        },
+        include: [
+          {
+            model: VisibilityGroup,
+            as: "group",
+            where: { isActive: true },
+          },
+        ],
+      });
+
+      if (membership) {
+        userGroup = membership.group;
+        leadVisibilityRule = await ItemVisibilityRule.findOne({
+          where: {
+            groupId: userGroup.groupId,
+            entityType: "leads",
+            isActive: true,
           },
         });
       }
+    }
+
+    // Determine masterUserID based on role
+
+    const pref = await LeadColumnPreference.findOne();
+
+    let leadAttributes, leadDetailsAttributes;
+    if (pref && pref.columns) {
+      // Parse columns if it's a string
+      const columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
+
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+
+      leadAttributes = columns
+        .filter((col) => col.check && leadFields.includes(col.key))
+        .map((col) => col.key);
+      // Always include leadId
+      if (!leadAttributes.includes("leadId")) {
+        leadAttributes.unshift("leadId");
+      }
+      // Always include the sortBy field for ordering
+      if (!leadAttributes.includes(sortBy)) {
+        leadAttributes.push(sortBy);
+      }
+
+      leadDetailsAttributes = columns
+        .filter((col) => col.check && leadDetailsFields.includes(col.key))
+        .map((col) => col.key);
+    }
+
+    console.log(leadAttributes, "leadAttributes from preferences");
+
+    let whereClause = {};
+    let hasActivityFiltering = false; // Initialize early for use throughout the function
+    let hasPersonFiltering = false; // Initialize for Person filtering
+    let hasOrganizationFiltering = false; // Initialize for Organization filtering
+
+    // let include = [
+    //   {
+    //     model: LeadDetails,
+    //     as: "details",
+    //     required: false,
+    //     attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
+
+    //   },
+    // ];
+    let include = [];
+    if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
+      include.push({
+        model: LeadDetails,
+        as: "details",
+        required: false,
+        attributes: leadDetailsAttributes,
+      });
+    }
+
+    // Handle masterUserID filtering based on role and query parameters
+    if (req.role === "admin") {
+      // Admin can filter by specific masterUserID or see all leads
+      if (queryMasterUserID && queryMasterUserID !== "all") {
+        whereClause[Op.or] = [
+          { masterUserID: queryMasterUserID },
+          { ownerId: queryMasterUserID },
+        ];
+      }
+      // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
     } else {
-      return res.status(400).json({
-        success: false,
-        message: "Either goalId or dashboardId is required",
-      });
-    }
+      // Non-admin users: apply visibility filtering based on group rules
+      let visibilityConditions = [];
 
-    // Helper to get default columns for an entity (first 5 dynamic columns)
-    async function getDefaultColumns(entity) {
-      const getModelColumns = (model) =>
-        Object.keys(model.rawAttributes).filter(
-          (col) =>
-            !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
-        );
-      const CustomFieldModel = require("../../models/customFieldModel");
-      async function getCustomFields(entityType) {
-        const fields = await CustomFieldModel.findAll({
-          where: { entityType, isActive: true },
-          attributes: ["fieldName"],
-        });
-        return fields.map((f) => f.fieldName);
-      }
-      let model, entityType;
-      if (entity === "Deal") {
-        model = require("../../models/deals/dealsModels");
-        entityType = "Deal";
-      } else if (entity === "Person") {
-        model = require("../../models/leads/leadPersonModel");
-        entityType = "Person";
-      } else if (entity === "Organization") {
-        model = require("../../models/leads/leadOrganizationModel");
-        entityType = "Organization";
-      }
-      const modelCols = getModelColumns(model);
-      const customCols = await getCustomFields(entityType);
-      return [...modelCols, ...customCols].slice(0, 5);
-    }
+      if (leadVisibilityRule) {
+        switch (leadVisibilityRule.defaultVisibility) {
+          case "owner_only":
+            // User can only see their own leads
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+            break;
 
-    // (Removed duplicate selectedColumns declaration here; initialization is now only at the top of the function)
-    const selectedDeal = selectedColumns.Deal;
-    const selectedPerson = selectedColumns.Person;
-    const selectedOrganization = selectedColumns.Organization;
-
-    // Process each goal to get detailed data
-    const goalsWithData = await Promise.all(
-      goals.map(async (goal) => {
-        let entityColumns = [];
-        if (goal.entity === "Deal") entityColumns = selectedDeal;
-        else if (goal.entity === "Person") entityColumns = selectedPerson;
-        else if (goal.entity === "Organization")
-          entityColumns = selectedOrganization;
-        if (!entityColumns || entityColumns.length === 0) {
-          // Use getDefaultColumns helper from above
-          async function getDefaultColumns(entity) {
-            const getModelColumns = (model) =>
-              Object.keys(model.rawAttributes).filter(
-                (col) =>
-                  !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
-              );
-            const CustomFieldModel = require("../../models/customFieldModel");
-            async function getCustomFields(entityType) {
-              const fields = await CustomFieldModel.findAll({
-                where: { entityType, isActive: true },
-                attributes: ["fieldName"],
+          case "group_only":
+            // User can see leads from their visibility group
+            if (userGroup) {
+              visibilityConditions.push({
+                [Op.or]: [
+                  { visibilityGroupId: userGroup.groupId },
+                  { masterUserID: req.adminId },
+                  { ownerId: req.adminId },
+                ],
               });
-              return fields.map((f) => f.fieldName);
             }
-            let model, entityType;
-            if (entity === "Deal") {
-              model = require("../../models/deals/dealsModels");
-              entityType = "Deal";
-            } else if (entity === "Person") {
-              model = require("../../models/leads/leadPersonModel");
-              entityType = "Person";
-            } else if (entity === "Organization") {
-              model = require("../../models/leads/leadOrganizationModel");
-              entityType = "Organization";
-            }
-            const modelCols = getModelColumns(model);
-            const customCols = await getCustomFields(entityType);
-            return [...modelCols, ...customCols].slice(0, 5);
-          }
-          entityColumns = await getDefaultColumns(goal.entity);
-        }
-        const goalData = await processGoalData(
-          goal,
-          ownerId,
-          periodFilter,
-          entityColumns
-        );
-        return goalData;
-      })
-    );
+            break;
 
-    // If single goal, return single goal format for backward compatibility
-    if (goalId && goalId !== "dashboard") {
-      return res.status(200).json({
-        success: true,
-        data: goalsWithData[0],
+          case "item_owners_visibility_group":
+            // User can see leads based on owner's visibility group
+            if (userGroup) {
+              // Get all users in the same visibility group
+              const groupMembers = await GroupMembership.findAll({
+                where: {
+                  groupId: userGroup.groupId,
+                  isActive: true,
+                },
+                attributes: ["userId"],
+              });
+
+              const memberIds = groupMembers.map((member) => member.userId);
+
+              visibilityConditions.push({
+                [Op.or]: [
+                  { masterUserID: { [Op.in]: memberIds } },
+                  { ownerId: { [Op.in]: memberIds } },
+                  // Include leads where visibility level allows group access
+                  {
+                    visibilityLevel: {
+                      [Op.in]: [
+                        "everyone",
+                        "group_only",
+                        "item_owners_visibility_group",
+                      ],
+                    },
+                    visibilityGroupId: userGroup.groupId,
+                  },
+                ],
+              });
+            }
+            break;
+
+          case "everyone":
+            // User can see all leads (no additional filtering)
+            break;
+
+          default:
+            // Default to owner only for security
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+        }
+      } else {
+        // No visibility rule found, default to owner only
+        visibilityConditions.push({
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        });
+      }
+
+      // Apply visibility conditions
+      if (visibilityConditions.length > 0) {
+        whereClause[Op.and] = whereClause[Op.and] || [];
+        whereClause[Op.and].push(...visibilityConditions);
+      }
+
+      // Handle specific user filtering for non-admin users
+      if (queryMasterUserID && queryMasterUserID !== "all") {
+        // Non-admin can only filter within their visible scope
+        const userId = queryMasterUserID;
+        whereClause[Op.and] = whereClause[Op.and] || [];
+        whereClause[Op.and].push({
+          [Op.or]: [{ masterUserID: userId }, { ownerId: userId }],
+        });
+      }
+    }
+
+    console.log("→ Query params:", req.query);
+    console.log("→ queryMasterUserID:", queryMasterUserID);
+    console.log("→ req.adminId:", req.adminId);
+    console.log("→ req.role:", req.role);
+
+    //................................................................//filter
+    if (filterId) {
+      console.log("Processing filter with filterId:", filterId);
+
+      // Fetch the saved filter
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
+
+      console.log("Found filter:", filter.filterName);
+
+      const filterConfig =
+        typeof filter.filterConfig === "string"
+          ? JSON.parse(filter.filterConfig)
+          : filter.filterConfig;
+
+      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
+
+      const { all = [], any = [] } = filterConfig;
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const personFields = Object.keys(Person.rawAttributes);
+      const organizationFields = Object.keys(Organization.rawAttributes);
+      const activityFields = Object.keys(Activity.rawAttributes);
+
+      let filterWhere = {};
+      let leadDetailsWhere = {};
+      let personWhere = {};
+      let organizationWhere = {};
+      let activityWhere = {};
+      let customFieldsConditions = { all: [], any: [] };
+
+      console.log("Available lead fields:", leadFields);
+      console.log("Available leadDetails fields:", leadDetailsFields);
+      console.log("Available person fields:", personFields);
+      console.log("Available organization fields:", organizationFields);
+      console.log("Available activity fields:", activityFields);
+
+      // --- Your new filter logic for all ---
+      if (all.length > 0) {
+        console.log("Processing 'all' conditions:", all);
+
+        filterWhere[Op.and] = [];
+        leadDetailsWhere[Op.and] = [];
+        personWhere[Op.and] = [];
+        organizationWhere[Op.and] = [];
+        activityWhere[Op.and] = [];
+        all.forEach((cond) => {
+          console.log("Processing condition:", cond);
+
+          // Check if entity is specified in the condition
+          if (cond.entity) {
+            console.log(`Condition specifies entity: ${cond.entity}`);
+
+            // Handle both "Lead" and "Leads" entity names for backward compatibility
+            if (
+              (cond.entity === "Lead" || cond.entity === "Leads") &&
+              leadFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Lead field due to entity specification`
+              );
+              filterWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "LeadDetails" &&
+              leadDetailsFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as LeadDetails field due to entity specification`
+              );
+              leadDetailsWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Person" &&
+              personFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Person field due to entity specification`
+              );
+              personWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Organization" &&
+              organizationFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Organization field due to entity specification`
+              );
+              organizationWhere[Op.and].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Activity" &&
+              activityFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Activity field due to entity specification`
+              );
+              const activityCondition = buildCondition(cond);
+              console.log(
+                `Built Activity condition for ${cond.field}:`,
+                activityCondition
+              );
+              console.log(
+                `Activity condition symbols:`,
+                Object.getOwnPropertySymbols(activityCondition[cond.field])
+              );
+              if (
+                Object.getOwnPropertySymbols(activityCondition[cond.field])
+                  .length > 0
+              ) {
+                const symbol = Object.getOwnPropertySymbols(
+                  activityCondition[cond.field]
+                )[0];
+                console.log(
+                  `Activity condition value: ${
+                    activityCondition[cond.field][symbol]
+                  }`
+                );
+              }
+              activityWhere[Op.and].push(activityCondition);
+            } else {
+              console.log(
+                `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
+              );
+              customFieldsConditions.all.push(cond);
+            }
+          } else {
+            // Fallback to original logic when entity is not specified
+            if (leadFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Lead fields`);
+              filterWhere[Op.and].push(buildCondition(cond));
+            } else if (leadDetailsFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in LeadDetails fields`);
+              leadDetailsWhere[Op.and].push(buildCondition(cond));
+            } else if (personFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Person fields`);
+              personWhere[Op.and].push(buildCondition(cond));
+            } else if (organizationFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Organization fields`);
+              organizationWhere[Op.and].push(buildCondition(cond));
+            } else if (activityFields.includes(cond.field)) {
+              console.log(`Field '${cond.field}' found in Activity fields`);
+              activityWhere[Op.and].push(buildCondition(cond));
+            } else {
+              console.log(
+                `Field '${cond.field}' NOT found in standard fields, treating as custom field`
+              );
+              // Handle custom fields
+              customFieldsConditions.all.push(cond);
+            }
+          }
+        });
+        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+        if (leadDetailsWhere[Op.and].length === 0)
+          delete leadDetailsWhere[Op.and];
+        if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
+        if (organizationWhere[Op.and].length === 0)
+          delete organizationWhere[Op.and];
+        if (activityWhere[Op.and].length === 0) delete activityWhere[Op.and];
+      }
+
+      // --- Your new filter logic for any ---
+      if (any.length > 0) {
+        filterWhere[Op.or] = [];
+        leadDetailsWhere[Op.or] = [];
+        personWhere[Op.or] = [];
+        organizationWhere[Op.or] = [];
+        activityWhere[Op.or] = [];
+        any.forEach((cond) => {
+          // Check if entity is specified in the condition
+          if (cond.entity) {
+            console.log(`'Any' condition specifies entity: ${cond.entity}`);
+
+            if (cond.entity === "Lead" && leadFields.includes(cond.field)) {
+              console.log(
+                `Field '${cond.field}' processed as Lead field due to entity specification`
+              );
+              filterWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "LeadDetails" &&
+              leadDetailsFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as LeadDetails field due to entity specification`
+              );
+              leadDetailsWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Person" &&
+              personFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Person field due to entity specification`
+              );
+              personWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Organization" &&
+              organizationFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Organization field due to entity specification`
+              );
+              organizationWhere[Op.or].push(buildCondition(cond));
+            } else if (
+              cond.entity === "Activity" &&
+              activityFields.includes(cond.field)
+            ) {
+              console.log(
+                `Field '${cond.field}' processed as Activity field due to entity specification`
+              );
+              const activityCondition = buildCondition(cond);
+              console.log(
+                `Built Activity condition for ${cond.field}:`,
+                activityCondition
+              );
+              activityWhere[Op.or].push(activityCondition);
+            } else {
+              console.log(
+                `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
+              );
+              customFieldsConditions.any.push(cond);
+            }
+          } else {
+            // Fallback to original logic when entity is not specified
+            if (leadFields.includes(cond.field)) {
+              filterWhere[Op.or].push(buildCondition(cond));
+            } else if (leadDetailsFields.includes(cond.field)) {
+              leadDetailsWhere[Op.or].push(buildCondition(cond));
+            } else if (personFields.includes(cond.field)) {
+              personWhere[Op.or].push(buildCondition(cond));
+            } else if (organizationFields.includes(cond.field)) {
+              organizationWhere[Op.or].push(buildCondition(cond));
+            } else if (activityFields.includes(cond.field)) {
+              activityWhere[Op.or].push(buildCondition(cond));
+            } else {
+              // Handle custom fields
+              customFieldsConditions.any.push(cond);
+            }
+          }
+        });
+        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+        if (leadDetailsWhere[Op.or].length === 0)
+          delete leadDetailsWhere[Op.or];
+        if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
+        if (organizationWhere[Op.or].length === 0)
+          delete organizationWhere[Op.or];
+        if (activityWhere[Op.or].length === 0) delete activityWhere[Op.or];
+      }
+
+      // Merge with archive/masterUserID filters
+      if (isArchived !== undefined)
+        filterWhere.isArchived = isArchived === "true";
+
+      // Apply masterUserID filtering logic for filters
+      if (req.role === "admin") {
+        // Admin can filter by specific masterUserID or see all leads
+        if (queryMasterUserID && queryMasterUserID !== "all") {
+          if (filterWhere[Op.or]) {
+            // If there's already an Op.or condition from filters, we need to combine properly
+            filterWhere[Op.and] = [
+              { [Op.or]: filterWhere[Op.or] },
+              {
+                [Op.or]: [
+                  { masterUserID: queryMasterUserID },
+                  { ownerId: queryMasterUserID },
+                ],
+              },
+            ];
+            delete filterWhere[Op.or];
+          } else {
+            filterWhere[Op.or] = [
+              { masterUserID: queryMasterUserID },
+              { ownerId: queryMasterUserID },
+            ];
+          }
+        }
+      } else {
+        // Non-admin users: filter by their own leads or specific user if provided
+        const userId =
+          queryMasterUserID && queryMasterUserID !== "all"
+            ? queryMasterUserID
+            : req.adminId;
+        if (filterWhere[Op.or]) {
+          // If there's already an Op.or condition from filters, we need to combine properly
+          filterWhere[Op.and] = [
+            { [Op.or]: filterWhere[Op.or] },
+            { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
+          ];
+          delete filterWhere[Op.or];
+        } else {
+          filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
+        }
+      }
+      whereClause = filterWhere;
+
+      console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
+      console.log(
+        "→ Built leadDetailsWhere:",
+        JSON.stringify(leadDetailsWhere)
+      );
+      console.log("→ Built personWhere:", JSON.stringify(personWhere));
+      console.log(
+        "→ Built organizationWhere:",
+        JSON.stringify(organizationWhere)
+      );
+      console.log("→ Built activityWhere:", activityWhere);
+      console.log(
+        "→ Activity where object keys length:",
+        Object.keys(activityWhere).length
+      );
+      console.log(
+        "→ Activity where object symbols length:",
+        Object.getOwnPropertySymbols(activityWhere).length
+      );
+      console.log(
+        "→ All activity where properties:",
+        Object.getOwnPropertyNames(activityWhere).concat(
+          Object.getOwnPropertySymbols(activityWhere)
+        )
+      );
+
+      // Fix: Check for both regular keys and Symbol properties (Sequelize operators are Symbols)
+      hasActivityFiltering =
+        Object.keys(activityWhere).length > 0 ||
+        Object.getOwnPropertySymbols(activityWhere).length > 0;
+
+      hasPersonFiltering =
+        Object.keys(personWhere).length > 0 ||
+        Object.getOwnPropertySymbols(personWhere).length > 0;
+
+      hasOrganizationFiltering =
+        Object.keys(organizationWhere).length > 0 ||
+        Object.getOwnPropertySymbols(organizationWhere).length > 0;
+
+      if (hasActivityFiltering) {
+        console.log("→ Activity filtering will be applied:");
+        if (activityWhere[Op.and]) {
+          console.log(
+            "  - AND conditions count:",
+            activityWhere[Op.and].length
+          );
+        }
+        if (activityWhere[Op.or]) {
+          console.log("  - OR conditions count:", activityWhere[Op.or].length);
+        }
+
+        // Quick database check for debugging
+        try {
+          const totalActivities = await Activity.count();
+          console.log("→ Total activities in database:", totalActivities);
+
+          const activitiesWithType = await Activity.count({
+            where: { type: "Meeting" },
+          });
+          console.log("→ Activities with type='Meeting':", activitiesWithType);
+
+          const activitiesWithLeads = await Activity.count({
+            where: { leadId: { [Op.not]: null } },
+          });
+          console.log("→ Activities linked to leads:", activitiesWithLeads);
+
+          const leadsWithActivities = await Lead.count({
+            include: [
+              {
+                model: Activity,
+                as: "Activities",
+                required: true,
+              },
+            ],
+          });
+          console.log("→ Leads that have activities:", leadsWithActivities);
+        } catch (debugError) {
+          console.log("→ Debug query error:", debugError.message);
+        }
+      }
+
+      if (Object.keys(leadDetailsWhere).length > 0) {
+        include.push({
+          model: LeadDetails,
+          as: "details",
+          where: leadDetailsWhere,
+          required: true,
+        });
+      } else {
+        include.push({
+          model: LeadDetails,
+          as: "details",
+          required: false,
+        });
+      }
+
+      if (hasPersonFiltering) {
+        console.log("→ Person filtering will be applied:");
+        if (personWhere[Op.and]) {
+          console.log("  - AND conditions count:", personWhere[Op.and].length);
+        }
+        if (personWhere[Op.or]) {
+          console.log("  - OR conditions count:", personWhere[Op.or].length);
+        }
+
+        include.push({
+          model: Person,
+          as: "LeadPerson",
+          required: true,
+          where: personWhere,
+        });
+      } else {
+        include.push({
+          model: Person,
+          as: "LeadPerson",
+          required: false,
+        });
+      }
+
+      if (hasOrganizationFiltering) {
+        console.log("→ Organization filtering will be applied:");
+        if (organizationWhere[Op.and]) {
+          console.log(
+            "  - AND conditions count:",
+            organizationWhere[Op.and].length
+          );
+        }
+        if (organizationWhere[Op.or]) {
+          console.log(
+            "  - OR conditions count:",
+            organizationWhere[Op.or].length
+          );
+        }
+
+        include.push({
+          model: Organization,
+          as: "LeadOrganization",
+          required: true,
+          where: organizationWhere,
+        });
+      } else {
+        include.push({
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        });
+      }
+
+      if (hasActivityFiltering) {
+        console.log("==========================================");
+        console.log("🔥 ACTIVITY FILTERING DETECTED!");
+        console.log(
+          "🔥 Activity where clause:",
+          JSON.stringify(activityWhere, null, 2)
+        );
+        console.log("🔥 Activity where keys:", Object.keys(activityWhere));
+        console.log(
+          "🔥 Activity where symbols:",
+          Object.getOwnPropertySymbols(activityWhere)
+        );
+
+        // Debug: Show the actual condition structure
+        if (activityWhere[Op.and]) {
+          console.log("🔥 AND conditions details:", activityWhere[Op.and]);
+          activityWhere[Op.and].forEach((condition, index) => {
+            console.log(
+              `🔥 Condition ${index}:`,
+              JSON.stringify(condition, null, 2)
+            );
+            console.log(`🔥 Condition ${index} keys:`, Object.keys(condition));
+            console.log(
+              `🔥 Condition ${index} symbols:`,
+              Object.getOwnPropertySymbols(condition)
+            );
+
+            // Check each field in the condition
+            Object.keys(condition).forEach((field) => {
+              console.log(`🔥 Field '${field}' value:`, condition[field]);
+              console.log(
+                `🔥 Field '${field}' symbols:`,
+                Object.getOwnPropertySymbols(condition[field])
+              );
+
+              // Show Symbol values
+              Object.getOwnPropertySymbols(condition[field]).forEach(
+                (symbol) => {
+                  console.log(
+                    `🔥 Symbol ${symbol.toString()} value:`,
+                    condition[field][symbol]
+                  );
+                }
+              );
+            });
+          });
+        }
+        console.log("==========================================");
+
+        // NEW APPROACH: Rebuild the activity condition from scratch to avoid Symbol loss
+        console.log("🔧 REBUILDING ACTIVITY CONDITIONS FROM SCRATCH...");
+
+        // Find the activity conditions from the filter config and rebuild them
+        let rebuiltActivityWhere = null;
+
+        if (activityWhere[Op.and] && activityWhere[Op.and].length > 0) {
+          const conditions = [];
+
+          activityWhere[Op.and].forEach((condition, index) => {
+            console.log(`🔧 Rebuilding condition ${index}:`, condition);
+
+            // Extract the field name and value from the original condition
+            Object.keys(condition).forEach((fieldName) => {
+              const fieldCondition = condition[fieldName];
+              console.log(
+                `🔧 Processing field '${fieldName}' with condition:`,
+                fieldCondition
+              );
+
+              // Find the operator and value
+              Object.getOwnPropertySymbols(fieldCondition).forEach((symbol) => {
+                const value = fieldCondition[symbol];
+                console.log(
+                  `🔧 Found operator ${symbol.toString()} with value: ${value}`
+                );
+
+                // Rebuild the condition with fresh Symbols
+                if (symbol === Op.eq) {
+                  const rebuiltCondition = { [fieldName]: { [Op.eq]: value } };
+                  console.log(`🔧 Rebuilt condition:`, rebuiltCondition);
+                  console.log(
+                    `🔧 Rebuilt condition symbols:`,
+                    Object.getOwnPropertySymbols(rebuiltCondition[fieldName])
+                  );
+                  conditions.push(rebuiltCondition);
+                }
+                // Add other operators as needed (Op.ne, Op.like, etc.)
+              });
+            });
+          });
+
+          if (conditions.length > 0) {
+            rebuiltActivityWhere = { [Op.and]: conditions };
+            console.log("� REBUILT ACTIVITY WHERE:", rebuiltActivityWhere);
+            console.log(
+              "� Rebuilt symbols:",
+              Object.getOwnPropertySymbols(rebuiltActivityWhere)
+            );
+
+            if (rebuiltActivityWhere[Op.and]) {
+              console.log(
+                "� Rebuilt AND conditions:",
+                rebuiltActivityWhere[Op.and]
+              );
+              rebuiltActivityWhere[Op.and].forEach((condition, index) => {
+                console.log(`� Rebuilt condition ${index}:`, condition);
+                Object.keys(condition).forEach((field) => {
+                  console.log(
+                    `🔧 Field '${field}' symbols:`,
+                    Object.getOwnPropertySymbols(condition[field])
+                  );
+                  Object.getOwnPropertySymbols(condition[field]).forEach(
+                    (symbol) => {
+                      console.log(
+                        `� Rebuilt field '${field}' symbol ${symbol.toString()} = ${
+                          condition[field][symbol]
+                        }`
+                      );
+                    }
+                  );
+                });
+              });
+            }
+          }
+        }
+
+        // Use the rebuilt condition if available, otherwise try direct approach
+        const finalActivityWhere = rebuiltActivityWhere || { type: "Meeting" };
+
+        console.log("🔧 FINAL ACTIVITY WHERE CONDITION:", finalActivityWhere);
+        console.log(
+          "🔧 Final condition symbols:",
+          Object.getOwnPropertySymbols(finalActivityWhere)
+        );
+
+        include.push({
+          model: Activity,
+          as: "Activities",
+          required: true,
+          where: finalActivityWhere,
+        });
+
+        console.log("🔥 ACTIVITY FILTERING APPLIED WITH REBUILT CONDITIONS");
+        console.log(
+          "🔥 This should now generate SQL: INNER JOIN activities ON activities.leadId = leads.leadId WHERE activities.type = 'Meeting'"
+        );
+
+        // FINAL DEBUG: Check what's actually in the include array
+        const finalActivityInclude = include[include.length - 1];
+        console.log("🔍 FINAL ACTIVITY INCLUDE IN ARRAY:");
+        console.log("🔍 Model:", finalActivityInclude.model.name);
+        console.log("🔍 As:", finalActivityInclude.as);
+        console.log("🔍 Required:", finalActivityInclude.required);
+        console.log("🔍 Where clause:", finalActivityInclude.where);
+        console.log(
+          "🔍 Where keys:",
+          Object.keys(finalActivityInclude.where || {})
+        );
+        console.log(
+          "🔍 Where symbols:",
+          Object.getOwnPropertySymbols(finalActivityInclude.where || {})
+        );
+
+        if (
+          finalActivityInclude.where &&
+          typeof finalActivityInclude.where === "object"
+        ) {
+          Object.keys(finalActivityInclude.where).forEach((key) => {
+            console.log(
+              `🔍 Where property '${key}':`,
+              finalActivityInclude.where[key]
+            );
+          });
+          Object.getOwnPropertySymbols(finalActivityInclude.where).forEach(
+            (symbol) => {
+              console.log(
+                `🔍 Where symbol ${symbol.toString()}:`,
+                finalActivityInclude.where[symbol]
+              );
+            }
+          );
+        }
+
+        console.log("==========================================");
+      } else {
+        console.log("==========================================");
+        console.log(
+          "🔵 NO ACTIVITY FILTERING - ADDING DEFAULT ACTIVITY INCLUDE"
+        );
+        console.log("==========================================");
+        include.push({
+          model: Activity,
+          as: "Activities",
+          required: false,
+        });
+      }
+
+      console.log(
+        "→ Updated include with LeadDetails where:",
+        JSON.stringify(leadDetailsWhere)
+      );
+
+      // Handle custom field filtering
+      if (
+        customFieldsConditions.all.length > 0 ||
+        customFieldsConditions.any.length > 0
+      ) {
+        console.log(
+          "Processing custom field conditions:",
+          customFieldsConditions
+        );
+
+        // Debug: Show all custom fields in the database
+        const allCustomFields = await CustomField.findAll({
+          where: {
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "entityType",
+            "fieldSource",
+            "isActive",
+          ],
+        });
+
+        console.log(
+          "All custom fields in database:",
+          allCustomFields.map((f) => ({
+            fieldId: f.fieldId,
+            fieldName: f.fieldName,
+            entityType: f.entityType,
+            fieldSource: f.fieldSource,
+            isActive: f.isActive,
+          }))
+        );
+
+        const customFieldFilters = await buildCustomFieldFilters(
+          customFieldsConditions,
+          req.adminId
+        );
+
+        console.log("Built custom field filters:", customFieldFilters);
+
+        if (customFieldFilters.length > 0) {
+          // Apply custom field filtering by finding leads that match the custom field conditions
+          const matchingLeadIds = await getLeadIdsByCustomFieldFilters(
+            customFieldFilters,
+            req.adminId
+          );
+
+          console.log(
+            "Matching lead IDs from custom field filtering:",
+            matchingLeadIds
+          );
+
+          if (matchingLeadIds.length > 0) {
+            // If we already have other conditions, combine them
+            if (filterWhere[Op.and]) {
+              filterWhere[Op.and].push({
+                leadId: { [Op.in]: matchingLeadIds },
+              });
+            } else if (filterWhere[Op.or]) {
+              filterWhere[Op.and] = [
+                { [Op.or]: filterWhere[Op.or] },
+                { leadId: { [Op.in]: matchingLeadIds } },
+              ];
+              delete filterWhere[Op.or];
+            } else {
+              filterWhere.leadId = { [Op.in]: matchingLeadIds };
+            }
+          } else {
+            // No leads match the custom field conditions, so return empty result
+            console.log("No matching leads found, setting empty result");
+            filterWhere.leadId = { [Op.in]: [] };
+          }
+        } else {
+          console.log(
+            "No custom field filters found, possibly field not found"
+          );
+        }
+
+        whereClause = filterWhere;
+      }
+    } else {
+      // Standard search/filter logic
+      if (isArchived !== undefined)
+        whereClause.isArchived = isArchived === "true";
+
+      if (search) {
+        whereClause[Op.or] = [
+          { contactPerson: { [Op.like]: `%${search}%` } },
+          { organization: { [Op.like]: `%${search}%` } },
+          { title: { [Op.like]: `%${search}%` } },
+          { email: { [Op.like]: `%${search}%` } },
+          { phone: { [Op.like]: `%${search}%` } },
+        ];
+        console.log(
+          "→ Search applied, whereClause[Op.or]:",
+          whereClause[Op.or]
+        );
+      }
+
+      // Add default Activity include for non-filtered queries
+      include.push({
+        model: Activity,
+        as: "Activities",
+        required: false,
       });
     }
 
-    // For dashboard queries, return array format with summary
-    const completedGoals = goalsWithData.filter(
-      (g) => g.summary.progress.percentage >= 100
-    ).length;
-    const avgProgress =
-      goalsWithData.length > 0
-        ? Math.round(
-            goalsWithData.reduce(
-              (sum, g) => sum + g.summary.progress.percentage,
-              0
-            ) / goalsWithData.length
-          )
-        : 0;
+    // Pagination
+    const offset = (page - 1) * limit;
+    console.log("→ Final whereClause:", JSON.stringify(whereClause));
+    console.log("→ Final include:", JSON.stringify(include));
+    console.log("→ Pagination: limit =", limit, "offset =", offset);
+    console.log("→ Order:", sortBy, order);
+    // Always include Person and Organization
+    if (!include.some((i) => i.as === "LeadPerson")) {
+      include.push({
+        model: Person,
+        as: "LeadPerson",
+        required: false,
+      });
+    }
+    if (!include.some((i) => i.as === "LeadOrganization")) {
+      include.push({
+        model: Organization,
+        as: "LeadOrganization",
+        required: false,
+      });
+    }
+
+    // Activity include is now handled in the filtering section above
+    // No need for additional Activity include logic here
+    include.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["name", "masterUserID"],
+      required: false,
+    });
+    //   if (!leadAttributes.includes('leadOrganizationId')) {
+    //   leadAttributes.push('leadOrganizationId');
+    // }
+    // if (!leadAttributes.includes('personId')) {
+    //   leadAttributes.push('personId');
+    // }
+
+    // Always exclude leads that have a dealId (converted leads)
+    whereClause.dealId = null;
+    console.log("🔍 Applied dealId = null (excluding converted leads)");
+
+    console.log("==========================================");
+    console.log("🚀 FINAL QUERY EXECUTION STARTING");
+    console.log("🚀 Total include array length:", include.length);
+
+    // Check if Activity filtering is active
+    console.log("🚀 Activity include details:");
+    const activityInclude = include.find((i) => i.as === "Activities");
+    if (activityInclude) {
+      console.log("  🎯 Activity include found:");
+      console.log("    - Required:", activityInclude.required);
+      console.log("    - Has where clause:", !!activityInclude.where);
+      if (activityInclude.where) {
+        console.log(
+          "    - Where clause:",
+          JSON.stringify(activityInclude.where)
+        );
+      }
+    } else {
+      console.log("  ❌ NO Activity include found!");
+    }
+
+    // Check if Person filtering is active
+    console.log("🚀 Person include details:");
+    const personInclude = include.find((i) => i.as === "LeadPerson");
+    if (personInclude) {
+      console.log("  👤 Person include found:");
+      console.log("    - Required:", personInclude.required);
+      console.log("    - Has where clause:", !!personInclude.where);
+      if (personInclude.where) {
+        console.log("    - Where clause:", JSON.stringify(personInclude.where));
+      }
+    } else {
+      console.log("  ❌ NO Person include found!");
+    }
+
+    // Check if Organization filtering is active
+    console.log("🚀 Organization include details:");
+    const organizationInclude = include.find(
+      (i) => i.as === "LeadOrganization"
+    );
+    if (organizationInclude) {
+      console.log("  🏢 Organization include found:");
+      console.log("    - Required:", organizationInclude.required);
+      console.log("    - Has where clause:", !!organizationInclude.where);
+      if (organizationInclude.where) {
+        console.log(
+          "    - Where clause:",
+          JSON.stringify(organizationInclude.where)
+        );
+      }
+    } else {
+      console.log("  ❌ NO Organization include found!");
+    }
+    console.log("==========================================");
+
+    // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
+    const leads = await Lead.findAndCountAll({
+      where: whereClause,
+      include,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [[sortBy, order.toUpperCase()]],
+      attributes:
+        leadAttributes && leadAttributes.length > 0
+          ? leadAttributes
+          : undefined,
+    });
+
+    console.log("==========================================");
+    console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
+    console.log("🎉 Total records found:", leads.count);
+
+    // Debug Activity filtering results
+    if (filterId && activityInclude && activityInclude.required) {
+      console.log("🎯 ACTIVITY FILTER RESULTS:");
+      console.log("  - Leads found with Activity filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead activities:",
+          leads.rows[0].Activities
+            ? leads.rows[0].Activities.length
+            : "No Activities"
+        );
+        if (leads.rows[0].Activities && leads.rows[0].Activities.length > 0) {
+          console.log(
+            "  - First activity type:",
+            leads.rows[0].Activities[0].type
+          );
+        }
+      }
+    }
+
+    // Debug Person filtering results
+    if (filterId && hasPersonFiltering) {
+      console.log("👤 PERSON FILTER RESULTS:");
+      console.log("  - Leads found with Person filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead person:",
+          leads.rows[0].LeadPerson
+            ? leads.rows[0].LeadPerson.firstName +
+                " " +
+                leads.rows[0].LeadPerson.lastName
+            : "No Person"
+        );
+      }
+    }
+
+    // Debug Organization filtering results
+    if (filterId && hasOrganizationFiltering) {
+      console.log("🏢 ORGANIZATION FILTER RESULTS:");
+      console.log("  - Leads found with Organization filter:", leads.count);
+      if (leads.rows.length > 0) {
+        console.log(
+          "  - First lead organization:",
+          leads.rows[0].LeadOrganization
+            ? leads.rows[0].LeadOrganization.organizationName
+            : "No Organization"
+        );
+      }
+    }
+    console.log("==========================================");
+
+    // Get custom field values for all leads (including default/system fields and unified fields)
+    // Only include custom fields where check is true
+    const leadIds = leads.rows.map((lead) => lead.leadId);
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: leadIds,
+        entityType: "lead",
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: {
+            isActive: true,
+            check: true, // Only include custom fields where check is true
+            entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+          required: true,
+        },
+      ],
+    });
+
+    // Group custom field values by leadId
+    const customFieldsByLead = {};
+    customFieldValues.forEach((value) => {
+      if (!value.CustomField) return;
+      if (!customFieldsByLead[value.entityId]) {
+        customFieldsByLead[value.entityId] = {};
+      }
+      customFieldsByLead[value.entityId][value.CustomField.fieldName] = {
+        fieldId: value.CustomField.fieldId,
+        fieldName: value.CustomField.fieldName,
+        fieldLabel: value.CustomField.fieldLabel,
+        fieldType: value.CustomField.fieldType,
+        isImportant: value.CustomField.isImportant,
+        value: value.value,
+      };
+    });
+
+    const flatLeads = leads.rows.map((lead) => {
+      const leadObj = lead.toJSON();
+      // Overwrite ownerName with the latest Owner.name if present
+      if (leadObj.Owner && leadObj.Owner.name) {
+        leadObj.ownerName = leadObj.Owner.name;
+      }
+      delete leadObj.Owner; // Remove the nested Owner object
+      delete leadObj.LeadPerson;
+      delete leadObj.LeadOrganization;
+
+      // Keep Activities data for the response
+      if (leadObj.Activities) {
+        leadObj.activities = leadObj.Activities;
+        delete leadObj.Activities; // Remove the nested Activities object but keep the data in activities
+      }
+
+      if (leadObj.details) {
+        Object.assign(leadObj, leadObj.details);
+        delete leadObj.details;
+      }
+
+      // Add custom fields directly to the lead object (not wrapped in customFields)
+      const customFields = customFieldsByLead[leadObj.leadId] || {};
+      Object.entries(customFields).forEach(([fieldName, fieldData]) => {
+        leadObj[fieldName] = fieldData.value;
+      });
+
+      // Keep the customFields property for backward compatibility (optional)
+      leadObj.customFields = customFields;
+
+      return leadObj;
+    });
+    // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
+
+    // let persons, organizations;
+
+    // 1. Fetch all persons and organizations (already in your code)
+    if (req.role === "admin") {
+      persons = await Person.findAll({ raw: true });
+      organizations = await Organization.findAll({ raw: true });
+    } else {
+      organizations = await Organization.findAll({
+        // where: { masterUserID: req.adminId },
+        where: {
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        raw: true,
+      });
+    }
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+    persons = await Person.findAll({
+      where: {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      },
+      raw: true,
+    });
+    // console.log("flatLeads:", flatLeads); // Commented out to see Activity filtering debug messages
+
+    // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
+      }
+    });
+
+    // 2. Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // 3. Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+    }));
+
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+    }));
+
+    // 4. Count leads for each person and organization
+    const personIds = persons.map((p) => p.personId);
+
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [
+          { personId: personIds },
+          { leadOrganizationId: orgIds },
+          // { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
+        ],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    persons = persons.map((p) => {
+      let ownerName = null;
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+          // organization=ownerMap[org.organization]
+        }
+      }
+      return {
+        ...p,
+        ownerName,
+        // organization,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
+    }));
+    console.log(req.role, "role of the user............");
 
     res.status(200).json({
-      success: true,
-      data: {
-        goals: goalsWithData,
-        summary: {
-          totalGoals: goalsWithData.length,
-          completedGoals: completedGoals,
-          avgProgress: avgProgress,
-          dashboardId: dashboardId || req.query.dashboardId,
-          periodFilter: periodFilter || "goal_duration",
-        },
-      },
+      message: "Leads fetched successfully",
+      totalRecords: leads.count,
+      totalPages: Math.ceil(leads.count / limit),
+      currentPage: parseInt(page),
+      // leads: leads.rows,
+      leads: flatLeads, // Return flattened leads with leadDetails merged
+      persons,
+      organizations,
+      role: req.role, // Include user role in the response
+      // leadDetails
     });
   } catch (error) {
-    console.error("Error fetching goal data:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_FETCH", // Mode
+      null, // No user ID for failed sign-in
+      "Error fetching leads: " + error.message, // Error description
+      null
+    );
+    console.error("Error fetching leads:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Helper function to build condition for regular fields
+function buildCondition(condition) {
+  const { field, operator, value } = condition;
+
+  // Handle date conversion if needed
+  let processedValue = value;
+  if (typeof value === "string" && value.includes("days ago")) {
+    processedValue = convertRelativeDate(value);
+  }
+
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+    between: Op.between,
+    notBetween: Op.notBetween,
+  };
+
+  let mappedOperator = operator;
+
+  // Map operator names to internal operators
+  const operatorMap = {
+    is: "eq",
+    "is not": "ne",
+    "is empty": "isEmpty",
+    "is not empty": "isNotEmpty",
+    contains: "like",
+    "does not contain": "notLike",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt",
+    equals: "eq",
+    "not equals": "ne",
+    "greater than": "gt",
+    "greater than or equal": "gte",
+    "less than": "lt",
+    "less than or equal": "lte",
+  };
+
+  if (operatorMap[mappedOperator]) {
+    mappedOperator = operatorMap[mappedOperator];
+  }
+
+  // Handle special cases
+  if (mappedOperator === "isEmpty") {
+    return { [field]: { [Op.is]: null } };
+  }
+
+  if (mappedOperator === "isNotEmpty") {
+    return { [field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  if (mappedOperator === "like") {
+    return { [field]: { [Op.like]: `%${processedValue}%` } };
+  }
+
+  if (mappedOperator === "notLike") {
+    return { [field]: { [Op.notLike]: `%${processedValue}%` } };
+  }
+
+  if (mappedOperator === "in" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.in]: processedValue } };
+  }
+
+  if (mappedOperator === "notIn" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.notIn]: processedValue } };
+  }
+
+  if (mappedOperator === "between" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.between]: processedValue } };
+  }
+
+  if (mappedOperator === "notBetween" && Array.isArray(processedValue)) {
+    return { [field]: { [Op.notBetween]: processedValue } };
+  }
+
+  // Default condition
+  const sequelizeOp = ops[mappedOperator] || Op.eq;
+  return { [field]: { [sequelizeOp]: processedValue } };
+}
+
+// Helper functions for custom field filtering
+async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
+  const filters = [];
+
+  // Handle 'all' conditions (AND logic)
+  if (customFieldsConditions.all.length > 0) {
+    for (const cond of customFieldsConditions.all) {
+      console.log("Processing 'all' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          isActive: true,
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'all' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "all",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'all' condition:", cond.field);
+      }
+    }
+  }
+
+  // Handle 'any' conditions (OR logic) - any condition can be met
+  if (customFieldsConditions.any.length > 0) {
+    for (const cond of customFieldsConditions.any) {
+      console.log("Processing 'any' condition:", cond);
+
+      // Try to find the custom field by fieldName first, then by fieldId
+      let customField = null;
+
+      // First try to find by fieldName
+      customField = await CustomField.findOne({
+        where: {
+          fieldName: cond.field,
+          isActive: true,
+          [Op.or]: [
+            { masterUserID: masterUserID },
+            { fieldSource: "default" },
+            { fieldSource: "system" },
+          ],
+        },
+      });
+
+      // If not found by fieldName, try by fieldId
+      if (!customField) {
+        customField = await CustomField.findOne({
+          where: {
+            fieldId: cond.field,
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+            ],
+          },
+        });
+      }
+
+      console.log(
+        "Custom field search result:",
+        customField
+          ? {
+              fieldId: customField.fieldId,
+              fieldName: customField.fieldName,
+              entityType: customField.entityType,
+              fieldSource: customField.fieldSource,
+            }
+          : "NOT FOUND"
+      );
+
+      if (customField) {
+        console.log(
+          "Found custom field for 'any' condition:",
+          customField.fieldName,
+          "entityType:",
+          customField.entityType
+        );
+        filters.push({
+          fieldId: customField.fieldId,
+          condition: cond,
+          logicType: "any",
+          entityType: customField.entityType,
+        });
+      } else {
+        console.log("Custom field not found for 'any' condition:", cond.field);
+      }
+    }
+  }
+
+  return filters;
+}
+
+async function getLeadIdsByCustomFieldFilters(
+  customFieldFilters,
+  masterUserID
+) {
+  if (customFieldFilters.length === 0) return [];
+
+  const allFilters = customFieldFilters.filter((f) => f.logicType === "all");
+  const anyFilters = customFieldFilters.filter((f) => f.logicType === "any");
+
+  let leadIds = [];
+
+  // Handle 'all' filters (AND logic) - all conditions must be met
+  if (allFilters.length > 0) {
+    let allConditionLeadIds = null;
+
+    for (const filter of allFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      console.log(
+        "Searching for custom field values with condition:",
+        whereCondition
+      );
+      console.log("Filter fieldId:", filter.fieldId);
+      console.log("Filter condition:", filter.condition);
+
+      // Search for custom field values with the right entity type
+      // For lead filtering, we want to find all entity types that could be related to leads
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          entityType: "lead", // Start with just lead entity type for debugging
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      console.log(
+        "Found custom field values:",
+        customFieldValues.map((cfv) => ({
+          entityId: cfv.entityId,
+          entityType: cfv.entityType,
+          value: cfv.value,
+        }))
+      );
+
+      let currentLeadIds = [];
+
+      // If the entity type is 'lead', use entityId directly
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "lead") {
+          currentLeadIds.push(cfv.entityId);
+        }
+      }
+
+      // Remove duplicates
+      currentLeadIds = [...new Set(currentLeadIds)];
+      console.log("Current lead IDs for filter:", currentLeadIds);
+
+      if (allConditionLeadIds === null) {
+        allConditionLeadIds = currentLeadIds;
+      } else {
+        // Intersection - only keep leads that match all conditions
+        allConditionLeadIds = allConditionLeadIds.filter((id) =>
+          currentLeadIds.includes(id)
+        );
+      }
+    }
+
+    leadIds = allConditionLeadIds || [];
+  }
+
+  // Handle 'any' filters (OR logic) - any condition can be met
+  if (anyFilters.length > 0) {
+    let anyConditionLeadIds = [];
+
+    for (const filter of anyFilters) {
+      const whereCondition = buildCustomFieldCondition(
+        filter.condition,
+        filter.fieldId
+      );
+
+      const customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          fieldId: filter.fieldId,
+          entityType: "lead", // Start with just lead entity type for debugging
+          ...whereCondition,
+        },
+        attributes: ["entityId", "entityType", "value"],
+      });
+
+      let currentLeadIds = [];
+
+      for (const cfv of customFieldValues) {
+        if (cfv.entityType === "lead") {
+          currentLeadIds.push(cfv.entityId);
+        }
+      }
+
+      currentLeadIds = [...new Set(currentLeadIds)];
+      anyConditionLeadIds = [...anyConditionLeadIds, ...currentLeadIds];
+    }
+
+    // Remove duplicates
+    anyConditionLeadIds = [...new Set(anyConditionLeadIds)];
+
+    if (leadIds.length > 0) {
+      // If we have both 'all' and 'any' conditions, combine them with AND logic
+      leadIds = leadIds.filter((id) => anyConditionLeadIds.includes(id));
+    } else {
+      leadIds = anyConditionLeadIds;
+    }
+  }
+
+  console.log("Final lead IDs from custom field filtering:", leadIds);
+  return leadIds;
+}
+
+function buildCustomFieldCondition(condition, fieldId) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = condition.operator;
+
+  // Map operator names to internal operators
+  const operatorMap = {
+    is: "eq",
+    "is not": "ne",
+    "is empty": "isEmpty",
+    "is not empty": "isNotEmpty",
+    contains: "like",
+    "does not contain": "notLike",
+    "is exactly or earlier than": "lte",
+    "is earlier than": "lt",
+    "is exactly or later than": "gte",
+    "is later than": "gt",
+  };
+
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "isEmpty") {
+    return { value: { [Op.is]: null } };
+  }
+  if (operator === "isNotEmpty") {
+    return { value: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle "contains" and "does not contain" for text fields
+  if (operator === "like") {
+    return { value: { [Op.like]: `%${condition.value}%` } };
+  }
+  if (operator === "notLike") {
+    return { value: { [Op.notLike]: `%${condition.value}%` } };
+  }
+
+  // Default condition
+  return {
+    value: {
+      [ops[operator] || Op.eq]: condition.value,
+    },
+  };
+}
+
+// Get visibility options for lead creation/editing
+exports.getLeadVisibilityOptions = async (req, res) => {
+  try {
+    const permissions = await getUserLeadVisibilityPermissions(
+      req.adminId,
+      req.role
+    );
+
+    const options = [
+      {
+        value: "owner_only",
+        label: "Item owner",
+        description:
+          "Visible to the owner, Deals admins, parent visibility groups",
+        available: true,
+      },
+      {
+        value: "item_owners_visibility_group",
+        label: "Item owner's visibility group",
+        description:
+          "Visible to the owner, Deals admins, users in the same visibility group and parent group",
+        available: true,
+        default:
+          permissions.defaultVisibility === "item_owners_visibility_group",
+      },
+      {
+        value: "group_only",
+        label: "Item owner's visibility group and sub-groups",
+        description:
+          "Visible to the owner, Deals admins, users in the same visibility group, parent group and sub-groups",
+        available: permissions.userGroup !== null,
+      },
+      {
+        value: "everyone",
+        label: "All users",
+        description: "Visible to everyone in the company",
+        available:
+          req.role === "admin" ||
+          (permissions.userGroup &&
+            permissions.userGroup.allowGlobalVisibility),
+      },
+    ];
+
+    res.status(200).json({
+      message: "Visibility options retrieved successfully",
+      options: options.filter((opt) => opt.available),
+      defaultOption: permissions.defaultVisibility,
+      userGroup: permissions.userGroup
+        ? {
+            groupId: permissions.userGroup.groupId,
+            groupName: permissions.userGroup.groupName,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Error getting visibility options:", error);
     res.status(500).json({
-      success: false,
-      message: "Failed to fetch goal data",
+      message: "Error retrieving visibility options",
       error: error.message,
     });
   }
 };
 
-// Helper function to process individual goal data (extracted from original getGoalData)
-async function processGoalData(goal, ownerId, periodFilter) {
-  const {
-    entity,
-    goalType,
-    assignee,
-    assignId,
-    pipeline,
-    pipelineStage,
-    startDate,
-    endDate,
-    trackingMetric,
-  } = goal;
+exports.updateLead = async (req, res) => {
+  const { leadId } = req.params;
+  const updateObj = req.body;
 
-  // Accept selectedColumns as a new argument (array of columns for this entity)
-  let selectedColumns = arguments[3] || [];
+  console.log("Request body:", updateObj);
 
-  // Helper function to get date range for period filters
-  function getPeriodRange(filter) {
-    const now = new Date();
-    let start, end;
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch ((filter || "").toLowerCase()) {
-      case "yesterday":
-        start = new Date(today);
-        start.setDate(start.getDate() - 1);
-        end = new Date(today);
-        end.setDate(end.getDate() - 1);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "today":
-        start = new Date(today);
-        end = new Date(today);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "tomorrow":
-        start = new Date(today);
-        start.setDate(start.getDate() + 1);
-        end = new Date(today);
-        end.setDate(end.getDate() + 1);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "last_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay() - 7);
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "next_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay() + 7);
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_month":
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-      case "last_month":
-        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-        break;
-      case "next_month":
-        start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 2,
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-      case "this_quarter": {
-        const q = Math.floor(now.getMonth() / 3);
-        start = new Date(now.getFullYear(), q * 3, 1);
-        end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-        break;
-      }
-      case "last_quarter": {
-        const q = Math.floor(now.getMonth() / 3);
-        const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
-        const quarter = q === 0 ? 3 : q - 1;
-        start = new Date(year, quarter * 3, 1);
-        end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-        break;
-      }
-      case "next_quarter": {
-        const q = Math.floor(now.getMonth() / 3);
-        const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
-        const quarter = q === 3 ? 0 : q + 1;
-        start = new Date(year, quarter * 3, 1);
-        end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-        break;
-      }
-      case "this_year":
-        start = new Date(now.getFullYear(), 0, 1);
-        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        break;
-      case "last_year":
-        start = new Date(now.getFullYear() - 1, 0, 1);
-        end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-        break;
-      case "next_year":
-        start = new Date(now.getFullYear() + 1, 0, 1);
-        end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-        break;
-      case "month_to_date":
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-        end = now;
-        break;
-      case "quarter_to_date": {
-        const q = Math.floor(now.getMonth() / 3);
-        start = new Date(now.getFullYear(), q * 3, 1);
-        end = now;
-        break;
-      }
-      case "year_to_date":
-        start = new Date(now.getFullYear(), 0, 1);
-        end = now;
-        break;
-      case "past_7_days":
-        start = new Date(today);
-        start.setDate(start.getDate() - 6);
-        end = new Date(today);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "past_2_weeks":
-        start = new Date(today);
-        start.setDate(start.getDate() - 13);
-        end = new Date(today);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "next_7_days":
-        start = new Date(today);
-        end = new Date(today);
-        end.setDate(end.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "next_2_weeks":
-        start = new Date(today);
-        end = new Date(today);
-        end.setDate(end.getDate() + 13);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "past_1_month":
-        start = new Date(now);
-        start.setMonth(start.getMonth() - 1);
-        end = now;
-        break;
-      case "past_3_months":
-        start = new Date(now);
-        start.setMonth(start.getMonth() - 3);
-        end = now;
-        break;
-      case "past_6_months":
-        start = new Date(now);
-        start.setMonth(start.getMonth() - 6);
-        end = now;
-        break;
-      case "past_12_months":
-        start = new Date(now);
-        start.setMonth(start.getMonth() - 12);
-        end = now;
-        break;
-      case "next_3_months":
-        start = now;
-        end = new Date(now);
-        end.setMonth(end.getMonth() + 3);
-        break;
-      case "next_6_months":
-        start = now;
-        end = new Date(now);
-        end.setMonth(end.getMonth() + 6);
-        break;
-      case "next_12_months":
-        start = now;
-        end = new Date(now);
-        end.setMonth(end.getMonth() + 12);
-        break;
-      case "goal_duration":
-      default:
-        // Use goal's startDate and endDate (or current date if indefinite)
-        start = startDate;
-        end = endDate || now;
-    }
-    return { start, end };
-  }
-
-  // Build where clause based on goal criteria and period filter
-  let start, end;
   try {
-    ({ start, end } = getPeriodRange(periodFilter));
-    // If start or end is invalid, fallback to goal duration
-    if (
-      !start ||
-      !end ||
-      isNaN(new Date(start).getTime()) ||
-      isNaN(new Date(end).getTime())
-    ) {
-      start = startDate;
-      end = endDate || new Date();
-    }
-  } catch (e) {
-    // Fallback to goal duration if getPeriodRange fails
-    start = startDate;
-    end = endDate || new Date();
-  }
+    // Get all columns for Lead, LeadDetails, Person, and Organization
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+    const personFields = Object.keys(Person.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+    console.log("Lead fields:", leadFields);
+    console.log("LeadDetails fields:", leadDetailsFields);
+    console.log("Person fields:", personFields);
+    console.log("Organization fields:", organizationFields);
 
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [start, end],
-    },
-  };
+    // Split the update object
+    const leadData = {};
+    const leadDetailsData = {};
+    const personData = {};
+    const organizationData = {};
+    const customFields = {};
 
-  // Add assignee filter based on assignId and assignee values
-  if (assignId && assignId !== "everyone") {
-    // Specific user assigned
-    whereClause.masterUserID = assignId;
-  } else if (
-    assignee &&
-    assignee !== "All" &&
-    assignee !== "Company (everyone)" &&
-    assignee !== "everyone"
-  ) {
-    // Legacy assignee field (for backward compatibility)
-    whereClause.masterUserID = assignee;
-  }
-
-  // Add pipeline filter if specified
-  if (pipeline && entity === "Deal") {
-    if (pipeline.includes(",")) {
-      // Multiple pipelines (comma-separated)
-      const pipelines = pipeline
-        .split(",")
-        .map((p) => p.trim())
-        .filter((p) => p !== "");
-      whereClause.pipeline = {
-        [Op.in]: pipelines,
-      };
-    } else {
-      // Single pipeline
-      whereClause.pipeline = pipeline;
-    }
-  }
-
-  let data = [];
-  let summary = {};
-  let breakdown = [];
-
-  // Process based on entity type - using simplified logic for dashboard view
-  if (entity === "Deal") {
-    if (goalType === "Added") {
-      // Build include for Person and Organization if needed
-      const include = [];
-      if (selectedColumns.some((col) => col.startsWith("person."))) {
-        include.push({
-          model: require("../../models/personModel"),
-          as: "person",
-          attributes: selectedColumns
-            .filter((col) => col.startsWith("person."))
-            .map((col) => col.replace("person.", "")),
-        });
-      }
-      if (selectedColumns.some((col) => col.startsWith("organization."))) {
-        include.push({
-          model: require("../../models/organizationModel"),
-          as: "organization",
-          attributes: selectedColumns
-            .filter((col) => col.startsWith("organization."))
-            .map((col) => col.replace("organization.", "")),
-        });
-      }
-      const dealAttributes = selectedColumns.filter(
-        (col) => !col.includes(".")
-      );
-      const addedDeals = await Deal.findAll({
-        where: whereClause,
-        attributes: dealAttributes,
-        order: [["createdAt", "DESC"]],
-        include,
-      });
-
-      // Assign fetched deals to data array for records, only include selected columns
-      data = addedDeals.map((deal) => {
-        const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
-        return record;
-      });
-
-      const currentValue =
-        trackingMetric === "Value"
-          ? addedDeals.reduce(
-              (sum, deal) => sum + parseFloat(deal.value || 0),
-              0
-            )
-          : addedDeals.length;
-
-      summary = {
-        totalCount: addedDeals.length,
-        totalValue: addedDeals.reduce(
-          (sum, deal) => sum + parseFloat(deal.value || 0),
-          0
-        ),
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: currentValue,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
-
-      breakdown =
-        goal.period === "Weekly"
-          ? generateWeeklyBreakdown(
-              addedDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            )
-          : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdown(
-              addedDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            )
-          : generateMonthlyBreakdown(
-              addedDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            );
-
-      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-      if (Array.isArray(breakdown) && breakdown.length > 0) {
-        summary.periodSummary = breakdown.map((period) => {
-          // For different breakdown types: period.goal, period.goalTarget
-          // period.label: e.g. "Jul 2025" or "W31 2025" or "Q3 2025" based on breakdown type
-          // period.result: actual value for this period
-          const goalValue = period.goal || period.goalTarget || 0;
-          const result = period.result || 0;
-          const difference = result - goalValue;
-          const goalProgress =
-            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-          return {
-            period: period.label || period.period || "",
-            goal: goalValue,
-            result,
-            difference,
-            goalProgress,
-          };
-        });
-      }
-    } else if (goalType === "Won") {
-      const wonWhereClause = {
-        ...whereClause,
-        status: "won",
-        updatedAt: {
-          [Op.between]: [start, end],
-        },
-      };
-      const include = [];
-      if (selectedColumns.some((col) => col.startsWith("person."))) {
-        include.push({
-          model: require("../../models/personModel"),
-          as: "person",
-          attributes: selectedColumns
-            .filter((col) => col.startsWith("person."))
-            .map((col) => col.replace("person.", "")),
-        });
-      }
-      if (selectedColumns.some((col) => col.startsWith("organization."))) {
-        include.push({
-          model: require("../../models/organizationModel"),
-          as: "organization",
-          attributes: selectedColumns
-            .filter((col) => col.startsWith("organization."))
-            .map((col) => col.replace("organization.", "")),
-        });
-      }
-      const dealAttributes = selectedColumns.filter(
-        (col) => !col.includes(".")
-      );
-      const wonDeals = await Deal.findAll({
-        where: wonWhereClause,
-        attributes: dealAttributes,
-        order: [["updatedAt", "DESC"]],
-        include,
-      });
-      data = wonDeals.map((deal) => {
-        const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
-        return record;
-      });
-
-      const currentValue =
-        trackingMetric === "Value"
-          ? wonDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0)
-          : wonDeals.length;
-
-      summary = {
-        totalCount: wonDeals.length,
-        totalValue: wonDeals.reduce(
-          (sum, deal) => sum + parseFloat(deal.value || 0),
-          0
-        ),
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: currentValue,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
-
-      breakdown =
-        goal.period === "Weekly"
-          ? generateWeeklyBreakdown(
-              wonDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            )
-          : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdown(
-              wonDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            )
-          : generateMonthlyBreakdown(
-              wonDeals,
-              goal,
-              trackingMetric,
-              "Deal",
-              start,
-              end
-            );
-
-      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-      if (Array.isArray(breakdown) && breakdown.length > 0) {
-        summary.periodSummary = breakdown.map((period) => {
-          const goalValue = period.goal || period.goalTarget || 0;
-          const result = period.result || 0;
-          const difference = result - goalValue;
-          const goalProgress =
-            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-          return {
-            period: period.label || period.period || "",
-            goal: goalValue,
-            result,
-            difference,
-            goalProgress,
-          };
-        });
-      }
-    } else if (goalType === "Progressed") {
-      // Use DealStageHistory for accurate tracking of deals entering a stage
-      const stageWhere = {
-        stageName: pipelineStage,
-        enteredAt: {
-          [Op.between]: [start, end],
-        },
-      };
-
-      // Find all DealStageHistory records for deals that entered the stage in the period
-      const progressedStages = await DealStageHistory.findAll({
-        where: stageWhere,
-        attributes: ["dealId", "stageName", "enteredAt"],
-        order: [["enteredAt", "DESC"]],
-      });
-
-      // Get unique dealIds
-      const progressedDealIds = progressedStages.map((s) => s.dealId);
-
-      // Build Deal filter for pipeline and assignee
-      const dealWhere = {};
-      if (pipeline) {
-        if (pipeline.includes(",")) {
-          const pipelines = pipeline
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p !== "");
-          dealWhere.pipeline = { [Op.in]: pipelines };
-        } else {
-          dealWhere.pipeline = pipeline;
-        }
-      }
-      if (assignId && assignId !== "everyone") {
-        dealWhere.masterUserID = assignId;
-      } else if (
-        assignee &&
-        assignee !== "All" &&
-        assignee !== "Company (everyone)" &&
-        assignee !== "everyone"
-      ) {
-        dealWhere.masterUserID = assignee;
+    for (const key in updateObj) {
+      if (key === "customFields") {
+        // Handle nested customFields object (backward compatibility)
+        Object.assign(customFields, updateObj[key]);
+        continue;
       }
 
-      // Fetch deal details for those deals, applying filters
-      let progressedDeals = [];
-      if (progressedDealIds.length > 0) {
-        // Build include for Person and Organization if needed
-        const include = [];
-        if (selectedColumns.some((col) => col.startsWith("person."))) {
-          include.push({
-            model: require("../../models/personModel"),
-            as: "person",
-            attributes: selectedColumns
-              .filter((col) => col.startsWith("person."))
-              .map((col) => col.replace("person.", "")),
-          });
-        }
-        if (selectedColumns.some((col) => col.startsWith("organization."))) {
-          include.push({
-            model: require("../../models/organizationModel"),
-            as: "organization",
-            attributes: selectedColumns
-              .filter((col) => col.startsWith("organization."))
-              .map((col) => col.replace("organization.", "")),
-          });
-        }
-        const dealAttributes = selectedColumns.filter(
-          (col) => !col.includes(".")
-        );
-        progressedDeals = await Deal.findAll({
-          where: {
-            dealId: { [Op.in]: progressedDealIds },
-            ...dealWhere,
-          },
-          attributes: dealAttributes,
-          include,
-        });
-      }
-
-      // Deduplicate deals by dealId for records array
-      const uniqueDealsMap = new Map();
-      progressedDeals.forEach((deal) => {
-        uniqueDealsMap.set(deal.dealId, deal);
-      });
-      data = Array.from(uniqueDealsMap.values()).map((deal) => {
-        const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
-        return record;
-      });
-
-      // Calculate current value
-      const currentValue =
-        trackingMetric === "Value"
-          ? progressedDeals.reduce(
-              (sum, deal) => sum + parseFloat(deal.value || 0),
-              0
-            )
-          : progressedDeals.length;
-
-      summary = {
-        totalCount: progressedDeals.length,
-        totalValue: progressedDeals.reduce(
-          (sum, deal) => sum + parseFloat(deal.value || 0),
-          0
-        ),
-        goalTarget: parseFloat(goal.targetValue),
-        trackingMetric: trackingMetric,
-        progress: {
-          current: currentValue,
-          target: parseFloat(goal.targetValue),
-          percentage: Math.min(
-            100,
-            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-          ),
-        },
-      };
-
-      // For breakdown, use enteredAt dates
-      breakdown =
-        goal.period === "Weekly"
-          ? generateWeeklyBreakdown(
-              progressedStages,
-              goal,
-              trackingMetric,
-              "DealProgressed",
-              start,
-              end,
-              "enteredAt"
-            )
-          : goal.period === "Quarterly"
-          ? generateQuarterlyBreakdown(
-              progressedStages,
-              goal,
-              trackingMetric,
-              "DealProgressed",
-              start,
-              end,
-              "enteredAt"
-            )
-          : generateMonthlyBreakdown(
-              progressedStages,
-              goal,
-              trackingMetric,
-              "DealProgressed",
-              start,
-              end,
-              "enteredAt"
-            );
-
-      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-      if (Array.isArray(breakdown) && breakdown.length > 0) {
-        summary.periodSummary = breakdown.map((period) => {
-          const goalValue = period.goal || period.goalTarget || 0;
-          const result = period.result || 0;
-          const difference = result - goalValue;
-          const goalProgress =
-            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-          return {
-            period: period.label || period.period || "",
-            goal: goalValue,
-            result,
-            difference,
-            goalProgress,
-          };
-        });
-      }
-    }
-    // Add other goal types as needed...
-  } else if (entity === "Activity") {
-    const activityWhereClause = { ...whereClause };
-
-    // Add activity type filter
-    if (goal.activityType && goal.activityType !== "all") {
-      if (goal.activityType.includes(",")) {
-        const activityTypes = goal.activityType
-          .split(",")
-          .map((type) => type.trim());
-        activityWhereClause.type = { [Op.in]: activityTypes };
+      if (leadFields.includes(key)) {
+        leadData[key] = updateObj[key];
+      } else if (personFields.includes(key)) {
+        personData[key] = updateObj[key];
+      } else if (organizationFields.includes(key)) {
+        organizationData[key] = updateObj[key];
+      } else if (leadDetailsFields.includes(key)) {
+        leadDetailsData[key] = updateObj[key];
       } else {
-        activityWhereClause.type = goal.activityType;
+        // If the key doesn't match any model field, treat it as a custom field
+        customFields[key] = updateObj[key];
       }
     }
 
-    // Add completion filter for "Completed" goals
-    if (goalType === "Completed") {
-      activityWhereClause.isDone = true;
+    console.log("leadData:", leadData);
+    console.log("leadDetailsData:", leadDetailsData);
+    console.log("personData:", personData);
+    console.log("organizationData:", organizationData);
+    console.log("customFields:", customFields);
+
+    // Update Lead
+    const lead = await Lead.findByPk(leadId);
+    console.log("Fetched lead:", lead ? lead.toJSON() : null);
+    if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UPDATE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
+      return res.status(404).json({ message: "Lead not found" });
     }
 
-    const activities = await Activity.findAll({
-      where: activityWhereClause,
+    // Check for email uniqueness if email is being updated
+    const emailToUpdate = leadData.email || personData.email;
+    if (emailToUpdate && emailToUpdate !== lead.email) {
+      const existingLead = await Lead.findOne({
+        where: {
+          email: emailToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this email address already exists. Each lead must have a unique email address.",
+          existingLeadId: existingLead.leadId,
+          existingLeadTitle: existingLead.title,
+        });
+      }
+    }
+
+    // Check for organization uniqueness if organization is being updated
+    const organizationToUpdate =
+      leadData.organization || organizationData.organization;
+    if (organizationToUpdate && organizationToUpdate !== lead.organization) {
+      const existingOrgLead = await Lead.findOne({
+        where: {
+          organization: organizationToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingOrgLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this organization already exists. Each organization must be unique.",
+          existingLeadId: existingOrgLead.leadId,
+          existingLeadTitle: existingOrgLead.title,
+          existingOrganization: existingOrgLead.organization,
+        });
+      }
+    }
+
+    let ownerChanged = false;
+    let newOwner = null;
+    let assigner = null;
+    if (updateObj.ownerId && updateObj.ownerId !== lead.ownerId) {
+      ownerChanged = true;
+      newOwner = await MasterUser.findByPk(updateObj.ownerId);
+      assigner = await MasterUser.findByPk(req.adminId);
+    }
+
+    // Update or create Organization
+    let orgRecord;
+    if (Object.keys(organizationData).length > 0) {
+      orgRecord = await Organization.findOne({
+        where: { leadOrganizationId: lead.leadOrganizationId },
+      });
+      console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
+      if (orgRecord) {
+        await orgRecord.update(organizationData);
+        console.log("Organization updated:", orgRecord.toJSON());
+      } else {
+        orgRecord = await Organization.create(organizationData);
+        console.log("Organization created:", orgRecord.toJSON());
+        leadData.leadOrganizationId = orgRecord.leadOrganizationId;
+        await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
+        console.log(
+          "Lead updated with new leadOrganizationId:",
+          orgRecord.leadOrganizationId
+        );
+      }
+    }
+
+    // Update or create Person
+    let personRecord;
+    if (Object.keys(personData).length > 0) {
+      personRecord = await Person.findOne({
+        where: { personId: lead.personId },
+      });
+      console.log(
+        "Fetched personRecord:",
+        personRecord ? personRecord.toJSON() : null
+      );
+      if (personRecord) {
+        await personRecord.update(personData);
+        console.log("Person updated:", personRecord.toJSON());
+      } else {
+        if (orgRecord)
+          personData.leadOrganizationId = orgRecord.leadOrganizationId;
+        personRecord = await Person.create(personData);
+        console.log("Person created:", personRecord.toJSON());
+        leadData.personId = personRecord.personId;
+        await lead.update({ personId: personRecord.personId });
+        console.log("Lead updated with new personId:", personRecord.personId);
+      }
+    }
+
+    // Update Lead
+    if (Object.keys(leadData).length > 0) {
+      await lead.update(leadData);
+      console.log("Lead updated:", lead.toJSON());
+    }
+
+    // --- Send email if owner changed ---
+    if (
+      ownerChanged &&
+      newOwner &&
+      newOwner.email &&
+      assigner &&
+      assigner.email
+    ) {
+      await sendEmail(assigner.email, {
+        from: assigner.email,
+        to: newOwner.email,
+        subject: "You have been assigned a new lead",
+        text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+      });
+    }
+
+    // Update or create LeadDetails
+    let leadDetails = await LeadDetails.findOne({ where: { leadId } });
+    console.log(
+      "Fetched leadDetails:",
+      leadDetails ? leadDetails.toJSON() : null
+    );
+    if (leadDetails) {
+      if (Object.keys(leadDetailsData).length > 0) {
+        await leadDetails.update(leadDetailsData);
+        console.log("LeadDetails updated:", leadDetails.toJSON());
+      }
+    } else if (Object.keys(leadDetailsData).length > 0) {
+      leadDetailsData.leadId = leadId;
+      leadDetails = await LeadDetails.create(leadDetailsData);
+      console.log("LeadDetails created:", leadDetails.toJSON());
+    }
+
+    // Handle custom fields if provided
+    const savedCustomFields = {};
+    if (customFields && Object.keys(customFields).length > 0) {
+      try {
+        console.log("Processing custom fields for update:", customFields);
+
+        for (const [fieldKey, value] of Object.entries(customFields)) {
+          // Try to find the custom field by fieldName first, then by fieldId
+          let customField = null;
+
+          // First try to find by fieldName
+          customField = await CustomField.findOne({
+            where: {
+              fieldName: fieldKey,
+              entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+              isActive: true,
+              // [Op.or]: [
+              //   { masterUserID: req.adminId },
+              //   { fieldSource: "default" },
+              //   { fieldSource: "system" },
+              // ],
+            },
+          });
+
+          // If not found by fieldName, try by fieldId
+          if (!customField) {
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: fieldKey,
+                entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+                isActive: true,
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
+              },
+            });
+          }
+
+          if (customField) {
+            console.log(
+              `Found custom field: ${customField.fieldName} (ID: ${customField.fieldId})`
+            );
+
+            // Check if custom field value already exists
+            const existingValue = await CustomFieldValue.findOne({
+              where: {
+                fieldId: customField.fieldId,
+                entityId: leadId,
+                entityType: "lead",
+              },
+            });
+
+            if (existingValue) {
+              // Update existing value
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
+                await existingValue.update({ value: valueToSave });
+                console.log(
+                  `Updated custom field value for ${customField.fieldName}: ${valueToSave}`
+                );
+                savedCustomFields[customField.fieldName] = {
+                  label: customField.fieldLabel,
+                  value: valueToSave,
+                  type: customField.fieldType,
+                  isImportant: customField.isImportant,
+                };
+              } else {
+                // Delete the value if it's empty
+                await existingValue.destroy();
+                console.log(
+                  `Deleted custom field value for ${customField.fieldName}`
+                );
+              }
+            } else {
+              // Create new value
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
+                await CustomFieldValue.create({
+                  fieldId: customField.fieldId,
+                  entityId: leadId,
+                  entityType: "lead",
+                  value: valueToSave,
+                   masterUserID: req.adminId // <-- add this line
+                });
+                console.log(
+                  `Created custom field value for ${customField.fieldName}: ${valueToSave}`
+                );
+                savedCustomFields[customField.fieldName] = {
+                  label: customField.fieldLabel,
+                  value: valueToSave,
+                  type: customField.fieldType,
+                  isImportant: customField.isImportant,
+                };
+              }
+            }
+          } else {
+            console.log(`Custom field not found: ${fieldKey}`);
+          }
+        }
+      } catch (customFieldError) {
+        console.error("Error processing custom fields:", customFieldError);
+        // Don't fail the entire update if custom fields fail
+      }
+    }
+    // // --- Send email if owner changed ---
+    // if (ownerChanged && newOwner && newOwner.email) {
+    //   // You should have a sendEmail utility function
+    //   await sendEmail(
+    //     newOwner.email,
+    //     "You have been assigned a new lead",
+    //     `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}".\n\nPlease check your CRM dashboard for details.`
+    //   );
+    // }
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for lead management
+      "LEAD_UPDATE", // Mode
+      lead.masterUserID, // Admin ID from the authenticated request
+      leadId, // Record ID (Lead ID)
+      req.adminId,
+      `Lead updated by "${req.role}"`, // Description
+      {
+        from: lead.toJSON(),
+        to: {
+          ...leadData,
+          leadOrganizationId: orgRecord
+            ? orgRecord.leadOrganizationId
+            : lead.leadOrganizationId,
+          personId: personRecord ? personRecord.personId : lead.personId,
+          customFields: savedCustomFields,
+        },
+      } // Changes logged as JSON
+    );
+
+    // Prepare response with updated lead and custom fields
+    const leadResponse = {
+      ...lead.toJSON(),
+      // customFields: savedCustomFields,
+    };
+
+    res.status(200).json({
+      message: "Lead updated successfully",
+      lead: leadResponse,
+      leadDetails,
+      person: personRecord,
+      organization: orgRecord,
+      customFieldsUpdated: Object.keys(savedCustomFields).length,
+      customFields: savedCustomFields,
+    });
+  } catch (error) {
+    console.error("Error updating lead:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.deleteLead = async (req, res) => {
+  const { leadId } = req.params; // Use leadId from the request parameters
+
+  try {
+    const lead = await Lead.findByPk(leadId); // Find the lead by leadId
+    if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_DELETE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Delete the lead
+    await lead.destroy();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for currency management
+      "LEAD_DELETE", // Mode
+      lead.masterUserID, // Admin ID from the authenticated request
+      leadId, // Record ID (Currency ID)
+      req.adminId,
+      `Lead "${lead}" deleted by "${req.role}"`, // Description
+      null // No changes to log for deletion
+    );
+    res.status(200).json({ message: "Lead deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting lead:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_DELETE", // Mode
+      null, // No user ID for failed sign-in
+      "Error deleting lead: " + error.message, // Error description
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.updateAllLabels = async (req, res) => {
+  try {
+    const { valueLabels } = req.body; // Get valueLabels from the request body
+
+    // Validate input
+    if (!valueLabels) {
+      return res.status(400).json({ message: "valueLabels is required." });
+    }
+
+    // Update valueLabels for all records
+    const [updatedCount] = await Lead.update(
+      { valueLabels }, // Set the new value for valueLabels
+      { where: {} } // Update all records
+    );
+
+    // Log the update in the audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE_ALL_LABELS", // Mode
+      req.adminId, // Admin ID of the user making the update
+      `Updated valueLabels for ${updatedCount} records`, // Description
+      null
+    );
+
+    res.status(200).json({
+      message: `Value labels updated successfully for ${updatedCount} records.`,
+    });
+  } catch (error) {
+    console.error("Error updating all labels:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+      "LEAD_UPDATE_ALL_LABELS", // Mode
+      null, // No user ID for failed operation
+      "Error updating all labels: " + error.message, // Error description
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+//......................................................
+exports.updateLeadCustomFields = async (req, res) => {
+  const { leadId } = req.params;
+  const { customFields } = req.body;
+
+  if (!customFields || typeof customFields !== "object") {
+    return res
+      .status(400)
+      .json({ message: "customFields must be a valid object." });
+  }
+
+  try {
+    const lead = await Lead.findByPk(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Save original customFields for history
+    const originalCustomFields = lead.customFields || {};
+
+    // Update only customFields
+    await lead.update({ customFields });
+
+    // Log the change (optional)
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_UPDATE_CUSTOM_FIELDS",
+      lead.masterUserID,
+      leadId,
+      req.adminId,
+      `Custom fields updated for lead ${leadId} by user ${req.role}`,
+      { from: originalCustomFields, to: customFields }
+    );
+
+    res.status(200).json({
+      message: "Custom fields updated successfully",
+      customFields: lead.customFields,
+    });
+  } catch (error) {
+    console.error("Error updating custom fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getNonAdminMasterUserNames = async (req, res) => {
+  try {
+    const { search, userType } = req.query;
+
+    // Build base where clause
+    let where = {};
+    let users = [];
+
+    // If userType is 'all', fetch all users regardless of role
+    if (userType === "all") {
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "admin") {
+      // Admin can see all users (including other admins if needed for assignment)
+      where = {
+        // userType: { [Op.ne]: "admin" }
+      };
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
+      if (userType) {
+        where.userType = userType;
+      }
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "master") {
+      where = {
+        [Op.or]: [{ userType: "general" }, { masterUserID: req.adminId }],
+      };
+      if (search) {
+        where[Op.and] = [
+          { [Op.or]: where[Op.or] },
+          { name: { [Op.like]: `%${search}%` } },
+        ];
+        delete where[Op.or];
+      }
+      if (userType && (userType === "general" || userType === "master")) {
+        if (userType === "general") {
+          where = { userType: "general" };
+        } else {
+          where = { masterUserID: req.adminId };
+        }
+        if (search) {
+          where.name = { [Op.like]: `%${search}%` };
+        }
+      }
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else if (req.role === "general") {
+      where = {
+        masterUserID: req.adminId,
+      };
+      if (search) {
+        where.name = { [Op.like]: `%${search}%` };
+      }
+      users = await MasterUser.findAll({
+        where,
+        attributes: ["masterUserID", "name", "userType", "email"],
+        order: [["name", "ASC"]],
+      });
+    } else {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "MASTER_USER_FETCH",
+        req.adminId,
+        `Access denied: Invalid role "${req.role}"`,
+        null
+      );
+      return res.status(403).json({
+        message: "Access denied. Invalid user role.",
+      });
+    }
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "MASTER_USER_FETCH",
+      req.adminId,
+      `Successfully fetched ${users.length} users for role "${req.role}"`,
+      null
+    );
+
+    res.status(200).json({
+      users,
+      message: `Found ${users.length} users`,
+      userRole: req.role,
+    });
+  } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "MASTER_USER_FETCH",
+      req.adminId,
+      `Error fetching master users: ${error.message}`,
+      null
+    );
+    console.error("Error fetching master users:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getLeadsByMasterUser = async (req, res) => {
+  const { masterUserID, name } = req.body;
+
+  try {
+    let whereClause = {};
+
+    if (masterUserID) {
+      whereClause.masterUserID = masterUserID;
+    } else if (name) {
+      // Find masterUserID by name
+      const user = await MasterUser.findOne({ where: { name } });
+      if (!user) {
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_FETCH_BY_MASTER_USER",
+          req.adminId,
+          `Master user with name "${name}" not found.`,
+          null
+        );
+        return res.status(404).json({ message: "Master user not found." });
+      }
+      whereClause.masterUserID = user.masterUserID;
+    } else {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_FETCH_BY_MASTER_USER",
+        req.adminId,
+        "Lead fetch failed: masterUserID or name is required.",
+        null
+      );
+
+      return res
+        .status(400)
+        .json({ message: "Please provide masterUserID or name." });
+    }
+
+    const leads = await Lead.findAll({ where: whereClause });
+    res.status(200).json({ leads });
+  } catch (error) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_FETCH_BY_MASTER_USER",
+      req.adminId,
+      `Error fetching leads by master user: ${error.message}`,
+      null
+    );
+    console.error("Error fetching leads by master user:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getAllLeadDetails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { leadId } = req.params;
+
+  // Add pagination parameters for emails
+  const { emailPage = 1, emailLimit = 25 } = req.query;
+  const emailOffset = (emailPage - 1) * emailLimit;
+
+  if (!leadId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_DETAILS_FETCH",
+      masterUserID,
+      "Lead details fetch failed: leadId is required",
+      null
+    );
+    console.error("leadId is required in params.");
+    return res.status(400).json({ message: "leadId is required in params." });
+  }
+
+  try {
+    // Get the user's email address from credentials
+    const lead = await Lead.findByPk(leadId);
+    if (!lead || !lead.email) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_DETAILS_FETCH",
+        masterUserID,
+        "Lead details fetch failed: Lead or lead email not found.",
+        null
+      );
+      return res.status(404).json({ message: "Lead or lead email not found." });
+    }
+    //     const deal = await Deal.findByPk(dealId);
+    // if (!deal || !deal.email) {
+    //   return res.status(404).json({ message: "Lead or lead email not found." });
+    // }
+    const clientEmail = lead.email;
+
+    // Optimize email fetching with pagination and size limits
+    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50); // Cap at 50 emails max
+    const maxBodyLength = 1000; // Truncate email bodies to prevent large responses
+
+    let emails = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { sender: clientEmail },
+          { recipient: { [Op.like]: `%${clientEmail}%` } },
+        ],
+      },
       attributes: [
-        "activityId",
-        "type",
+        "emailID",
+        "messageId",
+        "inReplyTo",
+        "references",
+        "sender",
+        "recipient",
         "subject",
-        "isDone",
         "createdAt",
-        "assignedTo",
-        "markedAsDoneTime",
+        "folder",
+        // Truncate body to prevent large responses
+        [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
       ],
-      order: [["createdAt", "DESC"]],
       include: [
         {
-          model: MasterUser,
-          attributes: [["name", "assignToUser"]],
-          as: "assignedUser", // <-- must match the alias in the association
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
+        },
+      ],
+      order: [["createdAt", "DESC"]], // Get most recent first
+      limit: maxEmailLimit,
+      offset: emailOffset,
+    });
+
+    // Filter out emails with "RE:" in subject and no inReplyTo or references
+    emails = emails.filter((email) => {
+      const hasRE =
+        email.subject && email.subject.toLowerCase().startsWith("re:");
+      const noThread =
+        (!email.inReplyTo || email.inReplyTo === "") &&
+        (!email.references || email.references === "");
+      return !(hasRE && noThread);
+    });
+
+    let emailsExist = emails.length > 0;
+    if (!emailsExist) {
+      emails = [];
+    }
+
+    // Simplified thread handling - only get direct replies to prevent exponential growth
+    const threadIds = [];
+    emails.forEach((email) => {
+      if (email.messageId) threadIds.push(email.messageId);
+      if (email.inReplyTo) threadIds.push(email.inReplyTo);
+    });
+    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+    // Fetch related emails with stricter limits
+    let relatedEmails = [];
+    if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
+      // Prevent too many thread lookups
+      relatedEmails = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { messageId: { [Op.in]: uniqueThreadIds } },
+            { inReplyTo: { [Op.in]: uniqueThreadIds } },
+          ],
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "inReplyTo",
+          "sender",
+          "recipient",
+          "subject",
+          "createdAt",
+          "folder",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [
+          {
+            model: Attachment,
+            as: "attachments",
+            attributes: ["attachmentID", "filename", "size", "contentType"],
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: maxEmailLimit, // Use the same limit
+      });
+
+      // Remove duplicates by messageId
+      const seen = new Set();
+      relatedEmails = relatedEmails.filter((email) => {
+        if (seen.has(email.messageId)) return false;
+        seen.add(email.messageId);
+        return true;
+      });
+    } else {
+      // If too many threads, just use the original emails
+      relatedEmails = emails;
+    }
+    const notes = await LeadNote.findAll({
+      where: { leadId },
+      order: [["createdAt", "DESC"]],
+    });
+    // Get all unique creator IDs from notes
+    const creatorIds = [...new Set(notes.map((note) => note.createdBy))];
+
+    // Fetch all creators in one query
+    const creators = await MasterUser.findAll({
+      where: { masterUserID: creatorIds },
+      attributes: ["masterUserID", "name"],
+    });
+    const creatorMap = {};
+    creators.forEach((user) => {
+      creatorMap[user.masterUserID] = user.name;
+    });
+
+    // Attach creatorName to each note
+    const notesWithCreator = notes.map((note) => {
+      const noteObj = note.toJSON();
+      noteObj.creatorName = creatorMap[note.createdBy] || null;
+      return noteObj;
+    });
+    const leadDetails = await LeadDetails.findOne({ where: { leadId } });
+    const activities = await Activity.findAll({
+      where: { leadId },
+      order: [["startDateTime", "DESC"]],
+    });
+
+    // Fetch all active custom fields for leads (for all users, not just current admin)
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        isActive: true,
+        entityType: { [Op.in]: ["lead", "both"] },
+      },
+      attributes: [
+        "fieldId",
+        "fieldName",
+        "fieldType",
+        "isRequired",
+        "entityType",
+        "fieldLabel",
+      ],
+      order: [["sortOrder", "ASC"]],
+    });
+
+    // Fetch all custom field values for this lead
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: leadId,
+        entityType: "lead",
+      },
+    });
+
+    // Map values by fieldId
+    const valueMap = {};
+    customFieldValues.forEach((cfv) => {
+      valueMap[cfv.fieldId] = cfv.value;
+    });
+
+    // Merge all custom fields with values (value: null if not present)
+    const customFields = {};
+    allCustomFields.forEach((field) => {
+      customFields[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldName: field.fieldName,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        value:
+          valueMap[field.fieldId] !== undefined
+            ? valueMap[field.fieldId]
+            : null,
+      };
+    });
+
+    // Only include specified fields in the lead object
+    const allowedFields = [
+      "value",
+      "expectedCloseDate",
+      "sourceOrigin",
+      "sourceChannel",
+      "sourceChannelID",
+      "ownerId",
+      "ownerName",
+      "email",
+      "phone",
+      "contactPerson",
+      "notes",
+      "jobTitle",
+      "birthday",
+      "organization",
+      "address",
+    ];
+    const filteredLead = {};
+    if (lead) {
+      allowedFields.forEach((field) => {
+        if (lead[field] !== undefined) {
+          filteredLead[field] = lead[field];
+        }
+      });
+    }
+
+    res.status(200).json({
+      message: "Lead details fetched successfully.",
+      lead: filteredLead,
+      leadDetails,
+      customFields,
+      notes: notesWithCreator,
+      emails: relatedEmails, // Restored as flat array for frontend compatibility
+      activities,
+      // Include metadata as separate fields for debugging and future use
+      _emailMetadata: {
+        count: relatedEmails.length,
+        page: parseInt(emailPage),
+        limit: maxEmailLimit,
+        hasMore: relatedEmails.length === maxEmailLimit,
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+      },
+      _pagination: {
+        emailPage: parseInt(emailPage),
+        emailLimit: maxEmailLimit,
+        emailOffset: emailOffset,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching conversation:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_DETAILS_FETCH",
+      masterUserID,
+      `Lead details fetch failed: ${error.message}`,
+      null
+    );
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+exports.addLeadNote = async (req, res) => {
+  const { content } = req.body;
+  const { leadId } = req.params;
+  const masterUserID = req.adminId;
+  const createdBy = req.adminId;
+
+  // 100KB = 102400 bytes
+  if (!content || Buffer.byteLength(content, "utf8") > 102400) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      "Note addition failed: Note is required and must be under 100KB.",
+      null
+    );
+    return res
+      .status(400)
+      .json({ message: "Note is required and must be under 100KB." });
+  }
+  if (!leadId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      "Note addition failed: leadId is required",
+      null
+    );
+    return res.status(400).json({ message: "leadId is required." });
+  }
+
+  try {
+    const note = await LeadNote.create({
+      leadId,
+      masterUserID,
+      content,
+      createdBy,
+    });
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      leadId,
+      createdBy,
+      `Note added to lead with ID ${leadId} by user ${req.role}`,
+      { content }
+    );
+    res.status(201).json({ message: "Note added successfully", note });
+  } catch (error) {
+    console.error("Error adding note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_ADD",
+      masterUserID,
+      `Note addition failed: ${error.message}`,
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.deleteLeadNote = async (req, res) => {
+  const { noteId } = req.params;
+  const masterUserID = req.adminId;
+
+  if (!noteId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      "Note deletion failed: noteId is required",
+      null
+    );
+    return res.status(400).json({ message: "noteId is required." });
+  }
+
+  try {
+    const note = await LeadNote.findByPk(noteId);
+    if (!note) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_DELETE",
+        masterUserID,
+        `Note deletion failed: Note with ID ${noteId} not found`,
+        null
+      );
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if the note belongs to the current user
+    if (note.masterUserID !== masterUserID) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_DELETE",
+        masterUserID,
+        `Note deletion failed: User does not have permission to delete note with ID ${noteId}`,
+        null
+      );
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to delete this note." });
+    }
+
+    await note.destroy();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      noteId,
+      req.adminId,
+      `Note with ID ${noteId} deleted by user ${req.role}`,
+      null
+    );
+    res.status(200).json({ message: "Note deleted successfully." });
+  } catch (error) {
+    console.error("Error deleting note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_DELETE",
+      masterUserID,
+      `Note deletion failed: ${error.message}`,
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.updateLeadNote = async (req, res) => {
+  const { noteId } = req.params;
+  const { content } = req.body;
+  const masterUserID = req.adminId;
+
+  // Validate input
+  if (!noteId) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      "Note update failed: noteId is required",
+      null
+    );
+    return res.status(400).json({ message: "noteId is required." });
+  }
+  if (!content || Buffer.byteLength(content, "utf8") > 102400) {
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      "Note update failed: Note is required and must be under 100KB.",
+      null
+    );
+    return res
+      .status(400)
+      .json({ message: "Note is required and must be under 100KB." });
+  }
+
+  try {
+    const note = await LeadNote.findByPk(noteId);
+    if (!note) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_UPDATE",
+        masterUserID,
+        `Note update failed: Note with ID ${noteId} not found`,
+        null
+      );
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if the note belongs to the current user
+    if (note.masterUserID !== masterUserID) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "LEAD_NOTE_UPDATE",
+        masterUserID,
+        `Note update failed: User does not have permission to edit note with ID ${noteId}`,
+        null
+      );
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to edit this note." });
+    }
+
+    note.content = content;
+    await note.save();
+    await historyLogger(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      noteId,
+      req.adminId,
+      `Note with ID ${noteId} updated by user ${req.role}`,
+      { from: note.content, to: content }
+    );
+    res.status(200).json({ message: "Note updated successfully.", note });
+  } catch (error) {
+    console.error("Error updating note:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_NOTE_UPDATE",
+      masterUserID,
+      `Note update failed: ${error.message}`,
+      null
+    );
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPersons = async (req, res) => {
+  const {
+    search,
+    page = 1,
+    limit = 10,
+    sortBy = "createdAt",
+    order = "DESC",
+    filterId,
+  } = req.query;
+
+  console.log(req.role, "Role of the user");
+
+  try {
+    // 1. Build where clauses and includes (reuse your dynamic filter logic)
+    let personWhere = {};
+    let organizationWhere = {};
+    let include = [];
+
+    // --- Dynamic filter logic (reuse from getLeads) ---
+    if (filterId) {
+      const filter = await LeadFilter.findByPk(filterId);
+      if (!filter) {
+        return res.status(404).json({ message: "Filter not found." });
+      }
+      const filterConfig =
+        typeof filter.filterConfig === "string"
+          ? JSON.parse(filter.filterConfig)
+          : filter.filterConfig;
+
+      const personFields = Object.keys(Person.rawAttributes);
+      const organizationFields = Object.keys(Organization.rawAttributes);
+
+      // AND conditions
+      if (filterConfig.all && filterConfig.all.length > 0) {
+        personWhere[Op.and] = [];
+        organizationWhere[Op.and] = [];
+        filterConfig.all.forEach((cond) => {
+          if (personFields.includes(cond.field))
+            personWhere[Op.and].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field))
+            organizationWhere[Op.and].push(buildCondition(cond));
+        });
+        if (!personWhere[Op.and].length) delete personWhere[Op.and];
+        if (!organizationWhere[Op.and].length) delete organizationWhere[Op.and];
+      }
+      // OR conditions
+      if (filterConfig.any && filterConfig.any.length > 0) {
+        personWhere[Op.or] = [];
+        organizationWhere[Op.or] = [];
+        filterConfig.any.forEach((cond) => {
+          if (personFields.includes(cond.field))
+            personWhere[Op.or].push(buildCondition(cond));
+          else if (organizationFields.includes(cond.field))
+            organizationWhere[Op.or].push(buildCondition(cond));
+        });
+        if (!personWhere[Op.or].length) delete personWhere[Op.or];
+        if (!organizationWhere[Op.or].length) delete organizationWhere[Op.or];
+      }
+    } else {
+      // Only show persons and organizations created by this user
+      if (req.role !== "admin") {
+        personWhere.masterUserID = req.adminId;
+        organizationWhere.masterUserID = req.adminId;
+      }
+
+      // Optional: add search logic
+      if (search) {
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `%${search}%` } },
+          { email: { [Op.like]: `%${search}%` } },
+          { phone: { [Op.like]: `%${search}%` } },
+        ];
+        organizationWhere[Op.or] = [
+          { organization: { [Op.like]: `%${search}%` } },
+          { address: { [Op.like]: `%${search}%` } },
+        ];
+      }
+    }
+
+    // 2. Search logic
+    if (search) {
+      personWhere[Op.or] = [
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+        { phone: { [Op.like]: `%${search}%` } },
+      ];
+      organizationWhere[Op.or] = [
+        { organization: { [Op.like]: `%${search}%` } },
+        { address: { [Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // 3. Fetch all organizations (with pagination)
+    let persons, organizationsRaw;
+
+    if (req.role === "admin") {
+      // 1. Fetch all organizations (with pagination and filters)
+      const orgOffset = (page - 1) * limit;
+      organizationsRaw = await Organization.findAndCountAll({
+        where: organizationWhere,
+        limit: parseInt(limit),
+        offset: parseInt(orgOffset),
+        order: [[sortBy, order.toUpperCase()]],
+        raw: true,
+      });
+
+      // 2. Fetch all persons for these organizations
+      const orgIds = organizationsRaw.rows.map((o) => o.leadOrganizationId);
+      persons = await Person.findAll({
+        where: {
+          ...personWhere,
+          leadOrganizationId: { [Op.in]: orgIds },
+        },
+        raw: true,
+      });
+    } else {
+      // 1. Fetch all persons (filtered)
+
+      persons = await Person.findAll({
+        where: personWhere,
+        raw: true,
+      });
+
+      // 2. Get unique orgIds from filtered persons
+      const orgIds = [
+        ...new Set(persons.map((p) => p.leadOrganizationId).filter(Boolean)),
+      ];
+
+      // 3. Fetch only organizations for those orgIds (with pagination)
+      const orgOffset = (page - 1) * limit;
+      organizationsRaw = await Organization.findAndCountAll({
+        where: {
+          ...organizationWhere,
+          leadOrganizationId: { [Op.in]: orgIds },
+        },
+        limit: parseInt(limit),
+        offset: parseInt(orgOffset),
+        order: [[sortBy, order.toUpperCase()]],
+        raw: true,
+      });
+    }
+    // 2. Get unique orgIds from filtered persons
+    // const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+    const orgIds = [
+      ...new Set(persons.map((p) => p.leadOrganizationId).filter(Boolean)),
+    ];
+    // 5. Count leads for each person and organization
+    const personIds = persons.map((p) => p.personId);
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ personId: personIds }, { leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // 6. Fetch owner names
+    const ownerIds = [
+      ...organizationsRaw.rows.map((o) => o.ownerId).filter(Boolean),
+      ...persons.map((p) => p.ownerId).filter(Boolean),
+    ];
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // 7. Attach persons to organizations
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
+      }
+    });
+
+    // 8. Format organizations, only include those with at least one person
+    const organizations = organizationsRaw.rows.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [],
+    }));
+
+    // If not admin, filter out organizations without persons
+    const finalOrganizations =
+      req.role === "admin"
+        ? organizations
+        : organizations.filter((org) => org.persons.length > 0);
+
+    // 9. Format persons
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+      leadCount: personLeadCountMap[p.personId] || 0,
+    }));
+
+    res.status(200).json({
+      message: "Data fetched successfully",
+      totalRecords: organizationsRaw.count,
+      totalPages: Math.ceil(organizationsRaw.count / limit),
+      currentPage: parseInt(page),
+      persons,
+      organizations: finalOrganizations,
+    });
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Bulk edit leads functionality
+exports.bulkEditLeads = async (req, res) => {
+  const { leadIds, updateData } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  if (!updateData || Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      message: "updateData must contain at least one field to update",
+    });
+  }
+
+  console.log("Bulk edit request:", { leadIds, updateData });
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_UPDATE",
+        null,
+        "Access denied. You do not have permission to bulk edit leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk edit leads.",
+      });
+    }
+
+    // Get all columns for different models
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+    const personFields = Object.keys(Person.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    // Split the update data by model
+    const leadData = {};
+    const leadDetailsData = {};
+    const personData = {};
+    const organizationData = {};
+    const customFields = {};
+
+    for (const key in updateData) {
+      if (key === "customFields") {
+        Object.assign(customFields, updateData[key]);
+        continue;
+      }
+
+      if (leadFields.includes(key)) {
+        leadData[key] = updateData[key];
+      } else if (personFields.includes(key)) {
+        personData[key] = updateData[key];
+      } else if (organizationFields.includes(key)) {
+        organizationData[key] = updateData[key];
+      } else if (leadDetailsFields.includes(key)) {
+        leadDetailsData[key] = updateData[key];
+      } else {
+        // Treat as custom field
+        customFields[key] = updateData[key];
+      }
+    }
+
+    console.log("Processed update data:", {
+      leadData,
+      leadDetailsData,
+      personData,
+      organizationData,
+      customFields,
+    });
+
+    // Find leads to update
+    let whereClause = { leadId: { [Op.in]: leadIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToUpdate = await Lead.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: LeadDetails,
+          as: "details",
+          required: false,
+        },
+        {
+          model: Person,
+          as: "LeadPerson",
+          required: false,
+        },
+        {
+          model: Organization,
+          as: "LeadOrganization",
           required: false,
         },
       ],
     });
 
-    // Assign fetched activities to data array for records
-    data = activities;
+    if (leadsToUpdate.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to update or you don't have permission to edit them",
+      });
+    }
 
-    summary = {
-      totalCount: activities.length,
-      goalTarget: parseFloat(goal.targetValue),
-      trackingMetric: trackingMetric,
-      progress: {
-        current: activities.length,
-        target: parseFloat(goal.targetValue),
-        percentage: Math.min(
-          100,
-          Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
-        ),
-      },
+    console.log(`Found ${leadsToUpdate.length} leads to update`);
+
+    const updateResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
     };
 
-    breakdown =
-      goal.period === "Weekly"
-        ? generateWeeklyBreakdown(
-            activities,
-            goal,
-            trackingMetric,
-            "Activity",
-            start,
-            end
-          )
-        : goal.period === "Quarterly"
-        ? generateQuarterlyBreakdown(
-            activities,
-            goal,
-            trackingMetric,
-            "Activity",
-            start,
-            end
-          )
-        : generateMonthlyBreakdown(
-            activities,
-            goal,
-            trackingMetric,
-            "Activity",
-            start,
-            end
+    // Process each lead
+    for (const lead of leadsToUpdate) {
+      try {
+        console.log(`Processing lead ${lead.leadId}`);
+
+        // Track if owner is being changed
+        let ownerChanged = false;
+        let newOwner = null;
+        if (updateData.ownerId && updateData.ownerId !== lead.ownerId) {
+          ownerChanged = true;
+          newOwner = await MasterUser.findByPk(updateData.ownerId);
+        }
+
+        // Update Lead table
+        if (Object.keys(leadData).length > 0) {
+          await lead.update(leadData);
+          console.log(`Updated lead ${lead.leadId} with:`, leadData);
+        }
+
+        // Update LeadDetails table
+        if (Object.keys(leadDetailsData).length > 0) {
+          let leadDetails = await LeadDetails.findOne({
+            where: { leadId: lead.leadId },
+          });
+
+          if (leadDetails) {
+            await leadDetails.update(leadDetailsData);
+          } else {
+            await LeadDetails.create({
+              leadId: lead.leadId,
+              ...leadDetailsData,
+            });
+          }
+          console.log(
+            `Updated lead details for ${lead.leadId}:`,
+            leadDetailsData
           );
+        }
 
-    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-    if (Array.isArray(breakdown) && breakdown.length > 0) {
-      summary.periodSummary = breakdown.map((period) => {
-        const goalValue = period.goal || period.goalTarget || 0;
-        const result = period.result || 0;
-        const difference = result - goalValue;
-        const goalProgress =
-          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-        return {
-          period: period.label || period.period || "",
-          goal: goalValue,
-          result,
-          difference,
-          goalProgress,
-        };
-      });
-    }
-  } else if (entity === "Lead") {
-    const leads = await Lead.findAll({
-      where: whereClause,
-      attributes: ["leadId", "firstName", "lastName", "status", "createdAt"],
-      order: [["createdAt", "DESC"]],
-    });
+        // Update Person table
+        if (Object.keys(personData).length > 0 && lead.personId) {
+          const person = await Person.findByPk(lead.personId);
+          if (person) {
+            await person.update(personData);
+            console.log(`Updated person ${lead.personId}:`, personData);
+          }
+        }
 
-    // Assign fetched leads to data array for records
-    data = leads;
-
-    summary = {
-      totalCount: leads.length,
-      goalTarget: parseFloat(goal.targetValue),
-      trackingMetric: trackingMetric,
-      progress: {
-        current: leads.length,
-        target: parseFloat(goal.targetValue),
-        percentage: Math.min(
-          100,
-          Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
-        ),
-      },
-    };
-
-    breakdown =
-      goal.period === "Weekly"
-        ? generateWeeklyBreakdown(
-            leads,
-            goal,
-            trackingMetric,
-            "Lead",
-            start,
-            end
-          )
-        : goal.period === "Quarterly"
-        ? generateQuarterlyBreakdown(
-            leads,
-            goal,
-            trackingMetric,
-            "Lead",
-            start,
-            end
-          )
-        : generateMonthlyBreakdown(
-            leads,
-            goal,
-            trackingMetric,
-            "Lead",
-            start,
-            end
+        // Update Organization table
+        if (
+          Object.keys(organizationData).length > 0 &&
+          lead.leadOrganizationId
+        ) {
+          const organization = await Organization.findByPk(
+            lead.leadOrganizationId
           );
-
-    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-    if (Array.isArray(breakdown) && breakdown.length > 0) {
-      summary.periodSummary = breakdown.map((period) => {
-        const goalValue = period.goal || period.goalTarget || 0;
-        const result = period.result || 0;
-        const difference = result - goalValue;
-        const goalProgress =
-          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-        return {
-          period: period.label || period.period || "",
-          goal: goalValue,
-          result,
-          difference,
-          goalProgress,
-        };
-      });
-    }
-  }
-
-  // Calculate duration info
-  const nowTime = new Date();
-  const isIndefinite = !endDate || endDate === null;
-  const goalStartDate = new Date(startDate);
-  const goalEndDate = endDate ? new Date(endDate) : null;
-
-  const durationInfo = {
-    startDate: startDate,
-    endDate: endDate,
-    isIndefinite: isIndefinite,
-    frequency: goal.period || "Monthly",
-    isActive:
-      nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
-    status: isIndefinite
-      ? "ongoing"
-      : nowTime <= goalEndDate
-      ? "active"
-      : "expired",
-  };
-
-  return {
-    goal: goal.toJSON(),
-    records: data,
-    summary: summary,
-    monthlyBreakdown: breakdown,
-    period: { startDate: start, endDate: end },
-    duration: durationInfo,
-    filters: {
-      entity: entity,
-      goalType: goalType,
-      assignee: assignee,
-      assignId: assignId,
-      pipeline: pipeline,
-      pipelineStage: pipelineStage,
-      activityType: entity === "Activity" ? goal.activityType : null,
-    },
-  };
-}
-// DEPRECATED: exports.getProgressedGoalData - not used
-// exports.getProgressedGoalData = async (req, res) => {
-//   try {
-//     const { goalId } = req.params;
-//     const ownerId = req.adminId;
-//     const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
-
-//     const goal = await Goal.findOne({
-//       where: {
-//         goalId,
-//         ownerId,
-//       },
-//     });
-
-//     if (!goal) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Goal not found or access denied",
-//       });
-//     }
-
-//     const {
-//       entity,
-//       goalType,
-//       assignee,
-//       assignId,
-//       pipeline,
-//       pipelineStage,
-//       startDate,
-//       endDate,
-//       trackingMetric,
-//     } = goal;
-
-//     // Helper function to get date range for period filters
-//     function getPeriodRange(filter) {
-//       const now = new Date();
-//       let start, end;
-//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-//       switch ((filter || "").toLowerCase()) {
-//         case "yesterday":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 1);
-//           end = new Date(today);
-//           end.setDate(end.getDate() - 1);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "today":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "tomorrow":
-//           start = new Date(today);
-//           start.setDate(start.getDate() + 1);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 1);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "this_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay());
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "last_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay() - 7);
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay() + 7);
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "last_two_weeks":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay() - 14);
-//           end = new Date(today);
-//           end.setDate(end.getDate() - end.getDay() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "this_month":
-//           start = new Date(now.getFullYear(), now.getMonth(), 1);
-//           end = new Date(
-//             now.getFullYear(),
-//             now.getMonth() + 1,
-//             0,
-//             23,
-//             59,
-//             59,
-//             999
-//           );
-//           break;
-//         case "last_month":
-//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-//           break;
-//         case "next_month":
-//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-//           end = new Date(
-//             now.getFullYear(),
-//             now.getMonth() + 2,
-//             0,
-//             23,
-//             59,
-//             59,
-//             999
-//           );
-//           break;
-//         case "this_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           start = new Date(now.getFullYear(), q * 3, 1);
-//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "last_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
-//           const quarter = q === 0 ? 3 : q - 1;
-//           start = new Date(year, quarter * 3, 1);
-//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "next_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
-//           const quarter = q === 3 ? 0 : q + 1;
-//           start = new Date(year, quarter * 3, 1);
-//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "this_year":
-//           start = new Date(now.getFullYear(), 0, 1);
-//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "last_year":
-//           start = new Date(now.getFullYear() - 1, 0, 1);
-//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "next_year":
-//           start = new Date(now.getFullYear() + 1, 0, 1);
-//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "month_to_date":
-//           start = new Date(now.getFullYear(), now.getMonth(), 1);
-//           end = now;
-//           break;
-//         case "quarter_to_date": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           start = new Date(now.getFullYear(), q * 3, 1);
-//           end = now;
-//           break;
-//         }
-//         case "year_to_date":
-//           start = new Date(now.getFullYear(), 0, 1);
-//           end = now;
-//           break;
-//         case "past_7_days":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 6);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "past_2_weeks":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 13);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_7_days":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_2_weeks":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 13);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "past_1_month":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 1);
-//           end = now;
-//           break;
-//         case "past_3_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 3);
-//           end = now;
-//           break;
-//         case "past_6_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 6);
-//           end = now;
-//           break;
-//         case "past_12_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 12);
-//           end = now;
-//           break;
-//         case "next_3_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 3);
-//           break;
-//         case "next_6_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 6);
-//           break;
-//         case "next_12_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 12);
-//           break;
-//         case "goal_duration":
-//         default:
-//           // Use goal's startDate and endDate (or current date if indefinite)
-//           start = startDate;
-//           end = endDate || now;
-//       }
-//       return { start, end };
-//     }
-
-//     // Build where clause based on goal criteria and period filter
-//     let start, end;
-//     try {
-//       ({ start, end } = getPeriodRange(periodFilter));
-//       // If start or end is invalid, fallback to goal duration
-//       if (
-//         !start ||
-//         !end ||
-//         isNaN(new Date(start).getTime()) ||
-//         isNaN(new Date(end).getTime())
-//       ) {
-//         start = startDate;
-//         end = endDate || new Date();
-//       }
-//     } catch (e) {
-//       // Fallback to goal duration if getPeriodRange fails
-//       start = startDate;
-//       end = endDate || new Date();
-//     }
-//     const whereClause = {
-//       createdAt: {
-//         [Op.between]: [start, end],
-//       },
-//     };
-
-//     // Add assignee filter based on assignId and assignee values
-//     if (assignId && assignId !== "everyone") {
-//       // Specific user assigned
-//       whereClause.masterUserID = assignId;
-//     } else if (
-//       assignee &&
-//       assignee !== "All" &&
-//       assignee !== "Company (everyone)" &&
-//       assignee !== "everyone"
-//     ) {
-//       // Legacy assignee field (for backward compatibility)
-//       whereClause.masterUserID = assignee;
-//     }
-//     // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
-
-//     // Add pipeline filter if specified
-//     if (pipeline && entity === "Deal") {
-//       if (pipeline.includes(",")) {
-//         // Multiple pipelines (comma-separated)
-//         const pipelines = pipeline
-//           .split(",")
-//           .map((p) => p.trim())
-//           .filter((p) => p !== "");
-//         whereClause.pipeline = {
-//           [Op.in]: pipelines,
-//         };
-//       } else {
-//         // Single pipeline
-//         whereClause.pipeline = pipeline;
-//       }
-//     }
-
-//     let data = [];
-//     let summary = {};
-//     let monthlyBreakdown = [];
-
-//     if (entity === "Deal") {
-//       // Handle different goal types with specific logic
-//       if (goalType === "Progressed") {
-//         // Use DealStageHistory for accurate stage progression tracking
-//         if (pipelineStage) {
-//           // Query DealStageHistory to find deals that entered this stage during the period
-//           const stageEntries = await DealStageHistory.findAll({
-//             where: {
-//               stageName: pipelineStage,
-//               enteredAt: {
-//                 [Op.between]: [start, end],
-//               },
-//             },
-//             include: [
-//               {
-//                 model: Deal,
-//                 as: "Deal",
-//                 where: {
-//                   ...(assignId && assignId !== "everyone"
-//                     ? { masterUserID: assignId }
-//                     : {}),
-//                   ...(assignee &&
-//                   assignee !== "All" &&
-//                   assignee !== "Company (everyone)" &&
-//                   assignee !== "everyone" &&
-//                   (!assignId || assignId === "everyone")
-//                     ? { masterUserID: assignee }
-//                     : {}),
-//                   ...(pipeline
-//                     ? pipeline.includes(",")
-//                       ? {
-//                           pipeline: {
-//                             [Op.in]: pipeline
-//                               .split(",")
-//                               .map((p) => p.trim())
-//                               .filter((p) => p !== ""),
-//                           },
-//                         }
-//                       : { pipeline: pipeline }
-//                     : {}),
-//                 },
-//                 attributes: [
-//                   "dealId",
-//                   "title",
-//                   "value",
-//                   "pipeline",
-//                   "pipelineStage",
-//                   "status",
-//                   "masterUserID",
-//                   "createdAt",
-//                   "updatedAt",
-//                 ],
-//               },
-//             ],
-//             order: [["enteredAt", "DESC"]],
-//           });
-
-//           // Format the data for frontend with stage entry information
-//           data = stageEntries.map((entry) => ({
-//             id: entry.Deal.dealId,
-//             title: entry.Deal.title,
-//             value: parseFloat(entry.Deal.value || 0),
-//             pipeline: entry.Deal.pipeline,
-//             stage: entry.Deal.pipelineStage,
-//             status: entry.Deal.status,
-//             owner: entry.Deal.masterUserID,
-//             enteredStageAt: entry.enteredAt,
-//             createdAt: entry.Deal.createdAt,
-//             updatedAt: entry.Deal.updatedAt,
-//           }));
-
-//           // Calculate current value based on tracking metric
-//           const currentValue =
-//             trackingMetric === "Value"
-//               ? data.reduce((sum, deal) => sum + deal.value, 0)
-//               : data.length;
-
-//           // Calculate summary
-//           summary = {
-//             totalCount: data.length,
-//             totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-//             goalTarget: parseFloat(goal.targetValue),
-//             trackingMetric: trackingMetric,
-//             targetStage: pipelineStage,
-//             progress: {
-//               current: currentValue,
-//               target: parseFloat(goal.targetValue),
-//               percentage: Math.min(
-//                 100,
-//                 Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-//               ),
-//             },
-//           };
-
-//           // Generate breakdown by stage entry date (weekly, quarterly, or monthly based on period)
-//           monthlyBreakdown =
-//             goal.period === "Weekly"
-//               ? generateWeeklyBreakdownForProgressed(
-//                   stageEntries,
-//                   goal,
-//                   trackingMetric
-//                 )
-//               : goal.period === "Quarterly"
-//               ? generateQuarterlyBreakdownForProgressed(
-//                   stageEntries,
-//                   goal,
-//                   trackingMetric
-//                 )
-//               : generateMonthlyBreakdownForProgressed(
-//                   stageEntries,
-//                   goal,
-//                   trackingMetric
-//                 );
-//         } else {
-//           return res.status(400).json({
-//             success: false,
-//             message: "Pipeline stage is required for progressed goals",
-//           });
-//         }
-//       } else if (goalType === "Added") {
-//         // ...existing code for Added...
-//         const addedDeals = await Deal.findAll({
-//           where: whereClause,
-//           attributes: [
-//             "dealId",
-//             "title",
-//             "value",
-//             "pipeline",
-//             "pipelineStage",
-//             "status",
-//             "masterUserID",
-//             "createdAt",
-//             "updatedAt",
-//           ],
-//           order: [["createdAt", "DESC"]],
-//         });
-//         data = addedDeals.map((deal) => ({
-//           id: deal.dealId,
-//           title: deal.title,
-//           value: parseFloat(deal.value || 0),
-//           pipeline: deal.pipeline,
-//           stage: deal.pipelineStage,
-//           status: deal.status,
-//           owner: deal.masterUserID,
-//           createdAt: deal.createdAt,
-//           updatedAt: deal.updatedAt,
-//         }));
-//         const currentValue =
-//           trackingMetric === "Value"
-//             ? data.reduce((sum, deal) => sum + deal.value, 0)
-//             : data.length;
-//         summary = {
-//           totalCount: data.length,
-//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-//           goalTarget: parseFloat(goal.targetValue),
-//           trackingMetric: trackingMetric,
-//           progress: {
-//             current: currentValue,
-//             target: parseFloat(goal.targetValue),
-//             percentage: Math.min(
-//               100,
-//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-//             ),
-//           },
-//         };
-//         monthlyBreakdown =
-//           goal.period === "Weekly"
-//             ? generateWeeklyBreakdown(
-//                 addedDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               )
-//             : goal.period === "Quarterly"
-//             ? generateQuarterlyBreakdown(
-//                 addedDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               )
-//             : generateMonthlyBreakdown(
-//                 addedDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               );
-//       } else if (goalType === "Won") {
-//         // Efficiently get only won deals in the period, applying all filters
-//         const wonWhereClause = {
-//           ...whereClause,
-//           status: "won",
-//           updatedAt: {
-//             [Op.between]: [start, end],
-//           },
-//         };
-//         const wonDeals = await Deal.findAll({
-//           where: wonWhereClause,
-//           attributes: [
-//             "dealId",
-//             "title",
-//             "value",
-//             "pipeline",
-//             "pipelineStage",
-//             "status",
-//             "masterUserID",
-//             "createdAt",
-//             "updatedAt",
-//           ],
-//           order: [["updatedAt", "DESC"]],
-//         });
-//         data = wonDeals.map((deal) => ({
-//           id: deal.dealId,
-//           title: deal.title,
-//           value: parseFloat(deal.value || 0),
-//           pipeline: deal.pipeline,
-//           stage: deal.pipelineStage,
-//           status: deal.status,
-//           owner: deal.masterUserID,
-//           createdAt: deal.createdAt,
-//           updatedAt: deal.updatedAt,
-//         }));
-//         const currentValue =
-//           trackingMetric === "Value"
-//             ? data.reduce((sum, deal) => sum + deal.value, 0)
-//             : data.length;
-//         summary = {
-//           totalCount: data.length,
-//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-//           goalTarget: parseFloat(goal.targetValue),
-//           trackingMetric: trackingMetric,
-//           progress: {
-//             current: currentValue,
-//             target: parseFloat(goal.targetValue),
-//             percentage: Math.min(
-//               100,
-//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-//             ),
-//           },
-//         };
-//         monthlyBreakdown =
-//           goal.period === "Weekly"
-//             ? generateWeeklyBreakdown(
-//                 wonDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               )
-//             : goal.period === "Quarterly"
-//             ? generateQuarterlyBreakdown(
-//                 wonDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               )
-//             : generateMonthlyBreakdown(
-//                 wonDeals,
-//                 goal,
-//                 trackingMetric,
-//                 "Deal",
-//                 start,
-//                 end
-//               );
-//       } else {
-//         // Unsupported goal type for Deal entity
-//         return res.status(400).json({
-//           success: false,
-//           message: `Unsupported goal type '${goalType}' for Deal entity. Supported types: Added, Progressed, Won`,
-//         });
-//       }
-
-//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
-//         summary.periodSummary = monthlyBreakdown.map((period) => {
-//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
-//           // period.label: e.g. "Jul 2025" or "W31 2025" based on breakdown type
-//           // period.result: actual value for this period
-//           const goalValue = period.goal || period.goalTarget || 0;
-//           const result = period.result || 0;
-//           const difference = result - goalValue;
-//           const goalProgress =
-//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-//           return {
-//             period: period.label || period.period || "",
-//             goal: goalValue,
-//             result,
-//             difference,
-//             goalProgress,
-//           };
-//         });
-//       }
-//     } else if (entity === "Activity") {
-//       // For Activity goals, use separate activityType and pipeline fields
-//       const activityTypeFilter = goal.activityType; // Use dedicated activityType field
-//       const pipelineFilter = goal.pipeline; // Pipeline is separate for Activity goals
-
-//       // Build where clause for activities
-//       const activityWhereClause = { ...whereClause };
-
-//       // Add activity type filter if specified
-//       if (activityTypeFilter && activityTypeFilter !== "all") {
-//         if (activityTypeFilter.includes(",")) {
-//           // Multiple activity types (comma-separated)
-//           const activityTypes = activityTypeFilter
-//             .split(",")
-//             .map((type) => type.trim());
-//           activityWhereClause.type = {
-//             [Op.in]: activityTypes,
-//           };
-//         } else {
-//           // Single activity type
-//           activityWhereClause.type = activityTypeFilter;
-//         }
-//       }
-
-//       // Handle goalType-specific filtering
-//       if (goalType === "Completed") {
-//         // For completed activities, filter by completion status
-//         activityWhereClause.isDone = true; // Use 'isDone' field for completion status
-//       } else if (goalType === "Added") {
-//         // For added activities, no additional filter needed - count all activities in date range
-//         // The date range filtering is already handled by whereClause
-//       }
-
-//       // Add pipeline filter by checking linked deals
-//       // Activities must be linked to deals in the specified pipeline(s)
-//       let includeClause = [];
-//       if (
-//         pipelineFilter &&
-//         pipelineFilter !== "All pipelines" &&
-//         pipelineFilter !== "all"
-//       ) {
-//         let pipelineWhereClause = {};
-
-//         if (pipelineFilter.includes(",")) {
-//           // Multiple pipelines (comma-separated)
-//           const pipelines = pipelineFilter
-//             .split(",")
-//             .map((pipeline) => pipeline.trim())
-//             .filter((pipeline) => pipeline !== "");
-//           pipelineWhereClause.pipeline = {
-//             [Op.in]: pipelines,
-//           };
-//         } else {
-//           // Single pipeline
-//           pipelineWhereClause.pipeline = pipelineFilter;
-//         }
-
-//         includeClause.push({
-//           model: Deal,
-//           where: pipelineWhereClause,
-//           required: true, // INNER JOIN - only activities linked to deals in these pipelines
-//           attributes: ["dealId", "pipeline", "title"], // Include deal info in response
-//         });
-//       } else {
-//         // If no pipeline filter, still include deal info but make it optional
-//         includeClause.push({
-//           model: Deal,
-//           required: false, // LEFT JOIN - include activities even if not linked to deals
-//           attributes: ["dealId", "pipeline", "title"],
-//         });
-//       }
-
-//       const activities = await Activity.findAll({
-//         where: activityWhereClause,
-//         include: includeClause, // Include deal information for pipeline filtering
-//         attributes: [
-//           "activityId",
-//           "type", // Use 'type' instead of 'activityType'
-//           "subject",
-//           "dealId", // Include dealId to show linked deal
-//           "isDone", // Include completion status
-//           "masterUserID",
-//           "createdAt",
-//           "updatedAt",
-//         ],
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       data = activities.map((activity) => ({
-//         id: activity.activityId,
-//         type: activity.type, // Use 'type' instead of 'activityType'
-//         subject: activity.subject,
-//         dealId: activity.dealId,
-//         dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
-//         pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
-//         isDone: activity.isDone, // Include completion status
-//         owner: activity.masterUserID,
-//         createdAt: activity.createdAt,
-//         updatedAt: activity.updatedAt,
-//       }));
-
-//       summary = {
-//         totalCount: activities.length,
-//         goalTarget: parseFloat(goal.targetValue),
-//         trackingMetric: trackingMetric,
-//         activityTypeFilter: activityTypeFilter, // Include filter info in response
-//         pipelineFilter: pipelineFilter, // Include pipeline filter info
-//         goalType: goalType, // Include goal type in response
-//         filterDescription:
-//           pipelineFilter &&
-//           pipelineFilter !== "all" &&
-//           pipelineFilter !== "All pipelines"
-//             ? `${goalType} activities of type "${
-//                 activityTypeFilter || "any"
-//               }" linked to deals in "${
-//                 pipelineFilter.includes(",")
-//                   ? pipelineFilter
-//                       .split(",")
-//                       .map((p) => p.trim())
-//                       .join(", ") + " pipelines"
-//                   : pipelineFilter + " pipeline"
-//               }"`
-//             : `${goalType} activities of type "${activityTypeFilter || "any"}"${
-//                 pipelineFilter ? " (any pipeline)" : ""
-//               }`,
-//         progress: {
-//           current: activities.length,
-//           target: parseFloat(goal.targetValue),
-//           percentage: Math.min(
-//             100,
-//             Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
-//           ),
-//         },
-//       };
-
-//       // Generate breakdown for Activity goals based on period setting
-//       monthlyBreakdown =
-//         goal.period === "Weekly"
-//           ? generateWeeklyBreakdown(
-//               activities,
-//               goal,
-//               trackingMetric,
-//               "Activity",
-//               start,
-//               end
-//             )
-//           : goal.period === "Quarterly"
-//           ? generateQuarterlyBreakdown(
-//               activities,
-//               goal,
-//               trackingMetric,
-//               "Activity",
-//               start,
-//               end
-//             )
-//           : generateMonthlyBreakdown(
-//               activities,
-//               goal,
-//               trackingMetric,
-//               "Activity",
-//               start,
-//               end
-//             );
-
-//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
-//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
-//         summary.periodSummary = monthlyBreakdown.map((period) => {
-//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
-//           // period.label: e.g. "W31 2025" for weekly or "Jul 2025" for monthly
-//           // period.result: actual value for this period
-//           const goalValue = period.goal || period.goalTarget || 0;
-//           const result = period.result || 0;
-//           const difference = result - goalValue;
-//           const goalProgress =
-//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
-//           return {
-//             period: period.label || period.period || "",
-//             goal: goalValue,
-//             result,
-//             difference,
-//             goalProgress,
-//           };
-//         });
-//       }
-//     } else if (entity === "Lead") {
-//       const leads = await Lead.findAll({
-//         where: whereClause,
-//         attributes: [
-//           "leadId",
-//           "firstName",
-//           "lastName",
-//           "email",
-//           "status",
-//           "masterUserID",
-//           "createdAt",
-//           "updatedAt",
-//         ],
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       data = leads.map((lead) => ({
-//         id: lead.leadId,
-//         name: `${lead.firstName} ${lead.lastName}`,
-//         email: lead.email,
-//         status: lead.status,
-//         owner: lead.masterUserID,
-//         createdAt: lead.createdAt,
-//         updatedAt: lead.updatedAt,
-//       }));
-
-//       summary = {
-//         totalCount: leads.length,
-//         goalTarget: parseFloat(goal.targetValue),
-//         trackingMetric: trackingMetric,
-//         progress: {
-//           current: leads.length,
-//           target: parseFloat(goal.targetValue),
-//           percentage: Math.min(
-//             100,
-//             Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
-//           ),
-//         },
-//       };
-
-//       // Generate breakdown based on goal's period setting
-//       monthlyBreakdown =
-//         goal.period === "Weekly"
-//           ? generateWeeklyBreakdown(
-//               leads,
-//               goal,
-//               trackingMetric,
-//               "Lead",
-//               start,
-//               end
-//             )
-//           : goal.period === "Quarterly"
-//           ? generateQuarterlyBreakdown(
-//               leads,
-//               goal,
-//               trackingMetric,
-//               "Lead",
-//               start,
-//               end
-//             )
-//           : generateMonthlyBreakdown(
-//               leads,
-//               goal,
-//               trackingMetric,
-//               "Lead",
-//               start,
-//               end
-//             );
-//     }
-
-//     // Calculate comprehensive duration information
-//     const nowTime = new Date();
-//     const isIndefinite = !endDate || endDate === null;
-//     const goalStartDate = new Date(startDate);
-//     const goalEndDate = endDate ? new Date(endDate) : null;
-
-//     // Calculate periods based on frequency
-//     let totalPeriods = 1;
-//     let currentPeriod = 1;
-//     let periodType = goal.period || "Monthly";
-
-//     if (!isIndefinite && goalEndDate) {
-//       const totalMonths =
-//         (goalEndDate.getFullYear() - goalStartDate.getFullYear()) * 12 +
-//         (goalEndDate.getMonth() - goalStartDate.getMonth()) +
-//         1;
-
-//       if (periodType === "Monthly") {
-//         totalPeriods = totalMonths;
-//         currentPeriod = Math.min(
-//           totalPeriods,
-//           (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-//             (nowTime.getMonth() - goalStartDate.getMonth()) +
-//             1
-//         );
-//       } else if (periodType === "Quarterly") {
-//         totalPeriods = Math.ceil(totalMonths / 3);
-//         currentPeriod = Math.min(
-//           totalPeriods,
-//           Math.ceil(
-//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-//               (nowTime.getMonth() - goalStartDate.getMonth()) +
-//               1) /
-//               3
-//           )
-//         );
-//       } else if (periodType === "Yearly") {
-//         totalPeriods = Math.ceil(totalMonths / 12);
-//         currentPeriod = Math.min(
-//           totalPeriods,
-//           Math.ceil(
-//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-//               (nowTime.getMonth() - goalStartDate.getMonth()) +
-//               1) /
-//               12
-//           )
-//         );
-//       }
-//     } else if (isIndefinite) {
-//       // For indefinite goals, calculate current period from start
-//       const monthsFromStart =
-//         (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
-//         (nowTime.getMonth() - goalStartDate.getMonth()) +
-//         1;
-
-//       if (periodType === "Monthly") {
-//         currentPeriod = monthsFromStart;
-//       } else if (periodType === "Quarterly") {
-//         currentPeriod = Math.ceil(monthsFromStart / 3);
-//       } else if (periodType === "Yearly") {
-//         currentPeriod = Math.ceil(monthsFromStart / 12);
-//       }
-//       totalPeriods = null; // Indefinite
-//     }
-
-//     const durationInfo = {
-//       startDate: startDate,
-//       endDate: endDate,
-//       isIndefinite: isIndefinite,
-//       frequency: periodType,
-//       totalPeriods: totalPeriods,
-//       currentPeriod: currentPeriod,
-//       durationDays: isIndefinite
-//         ? null
-//         : Math.ceil((goalEndDate - goalStartDate) / (1000 * 60 * 60 * 24)),
-//       isActive:
-//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
-//       timeRemaining: isIndefinite
-//         ? null
-//         : Math.max(
-//             0,
-//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
-//           ),
-//       timeElapsed: Math.max(
-//         0,
-//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
-//       ),
-//       status: isIndefinite
-//         ? "ongoing"
-//         : nowTime <= goalEndDate
-//         ? "active"
-//         : "expired",
-//       trackingPeriod: isIndefinite
-//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
-//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
-//       periodProgress: totalPeriods
-//         ? `${currentPeriod} of ${totalPeriods} ${periodType.toLowerCase()} periods`
-//         : `${currentPeriod} ${periodType.toLowerCase()} period(s) elapsed`,
-//       targetPerPeriod: calculateTargetPerPeriod(
-//         goal.targetValue,
-//         periodType,
-//         totalPeriods
-//       ),
-//     };
-
-//     res.status(200).json({
-//       success: true,
-//       data: {
-//         goal: goal.toJSON(),
-//         records: data,
-//         summary: summary,
-//         monthlyBreakdown: monthlyBreakdown,
-//         period: {
-//           startDate: startDate,
-//           endDate: endDate,
-//         },
-//         duration: durationInfo,
-//         filters: {
-//           entity: entity,
-//           goalType: goalType,
-//           assignee: assignee,
-//           assignId: assignId,
-//           pipeline: pipeline, // Show pipeline for all entities (Activity goals filter by linked deal pipeline)
-//           pipelineStage: pipelineStage,
-//           activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
-//         },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error fetching goal data:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch goal data",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// // DEPRECATED: Get progressed goal data with detailed stage tracking - not used
-// exports.getProgressedGoalData = async (req, res) => {
-//   try {
-//     const { goalId } = req.params;
-//     const ownerId = req.adminId;
-//     const periodFilter = req.query.periodFilter;
-
-//     const goal = await Goal.findOne({
-//       where: {
-//         goalId,
-//         ownerId,
-//       },
-//     });
-
-//     if (!goal) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Goal not found or access denied",
-//       });
-//     }
-
-//     // Check if goal type is supported (Progressed or Added)
-//     if (
-//       (goal.goalType !== "Progressed" && goal.goalType !== "Added") ||
-//       goal.entity !== "Deal"
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "This endpoint is only for 'Progressed' or 'Added' deal goals",
-//       });
-//     }
-
-//     const {
-//       assignee,
-//       assignId,
-//       pipeline,
-//       pipelineStage,
-//       startDate,
-//       endDate,
-//       trackingMetric,
-//     } = goal;
-
-//     // Use the same date range logic as getGoalData
-//     function getPeriodRange(filter) {
-//       const now = new Date();
-//       let start, end;
-//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-//       switch ((filter || "").toLowerCase()) {
-//         case "yesterday":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 1);
-//           end = new Date(today);
-//           end.setDate(end.getDate() - 1);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "today":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "tomorrow":
-//           start = new Date(today);
-//           start.setDate(start.getDate() + 1);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 1);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "this_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay());
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "last_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay() - 7);
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_week":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - start.getDay() + 7);
-//           end = new Date(start);
-//           end.setDate(start.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "this_month":
-//           start = new Date(now.getFullYear(), now.getMonth(), 1);
-//           end = new Date(
-//             now.getFullYear(),
-//             now.getMonth() + 1,
-//             0,
-//             23,
-//             59,
-//             59,
-//             999
-//           );
-//           break;
-//         case "last_month":
-//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-//           break;
-//         case "next_month":
-//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-//           end = new Date(
-//             now.getFullYear(),
-//             now.getMonth() + 2,
-//             0,
-//             23,
-//             59,
-//             59,
-//             999
-//           );
-//           break;
-//         case "this_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           start = new Date(now.getFullYear(), q * 3, 1);
-//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "last_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
-//           const quarter = q === 0 ? 3 : q - 1;
-//           start = new Date(year, quarter * 3, 1);
-//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "next_quarter": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
-//           const quarter = q === 3 ? 0 : q + 1;
-//           start = new Date(year, quarter * 3, 1);
-//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
-//           break;
-//         }
-//         case "this_year":
-//           start = new Date(now.getFullYear(), 0, 1);
-//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "last_year":
-//           start = new Date(now.getFullYear() - 1, 0, 1);
-//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "next_year":
-//           start = new Date(now.getFullYear() + 1, 0, 1);
-//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
-//           break;
-//         case "month_to_date":
-//           start = new Date(now.getFullYear(), now.getMonth(), 1);
-//           end = now;
-//           break;
-//         case "quarter_to_date": {
-//           const q = Math.floor(now.getMonth() / 3);
-//           start = new Date(now.getFullYear(), q * 3, 1);
-//           end = now;
-//           break;
-//         }
-//         case "year_to_date":
-//           start = new Date(now.getFullYear(), 0, 1);
-//           end = now;
-//           break;
-//         case "past_7_days":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 6);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "past_2_weeks":
-//           start = new Date(today);
-//           start.setDate(start.getDate() - 13);
-//           end = new Date(today);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_7_days":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 6);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "next_2_weeks":
-//           start = new Date(today);
-//           end = new Date(today);
-//           end.setDate(end.getDate() + 13);
-//           end.setHours(23, 59, 59, 999);
-//           break;
-//         case "past_1_month":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 1);
-//           end = now;
-//           break;
-//         case "past_3_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 3);
-//           end = now;
-//           break;
-//         case "past_6_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 6);
-//           end = now;
-//           break;
-//         case "next_3_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 3);
-//           break;
-//         case "next_6_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 6);
-//           break;
-//         case "past_12_months":
-//           start = new Date(now);
-//           start.setMonth(start.getMonth() - 12);
-//           end = now;
-//           break;
-//         case "next_12_months":
-//           start = now;
-//           end = new Date(now);
-//           end.setMonth(end.getMonth() + 12);
-//           break;
-//         case "goal_duration":
-//         default:
-//           start = startDate;
-//           end = endDate || now;
-//       }
-//       return { start, end };
-//     }
-
-//     let start, end;
-//     try {
-//       ({ start, end } = getPeriodRange(periodFilter));
-//       if (
-//         !start ||
-//         !end ||
-//         isNaN(new Date(start).getTime()) ||
-//         isNaN(new Date(end).getTime())
-//       ) {
-//         start = startDate;
-//         end = endDate || new Date();
-//       }
-//     } catch (e) {
-//       start = startDate;
-//       end = endDate || new Date();
-//     }
-
-//     // Build where clause for deals based on goal type
-//     const whereClause = {};
-
-//     // Add assignee filter
-//     if (assignId && assignId !== "everyone") {
-//       whereClause.masterUserID = assignId;
-//     } else if (
-//       assignee &&
-//       assignee !== "All" &&
-//       assignee !== "Company (everyone)" &&
-//       assignee !== "everyone"
-//     ) {
-//       whereClause.masterUserID = assignee;
-//     }
-
-//     // Add pipeline filter
-//     if (pipeline) {
-//       if (pipeline.includes(",")) {
-//         // Multiple pipelines (comma-separated)
-//         const pipelines = pipeline
-//           .split(",")
-//           .map((p) => p.trim())
-//           .filter((p) => p !== "");
-//         whereClause.pipeline = {
-//           [Op.in]: pipelines,
-//         };
-//       } else {
-//         // Single pipeline
-//         whereClause.pipeline = pipeline;
-//       }
-//     }
-
-//     let data = [];
-//     let summary = {};
-//     let monthlyBreakdown = [];
-
-//     // Handle different goal types
-//     if (goal.goalType === "Progressed") {
-//       // Track deals that entered the specific pipeline stage during the period
-//       if (pipelineStage) {
-//         // Query DealStageHistory to find deals that entered this stage during the period
-//         const stageEntries = await DealStageHistory.findAll({
-//           where: {
-//             stageName: pipelineStage,
-//             enteredAt: {
-//               [Op.between]: [start, end],
-//             },
-//           },
-//           include: [
-//             {
-//               model: Deal,
-//               as: "Deal",
-//               where: whereClause,
-//               attributes: [
-//                 "dealId",
-//                 "title",
-//                 "value",
-//                 "pipeline",
-//                 "pipelineStage",
-//                 "status",
-//                 "masterUserID",
-//                 "createdAt",
-//                 "updatedAt",
-//               ],
-//             },
-//           ],
-//           order: [["enteredAt", "DESC"]],
-//         });
-
-//         // Format the data for frontend
-//         data = stageEntries.map((entry) => ({
-//           id: entry.Deal.dealId,
-//           title: entry.Deal.title,
-//           value: parseFloat(entry.Deal.value || 0),
-//           pipeline: entry.Deal.pipeline,
-//           stage: entry.Deal.pipelineStage,
-//           status: entry.Deal.status,
-//           owner: entry.Deal.masterUserID,
-//           enteredStageAt: entry.enteredAt,
-//           createdAt: entry.Deal.createdAt,
-//           updatedAt: entry.Deal.updatedAt,
-//         }));
-
-//         // Calculate current value based on tracking metric
-//         const currentValue =
-//           trackingMetric === "Value"
-//             ? data.reduce((sum, deal) => sum + deal.value, 0)
-//             : data.length;
-
-//         // Calculate summary
-//         summary = {
-//           totalCount: data.length,
-//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-//           goalTarget: parseFloat(goal.targetValue),
-//           trackingMetric: trackingMetric,
-//           targetStage: pipelineStage,
-//           progress: {
-//             current: currentValue,
-//             target: parseFloat(goal.targetValue),
-//             percentage: Math.min(
-//               100,
-//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-//             ),
-//           },
-//         };
-
-//         // Generate monthly breakdown by stage entry date
-//         monthlyBreakdown = generateMonthlyBreakdownForProgressed(
-//           stageEntries,
-//           goal,
-//           trackingMetric
-//         );
-//       } else {
-//         return res.status(400).json({
-//           success: false,
-//           message: "Pipeline stage is required for progressed goals",
-//         });
-//       }
-//     } else if (goal.goalType === "Added") {
-//       // Track deals that were added (created) during the period
-//       const addedWhereClause = {
-//         ...whereClause,
-//         createdAt: {
-//           [Op.between]: [start, end],
-//         },
-//       };
-
-//       // Get all deals that were added during the period
-//       const addedDeals = await Deal.findAll({
-//         where: addedWhereClause,
-//         attributes: [
-//           "dealId",
-//           "title",
-//           "value",
-//           "pipeline",
-//           "pipelineStage",
-//           "status",
-//           "masterUserID",
-//           "createdAt",
-//           "updatedAt",
-//         ],
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       // Format the data for frontend
-//       data = addedDeals.map((deal) => ({
-//         id: deal.dealId,
-//         title: deal.title,
-//         value: parseFloat(deal.value || 0),
-//         pipeline: deal.pipeline,
-//         stage: deal.pipelineStage,
-//         status: deal.status,
-//         owner: deal.masterUserID,
-//         createdAt: deal.createdAt,
-//         updatedAt: deal.updatedAt,
-//       }));
-
-//       // Calculate current value based on tracking metric
-//       const currentValue =
-//         trackingMetric === "Value"
-//           ? data.reduce((sum, deal) => sum + deal.value, 0)
-//           : data.length;
-
-//       // Calculate summary
-//       summary = {
-//         totalCount: data.length,
-//         totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
-//         goalTarget: parseFloat(goal.targetValue),
-//         trackingMetric: trackingMetric,
-//         progress: {
-//           current: currentValue,
-//           target: parseFloat(goal.targetValue),
-//           percentage: Math.min(
-//             100,
-//             Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-//           ),
-//         },
-//       };
-
-//       // Generate monthly breakdown for added deals
-//       monthlyBreakdown = generateMonthlyBreakdown(
-//         addedDeals,
-//         goal,
-//         trackingMetric,
-//         "Deal"
-//       );
-//     }
-
-//     // Enhanced duration info
-//     const nowTime = new Date();
-//     const isIndefinite = !endDate || endDate === null;
-//     const goalStartDate = new Date(startDate);
-//     const goalEndDate = endDate ? new Date(endDate) : null;
-
-//     const durationInfo = {
-//       startDate: startDate,
-//       endDate: endDate,
-//       isIndefinite: isIndefinite,
-//       frequency: goal.period || "Monthly",
-//       isActive:
-//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
-//       timeRemaining: isIndefinite
-//         ? null
-//         : Math.max(
-//             0,
-//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
-//           ),
-//       timeElapsed: Math.max(
-//         0,
-//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
-//       ),
-//       status: isIndefinite
-//         ? "ongoing"
-//         : nowTime <= goalEndDate
-//         ? "active"
-//         : "expired",
-//       trackingPeriod: isIndefinite
-//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
-//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
-//     };
-
-//     res.status(200).json({
-//       success: true,
-//       data: {
-//         goal: goal.toJSON(),
-//         records: data,
-//         summary: summary,
-//         monthlyBreakdown: monthlyBreakdown,
-//         period: {
-//           startDate: start,
-//           endDate: end,
-//         },
-//         duration: durationInfo,
-//         filters: {
-//           entity: goal.entity,
-//           goalType: goal.goalType,
-//           assignee: assignee,
-//           assignId: assignId,
-//           pipeline: pipeline,
-//           pipelineStage: pipelineStage,
-//         },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error fetching progressed goal data:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch progressed goal data",
-//       error: error.message,
-//     });
-//   }
-// };
-// Get progressed goal data (legacy endpoint)
-
-// =============== HELPER FUNCTIONS ===============
-
-async function generateReportData(report, ownerId) {
-  try {
-    const { entity, type, config } = report;
-    const period = config.period || "this_month";
-
-    // Get date range based on period
-    const dateRange = getDateRange(period);
-
-    let data = {};
-
-    if (entity === "Deal") {
-      data = await generateDealReportData(type, config, dateRange, ownerId);
-    } else if (entity === "Lead") {
-      data = await generateLeadReportData(type, config, dateRange, ownerId);
-    } else if (entity === "Activity") {
-      data = await generateActivityReportData(type, config, dateRange, ownerId);
-    }
-
-    return {
-      ...data,
-      generatedAt: new Date(),
-      period: period,
-      dateRange: dateRange,
-    };
-  } catch (error) {
-    console.error("Error generating report data:", error);
-    return {
-      error: "Failed to generate report data",
-      generatedAt: new Date(),
-    };
-  }
-}
-
-async function generateDealReportData(type, config, dateRange, ownerId) {
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [dateRange.start, dateRange.end],
-    },
-  };
-
-  // Add user filter for non-admin users
-  if (ownerId) {
-    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
-  }
-
-  switch (type) {
-    case "Performance":
-      const dealStats = await Deal.findAll({
-        attributes: [
-          "status",
-          [Deal.sequelize.fn("COUNT", Deal.sequelize.col("dealId")), "count"],
-          [Deal.sequelize.fn("SUM", Deal.sequelize.col("value")), "totalValue"],
-        ],
-        where: whereClause,
-        group: ["status"],
-      });
-
-      return {
-        chartType: "pie",
-        labels: dealStats.map((stat) => stat.status || "Open"),
-        datasets: [
-          {
-            data: dealStats.map((stat) => stat.get("count")),
-            backgroundColor: ["#4CAF50", "#2196F3", "#FF9800", "#F44336"],
-          },
-        ],
-        summary: {
-          total: dealStats.reduce(
-            (sum, stat) => sum + parseInt(stat.get("count")),
-            0
-          ),
-          totalValue: dealStats.reduce(
-            (sum, stat) => sum + parseFloat(stat.get("totalValue") || 0),
-            0
-          ),
-        },
-      };
-
-    case "Conversion":
-      const conversionData = await Deal.findAll({
-        attributes: [
-          "pipelineStage",
-          [Deal.sequelize.fn("COUNT", Deal.sequelize.col("dealId")), "count"],
-        ],
-        where: whereClause,
-        group: ["pipelineStage"],
-      });
-
-      return {
-        chartType: "funnel",
-        stages: conversionData.map((stage) => ({
-          name: stage.pipelineStage || "Unknown",
-          value: parseInt(stage.get("count")),
-        })),
-      };
-
-    case "Duration":
-      const durationData = await Deal.findAll({
-        attributes: [
-          "pipelineStage",
-          [
-            Deal.sequelize.fn(
-              "AVG",
-              Deal.sequelize.fn(
-                "DATEDIFF",
-                Deal.sequelize.fn("NOW"),
-                Deal.sequelize.col("createdAt")
-              )
-            ),
-            "avgDays",
-          ],
-        ],
-        where: whereClause,
-        group: ["pipelineStage"],
-      });
-
-      return {
-        chartType: "bar",
-        labels: durationData.map((stage) => stage.pipelineStage || "Unknown"),
-        datasets: [
-          {
-            label: "Average Days",
-            data: durationData.map((stage) =>
-              Math.round(parseFloat(stage.get("avgDays")) || 0)
-            ),
-            backgroundColor: "#2196F3",
-          },
-        ],
-      };
-
-    default:
-      return { error: "Unknown report type" };
-  }
-}
-
-async function generateLeadReportData(type, config, dateRange, ownerId) {
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [dateRange.start, dateRange.end],
-    },
-  };
-
-  if (ownerId) {
-    whereClause.masterUserID = ownerId;
-  }
-
-  const leadStats = await Lead.findAll({
-    attributes: [
-      "status",
-      [Lead.sequelize.fn("COUNT", Lead.sequelize.col("leadId")), "count"],
-    ],
-    where: whereClause,
-    group: ["status"],
-  });
-
-  return {
-    chartType: "pie",
-    labels: leadStats.map((stat) => stat.status || "Open"),
-    datasets: [
-      {
-        data: leadStats.map((stat) => parseInt(stat.get("count"))),
-        backgroundColor: ["#4CAF50", "#2196F3", "#FF9800"],
-      },
-    ],
-    summary: {
-      total: leadStats.reduce(
-        (sum, stat) => sum + parseInt(stat.get("count")),
-        0
-      ),
-    },
-  };
-}
-
-async function generateActivityReportData(type, config, dateRange, ownerId) {
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [dateRange.start, dateRange.end],
-    },
-  };
-
-  if (ownerId) {
-    whereClause.masterUserID = ownerId;
-  }
-
-  const activityStats = await Activity.findAll({
-    attributes: [
-      "activityType",
-      [
-        Activity.sequelize.fn("COUNT", Activity.sequelize.col("activityId")),
-        "count",
-      ],
-    ],
-    where: whereClause,
-    group: ["activityType"],
-  });
-
-  return {
-    chartType: "bar",
-    labels: activityStats.map((stat) => stat.activityType || "Unknown"),
-    datasets: [
-      {
-        label: "Activity Count",
-        data: activityStats.map((stat) => parseInt(stat.get("count"))),
-        backgroundColor: "#FF9800",
-      },
-    ],
-    summary: {
-      total: activityStats.reduce(
-        (sum, stat) => sum + parseInt(stat.get("count")),
-        0
-      ),
-    },
-  };
-}
-
-// Helper function to generate breakdown data for goals (used in getGoalsForDashboard)
-async function generateGoalBreakdownData(
-  goal,
-  ownerId,
-  periodFilter = "goal_duration"
-) {
-  const {
-    entity,
-    goalType,
-    assignee,
-    assignId,
-    pipeline,
-    pipelineStage,
-    startDate,
-    endDate,
-    trackingMetric,
-    activityType,
-  } = goal;
-
-  // Helper function to get date range for period filters
-  function getPeriodRange(filter) {
-    const now = new Date();
-    let start, end;
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch ((filter || "").toLowerCase()) {
-      case "yesterday":
-        start = new Date(today);
-        start.setDate(start.getDate() - 1);
-        end = new Date(today);
-        end.setDate(end.getDate() - 1);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "today":
-        start = new Date(today);
-        end = new Date(today);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "last_week":
-        start = new Date(today);
-        start.setDate(start.getDate() - start.getDay() - 7);
-        end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        break;
-      case "this_month":
-        start = new Date(now.getFullYear(), now.getMonth(), 1);
-        end = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
-          23,
-          59,
-          59,
-          999
-        );
-        break;
-      case "last_month":
-        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-        break;
-      case "this_year":
-        start = new Date(now.getFullYear(), 0, 1);
-        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-        break;
-      case "last_year":
-        start = new Date(now.getFullYear() - 1, 0, 1);
-        end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-        break;
-      case "goal_duration":
-      default:
-        // Use goal's startDate and endDate (or current date if indefinite)
-        start = startDate;
-        end = endDate || now;
-    }
-    return { start, end };
-  }
-
-  // Build where clause based on goal criteria and period filter
-  let start, end;
-  try {
-    ({ start, end } = getPeriodRange(periodFilter));
-    // If start or end is invalid, fallback to goal duration
-    if (
-      !start ||
-      !end ||
-      isNaN(new Date(start).getTime()) ||
-      isNaN(new Date(end).getTime())
-    ) {
-      start = startDate;
-      end = endDate || new Date();
-    }
-  } catch (e) {
-    // Fallback to goal duration if getPeriodRange fails
-    start = startDate;
-    end = endDate || new Date();
-  }
-
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [start, end],
-    },
-  };
-
-  // Add assignee filter based on assignId and assignee values
-  if (assignId && assignId !== "everyone") {
-    // Specific user assigned
-    whereClause.masterUserID = assignId;
-  } else if (
-    assignee &&
-    assignee !== "All" &&
-    assignee !== "Company (everyone)" &&
-    assignee !== "everyone"
-  ) {
-    // Legacy assignee field (for backward compatibility)
-    whereClause.masterUserID = assignee;
-  }
-
-  // Add pipeline filter if specified
-  if (pipeline && entity === "Deal") {
-    if (pipeline.includes(",")) {
-      // Multiple pipelines (comma-separated)
-      const pipelines = pipeline
-        .split(",")
-        .map((p) => p.trim())
-        .filter((p) => p !== "");
-      whereClause.pipeline = {
-        [Op.in]: pipelines,
-      };
-    } else {
-      // Single pipeline
-      whereClause.pipeline = pipeline;
-    }
-  }
-
-  let breakdown = [];
-  let summary = {};
-
-  try {
-    if (entity === "Deal") {
-      // Handle different goal types with specific logic
-      if (goalType === "Progressed") {
-        // Use DealStageHistory for accurate stage progression tracking
-        if (pipelineStage) {
-          // Only filter by columns that exist in DealStageHistory
-          const stageHistoryWhereClause = {
-            newStage: pipelineStage,
-            updatedAt: {
-              [Op.between]: [start, end],
-            },
-          };
-
-          // Build Deal include where clause for pipeline and assignee
-          const dealWhere = {};
-          if (pipeline) {
-            if (pipeline.includes(",")) {
-              const pipelines = pipeline
-                .split(",")
-                .map((p) => p.trim())
-                .filter((p) => p !== "");
-              dealWhere.pipeline = { [Op.in]: pipelines };
-            } else {
-              dealWhere.pipeline = pipeline;
+          if (organization) {
+            await organization.update(organizationData);
+            console.log(
+              `Updated organization ${lead.leadOrganizationId}:`,
+              organizationData
+            );
+          }
+        }
+
+        // Handle custom fields
+        const savedCustomFields = {};
+        if (customFields && Object.keys(customFields).length > 0) {
+          for (const [fieldKey, value] of Object.entries(customFields)) {
+            try {
+              // Find custom field by fieldId first, then by fieldName
+              let customField = await CustomField.findOne({
+                where: {
+                  fieldId: fieldKey,
+                  entityType: { [Op.in]: ["lead", "both"] },
+                  isActive: true,
+                  [Op.or]: [
+                    { masterUserID: req.adminId },
+                    { fieldSource: "default" },
+                    { fieldSource: "system" },
+                  ],
+                },
+              });
+
+              if (!customField) {
+                customField = await CustomField.findOne({
+                  where: {
+                    fieldName: fieldKey,
+                    entityType: { [Op.in]: ["lead", "both"] },
+                    isActive: true,
+                    [Op.or]: [
+                      { masterUserID: req.adminId },
+                      { fieldSource: "default" },
+                      { fieldSource: "system" },
+                    ],
+                  },
+                });
+              }
+
+              if (
+                customField &&
+                value !== null &&
+                value !== undefined &&
+                value !== ""
+              ) {
+                // Check if custom field value already exists
+                const existingValue = await CustomFieldValue.findOne({
+                  where: {
+                    fieldId: customField.fieldId,
+                    entityId: lead.leadId,
+                    entityType: "lead",
+                  },
+                });
+
+                if (existingValue) {
+                  await existingValue.update({ value: value });
+                } else {
+                  await CustomFieldValue.create({
+                    fieldId: customField.fieldId,
+                    entityId: lead.leadId,
+                    entityType: "lead",
+                    value: value,
+                    masterUserID: req.adminId,
+                  });
+                }
+
+                savedCustomFields[customField.fieldName] = {
+                  fieldName: customField.fieldName,
+                  fieldType: customField.fieldType,
+                  value: value,
+                };
+              }
+            } catch (customFieldError) {
+              console.error(
+                `Error updating custom field ${fieldKey} for lead ${lead.leadId}:`,
+                customFieldError
+              );
             }
           }
-          if (assignId && assignId !== "everyone") {
-            dealWhere.masterUserID = assignId;
-          } else if (
-            assignee &&
-            assignee !== "All" &&
-            assignee !== "Company (everyone)" &&
-            assignee !== "everyone"
-          ) {
-            dealWhere.masterUserID = assignee;
+        }
+
+        // Send email notification if owner changed
+        if (ownerChanged && newOwner && newOwner.email) {
+          try {
+            const assigner = await MasterUser.findByPk(req.adminId);
+            if (assigner && assigner.email) {
+              await sendEmail(assigner.email, {
+                from: assigner.email,
+                to: newOwner.email,
+                subject: "You have been assigned a new lead",
+                text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+              });
+            }
+          } catch (emailError) {
+            console.error(
+              `Error sending email notification for lead ${lead.leadId}:`,
+              emailError
+            );
           }
-
-          const includeClause = [
-            {
-              model: Deal,
-              where: Object.keys(dealWhere).length > 0 ? dealWhere : undefined,
-              required: true,
-            },
-          ];
-
-          const stageEntries = await DealStageHistory.findAll({
-            where: stageHistoryWhereClause,
-            include: includeClause,
-            attributes: [
-              "dealId",
-              "oldStage",
-              "newStage",
-              "updatedAt",
-              "dealValue",
-            ],
-            order: [["updatedAt", "DESC"]],
-          });
-
-          const currentValue =
-            trackingMetric === "Value"
-              ? stageEntries.reduce(
-                  (sum, entry) => sum + parseFloat(entry.dealValue || 0),
-                  0
-                )
-              : stageEntries.length;
-
-          summary = {
-            totalCount: stageEntries.length,
-            totalValue: stageEntries.reduce(
-              (sum, entry) => sum + parseFloat(entry.dealValue || 0),
-              0
-            ),
-            goalTarget: parseFloat(goal.targetValue),
-            trackingMetric: trackingMetric,
-            progress: {
-              current: currentValue,
-              target: parseFloat(goal.targetValue),
-              percentage: Math.min(
-                100,
-                Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-              ),
-            },
-          };
-
-          // Generate breakdown by stage entry date
-          breakdown =
-            goal.period === "Weekly"
-              ? generateWeeklyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric,
-                  start,
-                  end
-                )
-              : generateMonthlyBreakdownForProgressed(
-                  stageEntries,
-                  goal,
-                  trackingMetric,
-                  start,
-                  end
-                );
         }
-      } else if (goalType === "Added") {
-        const addedDeals = await Deal.findAll({
-          where: whereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "createdAt",
-          ],
-          order: [["createdAt", "DESC"]],
+
+        // Log audit trail for successful update
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UPDATE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk updated by ${req.role}`,
+          { updateData }
+        );
+
+        updateResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+          customFields: savedCustomFields,
         });
+      } catch (leadError) {
+        console.error(`Error updating lead ${lead.leadId}:`, leadError);
 
-        const currentValue =
-          trackingMetric === "Value"
-            ? addedDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : addedDeals.length;
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UPDATE",
+          req.adminId,
+          `Error updating lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
 
-        summary = {
-          totalCount: addedDeals.length,
-          totalValue: addedDeals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                addedDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      } else if (goalType === "Won") {
-        const wonWhereClause = {
-          ...whereClause,
-          status: "won",
-          updatedAt: {
-            [Op.between]: [start, end],
-          },
-        };
-
-        const wonDeals = await Deal.findAll({
-          where: wonWhereClause,
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "pipelineStage",
-            "status",
-            "masterUserID",
-            "updatedAt",
-          ],
-          order: [["updatedAt", "DESC"]],
-        });
-
-        const currentValue =
-          trackingMetric === "Value"
-            ? wonDeals.reduce(
-                (sum, deal) => sum + parseFloat(deal.value || 0),
-                0
-              )
-            : wonDeals.length;
-
-        summary = {
-          totalCount: wonDeals.length,
-          totalValue: wonDeals.reduce(
-            (sum, deal) => sum + parseFloat(deal.value || 0),
-            0
-          ),
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: trackingMetric,
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                wonDeals,
-                goal,
-                trackingMetric,
-                "Deal",
-                start,
-                end
-              );
-      }
-    } else if (entity === "Activity") {
-      // Build where clause for activities
-      const activityWhereClause = { ...whereClause };
-
-      // Add activity type filter if specified
-      if (activityType) {
-        if (activityType.includes(",")) {
-          // Multiple activity types (comma-separated)
-          const activityTypes = activityType
-            .split(",")
-            .map((type) => type.trim())
-            .filter((type) => type !== "");
-          activityWhereClause.type = {
-            [Op.in]: activityTypes,
-          };
-        } else {
-          // Single activity type
-          activityWhereClause.type = activityType;
-        }
-      }
-
-      // Add pipeline filter for Activity goals via Deal association
-      const includeClause = [];
-      if (pipeline) {
-        const dealWhereClause = {};
-        if (pipeline.includes(",")) {
-          const pipelines = pipeline
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => p !== "");
-          dealWhereClause.pipeline = {
-            [Op.in]: pipelines,
-          };
-        } else {
-          dealWhereClause.pipeline = pipeline;
-        }
-
-        includeClause.push({
-          model: Deal,
-          where: dealWhereClause,
-          required: true,
+        updateResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
         });
       }
-
-      if (goalType === "Added") {
-        const addedActivities = await Activity.findAll({
-          where: activityWhereClause,
-          include: includeClause,
-          attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "createdAt",
-            "assignedTo",
-            "markedAsDoneTime",
-          ],
-          include: [
-            {
-              model: MasterUser,
-              attributes: [["name", "assignToUser"]],
-              as: "assignedUser", // <-- must match the alias in the association
-              required: false,
-            },
-          ],
-          order: [["createdAt", "DESC"]],
-        });
-
-        const currentValue = addedActivities.length;
-
-        summary = {
-          totalCount: addedActivities.length,
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: "Count",
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                addedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                addedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              );
-      } else if (goalType === "Completed") {
-        activityWhereClause.isDone = true;
-
-        const completedActivities = await Activity.findAll({
-          where: activityWhereClause,
-          include: includeClause,
-          attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "updatedAt",
-            "assignedTo",
-            "markedAsDoneTime",
-          ],
-          include: [
-            {
-              model: MasterUser,
-              attributes: [["name", "assignToUser"]],
-              as: "assignedUser", // <-- must match the alias in the association
-              required: false,
-            },
-          ],
-          order: [["updatedAt", "DESC"]],
-        });
-
-        const currentValue = completedActivities.length;
-
-        summary = {
-          totalCount: completedActivities.length,
-          goalTarget: parseFloat(goal.targetValue),
-          trackingMetric: "Count",
-          progress: {
-            current: currentValue,
-            target: parseFloat(goal.targetValue),
-            percentage: Math.min(
-              100,
-              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
-            ),
-          },
-        };
-
-        breakdown =
-          goal.period === "Weekly"
-            ? generateWeeklyBreakdown(
-                completedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              )
-            : generateMonthlyBreakdown(
-                completedActivities,
-                goal,
-                "Count",
-                "Activity",
-                start,
-                end
-              );
-      }
     }
-  } catch (error) {
-    console.error("Error generating goal breakdown data:", error);
-    breakdown = [];
-    summary = {
-      totalCount: 0,
-      totalValue: 0,
-      goalTarget: parseFloat(goal.targetValue),
-      trackingMetric: trackingMetric || "Count",
-      progress: {
-        current: 0,
-        target: parseFloat(goal.targetValue),
-        percentage: 0,
-      },
-    };
-  }
 
-  return {
-    breakdown,
-    summary,
-    periodInfo: {
-      start,
-      end,
-      periodFilter,
-    },
-  };
-}
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToUpdate.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
 
-async function calculateGoalProgress(goal, ownerId) {
-  const {
-    entity,
-    goalType,
-    targetValue,
-    startDate,
-    endDate,
-    assignee,
-    assignId,
-    pipeline,
-    pipelineStage,
-    trackingMetric,
-  } = goal;
-
-  // Handle indefinite goals (endDate is null)
-  const currentDate = new Date();
-  const effectiveEndDate = endDate || currentDate;
-
-  const whereClause = {
-    createdAt: {
-      [Op.between]: [startDate, effectiveEndDate],
-    },
-  };
-
-  // Add assignee filter based on assignId and assignee values
-  if (assignId && assignId !== "everyone") {
-    // Specific user assigned
-    whereClause.masterUserID = assignId;
-  } else if (
-    assignee &&
-    assignee !== "All" &&
-    assignee !== "Company (everyone)" &&
-    assignee !== "everyone"
-  ) {
-    // Legacy assignee field (for backward compatibility)
-    whereClause.masterUserID = assignee;
-  } else if (ownerId && !assignId && !assignee) {
-    // Fallback to owner ID if no specific assignment
-    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
-  }
-  // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
-
-  // Add pipeline filter if specified
-  if (pipeline && entity === "Deal") {
-    if (pipeline.includes(",")) {
-      // Multiple pipelines (comma-separated)
-      const pipelines = pipeline
-        .split(",")
-        .map((p) => p.trim())
-        .filter((p) => p !== "");
-      whereClause.pipeline = {
-        [Op.in]: pipelines,
-      };
-    } else {
-      // Single pipeline
-      whereClause.pipeline = pipeline;
-    }
-  }
-
-  let currentValue = 0;
-
-  try {
-    if (entity === "Deal") {
-      if (goalType === "Added") {
-        if (trackingMetric === "Value") {
-          const result = await Deal.sum("value", { where: whereClause });
-          currentValue = result || 0;
-        } else {
-          const count = await Deal.count({ where: whereClause });
-          currentValue = count;
-        }
-      } else if (goalType === "Won") {
-        const wonWhereClause = {
-          ...whereClause,
-          status: "won",
-        };
-        if (trackingMetric === "Value") {
-          const result = await Deal.sum("value", { where: wonWhereClause });
-          currentValue = result || 0;
-        } else {
-          const count = await Deal.count({ where: wonWhereClause });
-          currentValue = count;
-        }
-      } else if (goalType === "Progressed") {
-        // Count deals that moved to specific stage or progressed beyond qualified
-        let progressedWhereClause = { ...whereClause };
-        if (pipelineStage) {
-          // Track deals entering specific pipeline stage
-          progressedWhereClause.pipelineStage = pipelineStage;
-        } else {
-          // Fallback: deals that progressed beyond "Qualified"
-          progressedWhereClause.pipelineStage = { [Op.ne]: "Qualified" };
-        }
-
-        if (trackingMetric === "Value") {
-          const result = await Deal.sum("value", {
-            where: progressedWhereClause,
-          });
-          currentValue = result || 0;
-        } else {
-          const count = await Deal.count({ where: progressedWhereClause });
-          currentValue = count;
-        }
-      }
-    } else if (entity === "Lead") {
-      const count = await Lead.count({ where: whereClause });
-      currentValue = count;
-    } else if (entity === "Activity") {
-      const count = await Activity.count({ where: whereClause });
-      currentValue = count;
-    } else if (entity === "Forecast") {
-      // For forecast, calculate based on deal projections
-      const result = await Deal.sum("value", {
-        where: {
-          ...whereClause,
-          status: { [Op.in]: ["open", "qualified"] },
-        },
+    notFoundLeadIds.forEach((leadId) => {
+      updateResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found or no permission to edit",
       });
-      currentValue = result || 0;
-    }
-
-    const percentage = Math.min(
-      100,
-      Math.round((currentValue / targetValue) * 100)
-    );
-
-    return {
-      currentValue,
-      targetValue: parseFloat(targetValue),
-      percentage,
-      status:
-        percentage >= 100
-          ? "completed"
-          : percentage >= 75
-          ? "on_track"
-          : "behind",
-    };
-  } catch (error) {
-    console.error("Error calculating goal progress:", error);
-    return {
-      currentValue: 0,
-      targetValue: parseFloat(targetValue),
-      percentage: 0,
-      status: "error",
-      error: error.message,
-    };
-  }
-}
-
-function getDateRange(period) {
-  const now = new Date();
-  let start, end;
-
-  switch (period) {
-    case "today":
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      break;
-    case "this_week":
-      start = new Date(now.setDate(now.getDate() - now.getDay()));
-      end = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-      break;
-    case "this_month":
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      break;
-    case "this_quarter":
-      const quarter = Math.floor(now.getMonth() / 3);
-      start = new Date(now.getFullYear(), quarter * 3, 1);
-      end = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-      break;
-    case "this_year":
-      start = new Date(now.getFullYear(), 0, 1);
-      end = new Date(now.getFullYear(), 11, 31);
-      break;
-    default:
-      start = new Date(now.getFullYear(), now.getMonth(), 1);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  }
-
-  return { start, end };
-}
-
-// Generate monthly breakdown based on goal's actual duration and frequency
-function generateMonthlyBreakdown(
-  records,
-  goal,
-  trackingMetric,
-  entityType,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  const { startDate, endDate, period, targetValue } = goal;
-  const currentDate = new Date();
-  const isIndefinite = !endDate || endDate === null;
-
-  // Use filter dates if provided, otherwise use goal dates
-  const effectiveStartDate = filterStartDate
-    ? new Date(filterStartDate)
-    : new Date(startDate);
-  const effectiveEndDate = filterEndDate
-    ? new Date(filterEndDate)
-    : isIndefinite
-    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
-    : new Date(endDate);
-
-  // Calculate monthly target based on frequency
-  let monthlyTarget = parseFloat(targetValue);
-  if (period === "Quarterly") {
-    monthlyTarget = parseFloat(targetValue) / 3; // Divide quarterly target by 3 months
-  } else if (period === "Yearly") {
-    monthlyTarget = parseFloat(targetValue) / 12; // Divide yearly target by 12 months
-  }
-  // For Monthly frequency, target remains the same
-
-  const monthlyBreakdown = [];
-
-  // Generate months from effective start date to effective end date
-  let currentMonth = new Date(
-    effectiveStartDate.getFullYear(),
-    effectiveStartDate.getMonth(),
-    1
-  );
-
-  while (currentMonth <= effectiveEndDate) {
-    const monthStart = new Date(currentMonth);
-    const monthEnd = new Date(
-      currentMonth.getFullYear(),
-      currentMonth.getMonth() + 1,
-      0
-    );
-
-    // Adjust first month to start from effective start date
-    if (
-      monthStart.getMonth() === effectiveStartDate.getMonth() &&
-      monthStart.getFullYear() === effectiveStartDate.getFullYear()
-    ) {
-      monthStart.setDate(effectiveStartDate.getDate());
-    }
-
-    // Adjust last month to end at effective end date
-    if (
-      monthEnd.getMonth() === effectiveEndDate.getMonth() &&
-      monthEnd.getFullYear() === effectiveEndDate.getFullYear()
-    ) {
-      monthEnd.setDate(effectiveEndDate.getDate());
-    }
-
-    // Filter records for this month
-    const monthRecords = records.filter((record) => {
-      const recordDate = new Date(record.createdAt);
-      return recordDate >= monthStart && recordDate <= monthEnd;
     });
 
-    // Calculate result based on tracking metric and entity type
-    let monthResult = 0;
-    if (entityType === "Deal" && trackingMetric === "Value") {
-      monthResult = monthRecords.reduce(
-        (sum, deal) => sum + parseFloat(deal.value || 0),
-        0
-      );
-    } else {
-      monthResult = monthRecords.length; // Count for all other cases
-    }
-
-    // Calculate progress metrics
-    const difference = monthResult - monthlyTarget;
-    const percentage =
-      monthResult > 0 ? Math.round((monthResult / monthlyTarget) * 100) : 0;
-
-    // Format period display
-    const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    const periodDisplay = `${
-      monthNames[currentMonth.getMonth()]
-    } ${currentMonth.getFullYear()}`;
-
-    monthlyBreakdown.push({
-      period: periodDisplay,
-      goal: monthlyTarget,
-      result: monthResult,
-      difference: difference,
-      percentage: percentage,
-      monthStart: monthStart.toISOString(),
-      monthEnd: monthEnd.toISOString(),
-      recordCount: monthRecords.length,
-      isCurrentMonth:
-        currentMonth.getMonth() === currentDate.getMonth() &&
-        currentMonth.getFullYear() === currentDate.getFullYear(),
-      isFutureMonth: currentMonth > currentDate,
-    });
-
-    // Move to next month
-    currentMonth.setMonth(currentMonth.getMonth() + 1);
-  }
-
-  return monthlyBreakdown;
-}
-
-// Calculate target per period based on frequency
-function calculateTargetPerPeriod(totalTarget, frequency, totalPeriods) {
-  const target = parseFloat(totalTarget);
-
-  if (frequency === "Monthly") {
-    return target; // Monthly targets remain the same
-  } else if (frequency === "Quarterly") {
-    return target / 3; // Quarterly target divided by 3 months
-  } else if (frequency === "Yearly") {
-    return target / 12; // Yearly target divided by 12 months
-  }
-
-  return target; // Default case
-}
-
-// Generate monthly breakdown for progressed goals based on stage entry dates
-function generateMonthlyBreakdownForProgressed(
-  stageEntries,
-  goal,
-  trackingMetric
-) {
-  if (!stageEntries || stageEntries.length === 0) return [];
-
-  const monthlyData = new Map();
-
-  stageEntries.forEach((entry) => {
-    const entryDate = new Date(entry.enteredAt);
-    const monthKey = `${entryDate.getFullYear()}-${String(
-      entryDate.getMonth() + 1
-    ).padStart(2, "0")}`;
-    const monthLabel = entryDate.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-    });
-
-    if (!monthlyData.has(monthKey)) {
-      monthlyData.set(monthKey, {
-        period: monthLabel,
-        label: monthLabel,
-        count: 0,
-        value: 0,
-        deals: [],
-      });
-    }
-
-    const monthData = monthlyData.get(monthKey);
-    monthData.count += 1;
-    monthData.value += parseFloat(entry.Deal?.value || 0);
-    monthData.deals.push(entry);
-  });
-
-  // Convert to array and sort by date
-  const breakdown = Array.from(monthlyData.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([monthKey, data]) => {
-      const goalTarget = parseFloat(goal.targetValue);
-      const result = trackingMetric === "Value" ? data.value : data.count;
-      const difference = result - goalTarget;
-      const goalProgress =
-        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
-
-      return {
-        period: data.period,
-        label: data.label,
-        goalTarget: goalTarget,
-        result: result,
-        difference: difference,
-        goalProgress: goalProgress,
-        count: data.count,
-        value: data.value,
-        deals: data.deals.length,
-      };
-    });
-
-  return breakdown;
-}
-
-// Generate weekly breakdown for progressed goals based on stage entry dates
-function generateWeeklyBreakdownForProgressed(
-  stageEntries,
-  goal,
-  trackingMetric
-) {
-  if (!stageEntries || stageEntries.length === 0) return [];
-
-  const weeklyData = new Map();
-
-  // Helper function to get week number
-  function getWeekNumber(date) {
-    const d = new Date(
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
-    );
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-  }
-
-  stageEntries.forEach((entry) => {
-    const entryDate = new Date(entry.enteredAt);
-    const weekNumber = getWeekNumber(entryDate);
-    const year = entryDate.getFullYear();
-    const weekKey = `${year}-W${weekNumber}`;
-    const weekLabel = `W${weekNumber} ${year}`;
-
-    if (!weeklyData.has(weekKey)) {
-      weeklyData.set(weekKey, {
-        period: weekLabel,
-        label: weekLabel,
-        count: 0,
-        value: 0,
-        deals: [],
-      });
-    }
-
-    const weekData = weeklyData.get(weekKey);
-    weekData.count += 1;
-    weekData.value += parseFloat(entry.Deal?.value || 0);
-    weekData.deals.push(entry);
-  });
-
-  // Calculate weekly target based on goal duration
-  const currentDate = new Date();
-  const isIndefinite = !goal.endDate || goal.endDate === null;
-  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
-  const goalStartDate = new Date(goal.startDate);
-  const totalDays = Math.ceil(
-    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
-  );
-  const totalWeeks = Math.ceil(totalDays / 7);
-  const weeklyTarget = parseFloat(goal.targetValue) / totalWeeks;
-
-  // Convert to array and sort by date
-  const breakdown = Array.from(weeklyData.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([weekKey, data]) => {
-      const goalTarget = weeklyTarget;
-      const result = trackingMetric === "Value" ? data.value : data.count;
-      const difference = result - goalTarget;
-      const goalProgress =
-        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
-
-      return {
-        period: data.period,
-        label: data.label,
-        goal: goalTarget, // Use 'goal' key to match weekly breakdown format
-        result: result,
-        difference: difference,
-        goalProgress: goalProgress,
-        count: data.count,
-        value: data.value,
-        deals: data.deals.length,
-      };
-    });
-
-  return breakdown;
-}
-function generateQuarterlyBreakdown(
-  records,
-  goal,
-  trackingMetric,
-  entityType,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  if (!records || records.length === 0) return [];
-
-  const now = new Date();
-  const startDate = filterStartDate || new Date(goal.startDate);
-  const endDate =
-    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
-
-  // Use the filtered date range, not the goal's full duration
-  const effectiveStartDate = new Date(
-    Math.max(startDate.getTime(), new Date(goal.startDate).getTime())
-  );
-  const effectiveEndDate = new Date(
-    Math.min(
-      endDate.getTime(),
-      goal.endDate ? new Date(goal.endDate).getTime() : now.getTime()
-    )
-  );
-
-  const quarterlyBreakdown = [];
-
-  // Helper function to get quarter start date
-  function getQuarterStart(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
-    return new Date(year, quarterStartMonth, 1);
-  }
-
-  // Helper function to get quarter end date
-  function getQuarterEnd(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const quarterEndMonth = Math.floor(month / 3) * 3 + 2; // 2, 5, 8, or 11
-    return new Date(year, quarterEndMonth + 1, 0, 23, 59, 59, 999); // Last day of quarter
-  }
-
-  // Helper function to get quarter number (1-4)
-  function getQuarterNumber(date) {
-    return Math.floor(date.getMonth() / 3) + 1;
-  }
-
-  // Calculate quarterly target based on goal's target and period
-  let quarterlyTarget = parseFloat(goal.targetValue);
-  if (goal.period === "Monthly") {
-    quarterlyTarget = quarterlyTarget * 3; // 3 months per quarter
-  } else if (goal.period === "Weekly") {
-    quarterlyTarget = quarterlyTarget * 13; // ~13 weeks per quarter
-  } else if (goal.period === "Yearly") {
-    quarterlyTarget = quarterlyTarget / 4; // 4 quarters per year
-  }
-  // If goal.period === "Quarterly", use the target as-is
-
-  // Start from the first quarter that intersects with effective start date
-  let currentQuarterStart = getQuarterStart(effectiveStartDate);
-
-  // Generate breakdown for each quarter within the effective period
-  while (currentQuarterStart <= effectiveEndDate) {
-    const quarterEnd = getQuarterEnd(currentQuarterStart);
-
-    // Adjust quarter boundaries to fit within effective date range
-    let quarterStart = new Date(
-      Math.max(currentQuarterStart.getTime(), effectiveStartDate.getTime())
-    );
-    let quarterEndAdjusted = new Date(
-      Math.min(quarterEnd.getTime(), effectiveEndDate.getTime())
-    );
-
-    // Don't process quarters that are entirely in the future beyond effective end date
-    if (quarterStart > effectiveEndDate) {
-      break;
-    }
-
-    // Filter records for this quarter
-    const quarterRecords = records.filter((record) => {
-      const recordDate = new Date(record.createdAt);
-      return recordDate >= quarterStart && recordDate <= quarterEndAdjusted;
-    });
-
-    // Calculate result based on tracking metric and entity type
-    let quarterResult = 0;
-    if (entityType === "Deal" && trackingMetric === "Value") {
-      quarterResult = quarterRecords.reduce(
-        (sum, deal) => sum + parseFloat(deal.value || 0),
-        0
-      );
-    } else {
-      quarterResult = quarterRecords.length; // Count for all other cases
-    }
-
-    // Calculate progress metrics
-    const difference = quarterResult - quarterlyTarget;
-    const percentage =
-      quarterlyTarget > 0
-        ? Math.round((quarterResult / quarterlyTarget) * 100)
-        : 0;
-
-    // Format period display (Q3 2025 format)
-    const quarterNumber = getQuarterNumber(currentQuarterStart);
-    const year = currentQuarterStart.getFullYear();
-    const periodDisplay = `Q${quarterNumber} ${year}`;
-
-    // Check if this is the current quarter
-    const currentQuarterStart_check = getQuarterStart(now);
-    const isCurrentQuarter =
-      currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
-
-    quarterlyBreakdown.push({
-      period: periodDisplay,
-      goal: quarterlyTarget, // Keep the actual quarterly target
-      result: quarterResult,
-      difference: difference,
-      percentage: percentage,
-      quarterStart: quarterStart.toISOString(),
-      quarterEnd: quarterEndAdjusted.toISOString(),
-      recordCount: quarterRecords.length,
-      isCurrentQuarter: isCurrentQuarter,
-      isFutureQuarter: currentQuarterStart > now,
-      quarterNumber: quarterNumber,
-      year: year,
-    });
-
-    // Move to next quarter
-    currentQuarterStart = new Date(
-      currentQuarterStart.getFullYear(),
-      currentQuarterStart.getMonth() + 3,
-      1
-    );
-  }
-
-  return quarterlyBreakdown;
-}
-// Generate weekly breakdown specifically for Activity goals
-function generateWeeklyBreakdown(
-  records,
-  goal,
-  trackingMetric,
-  entityType,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  const { startDate, endDate, period, targetValue } = goal;
-  const currentDate = new Date();
-  const isIndefinite = !endDate || endDate === null;
-
-  // Use filter dates if provided, otherwise use goal dates
-  const effectiveStartDate = filterStartDate
-    ? new Date(filterStartDate)
-    : new Date(startDate);
-  const effectiveEndDate = filterEndDate
-    ? new Date(filterEndDate)
-    : isIndefinite
-    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
-    : new Date(endDate);
-
-  // Calculate weekly target based on goal duration and frequency
-  let weeklyTarget = parseFloat(targetValue);
-
-  // Calculate total weeks in the effective period
-  const totalDays = Math.ceil(
-    (effectiveEndDate - effectiveStartDate) / (1000 * 60 * 60 * 24)
-  );
-  const totalWeeks = Math.ceil(totalDays / 7);
-
-  if (period === "Monthly" || period === "Quarterly" || period === "Yearly") {
-    // For any frequency, distribute the total target across the actual weeks in the goal period
-    weeklyTarget = parseFloat(targetValue) / totalWeeks;
-  }
-  // Round to reasonable decimal places
-  weeklyTarget = Math.round(weeklyTarget * 100) / 100;
-
-  const weeklyBreakdown = [];
-
-  // Helper function to get week number
-  function getWeekNumber(date) {
-    const d = new Date(
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
-    );
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-  }
-
-  // Helper function to get start of week (Monday)
-  function getStartOfWeek(date) {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
-    return new Date(d.setDate(diff));
-  }
-
-  // Helper function to get end of week (Sunday)
-  function getEndOfWeek(date) {
-    const startOfWeek = getStartOfWeek(date);
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    endOfWeek.setHours(23, 59, 59, 999);
-    return endOfWeek;
-  }
-
-  // Start from the week containing the effective start date
-  let currentWeekStart = getStartOfWeek(effectiveStartDate);
-
-  while (currentWeekStart <= effectiveEndDate) {
-    const weekStart = new Date(currentWeekStart);
-    const weekEnd = getEndOfWeek(currentWeekStart);
-
-    // Adjust first week to start from effective start date
-    if (
-      currentWeekStart <= effectiveStartDate &&
-      weekEnd >= effectiveStartDate
-    ) {
-      weekStart.setTime(effectiveStartDate.getTime());
-    }
-
-    // Adjust last week to end at effective end date
-    if (weekEnd >= effectiveEndDate) {
-      weekEnd.setTime(effectiveEndDate.getTime());
-    }
-
-    // Don't process weeks that are entirely in the future beyond effective end date
-    if (weekStart > effectiveEndDate) {
-      break;
-    }
-
-    // Filter records for this week
-    const weekRecords = records.filter((record) => {
-      const recordDate = new Date(record.createdAt);
-      return recordDate >= weekStart && recordDate <= weekEnd;
-    });
-
-    // Calculate result based on tracking metric and entity type
-    let weekResult = 0;
-    if (entityType === "Deal" && trackingMetric === "Value") {
-      weekResult = weekRecords.reduce(
-        (sum, deal) => sum + parseFloat(deal.value || 0),
-        0
-      );
-    } else {
-      weekResult = weekRecords.length; // Count for all other cases
-    }
-
-    // Calculate progress metrics
-    const difference = weekResult - weeklyTarget;
-    const percentage =
-      weeklyTarget > 0 ? Math.round((weekResult / weeklyTarget) * 100) : 0;
-
-    // Format period display (W31 2025 format)
-    const weekNumber = getWeekNumber(currentWeekStart);
-    const year = currentWeekStart.getFullYear();
-    const periodDisplay = `W${weekNumber} ${year}`;
-
-    // Check if this is the current week
-    const currentWeekStart_check = getStartOfWeek(currentDate);
-    const isCurrentWeek =
-      currentWeekStart.getTime() === currentWeekStart_check.getTime();
-
-    weeklyBreakdown.push({
-      period: periodDisplay,
-      goal: weeklyTarget, // Keep the actual weekly target (with decimals)
-      result: weekResult,
-      difference: difference,
-      percentage: percentage,
-      weekStart: weekStart.toISOString(),
-      weekEnd: weekEnd.toISOString(),
-      recordCount: weekRecords.length,
-      isCurrentWeek: isCurrentWeek,
-      isFutureWeek: currentWeekStart > currentDate,
-      weekNumber: weekNumber,
-      year: year,
-    });
-
-    // Move to next week
-    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
-  }
-
-  return weeklyBreakdown;
-}
-
-// Generate quarterly breakdown for progressed goals based on stage entry dates
-function generateQuarterlyBreakdownForProgressed(
-  stageEntries,
-  goal,
-  trackingMetric,
-  entityType,
-  filterStartDate = null,
-  filterEndDate = null
-) {
-  if (!stageEntries || stageEntries.length === 0) return [];
-
-  const quarterlyData = new Map();
-
-  // Helper function to get quarter number (1-4)
-  function getQuarterNumber(date) {
-    return Math.floor(date.getMonth() / 3) + 1;
-  }
-
-  // Helper function to get quarter start date
-  function getQuarterStart(date) {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
-    return new Date(year, quarterStartMonth, 1);
-  }
-
-  stageEntries.forEach((entry) => {
-    const entryDate = new Date(entry.enteredAt);
-    const quarterNumber = getQuarterNumber(entryDate);
-    const year = entryDate.getFullYear();
-    const quarterKey = `${year}-Q${quarterNumber}`;
-    const quarterLabel = `Q${quarterNumber} ${year}`;
-
-    if (!quarterlyData.has(quarterKey)) {
-      quarterlyData.set(quarterKey, {
-        period: quarterLabel,
-        label: quarterLabel,
-        count: 0,
-        value: 0,
-        deals: [],
-      });
-    }
-
-    const quarterData = quarterlyData.get(quarterKey);
-    quarterData.count += 1;
-    quarterData.value += parseFloat(entry.Deal?.value || 0);
-    quarterData.deals.push(entry);
-  });
-
-  // Calculate quarterly target based on goal duration
-  const currentDate = new Date();
-  const isIndefinite = !goal.endDate || goal.endDate === null;
-  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
-  const goalStartDate = new Date(goal.startDate);
-  const totalDays = Math.ceil(
-    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
-  );
-  const totalQuarters = Math.ceil(totalDays / 91); // Approximate 91 days per quarter
-  let quarterlyTarget = parseFloat(goal.targetValue) / totalQuarters;
-
-  // Adjust target based on goal period
-  if (goal.period === "Monthly") {
-    quarterlyTarget = parseFloat(goal.targetValue) * 3; // 3 months per quarter
-  } else if (goal.period === "Weekly") {
-    quarterlyTarget = parseFloat(goal.targetValue) * 13; // ~13 weeks per quarter
-  } else if (goal.period === "Yearly") {
-    quarterlyTarget = parseFloat(goal.targetValue) / 4; // 4 quarters per year
-  } else if (goal.period === "Quarterly") {
-    quarterlyTarget = parseFloat(goal.targetValue); // Use as-is for quarterly goals
-  }
-
-  // Convert to array and sort by date
-  const breakdown = Array.from(quarterlyData.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([quarterKey, data]) => {
-      const goalTarget = quarterlyTarget;
-      const result = trackingMetric === "Value" ? data.value : data.count;
-      const difference = result - goalTarget;
-      const percentage =
-        goalTarget > 0 ? Math.round((result / goalTarget) * 100) : 0;
-
-      return {
-        period: data.period,
-        label: data.label,
-        goal: goalTarget, // Use 'goal' key to match quarterly breakdown format
-        result: result,
-        difference: difference,
-        percentage: percentage,
-        count: data.count,
-        value: data.value,
-        deals: data.deals.length,
-      };
-    });
-
-  return breakdown;
-}
-// Bulk delete multiple or single goals
-exports.bulkDeleteGoal = async (req, res) => {
-  try {
-    let { goalIds } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // Support both single and multiple deletion
-    if (!goalIds) {
-      // Try to get from query or params for single delete
-      if (req.body.goalId) {
-        goalIds = [req.body.goalId];
-      } else if (req.query.goalId) {
-        goalIds = [req.query.goalId];
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "goalIds array or goalId is required",
-        });
-      }
-    } else if (!Array.isArray(goalIds)) {
-      goalIds = [goalIds];
-    }
-
-    // Find goals to delete (admin: all, non-admin: only own)
-    let goalsToDelete;
-    if (role === "admin") {
-      goalsToDelete = await Goal.findAll({
-        where: {
-          goalId: { [Op.in]: goalIds },
-        },
-      });
-    } else {
-      goalsToDelete = await Goal.findAll({
-        where: {
-          goalId: { [Op.in]: goalIds },
-          ownerId,
-        },
-      });
-    }
-
-    if (!goalsToDelete || goalsToDelete.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No goals found to delete",
-      });
-    }
-
-    // Check if some goals were not found or not accessible
-    const foundIds = goalsToDelete.map((g) => g.goalId);
-    const notFoundIds = goalIds.filter((id) => !foundIds.includes(id));
-
-    // Delete the goals
-    let deleteWhere = { goalId: { [Op.in]: foundIds } };
-    if (role !== "admin") deleteWhere.ownerId = ownerId;
-    const deletedCount = await Goal.destroy({ where: deleteWhere });
-
-    let message = `Successfully deleted ${deletedCount} goal(s)`;
-    if (notFoundIds.length > 0) {
-      message += `. Note: ${notFoundIds.length} goal(s) were not found or not accessible.`;
-    }
+    console.log("Bulk update results:", updateResults);
 
     res.status(200).json({
-      success: true,
-      message: message,
-      data: {
-        deletedCount: deletedCount,
-        deletedIds: foundIds,
-        notFoundIds: notFoundIds,
+      message: "Bulk edit operation completed",
+      results: updateResults,
+      summary: {
+        total: leadIds.length,
+        successful: updateResults.successful.length,
+        failed: updateResults.failed.length,
+        skipped: updateResults.skipped.length,
       },
     });
   } catch (error) {
-    console.error("Error bulk deleting goals:", error);
+    console.error("Error in bulk edit leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_UPDATE",
+      null,
+      "Error in bulk edit leads: " + error.message,
+      req.adminId
+    );
+
     res.status(500).json({
-      success: false,
-      message: "Failed to delete goals",
+      message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk delete leads functionality
+exports.bulkDeleteLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk delete request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_DELETE",
+        null,
+        "Access denied. You do not have permission to bulk delete leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk delete leads.",
+      });
+    }
+
+    // Find leads to delete
+    let whereClause = { leadId: { [Op.in]: leadIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToDelete = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "masterUserID",
+      ],
+    });
+
+    if (leadsToDelete.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to delete or you don't have permission to delete them",
+      });
+    }
+
+    console.log(`Found ${leadsToDelete.length} leads to delete`);
+
+    const deleteResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for deletion
+    for (const lead of leadsToDelete) {
+      try {
+        console.log(`Deleting lead ${lead.leadId}`);
+
+        // Delete related data first
+        // Delete custom field values
+        await CustomFieldValue.destroy({
+          where: {
+            entityId: lead.leadId,
+            entityType: "lead",
+          },
+        });
+
+        // Delete lead notes
+        await LeadNote.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Delete lead details
+        await LeadDetails.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Update emails to remove leadId association
+        await Email.update(
+          { leadId: null },
+          { where: { leadId: lead.leadId } }
+        );
+
+        // Delete the lead
+        await Lead.destroy({
+          where: { leadId: lead.leadId },
+        });
+
+        // Log audit trail for successful deletion
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_DELETE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk deleted by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        deleteResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error deleting lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_DELETE",
+          req.adminId,
+          `Error deleting lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        deleteResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToDelete.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      deleteResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found or no permission to delete",
+      });
+    });
+
+    console.log("Bulk delete results:", deleteResults);
+
+    res.status(200).json({
+      message: "Bulk delete operation completed",
+      results: deleteResults,
+      summary: {
+        total: leadIds.length,
+        successful: deleteResults.successful.length,
+        failed: deleteResults.failed.length,
+        skipped: deleteResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk delete leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_DELETE",
+      null,
+      "Error in bulk delete leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk delete",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk archive leads functionality
+exports.bulkArchiveLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk archive request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_ARCHIVE",
+        null,
+        "Access denied. You do not have permission to bulk archive leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk archive leads.",
+      });
+    }
+
+    // Find leads to archive
+    let whereClause = {
+      leadId: { [Op.in]: leadIds },
+      isArchived: false, // Only archive non-archived leads
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToArchive = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "isArchived",
+      ],
+    });
+
+    if (leadsToArchive.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to archive or you don't have permission to archive them",
+      });
+    }
+
+    console.log(`Found ${leadsToArchive.length} leads to archive`);
+
+    const archiveResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for archiving
+    for (const lead of leadsToArchive) {
+      try {
+        console.log(`Archiving lead ${lead.leadId}`);
+
+        // Update the lead to set isArchived = true and archiveTime
+        await Lead.update(
+          {
+            isArchived: true,
+            archiveTime: new Date(),
+          },
+          {
+            where: { leadId: lead.leadId },
+          }
+        );
+
+        // Log audit trail for successful archiving
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_ARCHIVE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk archived by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        archiveResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error archiving lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_ARCHIVE",
+          req.adminId,
+          `Error archiving lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        archiveResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToArchive.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      archiveResults.skipped.push({
+        leadId: leadId,
+        reason: "Lead not found, already archived, or no permission to archive",
+      });
+    });
+
+    console.log("Bulk archive results:", archiveResults);
+
+    res.status(200).json({
+      message: "Bulk archive operation completed",
+      results: archiveResults,
+      summary: {
+        total: leadIds.length,
+        successful: archiveResults.successful.length,
+        failed: archiveResults.failed.length,
+        skipped: archiveResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk archive leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_ARCHIVE",
+      null,
+      "Error in bulk archive leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk archive",
+      error: error.message,
+    });
+  }
+};
+
+// Bulk unarchive leads functionality
+exports.bulkUnarchiveLeads = async (req, res) => {
+  const { leadIds } = req.body;
+
+  // Validate input
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk unarchive request for leads:", leadIds);
+
+  try {
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_UNARCHIVE",
+        null,
+        "Access denied. You do not have permission to bulk unarchive leads.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk unarchive leads.",
+      });
+    }
+
+    // Find leads to unarchive
+    let whereClause = {
+      leadId: { [Op.in]: leadIds },
+      isArchived: true, // Only unarchive archived leads
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const leadsToUnarchive = await Lead.findAll({
+      where: whereClause,
+      attributes: [
+        "leadId",
+        "title",
+        "contactPerson",
+        "organization",
+        "isArchived",
+      ],
+    });
+
+    if (leadsToUnarchive.length === 0) {
+      return res.status(404).json({
+        message:
+          "No leads found to unarchive or you don't have permission to unarchive them",
+      });
+    }
+
+    console.log(`Found ${leadsToUnarchive.length} leads to unarchive`);
+
+    const unarchiveResults = {
+      successful: [],
+      failed: [],
+      skipped: [],
+    };
+
+    // Process each lead for unarchiving
+    for (const lead of leadsToUnarchive) {
+      try {
+        console.log(`Unarchiving lead ${lead.leadId}`);
+
+        // Update the lead to set isArchived = false
+        await Lead.update(
+          {
+            isArchived: false,
+            archiveTime: null,
+          },
+          {
+            where: { leadId: lead.leadId },
+          }
+        );
+
+        // Log audit trail for successful unarchiving
+        await historyLogger(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UNARCHIVE",
+          req.adminId,
+          lead.leadId,
+          null,
+          `Lead bulk unarchived by ${req.role}`,
+          { leadTitle: lead.title }
+        );
+
+        unarchiveResults.successful.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          contactPerson: lead.contactPerson,
+          organization: lead.organization,
+        });
+      } catch (leadError) {
+        console.error(`Error unarchiving lead ${lead.leadId}:`, leadError);
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_UNARCHIVE",
+          req.adminId,
+          `Error unarchiving lead ${lead.leadId}: ${leadError.message}`,
+          req.adminId
+        );
+
+        unarchiveResults.failed.push({
+          leadId: lead.leadId,
+          title: lead.title,
+          error: leadError.message,
+        });
+      }
+    }
+
+    // Check for leads that were requested but not found
+    const foundLeadIds = leadsToUnarchive.map((lead) => lead.leadId);
+    const notFoundLeadIds = leadIds.filter((id) => !foundLeadIds.includes(id));
+
+    notFoundLeadIds.forEach((leadId) => {
+      unarchiveResults.skipped.push({
+        leadId: leadId,
+        reason:
+          "Lead not found, already unarchived, or no permission to unarchive",
+      });
+    });
+
+    console.log("Bulk unarchive results:", unarchiveResults);
+
+    res.status(200).json({
+      message: "Bulk unarchive operation completed",
+      results: unarchiveResults,
+      summary: {
+        total: leadIds.length,
+        successful: unarchiveResults.successful.length,
+        failed: unarchiveResults.failed.length,
+        skipped: unarchiveResults.skipped.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error in bulk unarchive leads:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_UNARCHIVE",
+      null,
+      "Error in bulk unarchive leads: " + error.message,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk unarchive",
       error: error.message,
     });
   }
