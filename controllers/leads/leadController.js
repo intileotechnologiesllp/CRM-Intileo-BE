@@ -3275,6 +3275,7 @@ exports.getAllLeadDetails = async (req, res) => {
         "isRequired",
         "entityType",
         "fieldLabel",
+        "options"
       ],
       order: [["sortOrder", "ASC"]],
     });
