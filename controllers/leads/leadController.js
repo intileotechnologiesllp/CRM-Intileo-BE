@@ -155,7 +155,7 @@ exports.createLead = async (req, res) => {
   } = req.body;
 
   // Collect custom fields from root level (not in standardFields)
-
+  
   let customFields = { ...(customFieldsFromBody || {}) };
   for (const key in req.body) {
     if (!standardFields.includes(key)) {
@@ -378,7 +378,7 @@ exports.createLead = async (req, res) => {
       visibilityLevel,
       visibilityGroupId: userGroup ? userGroup.groupId : null,
       valueCurrency: req.body.valueCurrency || "INR",
-      proposalValueCurrency: req.body.proposalValueCurrency || "INR",
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR"
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
@@ -2458,15 +2458,6 @@ exports.updateLead = async (req, res) => {
   console.log("Request body:", updateObj);
 
   try {
-    // Declare owner change tracking variables
-    let ownerChanged = false;
-    let newOwner = null;
-    let assigner = null;
-    // Fetch lead record at the start
-    const lead = await Lead.findByPk(leadId);
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
-    }
     // Get all columns for Lead, LeadDetails, Person, and Organization
     const leadFields = Object.keys(Lead.rawAttributes);
     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
@@ -2488,109 +2479,90 @@ exports.updateLead = async (req, res) => {
       if (key === "customFields") {
         // Handle nested customFields object (backward compatibility)
         Object.assign(customFields, updateObj[key]);
-        const savedCustomFields = {};
-        if (customFields && Object.keys(customFields).length > 0) {
-          try {
-            console.log("Processing custom fields for update:", customFields);
-
-            for (const [fieldKey, value] of Object.entries(customFields)) {
-              let customField = await CustomField.findOne({
-                where: {
-                  fieldName: fieldKey,
-                  entityType: { [Op.in]: ["lead", "both"] },
-                  isActive: true,
-                },
-              });
-              if (!customField) {
-                customField = await CustomField.findOne({
-                  where: {
-                    fieldId: fieldKey,
-                    entityType: { [Op.in]: ["lead", "both"] },
-                    isActive: true,
-                  },
-                });
-              }
-
-              if (customField) {
-                const valueToSave =
-                  typeof value === "object" ? JSON.stringify(value) : value;
-                const existingValue = await CustomFieldValue.findOne({
-                  where: {
-                    fieldId: customField.fieldId,
-                    entityId: leadId,
-                    entityType: "lead",
-                  },
-                });
-
-                // Only add to savedCustomFields if value is actually changed (created, updated, or deleted)
-                if (existingValue) {
-                  // Compare old and new value before updating
-                  const oldValue = existingValue.value;
-                  if (
-                    valueToSave !== null &&
-                    valueToSave !== undefined &&
-                    valueToSave !== ""
-                  ) {
-                    if (oldValue !== valueToSave) {
-                      await existingValue.update({ value: valueToSave });
-                      console.log(
-                        `Updated custom field value for ${customField.fieldName}: ${valueToSave}`
-                      );
-                      savedCustomFields[customField.fieldName] = {
-                        label: customField.fieldLabel,
-                        value: valueToSave,
-                        type: customField.fieldType,
-                        isImportant: customField.isImportant,
-                      };
-                    }
-                  } else {
-                    // Only add to savedCustomFields if value was deleted
-                    await existingValue.destroy();
-                    console.log(
-                      `Deleted custom field value for ${customField.fieldName}`
-                    );
-                    savedCustomFields[customField.fieldName] = {
-                      label: customField.fieldLabel,
-                      value: null,
-                      type: customField.fieldType,
-                      isImportant: customField.isImportant,
-                    };
-                  }
-                } else {
-                  // Only add to savedCustomFields if value was created
-                  if (
-                    valueToSave !== null &&
-                    valueToSave !== undefined &&
-                    valueToSave !== ""
-                  ) {
-                    await CustomFieldValue.create({
-                      fieldId: customField.fieldId,
-                      entityId: leadId,
-                      entityType: "lead",
-                      value: valueToSave,
-                      masterUserID: req.adminId,
-                    });
-                    console.log(
-                      `Created custom field value for ${customField.fieldName}: ${valueToSave}`
-                    );
-                    savedCustomFields[customField.fieldName] = {
-                      label: customField.fieldLabel,
-                      value: valueToSave,
-                      type: customField.fieldType,
-                      isImportant: customField.isImportant,
-                    };
-                  }
-                }
-              } else {
-                console.log(`Custom field not found: ${fieldKey}`);
-              }
-            }
-          } catch (customFieldError) {
-            console.error("Error processing custom fields:", customFieldError);
-            // Don't fail the entire update if custom fields fail
-          }
-        }
+        continue;
       }
+
+      if (leadFields.includes(key)) {
+        leadData[key] = updateObj[key];
+      } else if (personFields.includes(key)) {
+        personData[key] = updateObj[key];
+      } else if (organizationFields.includes(key)) {
+        organizationData[key] = updateObj[key];
+      } else if (leadDetailsFields.includes(key)) {
+        leadDetailsData[key] = updateObj[key];
+      } else {
+        // If the key doesn't match any model field, treat it as a custom field
+        customFields[key] = updateObj[key];
+      }
+    }
+
+    console.log("leadData:", leadData);
+    console.log("leadDetailsData:", leadDetailsData);
+    console.log("personData:", personData);
+    console.log("organizationData:", organizationData);
+    console.log("customFields:", customFields);
+
+    // Update Lead
+    const lead = await Lead.findByPk(leadId);
+    console.log("Fetched lead:", lead ? lead.toJSON() : null);
+    if (!lead) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
+        "LEAD_UPDATE", // Mode
+        req.role, // No user ID for failed sign-in
+        "Lead not found", // Error description
+        req.adminId
+      );
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Check for email uniqueness if email is being updated
+    const emailToUpdate = leadData.email || personData.email;
+    if (emailToUpdate && emailToUpdate !== lead.email) {
+      const existingLead = await Lead.findOne({
+        where: {
+          email: emailToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this email address already exists. Each lead must have a unique email address.",
+          existingLeadId: existingLead.leadId,
+          existingLeadTitle: existingLead.title,
+        });
+      }
+    }
+
+    // Check for organization uniqueness if organization is being updated
+    const organizationToUpdate =
+      leadData.organization || organizationData.organization;
+    if (organizationToUpdate && organizationToUpdate !== lead.organization) {
+      const existingOrgLead = await Lead.findOne({
+        where: {
+          organization: organizationToUpdate,
+          leadId: { [Op.ne]: leadId }, // Exclude current lead from the check
+        },
+      });
+      if (existingOrgLead) {
+        return res.status(409).json({
+          message:
+            "A lead with this organization already exists. Each organization must be unique.",
+          existingLeadId: existingOrgLead.leadId,
+          existingLeadTitle: existingOrgLead.title,
+          existingOrganization: existingOrgLead.organization,
+        });
+      }
+    }
+
+    let ownerChanged = false;
+    let newOwner = null;
+    let assigner = null;
+    if (updateObj.ownerId && updateObj.ownerId !== lead.ownerId) {
+      ownerChanged = true;
+      newOwner = await MasterUser.findByPk(updateObj.ownerId);
+      assigner = await MasterUser.findByPk(req.adminId);
     }
 
     // Update or create Organization
@@ -2734,13 +2706,8 @@ exports.updateLead = async (req, res) => {
 
             if (existingValue) {
               // Update existing value
-              const valueToSave =
-                typeof value === "object" ? JSON.stringify(value) : value;
-              if (
-                valueToSave !== null &&
-                valueToSave !== undefined &&
-                valueToSave !== ""
-              ) {
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
                 await existingValue.update({ value: valueToSave });
                 console.log(
                   `Updated custom field value for ${customField.fieldName}: ${valueToSave}`
@@ -2760,19 +2727,14 @@ exports.updateLead = async (req, res) => {
               }
             } else {
               // Create new value
-              const valueToSave =
-                typeof value === "object" ? JSON.stringify(value) : value;
-              if (
-                valueToSave !== null &&
-                valueToSave !== undefined &&
-                valueToSave !== ""
-              ) {
+              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
+              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
                 await CustomFieldValue.create({
                   fieldId: customField.fieldId,
                   entityId: leadId,
                   entityType: "lead",
                   value: valueToSave,
-                  masterUserID: req.adminId, // <-- add this line
+                   masterUserID: req.adminId // <-- add this line
                 });
                 console.log(
                   `Created custom field value for ${customField.fieldName}: ${valueToSave}`
