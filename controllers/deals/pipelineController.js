@@ -204,6 +204,7 @@ exports.updatePipeline = async (req, res) => {
     color,
     displayOrder,
     isActive,
+    stages = [],
   } = req.body;
 
   const masterUserID = req.adminId;
@@ -212,6 +213,7 @@ exports.updatePipeline = async (req, res) => {
   try {
     const pipeline = await Pipeline.findOne({
       where: { pipelineId, masterUserID },
+      include: [{ model: PipelineStage, as: "stages" }],
     });
 
     if (!pipeline) {
@@ -267,19 +269,76 @@ exports.updatePipeline = async (req, res) => {
       updatedBy,
     });
 
+    // --- Enhanced stage update logic ---
+    // 1. Update existing stages, 2. Add new stages, 3. Delete removed stages
+    const existingStages = pipeline.stages || [];
+    const incomingStageIds = stages
+      .filter((s) => s.stageId)
+      .map((s) => s.stageId);
+    // Delete stages not present in the new list
+    for (const stage of existingStages) {
+      if (!incomingStageIds.includes(stage.stageId)) {
+        await PipelineStage.destroy({
+          where: { stageId: stage.stageId, pipelineId, masterUserID },
+        });
+      }
+    }
+    // Update or create stages
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      if (s.stageId) {
+        // Update existing
+        await PipelineStage.update(
+          {
+            stageName: s.stageName,
+            stageOrder: s.stageOrder !== undefined ? s.stageOrder : i + 1,
+            probability: s.probability !== undefined ? s.probability : 0,
+            dealRottenDays: s.dealRottenDays || null,
+            color: s.color || "#28A745",
+            isActive: s.isActive !== undefined ? s.isActive : true,
+            updatedBy,
+          },
+          {
+            where: { stageId: s.stageId, pipelineId, masterUserID },
+          }
+        );
+      } else {
+        // Create new
+        await PipelineStage.create({
+          pipelineId,
+          stageName: s.stageName,
+          stageOrder: s.stageOrder !== undefined ? s.stageOrder : i + 1,
+          probability: s.probability !== undefined ? s.probability : 0,
+          dealRottenDays: s.dealRottenDays || null,
+          color: s.color || "#28A745",
+          isActive: s.isActive !== undefined ? s.isActive : true,
+          masterUserID,
+          createdBy: updatedBy,
+        });
+      }
+    }
+
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "PIPELINE_UPDATE",
       masterUserID,
       pipeline.pipelineId,
       null,
-      `Pipeline "${pipeline.pipelineName}" updated`,
+      `Pipeline "${pipeline.pipelineName}" updated (with stages)`,
       { old: oldValues, new: pipeline.toJSON() }
     );
 
+    // Return updated pipeline with stages
+    const updatedPipeline = await Pipeline.findOne({
+      where: { pipelineId, masterUserID },
+      include: [
+        { model: PipelineStage, as: "stages", order: [["stageOrder", "ASC"]] },
+      ],
+    });
+
     res.status(200).json({
-      message: "Pipeline updated successfully.",
-      pipeline,
+      message: "Pipeline and stages updated successfully.",
+      pipeline: updatedPipeline,
     });
   } catch (error) {
     console.error("Error updating pipeline:", error);
