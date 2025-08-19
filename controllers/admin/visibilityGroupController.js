@@ -87,6 +87,19 @@ exports.getVisibilityGroups = async (req, res) => {
       ],
     });
 
+    // Fetch all MasterUsers for use in the default group
+    const allMasterUsers = await MasterUser.findAll({
+      attributes: [
+        "masterUserID",
+        "name",
+        "email",
+        "loginType",
+        "designation",
+        "department",
+        "status",
+      ],
+    });
+
     // Process groups for frontend display
     const processedGroups = groups.map((group) => {
       const groupData = group.toJSON();
@@ -113,6 +126,19 @@ exports.getVisibilityGroups = async (req, res) => {
           };
           return acc;
         }, {}) || {};
+
+      // If this is the default group, add all master users
+      if (groupData.isDefault) {
+        groupData.users = allMasterUsers.map((user) => ({
+          id: user.masterUserID,
+          name: user.name,
+          email: user.email,
+          loginType: user.loginType,
+          designation: user.designation,
+          department: user.department,
+          status: user.status,
+        }));
+      }
 
       return groupData;
     });
