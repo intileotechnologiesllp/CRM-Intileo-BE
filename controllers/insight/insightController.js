@@ -1,3 +1,155 @@
+// =============== COLUMN VISIBILITY MANAGEMENT ===============
+const InsightColumn = require("../../models/insight/insightColumnModel");
+
+// Get column visibility for a user/entity/context
+exports.getColumnVisibility = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // or req.userId, adjust as needed
+    const { entity, contextId } = req.query; // entity: 'Deal', 'Person', etc. contextId: dashboardId/reportId (optional)
+    if (!entity) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Entity is required" });
+    }
+    const where = { masterUserID, entity };
+    if (contextId) where.contextId = contextId;
+    const record = await InsightColumn.findOne({ where });
+    res
+      .status(200)
+      .json({ success: true, data: record ? record.columns : null });
+  } catch (error) {
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch column visibility",
+        error: error.message,
+      });
+  }
+};
+
+// Update (or create) column visibility for a user/entity/context
+exports.setColumnVisibility = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // or req.userId, adjust as needed
+    const { entity, contextId, columns } = req.body; // columns: [{ key, checked }]
+    if (!entity || !Array.isArray(columns)) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Entity and columns array are required",
+        });
+    }
+    const where = { masterUserID, entity };
+    if (contextId) where.contextId = contextId;
+    let record = await InsightColumn.findOne({ where });
+    if (record) {
+      await record.update({ columns });
+    } else {
+      record = await InsightColumn.create({
+        masterUserID,
+        entity,
+        contextId,
+        columns,
+      });
+    }
+    res.status(200).json({ success: true, data: record });
+  } catch (error) {
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to set column visibility",
+        error: error.message,
+      });
+  }
+};
+// =============== ENTITY COLUMNS API ===============
+// Returns available columns for Deal, Person, and Organization
+exports.getEntityColumns = async (req, res) => {
+  try {
+    // Dynamically fetch model attributes (excluding ID fields)
+    const getModelColumns = (model) => {
+      return Object.keys(model.rawAttributes).filter(
+        (col) =>
+          !/id$/i.test(col) && // Exclude fields ending with 'id' or 'ID'
+          col !== "createdAt" &&
+          col !== "updatedAt"
+      );
+    };
+
+    // Fetch custom fields for each entity
+    const CustomFieldModel = require("../../models/customFieldModel");
+    async function getCustomFields(entityType) {
+      // entityType: 'Deal', 'Person', 'Organization'
+      const fields = await CustomFieldModel.findAll({
+        where: { entityType, isActive: true },
+        attributes: ["fieldName"],
+      });
+      return fields.map((f) => f.fieldName);
+    }
+
+    // Get columns for each entity
+    const dealModel = require("../../models/deals/dealsModels");
+    const personModel = require("../../models/leads/leadPersonModel");
+    const organizationModel = require("../../models/leads/leadOrganizationModel");
+
+    const [dealCustom, personCustom, orgCustom] = await Promise.all([
+      getCustomFields("Deal"),
+      getCustomFields("Person"),
+      getCustomFields("Organization"),
+    ]);
+
+    const dealColumns = [...getModelColumns(dealModel), ...dealCustom];
+    const personColumns = [...getModelColumns(personModel), ...personCustom];
+    const organizationColumns = [
+      ...getModelColumns(organizationModel),
+      ...orgCustom,
+    ];
+
+    // Accept selected columns from request (body or query)
+    const selected =
+      req.body.selectedColumns || req.query.selectedColumns || {};
+    const selectedDeal = Array.isArray(selected.Deal) ? selected.Deal : [];
+    const selectedPerson = Array.isArray(selected.Person)
+      ? selected.Person
+      : [];
+    const selectedOrganization = Array.isArray(selected.Organization)
+      ? selected.Organization
+      : [];
+
+    function splitColumns(all, selected) {
+      return {
+        visibleColumns: all.filter((col) => selected.includes(col)),
+        availableColumns: all.filter((col) => !selected.includes(col)),
+        allColumns: all,
+      };
+    }
+
+    const dealResult = splitColumns(dealColumns, selectedDeal);
+    const personResult = splitColumns(personColumns, selectedPerson);
+    const organizationResult = splitColumns(
+      organizationColumns,
+      selectedOrganization
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        Deal: dealResult,
+        Person: personResult,
+        Organization: organizationResult,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch entity columns",
+      error: error.message,
+    });
+  }
+};
 const DASHBOARD = require("../../models/insight/dashboardModel");
 const Report = require("../../models/insight/reportModel");
 const Goal = require("../../models/insight/goalModel");
@@ -1854,10 +2006,74 @@ exports.getGoalData = async (req, res) => {
       });
     }
 
+    // Helper to get default columns for an entity (first 5 dynamic columns)
+    async function getDefaultColumns(entity) {
+      const getModelColumns = (model) =>
+        Object.keys(model.rawAttributes).filter(
+          (col) =>
+            !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
+        );
+      const CustomFieldModel = require("../../models/customFieldModel");
+      async function getCustomFields(entityType) {
+        const fields = await CustomFieldModel.findAll({
+          where: { entityType, isActive: true },
+          attributes: ["fieldName"],
+        });
+        return fields.map((f) => f.fieldName);
+      }
+      let model, entityType;
+      if (entity === "Deal") {
+        model = require("../../models/deals/dealsModels");
+        entityType = "Deal";
+      } else if (entity === "Person") {
+        model = require("../../models/leads/leadPersonModel");
+        entityType = "Person";
+      } else if (entity === "Organization") {
+        model = require("../../models/leads/leadOrganizationModel");
+        entityType = "Organization";
+      }
+      const modelCols = getModelColumns(model);
+      const customCols = await getCustomFields(entityType);
+      return [...modelCols, ...customCols].slice(0, 5);
+    }
+
+    // Accept selectedColumns from body or query (object with Deal, Person, Organization arrays)
+    let selectedColumns =
+      req.body.selectedColumns || req.query.selectedColumns || {};
+    if (typeof selectedColumns === "string") {
+      try {
+        selectedColumns = JSON.parse(selectedColumns);
+      } catch (e) {
+        selectedColumns = {};
+      }
+    }
+    const selectedDeal = Array.isArray(selectedColumns.Deal)
+      ? selectedColumns.Deal
+      : [];
+    const selectedPerson = Array.isArray(selectedColumns.Person)
+      ? selectedColumns.Person
+      : [];
+    const selectedOrganization = Array.isArray(selectedColumns.Organization)
+      ? selectedColumns.Organization
+      : [];
+
     // Process each goal to get detailed data
     const goalsWithData = await Promise.all(
       goals.map(async (goal) => {
-        const goalData = await processGoalData(goal, ownerId, periodFilter);
+        let entityColumns = [];
+        if (goal.entity === "Deal") entityColumns = selectedDeal;
+        else if (goal.entity === "Person") entityColumns = selectedPerson;
+        else if (goal.entity === "Organization")
+          entityColumns = selectedOrganization;
+        if (!entityColumns || entityColumns.length === 0) {
+          entityColumns = await getDefaultColumns(goal.entity);
+        }
+        const goalData = await processGoalData(
+          goal,
+          ownerId,
+          periodFilter,
+          entityColumns
+        );
         return goalData;
       })
     );
@@ -1920,6 +2136,9 @@ async function processGoalData(goal, ownerId, periodFilter) {
     endDate,
     trackingMetric,
   } = goal;
+
+  // Accept selectedColumns as a new argument (array of columns for this entity)
+  let selectedColumns = arguments[3] || [];
 
   // Helper function to get date range for period filters
   function getPeriodRange(filter) {
@@ -2176,21 +2395,49 @@ async function processGoalData(goal, ownerId, periodFilter) {
   // Process based on entity type - using simplified logic for dashboard view
   if (entity === "Deal") {
     if (goalType === "Added") {
+      // Build include for Person and Organization if needed
+      const include = [];
+      if (selectedColumns.some((col) => col.startsWith("person."))) {
+        include.push({
+          model: require("../../models/personModel"),
+          as: "person",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("person."))
+            .map((col) => col.replace("person.", "")),
+        });
+      }
+      if (selectedColumns.some((col) => col.startsWith("organization."))) {
+        include.push({
+          model: require("../../models/organizationModel"),
+          as: "organization",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("organization."))
+            .map((col) => col.replace("organization.", "")),
+        });
+      }
+      const dealAttributes = selectedColumns.filter(
+        (col) => !col.includes(".")
+      );
       const addedDeals = await Deal.findAll({
         where: whereClause,
-        attributes: [
-          "dealId",
-          "title",
-          "value",
-          "pipeline",
-          "status",
-          "createdAt",
-        ],
+        attributes: dealAttributes,
         order: [["createdAt", "DESC"]],
+        include,
       });
 
-      // Assign fetched deals to data array for records
-      data = addedDeals;
+      // Assign fetched deals to data array for records, only include selected columns
+      data = addedDeals.map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
 
       const currentValue =
         trackingMetric === "Value"
@@ -2274,24 +2521,46 @@ async function processGoalData(goal, ownerId, periodFilter) {
           [Op.between]: [start, end],
         },
       };
-
+      const include = [];
+      if (selectedColumns.some((col) => col.startsWith("person."))) {
+        include.push({
+          model: require("../../models/personModel"),
+          as: "person",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("person."))
+            .map((col) => col.replace("person.", "")),
+        });
+      }
+      if (selectedColumns.some((col) => col.startsWith("organization."))) {
+        include.push({
+          model: require("../../models/organizationModel"),
+          as: "organization",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("organization."))
+            .map((col) => col.replace("organization.", "")),
+        });
+      }
+      const dealAttributes = selectedColumns.filter(
+        (col) => !col.includes(".")
+      );
       const wonDeals = await Deal.findAll({
         where: wonWhereClause,
-        attributes: [
-          "dealId",
-          "title",
-          "value",
-          "pipeline",
-          "pipelineStage",
-          "status",
-          "masterUserID",
-          "updatedAt",
-        ],
+        attributes: dealAttributes,
         order: [["updatedAt", "DESC"]],
+        include,
       });
-
-      // Assign fetched deals to data array for records
-      data = wonDeals;
+      data = wonDeals.map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
 
       const currentValue =
         trackingMetric === "Value"
@@ -2407,19 +2676,36 @@ async function processGoalData(goal, ownerId, periodFilter) {
       // Fetch deal details for those deals, applying filters
       let progressedDeals = [];
       if (progressedDealIds.length > 0) {
+        // Build include for Person and Organization if needed
+        const include = [];
+        if (selectedColumns.some((col) => col.startsWith("person."))) {
+          include.push({
+            model: require("../../models/personModel"),
+            as: "person",
+            attributes: selectedColumns
+              .filter((col) => col.startsWith("person."))
+              .map((col) => col.replace("person.", "")),
+          });
+        }
+        if (selectedColumns.some((col) => col.startsWith("organization."))) {
+          include.push({
+            model: require("../../models/organizationModel"),
+            as: "organization",
+            attributes: selectedColumns
+              .filter((col) => col.startsWith("organization."))
+              .map((col) => col.replace("organization.", "")),
+          });
+        }
+        const dealAttributes = selectedColumns.filter(
+          (col) => !col.includes(".")
+        );
         progressedDeals = await Deal.findAll({
           where: {
             dealId: { [Op.in]: progressedDealIds },
             ...dealWhere,
           },
-          attributes: [
-            "dealId",
-            "title",
-            "value",
-            "pipeline",
-            "status",
-            "createdAt",
-          ],
+          attributes: dealAttributes,
+          include,
         });
       }
 
@@ -2428,14 +2714,18 @@ async function processGoalData(goal, ownerId, periodFilter) {
       progressedDeals.forEach((deal) => {
         uniqueDealsMap.set(deal.dealId, deal);
       });
-      data = Array.from(uniqueDealsMap.values()).map((deal) => ({
-        dealId: deal.dealId,
-        title: deal.title,
-        value: deal.value,
-        pipeline: deal.pipeline,
-        status: deal.status,
-        createdAt: deal.createdAt,
-      }));
+      data = Array.from(uniqueDealsMap.values()).map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
 
       // Calculate current value
       const currentValue =

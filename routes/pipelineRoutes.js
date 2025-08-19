@@ -21,7 +21,7 @@ router.post("/create", validateAdmin, pipelineController.createPipeline);
 router.get("/get", pipelineController.getPipelines);
 router.get("/:pipelineId", pipelineController.getPipelineById);
 router.post("/update/:pipelineId", validateAdmin, pipelineController.updatePipeline);
-router.post("/delete/:pipelineId", validateAdmin, pipelineController.deletePipeline);
+router.delete("/delete/:pipelineId", validateAdmin, pipelineController.deletePipeline);
 
 // Stage management routes (admin only)
 router.post(
