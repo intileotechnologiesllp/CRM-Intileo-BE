@@ -1971,9 +1971,13 @@ exports.getGoalData = async (req, res) => {
       return [...modelCols, ...customCols].slice(0, 5);
     }
 
+    // Ensure req.body and req.query are always objects
+    const safeBody = req.body && typeof req.body === "object" ? req.body : {};
+    const safeQuery =
+      req.query && typeof req.query === "object" ? req.query : {};
     // Accept selectedColumns from body or query (object with Deal, Person, Organization arrays)
     let selectedColumns =
-      req.body.selectedColumns || req.query.selectedColumns || {};
+      safeBody.selectedColumns || safeQuery.selectedColumns || {};
     if (typeof selectedColumns === "string") {
       try {
         selectedColumns = JSON.parse(selectedColumns);
