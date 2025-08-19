@@ -1,4389 +1,6224 @@
-const Deal = require("../../models/deals/dealsModels");
-const Lead = require("../../models/leads/leadsModel");
-const Person = require("../../models/leads/leadPersonModel");
-const Organization = require("../../models/leads/leadOrganizationModel");
-const CustomField = require("../../models/customFieldModel");
-const CustomFieldValue = require("../../models/customFieldValueModel");
-const { Op } = require("sequelize");
-const { fn, col, literal } = require("sequelize");
-const DealDetails = require("../../models/deals/dealsDetailModel");
-const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
-const DealParticipant = require("../../models/deals/dealPartcipentsModel");
-const MasterUser = require("../../models/master/masterUserModel");
-const DealNote = require("../../models/deals/delasNoteModel");
-const LeadNote = require("../../models/leads/leadNoteModel");
-const Email = require("../../models/email/emailModel");
-const Attachment = require("../../models/email/attachmentModel");
-const LeadFilter = require("../../models/leads/leadFiltersModel");
-const { convertRelativeDate } = require("../../utils/helper");
-const Activity = require("../../models/activity/activityModel");
-const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
-const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
-const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
-const { sendEmail } = require("../../utils/emailSend"); // Add email service import
+// =============== COLUMN VISIBILITY MANAGEMENT ===============
+const InsightColumn = require("../../models/insight/insightColumnModel");
 
-const { getProgramId } = require("../../utils/programCache");
-const PipelineStage = require("../../models/deals/pipelineStageModel");
-// Create a new deal with validation
-exports.createDeal = async (req, res) => {
+// Get column visibility for a user/entity/context
+exports.getColumnVisibility = async (req, res) => {
   try {
-    const dealProgramId = getProgramId("DEALS");
-    const {
-      contactPerson,
-      organization,
-      title,
-      value,
-      currency,
-      pipeline,
-      pipelineStage,
-      expectedCloseDate,
-      sourceChannel,
-      sourceChannelId,
-      serviceType,
-      proposalValue,
-      proposalCurrency,
-      esplProposalNo,
-      projectLocation,
-      organizationCountry,
-      proposalSentDate,
-      sourceRequired,
-      questionerShared,
-      sectorialSector,
-      sbuClass,
-      phone,
-      email,
-      sourceOrgin,
-      source,
-      // Custom fields will be processed from remaining req.body fields
-    } = req.body;
-
-    // Validate required fields here...
-    let ownerId = req.user?.id || req.adminId || req.body.ownerId;
-
-    // --- Enhanced validation similar to createLead ---
-    // Validate required fields
-    if (!contactPerson || !organization || !title || !email) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: contactPerson, organization, title, and email are required.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "contactPerson, organization, title, and email are required.",
+    const masterUserID = req.adminId; // or req.userId, adjust as needed
+    const { entity, contextId } = req.query; // entity: 'Deal', 'Person', etc. contextId: dashboardId/reportId (optional)
+    if (!entity) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Entity is required" });
+    }
+    const where = { masterUserID, entity };
+    if (contextId) where.contextId = contextId;
+    const record = await InsightColumn.findOne({ where });
+    res
+      .status(200)
+      .json({ success: true, data: record ? record.columns : null });
+  } catch (error) {
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch column visibility",
+        error: error.message,
       });
-    }
+  }
+};
 
-    // Validate contactPerson
-    if (typeof contactPerson !== "string" || !contactPerson.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: contactPerson must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "contactPerson must be a non-empty string.",
-      });
-    }
-
-    // Validate organization
-    if (typeof organization !== "string" || !organization.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: organization must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "organization must be a non-empty string.",
-      });
-    }
-
-    // Validate title
-    if (typeof title !== "string" || !title.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: title must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "title must be a non-empty string.",
-      });
-    }
-
-    // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid email format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid email format.",
-      });
-    }
-
-    // Validate phone if provided
-    if (phone && !/^\+?\d{7,15}$/.test(phone)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid phone number format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid phone number format.",
-      });
-    }
-
-    // Validate proposalValue if provided
-    if (proposalValue && proposalValue < 0) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Proposal value must be positive.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Proposal value must be positive.",
-      });
-    }
-
-    // Validate value if provided
-    if (value && value < 0) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Deal value must be positive.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Deal value must be positive.",
-      });
-    }
-    // Find or create Person and Organization here...
-    // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
-    const existingContactOrgTitleDeal = await Deal.findOne({
-      where: {
-        contactPerson: contactPerson,
-        organization: organization,
-        title: title,
-      },
-    });
-    if (existingContactOrgTitleDeal) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: A deal with this exact combination of contact person, organization, and title already exists.`,
-        req.adminId
-      );
-      return res.status(409).json({
-        message:
-          "A deal with this exact combination of contact person, organization, and title already exists. Please use a different title for a new deal with the same contact.",
-        existingDealId: existingContactOrgTitleDeal.dealId,
-        existingDealTitle: existingContactOrgTitleDeal.title,
-      });
-    }
-    // 1. Set masterUserID at the top, before using it anywhere
-    const masterUserID = req.adminId;
-    // 1. Check if a matching lead exists
-
-    let existingLead = null;
-
-    // 2. If sourceOrgin is '2', require and use leadId
-    let leadId = req.body.leadId;
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
-      if (!leadId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "leadId is required when sourceOrgin is 2." });
-      }
-      existingLead = await Lead.findByPk(leadId);
-      if (!existingLead) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: Lead with leadId ${leadId} not found.`,
-          req.adminId
-        );
-        return res.status(404).json({ message: "Lead not found." });
-      }
-      ownerId = existingLead.ownerId; // assign, don't redeclare
-      leadId = existingLead.leadId; // assign, don't redeclare
-      // Optionally, update the lead after deal creation
-    }
-    // 1. Find or create Organization
-    let org = null;
-    if (organization) {
-      org = await Organization.findOne({ where: { organization } });
-      if (!org) {
-        org = await Organization.create({
-          organization,
-          masterUserID, // make sure this is set
+// Update (or create) column visibility for a user/entity/context
+exports.setColumnVisibility = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // or req.userId, adjust as needed
+    const { entity, contextId, columns } = req.body; // columns: [{ key, checked }]
+    if (!entity || !Array.isArray(columns)) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Entity and columns array are required",
         });
-      }
     }
-    // 2. Find or create Person
-    let person = null;
-    if (contactPerson) {
-      const masterUserID = req.adminId;
-
-      person = await Person.findOne({ where: { email } });
-      if (!person) {
-        person = await Person.create({
-          contactPerson,
-          email,
-          phone,
-          leadOrganizationId: org ? org.leadOrganizationId : null,
-          masterUserID,
-        });
-      }
-    }
-    // Create the lead
-    console.log(person.personId, " before deal creation");
-    // Before saving to DB
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
-      if (!leadId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "leadId is required when sourceOrgin is 2." });
-      }
-      existingLead = await Lead.findByPk(leadId);
-      if (!existingLead) {
-        return res.status(404).json({ message: "Lead not found." });
-      }
-      // Prevent conversion if already converted to a deal
-      if (existingLead.dealId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: This lead is already converted to a deal.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "This lead is already converted to a deal." });
-      }
-      ownerId = existingLead.ownerId;
-      leadId = existingLead.leadId;
-    }
-    const deal = await Deal.create({
-      // contactPerson: person ? person.contactPerson : null,
-      contactPerson: person ? person.contactPerson : contactPerson,
-      organization: org ? org.organization : null,
-      personId: person ? person.personId : null,
-      leadOrganizationId: org ? org.leadOrganizationId : null,
-      //       personId: person.personId,
-      // leadOrganizationId: org.leadOrganizationId,
-      leadId, // link to the lead if found
-      title,
-      value,
-      currency,
-      pipeline,
-      pipelineStage,
-      expectedCloseDate,
-      sourceChannel,
-      sourceChannelId,
-      serviceType,
-      proposalValue,
-      proposalCurrency,
-      esplProposalNo,
-      projectLocation,
-      organizationCountry,
-      proposalSentDate,
-      sourceRequired,
-      questionerShared,
-      sectorialSector,
-      sbuClass,
-      phone,
-      email,
-      sourceOrgin,
-      masterUserID: req.adminId, // Ensure masterUserID is set from the request
-      ownerId,
-      status: "open", // Default status
-      source,
-      // Add personId, organizationId, etc. as needed
-    });
-    let responsiblePerson = null;
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
-      // Use ownerId for responsible person
-      const owner = await MasterUser.findOne({
-        where: { masterUserID: ownerId },
-      });
-      responsiblePerson = owner ? owner.name : null;
+    const where = { masterUserID, entity };
+    if (contextId) where.contextId = contextId;
+    let record = await InsightColumn.findOne({ where });
+    if (record) {
+      await record.update({ columns });
     } else {
-      // Use masterUserID for responsible person
-      const user = await MasterUser.findOne({
-        where: { masterUserID: req.adminId },
+      record = await InsightColumn.create({
+        masterUserID,
+        entity,
+        contextId,
+        columns,
       });
-      responsiblePerson = user ? user.name : null;
     }
-
-    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
-      await Email.update(
-        { dealId: deal.dealId },
-        { where: { emailID: req.body.emailID } }
+    res.status(200).json({ success: true, data: record });
+  } catch (error) {
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to set column visibility",
+        error: error.message,
+      });
+  }
+};
+// =============== ENTITY COLUMNS API ===============
+// Returns available columns for Deal, Person, and Organization
+exports.getEntityColumns = async (req, res) => {
+  try {
+    // Dynamically fetch model attributes (excluding ID fields)
+    const getModelColumns = (model) => {
+      return Object.keys(model.rawAttributes).filter(
+        (col) =>
+          !/id$/i.test(col) && // Exclude fields ending with 'id' or 'ID'
+          col !== "createdAt" &&
+          col !== "updatedAt"
       );
-    }
-    await DealDetails.create({
-      dealId: deal.dealId, // or deal.id depending on your PK
-      responsiblePerson,
-      ownerName: responsiblePerson, // or any other field you want to set
-      // ...other dealDetails fields if needed
-    });
-    // Optionally, update the lead with the new dealId
-    await DealStageHistory.create({
-      dealId: deal.dealId,
-      stageName: deal.pipelineStage,
-      enteredAt: deal.createdAt, // or new Date()
-    });
-    if (person || org) {
-      await DealParticipant.create({
-        dealId: deal.dealId,
-        personId: person ? person.personId : null,
-        leadOrganizationId: org ? org.leadOrganizationId : null,
+    };
+
+    // Fetch custom fields for each entity
+    const CustomFieldModel = require("../../models/customFieldModel");
+    async function getCustomFields(entityType) {
+      // entityType: 'Deal', 'Person', 'Organization'
+      const fields = await CustomFieldModel.findAll({
+        where: { entityType, isActive: true },
+        attributes: ["fieldName"],
       });
+      return fields.map((f) => f.fieldName);
     }
 
-    if (existingLead) {
-      await existingLead.update({ dealId: deal.dealId });
-    } else if (leadId) {
-      // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
-      const leadToUpdate = await Lead.findByPk(leadId);
-      if (leadToUpdate) {
-        await leadToUpdate.update({ dealId: deal.dealId });
-      }
-    }
+    // Get columns for each entity
+    const dealModel = require("../../models/deals/dealsModels");
+    const personModel = require("../../models/leads/leadPersonModel");
+    const organizationModel = require("../../models/leads/leadOrganizationModel");
 
-    // Handle custom fields - extract from req.body directly
-    const savedCustomFields = {};
+    const [dealCustom, personCustom, orgCustom] = await Promise.all([
+      getCustomFields("Deal"),
+      getCustomFields("Person"),
+      getCustomFields("Organization"),
+    ]);
 
-    // Define standard Deal model fields that should not be treated as custom fields
-    // const standardDealFields = [
-    //   'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline',
-    //   'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'sourceChannelId',
-    //   'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo',
-    //   'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired',
-    //   'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email',
-    //   'sourceOrgin', 'source', 'leadId', 'ownerId', 'emailID'
-    // ];
-    const standardDealFields = [
-      "title",
-      "ownerId",
-      "sourceChannel",
-      "sourceChannelID",
+    const dealColumns = [...getModelColumns(dealModel), ...dealCustom];
+    const personColumns = [...getModelColumns(personModel), ...personCustom];
+    const organizationColumns = [
+      ...getModelColumns(organizationModel),
+      ...orgCustom,
     ];
 
-    // Extract potential custom fields from req.body
-    const potentialCustomFields = {};
-    for (const [key, value] of Object.entries(req.body)) {
-      if (
-        !standardDealFields.includes(key) &&
-        value !== null &&
-        value !== undefined &&
-        value !== ""
-      ) {
-        potentialCustomFields[key] = value;
-      }
+    // Accept selected columns from request (body or query)
+    const selected =
+      req.body.selectedColumns || req.query.selectedColumns || {};
+    const selectedDeal = Array.isArray(selected.Deal) ? selected.Deal : [];
+    const selectedPerson = Array.isArray(selected.Person)
+      ? selected.Person
+      : [];
+    const selectedOrganization = Array.isArray(selected.Organization)
+      ? selected.Organization
+      : [];
+
+    function splitColumns(all, selected) {
+      return {
+        visibleColumns: all.filter((col) => selected.includes(col)),
+        availableColumns: all.filter((col) => !selected.includes(col)),
+        allColumns: all,
+      };
     }
 
-    console.log("=== CUSTOM FIELDS DEBUG ===");
-    console.log("Potential custom fields extracted:", potentialCustomFields);
-    console.log("req.adminId:", req.adminId);
-    console.log("deal.dealId:", deal ? deal.dealId : "Deal not created yet");
-
-    // Check if CustomField and CustomFieldValue models are loaded
-    console.log("CustomField model available:", typeof CustomField);
-    console.log("CustomFieldValue model available:", typeof CustomFieldValue);
-
-    if (Object.keys(potentialCustomFields).length > 0) {
-      try {
-        console.log(
-          "Processing",
-          Object.keys(potentialCustomFields).length,
-          "potential custom fields"
-        );
-
-        for (const [fieldKey, value] of Object.entries(potentialCustomFields)) {
-          console.log(`\n--- Processing field: ${fieldKey} = ${value} ---`);
-          let customField;
-
-          // Check if it's a fieldId (numeric) or fieldName (string)
-          if (isNaN(fieldKey)) {
-            // It's a fieldName - search by fieldName
-            console.log("Searching by fieldName:", fieldKey);
-            customField = await CustomField.findOne({
-              where: {
-                fieldName: fieldKey,
-                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                isActive: true,
-                // [Op.or]: [
-                //   { masterUserID: req.adminId },
-                //   { fieldSource: "default" },
-                //   { fieldSource: "system" },
-                // ],
-              },
-            });
-          } else {
-            // It's a fieldId - search by fieldId
-            console.log("Searching by fieldId:", parseInt(fieldKey));
-            customField = await CustomField.findOne({
-              where: {
-                fieldId: parseInt(fieldKey),
-                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                isActive: true,
-                // [Op.or]: [
-                //   { masterUserID: req.adminId },
-                //   { fieldSource: "default" },
-                //   { fieldSource: "system" },
-                // ],
-              },
-            });
-          }
-
-          console.log(
-            "CustomField found:",
-            customField
-              ? {
-                  fieldId: customField.fieldId,
-                  fieldName: customField.fieldName,
-                  fieldType: customField.fieldType,
-                  entityType: customField.entityType,
-                  isActive: customField.isActive,
-                  masterUserID: customField.masterUserID,
-                  fieldSource: customField.fieldSource,
-                }
-              : "NOT FOUND"
-          );
-
-          if (
-            customField &&
-            value !== null &&
-            value !== undefined &&
-            value !== ""
-          ) {
-            // Validate value based on field type
-            let processedValue = value;
-
-            if (
-              customField.fieldType === "number" &&
-              value !== null &&
-              value !== ""
-            ) {
-              processedValue = parseFloat(value);
-              if (isNaN(processedValue)) {
-                console.warn(
-                  `Invalid number value for field "${customField.fieldLabel}"`
-                );
-                continue;
-              }
-            }
-
-            if (customField.fieldType === "email" && value) {
-              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-              if (!emailRegex.test(value)) {
-                console.warn(
-                  `Invalid email format for field "${customField.fieldLabel}"`
-                );
-                continue;
-              }
-            }
-
-            console.log("Creating CustomFieldValue:", {
-              fieldId: customField.fieldId,
-              entityId: deal.dealId,
-              entityType: "deal",
-              value:
-                typeof processedValue === "object"
-                  ? JSON.stringify(processedValue)
-                  : String(processedValue),
-              masterUserID: req.adminId,
-            });
-
-            await CustomFieldValue.create({
-              fieldId: customField.fieldId,
-              entityId: deal.dealId,
-              entityType: "deal",
-              value:
-                typeof processedValue === "object"
-                  ? JSON.stringify(processedValue)
-                  : String(processedValue),
-              masterUserID: req.adminId,
-            });
-
-            // Store the saved custom field for response using fieldName as key
-            savedCustomFields[customField.fieldName] = {
-              fieldName: customField.fieldName,
-              fieldType: customField.fieldType,
-              value: processedValue,
-            };
-
-            console.log(
-              "✅ Custom field saved successfully:",
-              customField.fieldName
-            );
-          } else if (!customField) {
-            console.warn(`❌ Custom field not found for key: ${fieldKey}`);
-          } else {
-            console.warn(`❌ Invalid value for field ${fieldKey}:`, value);
-          }
-        }
-        console.log(
-          `🎉 Saved ${
-            Object.keys(savedCustomFields).length
-          } custom field values for deal ${deal.dealId}`
-        );
-      } catch (customFieldError) {
-        console.error("❌ Error saving custom fields:", customFieldError);
-        // Don't fail the deal creation, just log the error
-      }
-    } else {
-      console.log("❌ No potential custom fields found in request body");
-    }
-
-    await historyLogger(
-      dealProgramId,
-      "DEAL_CREATION",
-      deal.masterUserID,
-      deal.dealId,
-      null,
-      `Deal is created by ${req.role}`,
-      null
+    const dealResult = splitColumns(dealColumns, selectedDeal);
+    const personResult = splitColumns(personColumns, selectedPerson);
+    const organizationResult = splitColumns(
+      organizationColumns,
+      selectedOrganization
     );
 
-    // Prepare response with both default and custom fields
-    const dealResponse = {
-      ...deal.toJSON(),
-      customFields: savedCustomFields,
-    };
+    res.status(200).json({
+      success: true,
+      data: {
+        Deal: dealResult,
+        Person: personResult,
+        Organization: organizationResult,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch entity columns",
+      error: error.message,
+    });
+  }
+};
+const DASHBOARD = require("../../models/insight/dashboardModel");
+const Report = require("../../models/insight/reportModel");
+const Goal = require("../../models/insight/goalModel");
+const Deal = require("../../models/deals/dealsModels");
+const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
+const Lead = require("../../models/leads/leadsModel");
+const Activity = require("../../models/activity/activityModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const { Op } = require("sequelize");
+
+// =============== DASHBOARD MANAGEMENT ===============
+
+exports.createDashboard = async (req, res) => {
+  try {
+    const { name, folder, type, parentId } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate required fields
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard name is required",
+      });
+    }
+
+    // Determine the type (folder or dashboard/file)
+    const itemType = type || "dashboard"; // default to dashboard
+
+    let resolvedParentId = parentId || null;
+    let resolvedFolderName = null; // Start with null
+
+    // If folder name is provided, check if it's a valid existing folder
+    if (!parentId && folder) {
+      console.log(`[DEBUG] Processing folder request: "${folder}"`);
+
+      // Handle special cases
+      if (folder === "My dashboards") {
+        console.log("[DEBUG] Using My dashboards folder");
+        resolvedFolderName = "My dashboards";
+        // Don't set parentId - keep it null for root level
+      } else {
+        console.log(`[DEBUG] Looking for existing folder: "${folder}"`);
+
+        // Look for existing folder with the provided name
+        let existingFolder = await DASHBOARD.findOne({
+          where: {
+            name: folder,
+            ownerId,
+            type: "folder",
+            parentId: null,
+          },
+        });
+
+        console.log(
+          `[DEBUG] Existing folder found:`,
+          existingFolder
+            ? {
+                id: existingFolder.dashboardId,
+                name: existingFolder.name,
+                folder: existingFolder.folder,
+              }
+            : "None"
+        );
+
+        if (!existingFolder) {
+          console.log(`[DEBUG] Creating new folder: "${folder}"`);
+          // Auto-create the folder if it doesn't exist
+          existingFolder = await DASHBOARD.create({
+            name: folder,
+            folder: folder, // Set folder field to its own name
+            type: "folder",
+            parentId: null,
+            ownerId,
+          });
+          console.log(
+            `[DEBUG] Created folder with ID: ${existingFolder.dashboardId}`
+          );
+        }
+        // Use the existing or newly created folder
+        resolvedParentId = existingFolder.dashboardId;
+        resolvedFolderName = existingFolder.name;
+        console.log(
+          `[DEBUG] Resolved parentId: ${resolvedParentId}, folderName: ${resolvedFolderName}`
+        );
+      }
+    } else if (parentId) {
+      // If parentId is provided, validate it is a folder and get its name
+      const parentFolder = await DASHBOARD.findOne({
+        where: {
+          dashboardId: parentId,
+          ownerId,
+          type: "folder",
+        },
+      });
+      if (!parentFolder) {
+        return res.status(404).json({
+          success: false,
+          message: "Parent folder not found",
+        });
+      }
+      resolvedFolderName = parentFolder.name;
+    } else {
+      // No folder specified and no parentId - this goes to "My dashboards"
+      resolvedFolderName = "My dashboards";
+    }
+
+    // Check if a dashboard with the same name already exists in the same folder
+    const existingDashboard = await DASHBOARD.findOne({
+      where: {
+        name,
+        ownerId,
+        parentId: resolvedParentId, // Check within the same folder/parent
+        type: itemType, // Also check for the same type (dashboard/folder)
+      },
+    });
+
+    if (existingDashboard) {
+      return res.status(400).json({
+        success: false,
+        message: `A ${
+          itemType === "folder" ? "folder" : "dashboard"
+        } with this name already exists in this location`,
+      });
+    }
+
+    const newDashboard = await DASHBOARD.create({
+      name,
+      folder: resolvedFolderName, // Allow null values
+      type: itemType,
+      parentId: resolvedParentId,
+      ownerId,
+    });
 
     res.status(201).json({
-      message: "deal created successfully",
-      deal: dealResponse,
-      customFieldsSaved: Object.keys(savedCustomFields).length,
+      success: true,
+      message: `${
+        itemType === "folder" ? "Folder" : "Dashboard"
+      } created successfully`,
+      data: newDashboard,
     });
   } catch (error) {
-    console.log("Error creating deal:", error);
-
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error creating dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create dashboard",
+      error: error.message,
+    });
   }
 };
 
-exports.getDeals = async (req, res) => {
-  const {
-    page = 1,
-    limit = 20,
-    search,
-    sortBy = "createdAt",
-    order = "DESC",
-    pipeline,
-    pipelineStage,
-    ownerId,
-    masterUserID,
-    isArchived,
-    filterId,
-  } = req.query;
-
-  const offset = (page - 1) * limit;
-
+exports.getDashboards = async (req, res) => {
   try {
-    // Build the base where clause
-    let where = {};
-
-    // --- Handle column preferences ---
-    const pref = await DealColumnPreference.findOne();
-    let attributes = [];
-    let dealDetailsAttributes = [];
-
-    if (pref && pref.columns) {
-      const columns =
-        typeof pref.columns === "string"
-          ? JSON.parse(pref.columns)
-          : pref.columns;
-
-      // Get all Deal and DealDetails fields
-      const dealFields = Object.keys(Deal.rawAttributes);
-      const dealDetailsFields = DealDetails
-        ? Object.keys(DealDetails.rawAttributes)
-        : [];
-
-      // Filter checked columns by table
-      const checkedColumns = columns.filter((col) => col.check);
-
-      dealFields.forEach((field) => {
-        const col = checkedColumns.find((c) => c.key === field);
-        if (col) attributes.push(field);
-      });
-
-      dealDetailsFields.forEach((field) => {
-        const col = checkedColumns.find((c) => c.key === field);
-        if (col) dealDetailsAttributes.push(field);
-      });
-
-      // Always include dealId for relationships
-      if (!attributes.includes("dealId")) {
-        attributes.unshift("dealId");
-      }
-      // Always include status column from database
-      if (!attributes.includes("status")) {
-        attributes.push("status");
-      }
-
-      if (attributes.length === 0) attributes = undefined;
-      if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
-    }
-
-    // --- Handle dynamic filtering ---
-    let include = [];
-    let customFieldsConditions = { all: [], any: [] };
-
-    if (filterId) {
-      console.log("Processing filter with filterId:", filterId);
-
-      // Fetch the saved filter
-      const filter = await LeadFilter.findByPk(filterId);
-      if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
-      }
-
-      console.log("Found filter:", filter.filterName);
-
-      const filterConfig =
-        typeof filter.filterConfig === "string"
-          ? JSON.parse(filter.filterConfig)
-          : filter.filterConfig;
-
-      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
-
-      const { all = [], any = [] } = filterConfig;
-      const dealFields = Object.keys(Deal.rawAttributes);
-      const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-
-      let filterWhere = {};
-      let dealDetailsWhere = {};
-
-      console.log("Available deal fields:", dealFields);
-      console.log("Available dealDetails fields:", dealDetailsFields);
-
-      // Process 'all' conditions (AND logic)
-      if (all.length > 0) {
-        console.log("Processing 'all' conditions:", all);
-
-        filterWhere[Op.and] = [];
-        dealDetailsWhere[Op.and] = [];
-
-        all.forEach((cond) => {
-          console.log("Processing condition:", cond);
-
-          if (dealFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in Deal fields`);
-            filterWhere[Op.and].push(buildCondition(cond));
-          } else if (dealDetailsFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in DealDetails fields`);
-            dealDetailsWhere[Op.and].push(buildCondition(cond));
-          } else {
-            console.log(
-              `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-            );
-            // Handle custom fields
-            customFieldsConditions.all.push(cond);
-          }
-        });
-
-        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-        if (dealDetailsWhere[Op.and].length === 0)
-          delete dealDetailsWhere[Op.and];
-      }
-
-      // Process 'any' conditions (OR logic)
-      if (any.length > 0) {
-        console.log("Processing 'any' conditions:", any);
-
-        filterWhere[Op.or] = [];
-        dealDetailsWhere[Op.or] = [];
-
-        any.forEach((cond) => {
-          if (dealFields.includes(cond.field)) {
-            filterWhere[Op.or].push(buildCondition(cond));
-          } else if (dealDetailsFields.includes(cond.field)) {
-            dealDetailsWhere[Op.or].push(buildCondition(cond));
-          } else {
-            // Handle custom fields
-            customFieldsConditions.any.push(cond);
-          }
-        });
-
-        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-        if (dealDetailsWhere[Op.or].length === 0)
-          delete dealDetailsWhere[Op.or];
-      }
-
-      // Apply masterUserID filtering logic for filters
-      if (req.role === "admin") {
-        // Admin can filter by specific masterUserID or see all deals
-        if (masterUserID && masterUserID !== "all") {
-          if (filterWhere[Op.or]) {
-            // If there's already an Op.or condition from filters, combine properly
-            filterWhere[Op.and] = [
-              { [Op.or]: filterWhere[Op.or] },
-              {
-                [Op.or]: [
-                  { masterUserID: masterUserID },
-                  { ownerId: masterUserID },
-                ],
-              },
-            ];
-            delete filterWhere[Op.or];
-          } else {
-            filterWhere[Op.or] = [
-              { masterUserID: masterUserID },
-              { ownerId: masterUserID },
-            ];
-          }
-        }
-      } else {
-        // Non-admin users: filter by their own deals or specific user if provided
-        const userId =
-          masterUserID && masterUserID !== "all" ? masterUserID : req.adminId;
-
-        if (filterWhere[Op.or]) {
-          // If there's already an Op.or condition from filters, combine properly
-          filterWhere[Op.and] = [
-            { [Op.or]: filterWhere[Op.or] },
-            { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
-          ];
-          delete filterWhere[Op.or];
-        } else {
-          filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
-        }
-      }
-
-      // Add DealDetails include with filtering
-      if (Object.keys(dealDetailsWhere).length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          where: dealDetailsWhere,
-          required: true,
-          attributes: dealDetailsAttributes,
-        });
-      } else if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          required: false,
-          attributes: dealDetailsAttributes,
-        });
-      }
-
-      // Handle custom field filtering
-      if (
-        customFieldsConditions.all.length > 0 ||
-        customFieldsConditions.any.length > 0
-      ) {
-        console.log(
-          "Processing custom field conditions:",
-          customFieldsConditions
-        );
-
-        // Debug: Show all custom fields in the database
-        const allCustomFields = await CustomField.findAll({
-          where: {
-            isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
+    const ownerId = req.adminId;
+    const role = req.role;
+    let dashboards;
+    if (role === "admin") {
+      dashboards = await DASHBOARD.findAll({
+        include: [
+          {
+            model: Report,
+            as: "Reports",
+            required: false,
           },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "entityType",
-            "fieldSource",
-            "isActive",
-            "masterUserID",
-          ],
-        });
-
-        console.log(
-          "All custom fields in database:",
-          allCustomFields.map((f) => ({
-            fieldId: f.fieldId,
-            fieldName: f.fieldName,
-            entityType: f.entityType,
-            fieldSource: f.fieldSource,
-            isActive: f.isActive,
-            masterUserID: f.masterUserID,
-          }))
-        );
-
-        const customFieldFilters = await buildCustomFieldFilters(
-          customFieldsConditions,
-          req.adminId
-        );
-        console.log("Built custom field filters:", customFieldFilters);
-
-        if (customFieldFilters.length > 0) {
-          // Apply custom field filtering by finding deals that match the custom field conditions
-          const matchingDealIds = await getDealIdsByCustomFieldFilters(
-            customFieldFilters,
-            req.adminId
-          );
-
-          console.log(
-            "Matching deal IDs from custom field filtering:",
-            matchingDealIds
-          );
-
-          if (matchingDealIds.length > 0) {
-            // If we already have other conditions, combine them
-            if (filterWhere[Op.and]) {
-              filterWhere[Op.and].push({
-                dealId: { [Op.in]: matchingDealIds },
-              });
-            } else if (filterWhere[Op.or]) {
-              filterWhere[Op.and] = [
-                { [Op.or]: filterWhere[Op.or] },
-                { dealId: { [Op.in]: matchingDealIds } },
-              ];
-              delete filterWhere[Op.or];
-            } else {
-              filterWhere.dealId = { [Op.in]: matchingDealIds };
-            }
-          } else {
-            // No deals match the custom field conditions, so return empty result
-            console.log(
-              "No matching deals found for custom field filters, setting empty result"
-            );
-            filterWhere.dealId = { [Op.in]: [] };
-          }
-        } else {
-          // Custom field conditions exist but no valid filters were built (field not found)
-          console.log(
-            "Custom field conditions exist but no valid filters found, setting empty result"
-          );
-          filterWhere.dealId = { [Op.in]: [] };
-        }
-      }
-
-      where = filterWhere;
-    } else {
-      // --- Standard filtering without filterId ---
-      // Handle masterUserID filtering based on role
-      if (req.role !== "admin") {
-        where[Op.or] = [
-          { masterUserID: req.adminId },
-          { ownerId: req.adminId },
-        ];
-      } else if (masterUserID && masterUserID !== "all") {
-        where[Op.or] = [
-          { masterUserID: masterUserID },
-          { ownerId: masterUserID },
-        ];
-      }
-
-      // Basic search functionality
-      if (search) {
-        where[Op.or] = [
-          { title: { [Op.like]: `%${search}%` } },
-          { contactPerson: { [Op.like]: `%${search}%` } },
-          { organization: { [Op.like]: `%${search}%` } },
-        ];
-      }
-
-      // Filter by pipeline
-      if (pipeline) {
-        where.pipeline = pipeline;
-      }
-
-      // Filter by pipelineStage
-      if (pipelineStage) {
-        where.pipelineStage = pipelineStage;
-      }
-
-      // Filter by ownerId
-      if (ownerId) {
-        where.ownerId = ownerId;
-      }
-
-      // Add isArchived filter if provided
-      if (typeof isArchived !== "undefined") {
-        where.isArchived = isArchived === "true";
-      }
-
-      // Add default DealDetails include if not added by filtering
-      if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          attributes: dealDetailsAttributes,
-          required: false,
-        });
-      }
-    }
-
-    console.log("→ Final where clause:", JSON.stringify(where, null, 2));
-    console.log("→ Final include:", JSON.stringify(include, null, 2));
-
-    const { rows: deals, count: total } = await Deal.findAndCountAll({
-      where,
-      limit: parseInt(limit),
-      offset,
-      order: [[sortBy, order.toUpperCase()]],
-      attributes,
-      include,
-    });
-
-    console.log("→ Query executed. Total records:", total);
-
-    // Fetch custom field values for all deals
-    const dealIds = deals.map((deal) => deal.dealId);
-
-    console.log("→ Fetching custom fields for dealIds:", dealIds);
-    console.log("→ Current user adminId:", req.adminId);
-
-    // First, let's check if there are any custom field values for these deals
-    const allCustomFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityType: "deal",
-        entityId: dealIds,
-      },
-      attributes: [
-        "fieldId",
-        "entityId",
-        "entityType",
-        "value",
-        "masterUserID",
-      ],
-    });
-
-    console.log(
-      "→ All custom field values for these deals:",
-      allCustomFieldValues.length
-    );
-    allCustomFieldValues.forEach((value) => {
-      console.log(
-        `  - Deal ${value.entityId}: Field ${value.fieldId} = ${value.value} (MasterUserID: ${value.masterUserID})`
-      );
-    });
-
-    // Now check custom fields that match our criteria and have dealCheck = true
-    const allCustomFields = await CustomField.findAll({
-      where: {
-        isActive: true,
-        entityType: { [Op.in]: ["deal", "both", "lead"] },
-        dealCheck: true, // Only include custom fields where dealCheck is true
-        [Op.or]: [
-          { masterUserID: req.adminId },
-          { fieldSource: "default" },
-          { fieldSource: "system" },
+          {
+            model: Goal,
+            as: "Goals",
+            required: false,
+          },
         ],
-      },
-      attributes: [
-        "fieldId",
-        "fieldName",
-        "entityType",
-        "fieldSource",
-        "masterUserID",
-        "isActive",
-        "dealCheck",
-      ],
-    });
-
-    console.log(
-      "→ Available custom fields with dealCheck=true:",
-      allCustomFields.length
-    );
-    allCustomFields.forEach((field) => {
-      console.log(
-        `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, dealCheck: ${field.dealCheck})`
-      );
-    });
-
-    const customFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityType: "deal",
-        entityId: dealIds,
-      },
-      include: [
-        {
-          model: CustomField,
-          as: "CustomField",
-          where: {
-            isActive: true,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
-          },
-          required: true,
-        },
-      ],
-    });
-
-    console.log("→ Found custom field values:", customFieldValues.length);
-
-    console.log("→ Found custom field values:", customFieldValues.length);
-
-    // Group custom field values by dealId
-    const customFieldsByDeal = {};
-    customFieldValues.forEach((value) => {
-      if (!customFieldsByDeal[value.entityId]) {
-        customFieldsByDeal[value.entityId] = {};
-      }
-      customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
-        label: value.CustomField.fieldLabel,
-        value: value.value,
-        type: value.CustomField.fieldType,
-        isImportant: value.CustomField.isImportant,
-      };
-    });
-
-    console.log(
-      "→ Grouped custom fields by deal:",
-      Object.keys(customFieldsByDeal).length,
-      "deals have custom fields"
-    );
-
-    // Debug each deal's custom fields
-    Object.keys(customFieldsByDeal).forEach((dealId) => {
-      console.log(
-        `  - Deal ${dealId} has custom fields:`,
-        Object.keys(customFieldsByDeal[dealId])
-      );
-    });
-
-    // Attach custom fields and status to each deal
-    const dealsWithCustomFields = deals.map((deal) => {
-      const dealObj = deal.toJSON();
-
-      // Flatten dealDetails into the main deal object if present
-      if (dealObj.details) {
-        Object.assign(dealObj, dealObj.details);
-        delete dealObj.details;
-      }
-
-      // Add custom fields
-      dealObj.customFields = customFieldsByDeal[dealObj.dealId] || {};
-
-      // Ensure status is present (from deal or details)
-      if (!("status" in dealObj)) {
-        // Try to get status from original deal instance if not present
-        dealObj.status = deal.status || null;
-      }
-
-      return dealObj;
-    });
-
-    // --- Deal summary calculation (like getDealSummary) ---
-    // Use the filtered deals for summary
-    const summaryDeals = dealsWithCustomFields;
-    // If dealsWithCustomFields is empty, summary will be zeroed
-    let totalValue = 0;
-    let totalWeightedValue = 0;
-    let totalDealCount = 0;
-    const currencyMap = {};
-
-    // Fetch pipeline stage probabilities
-    let stageProbabilities = {};
-    try {
-      const pipelineStages = await PipelineStage.findAll({
-        attributes: ["stageName", "probability"],
-        where: { isActive: true },
-      });
-      stageProbabilities = pipelineStages.reduce((acc, stage) => {
-        acc[stage.stageName] = stage.probability || 0;
-        return acc;
-      }, {});
-    } catch (e) {
-      // fallback: all probabilities 0
-    }
-
-    summaryDeals.forEach((deal) => {
-      const currency = deal.currency;
-      const value = deal.value || 0;
-      const pipelineStage = deal.pipelineStage;
-      if (!currencyMap[currency]) {
-        currencyMap[currency] = {
-          totalValue: 0,
-          weightedValue: 0,
-          dealCount: 0,
-        };
-      }
-      currencyMap[currency].totalValue += value;
-      currencyMap[currency].weightedValue +=
-        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-      currencyMap[currency].dealCount += 1;
-      totalValue += value;
-      totalWeightedValue +=
-        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-      totalDealCount += 1;
-    });
-
-    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
-      currency,
-      totalValue: data.totalValue,
-      weightedValue: data.weightedValue,
-      dealCount: data.dealCount,
-    }));
-    summary.sort((a, b) => b.totalValue - a.totalValue);
-
-    res.status(200).json({
-      message: "Deals fetched successfully",
-      totalDeals: total,
-      totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page),
-      deals: dealsWithCustomFields,
-      role: req.role,
-      totalValue,
-      totalWeightedValue,
-      totalDealCount,
-      summary,
-    });
-  } catch (error) {
-    console.error("Error fetching deals:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// Helper functions for custom field filtering
-async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
-  const filters = [];
-
-  // Handle 'all' conditions (AND logic)
-  if (customFieldsConditions.all.length > 0) {
-    for (const cond of customFieldsConditions.all) {
-      console.log("Processing 'all' condition:", cond);
-
-      // Try to find the custom field by fieldName first, then by fieldId
-      let customField = null;
-
-      // First try to find by fieldName
-      customField = await CustomField.findOne({
-        where: {
-          fieldName: cond.field,
-          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-          isActive: true,
-          dealCheck: true, // Only include custom fields where dealCheck is true
-          [Op.or]: [
-            { masterUserID: masterUserID },
-            { fieldSource: "default" },
-            { fieldSource: "system" },
-          ],
-        },
-      });
-
-      // If not found by fieldName, try by fieldId
-      if (!customField) {
-        customField = await CustomField.findOne({
-          where: {
-            fieldId: cond.field,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            isActive: true,
-            dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: masterUserID },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
-          },
-        });
-      }
-
-      console.log(
-        "Custom field search result:",
-        customField
-          ? {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              entityType: customField.entityType,
-              fieldSource: customField.fieldSource,
-            }
-          : "NOT FOUND"
-      );
-
-      if (customField) {
-        console.log(
-          "Found custom field for 'all' condition:",
-          customField.fieldName,
-          "entityType:",
-          customField.entityType
-        );
-        filters.push({
-          fieldId: customField.fieldId,
-          condition: cond,
-          logicType: "all",
-          entityType: customField.entityType,
-        });
-      } else {
-        console.log("Custom field not found for 'all' condition:", cond.field);
-      }
-    }
-  }
-
-  // Handle 'any' conditions (OR logic) - any condition can be met
-  if (customFieldsConditions.any.length > 0) {
-    for (const cond of customFieldsConditions.any) {
-      console.log("Processing 'any' condition:", cond);
-
-      // Try to find the custom field by fieldName first, then by fieldId
-      let customField = null;
-
-      // First try to find by fieldName
-      customField = await CustomField.findOne({
-        where: {
-          fieldName: cond.field,
-          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-          isActive: true,
-          dealCheck: true, // Only include custom fields where dealCheck is true
-          [Op.or]: [
-            { masterUserID: masterUserID },
-            { fieldSource: "default" },
-            { fieldSource: "system" },
-          ],
-        },
-      });
-
-      // If not found by fieldName, try by fieldId
-      if (!customField) {
-        customField = await CustomField.findOne({
-          where: {
-            fieldId: cond.field,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            isActive: true,
-            dealCheck: true, // Only include custom fields where dealCheck is true
-            [Op.or]: [
-              { masterUserID: masterUserID },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
-          },
-        });
-      }
-
-      console.log(
-        "Custom field search result:",
-        customField
-          ? {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              entityType: customField.entityType,
-              fieldSource: customField.fieldSource,
-            }
-          : "NOT FOUND"
-      );
-
-      if (customField) {
-        console.log(
-          "Found custom field for 'any' condition:",
-          customField.fieldName,
-          "entityType:",
-          customField.entityType
-        );
-        filters.push({
-          fieldId: customField.fieldId,
-          condition: cond,
-          logicType: "any",
-          entityType: customField.entityType,
-        });
-      } else {
-        console.log("Custom field not found for 'any' condition:", cond.field);
-      }
-    }
-  }
-
-  return filters;
-}
-
-async function getDealIdsByCustomFieldFilters(
-  customFieldFilters,
-  masterUserID
-) {
-  if (customFieldFilters.length === 0) return [];
-
-  const allFilters = customFieldFilters.filter((f) => f.logicType === "all");
-  const anyFilters = customFieldFilters.filter((f) => f.logicType === "any");
-
-  let dealIds = [];
-
-  // Handle 'all' filters (AND logic) - all conditions must be met
-  if (allFilters.length > 0) {
-    let allConditionDealIds = null;
-
-    for (const filter of allFilters) {
-      const whereCondition = buildCustomFieldCondition(
-        filter.condition,
-        filter.fieldId
-      );
-
-      console.log(
-        "Searching for custom field values with condition:",
-        whereCondition
-      );
-      console.log("Filter fieldId:", filter.fieldId);
-      console.log("Filter condition:", filter.condition);
-
-      // Search for custom field values - handle different entity types
-      const customFieldValues = await CustomFieldValue.findAll({
-        where: {
-          fieldId: filter.fieldId,
-          // Look for values in both deal and lead entity types since some fields might be unified
-          entityType: { [Op.in]: ["deal", "lead"] },
-          ...whereCondition,
-        },
-        attributes: ["entityId", "entityType", "value"],
-      });
-
-      console.log("Found custom field values:", customFieldValues.length);
-      customFieldValues.forEach((cfv) => {
-        console.log(
-          `  - EntityType: ${cfv.entityType}, EntityId: ${cfv.entityId}, Value: ${cfv.value}`
-        );
-      });
-
-      let currentDealIds = [];
-
-      // Process each custom field value
-      for (const cfv of customFieldValues) {
-        if (cfv.entityType === "deal") {
-          // Direct deal association
-          currentDealIds.push(cfv.entityId);
-        } else if (cfv.entityType === "lead") {
-          // Lead association - need to find corresponding deal
-          // Since leads can be converted to deals, we need to find deals that have this leadId
-          try {
-            const dealsFromLead = await Deal.findAll({
-              where: { leadId: cfv.entityId },
-              attributes: ["dealId"],
-            });
-
-            dealsFromLead.forEach((deal) => {
-              currentDealIds.push(deal.dealId);
-            });
-
-            console.log(
-              `  - Found ${dealsFromLead.length} deals from lead ${cfv.entityId}`
-            );
-          } catch (error) {
-            console.error("Error finding deals from lead:", error);
-          }
-        }
-      }
-
-      // Remove duplicates
-      currentDealIds = [...new Set(currentDealIds)];
-      console.log("Current deal IDs for filter:", currentDealIds);
-
-      if (allConditionDealIds === null) {
-        allConditionDealIds = currentDealIds;
-      } else {
-        // Intersection - only keep deals that match all conditions
-        allConditionDealIds = allConditionDealIds.filter((id) =>
-          currentDealIds.includes(id)
-        );
-      }
-    }
-
-    dealIds = allConditionDealIds || [];
-  }
-
-  // Handle 'any' filters (OR logic) - any condition can be met
-  if (anyFilters.length > 0) {
-    let anyConditionDealIds = [];
-
-    for (const filter of anyFilters) {
-      const whereCondition = buildCustomFieldCondition(
-        filter.condition,
-        filter.fieldId
-      );
-
-      const customFieldValues = await CustomFieldValue.findAll({
-        where: {
-          fieldId: filter.fieldId,
-          entityType: { [Op.in]: ["deal", "lead"] }, // Look for values in both deal and lead entity types
-          ...whereCondition,
-        },
-        attributes: ["entityId", "entityType", "value"],
-      });
-
-      let currentDealIds = [];
-
-      for (const cfv of customFieldValues) {
-        if (cfv.entityType === "deal") {
-          currentDealIds.push(cfv.entityId);
-        } else if (cfv.entityType === "lead") {
-          // Lead association - need to find corresponding deal
-          try {
-            const dealsFromLead = await Deal.findAll({
-              where: { leadId: cfv.entityId },
-              attributes: ["dealId"],
-            });
-
-            dealsFromLead.forEach((deal) => {
-              currentDealIds.push(deal.dealId);
-            });
-          } catch (error) {
-            console.error("Error finding deals from lead:", error);
-          }
-        }
-      }
-
-      currentDealIds = [...new Set(currentDealIds)];
-      anyConditionDealIds = [...anyConditionDealIds, ...currentDealIds];
-    }
-
-    // Remove duplicates
-    anyConditionDealIds = [...new Set(anyConditionDealIds)];
-
-    if (dealIds.length > 0) {
-      // If we have both 'all' and 'any' conditions, combine them with AND logic
-      dealIds = dealIds.filter((id) => anyConditionDealIds.includes(id));
-    } else {
-      dealIds = anyConditionDealIds;
-    }
-  }
-
-  console.log("Final deal IDs from custom field filtering:", dealIds);
-  return dealIds;
-}
-
-function buildCustomFieldCondition(condition, fieldId) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
-
-  let operator = condition.operator;
-
-  // Map operator names to internal operators
-  const operatorMap = {
-    is: "eq",
-    "is not": "ne",
-    "is empty": "isEmpty",
-    "is not empty": "isNotEmpty",
-    contains: "like",
-    "does not contain": "notLike",
-    "is exactly or earlier than": "lte",
-    "is earlier than": "lt",
-    "is exactly or later than": "gte",
-    "is later than": "gt",
-  };
-
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "isEmpty") {
-    return { value: { [Op.is]: null } };
-  }
-  if (operator === "isNotEmpty") {
-    return { value: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle "contains" and "does not contain" for text fields
-  if (operator === "like") {
-    return { value: { [Op.like]: `%${condition.value}%` } };
-  }
-  if (operator === "notLike") {
-    return { value: { [Op.notLike]: `%${condition.value}%` } };
-  }
-
-  // Default condition
-  return {
-    value: {
-      [ops[operator] || Op.eq]: condition.value,
-    },
-  };
-}
-
-// Operator label to backend key mapping
-const operatorMap = {
-  is: "eq",
-  "is not": "ne",
-  "is empty": "is empty",
-  "is not empty": "is not empty",
-  "is exactly or earlier than": "lte",
-  "is earlier than": "lt",
-  "is exactly or later than": "gte",
-  "is later than": "gt",
-  // New mappings for frontend operators
-  "is before": "lt",
-  "is after": "gt",
-  "is exactly on or before": "lte",
-  "is exactly on or after": "gte",
-};
-
-// Helper to build a single condition
-function buildCondition(cond) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
-
-  let operator = cond.operator;
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "is empty") {
-    return { [cond.field]: { [Op.is]: null } };
-  }
-  if (operator === "is not empty") {
-    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle date fields
-  const dealDateFields = Object.entries(Deal.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const dealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const allDateFields = [...dealDateFields, ...dealDetailsDateFields];
-
-  if (allDateFields.includes(cond.field)) {
-    // Support new date operators
-    const dateStr = cond.value;
-    if (!dateStr) return {};
-    // For exact date (full day)
-    if (cond.useExactDate || operator === "eq") {
-      const start = new Date(dateStr + "T00:00:00");
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.between]: [start, end],
-        },
-      };
-    }
-    // is before: strictly less than start of day
-    if (operator === "lt") {
-      const start = new Date(dateStr + "T00:00:00");
-      if (isNaN(start.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.lt]: start,
-        },
-      };
-    }
-    // is after: strictly greater than end of day
-    if (operator === "gt") {
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.gt]: end,
-        },
-      };
-    }
-    // is exactly on or before: less than or equal to end of day
-    if (operator === "lte") {
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.lte]: end,
-        },
-      };
-    }
-    // is exactly on or after: greater than or equal to start of day
-    if (operator === "gte") {
-      const start = new Date(dateStr + "T00:00:00");
-      if (isNaN(start.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.gte]: start,
-        },
-      };
-    }
-    // Otherwise, use relative date conversion
-    const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
-
-    if (
-      dateRange &&
-      isValidDate(dateRange.start) &&
-      isValidDate(dateRange.end)
-    ) {
-      return {
-        [cond.field]: {
-          [Op.between]: [dateRange.start, dateRange.end],
-        },
-      };
-    }
-    if (dateRange && isValidDate(dateRange.start)) {
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: dateRange.start,
-        },
-      };
-    }
-  }
-
-  // Handle "contains" for text fields
-  if (operator === "like") {
-    return { [cond.field]: { [Op.like]: `%${cond.value}%` } };
-  }
-
-  // Default condition
-  return {
-    [cond.field]: {
-      [ops[operator] || Op.eq]: cond.value,
-    },
-  };
-}
-exports.updateDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-
-    // Debug: Log the complete request body
-    console.log("=== UPDATE DEAL REQUEST DEBUG ===");
-    console.log("dealId:", dealId);
-    console.log("req.body:", JSON.stringify(req.body, null, 2));
-    console.log("req.body type:", typeof req.body);
-    console.log("req.body keys:", Object.keys(req.body));
-    console.log("req.adminId:", req.adminId);
-    console.log("req.role:", req.role);
-    console.log("req.user:", req.user);
-
-    const updateFields = { ...req.body };
-
-    // Separate DealDetails fields
-    const dealDetailsFields = {};
-    if ("statusSummary" in updateFields)
-      dealDetailsFields.statusSummary = updateFields.statusSummary;
-    if ("responsiblePerson" in updateFields)
-      dealDetailsFields.responsiblePerson = updateFields.responsiblePerson;
-    if ("rfpReceivedDate" in updateFields)
-      dealDetailsFields.rfpReceivedDate = updateFields.rfpReceivedDate;
-
-    // Remove DealDetails fields from main update
-    delete updateFields.statusSummary;
-    delete updateFields.responsiblePerson;
-    delete updateFields.rfpReceivedDate;
-
-    // Update Deal
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      await logAuditTrail(
-        getProgramId("DEALS"),
-        "DEAL_UPDATE",
-        req.role,
-        `Deal update failed: Deal with ID ${dealId} not found.`,
-        req.adminId
-      );
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    // Check if pipelineStage is changing
-    // Only check for pipelineStage if it's in the request body
-    if (
-      updateFields.pipelineStage &&
-      updateFields.pipelineStage !== deal.pipelineStage
-    ) {
-      await DealStageHistory.create({
-        dealId: deal.dealId,
-        stageName: updateFields.pipelineStage,
-        enteredAt: new Date(),
-      });
-    }
-    await deal.update({ ...updateFields });
-
-    // Update or create DealDetails
-    if (Object.keys(dealDetailsFields).length > 0) {
-      let dealDetails = await DealDetails.findOne({ where: { dealId } });
-      if (dealDetails) {
-        await dealDetails.update(dealDetailsFields);
-      } else {
-        await DealDetails.create({ dealId, ...dealDetailsFields });
-      }
-    }
-
-    // Update all fields of Person
-    if (deal.personId) {
-      const person = await Person.findByPk(deal.personId);
-      if (person) {
-        // Only update fields that exist in the Person model
-        const personAttributes = Object.keys(Person.rawAttributes);
-        const personUpdate = {};
-        for (const key of personAttributes) {
-          if (key in req.body) {
-            personUpdate[key] = req.body[key];
-          }
-        }
-        if (Object.keys(personUpdate).length > 0) {
-          await person.update(personUpdate);
-        }
-      }
-    }
-
-    // Update all fields of Organization
-    if (deal.leadOrganizationId) {
-      const org = await Organization.findByPk(deal.leadOrganizationId);
-      if (org) {
-        // Only update fields that exist in the Organization model
-        const orgAttributes = Object.keys(Organization.rawAttributes);
-        const orgUpdate = {};
-        for (const key of orgAttributes) {
-          if (key in req.body) {
-            orgUpdate[key] = req.body[key];
-          }
-        }
-        if (Object.keys(orgUpdate).length > 0) {
-          await org.update(orgUpdate);
-        }
-      }
-    }
-
-    // Handle custom fields update - Check for custom fields directly in req.body
-    let updatedCustomFields = {};
-
-    console.log("=== CUSTOM FIELDS UPDATE DEBUG ===");
-    console.log("req.adminId:", req.adminId);
-    console.log("dealId:", dealId);
-
-    // Get all available custom fields for this user
-    const availableCustomFields = await CustomField.findAll({
-      where: {
-        entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
-        isActive: true,
-        [Op.or]: [
-          { masterUserID: req.adminId },
-          { fieldSource: "default" },
-          { fieldSource: "system" },
-        ],
-      },
-    });
-
-    console.log(
-      "Available custom fields:",
-      availableCustomFields.map((f) => f.fieldName)
-    );
-
-    if (availableCustomFields.length > 0) {
-      try {
-        // Check each available custom field to see if it's in the request body
-        for (const customField of availableCustomFields) {
-          const fieldName = customField.fieldName;
-
-          // Check if this field is in the request body
-          if (fieldName in req.body) {
-            const value = req.body[fieldName];
-
-            console.log(`\n--- Processing field: ${fieldName} = ${value} ---`);
-            console.log("CustomField found:", {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              fieldType: customField.fieldType,
-              entityType: customField.entityType,
-              isActive: customField.isActive,
-              masterUserID: customField.masterUserID,
-              fieldSource: customField.fieldSource,
-            });
-
-            if (value !== null && value !== undefined) {
-              // Validate value based on field type
-              let processedValue = value;
-
-              if (
-                customField.fieldType === "number" &&
-                value !== null &&
-                value !== ""
-              ) {
-                processedValue = parseFloat(value);
-                if (isNaN(processedValue)) {
-                  console.warn(
-                    `Invalid number value for field "${customField.fieldLabel}"`
-                  );
-                  continue;
-                }
-              }
-
-              if (customField.fieldType === "email" && value) {
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!emailRegex.test(value)) {
-                  console.warn(
-                    `Invalid email format for field "${customField.fieldLabel}"`
-                  );
-                  continue;
-                }
-              }
-
-              // Handle empty values (allow clearing fields)
-              if (value === "" || value === null) {
-                processedValue = null;
-              }
-
-              console.log("Processing custom field value:", {
-                fieldId: customField.fieldId,
-                fieldName: customField.fieldName,
-                dealId: dealId,
-                processedValue: processedValue,
-                originalValue: value,
-              });
-
-              // Find or create the field value
-              let fieldValue = await CustomFieldValue.findOne({
-                where: {
-                  fieldId: customField.fieldId,
-                  entityId: dealId,
-                  entityType: "deal",
-                },
-              });
-
-              if (fieldValue) {
-                // Update existing value
-                if (processedValue === null || processedValue === "") {
-                  // Delete the field value if it's being cleared
-                  await fieldValue.destroy();
-                  console.log(
-                    `✅ Deleted custom field value for: ${customField.fieldName}`
-                  );
-                } else {
-                  await fieldValue.update({
-                    value:
-                      typeof processedValue === "object"
-                        ? JSON.stringify(processedValue)
-                        : String(processedValue),
-                  });
-                  console.log(
-                    `✅ Updated custom field value for: ${customField.fieldName}`
-                  );
-                }
-              } else if (processedValue !== null && processedValue !== "") {
-                // Create new value only if it's not empty
-                await CustomFieldValue.create({
-                  fieldId: customField.fieldId,
-                  entityId: dealId,
-                  entityType: "deal",
-                  value:
-                    typeof processedValue === "object"
-                      ? JSON.stringify(processedValue)
-                      : String(processedValue),
-                  masterUserID: req.adminId,
-                });
-                console.log(
-                  `✅ Created new custom field value for: ${customField.fieldName}`
-                );
-              }
-
-              // Store the updated custom field for response
-              updatedCustomFields[customField.fieldName] = {
-                fieldName: customField.fieldName,
-                fieldType: customField.fieldType,
-                value: processedValue,
-              };
-
-              // Remove the custom field from updateFields to prevent it from being updated in the main Deal table
-              delete updateFields[fieldName];
-            } else {
-              console.warn(`❌ Invalid value for field ${fieldName}:`, value);
-            }
-          }
-        }
-
-        console.log(
-          `🎉 Updated ${
-            Object.keys(updatedCustomFields).length
-          } custom field values for deal ${dealId}`
-        );
-      } catch (customFieldError) {
-        console.error("❌ Error updating custom fields:", customFieldError);
-        // Don't fail the deal update, just log the error
-      }
-    } else {
-      console.log("❌ No custom fields available for this user");
-    }
-
-    // After all updates and before sending the response:
-    const updatedDeal = await Deal.findByPk(dealId, {
-      include: [
-        { model: DealDetails, as: "details" },
-        { model: Person, as: "Person" },
-        { model: Organization, as: "Organization" },
-      ],
-    });
-
-    // Calculate pipeline stage days
-    const stageHistory = await DealStageHistory.findAll({
-      where: { dealId },
-      order: [["enteredAt", "ASC"]],
-    });
-
-    const now = new Date();
-    const pipelineStages = [];
-    for (let i = 0; i < stageHistory.length; i++) {
-      const stage = stageHistory[i];
-      const nextStage = stageHistory[i + 1];
-      const start = new Date(stage.enteredAt);
-      const end = nextStage ? new Date(nextStage.enteredAt) : now;
-      const days = Math.max(
-        0,
-        Math.floor((end - start) / (1000 * 60 * 60 * 24))
-      );
-      pipelineStages.push({
-        stageName: stage.stageName,
-        days,
-      });
-    }
-    const pipelineOrder = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-    ];
-
-    const stageDaysMap = new Map();
-    for (const stage of pipelineStages) {
-      if (!stageDaysMap.has(stage.stageName)) {
-        stageDaysMap.set(stage.stageName, stage.days);
-      } else {
-        stageDaysMap.set(
-          stage.stageName,
-          stageDaysMap.get(stage.stageName) + stage.days
-        );
-      }
-    }
-
-    let currentStageName = pipelineStages.length
-      ? pipelineStages[pipelineStages.length - 1].stageName
-      : null;
-
-    let pipelineStagesUnique = [];
-    if (currentStageName && pipelineOrder.includes(currentStageName)) {
-      const currentIdx = pipelineOrder.indexOf(currentStageName);
-      pipelineStagesUnique = pipelineOrder
-        .slice(0, currentIdx + 1)
-        .map((stageName) => ({
-          stageName,
-          days: stageDaysMap.get(stageName) || 0,
-        }));
-    }
-
-    //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
-    await historyLogger(
-      getProgramId("DEALS"),
-      "DEAL_UPDATE",
-      req.adminId,
-      deal.dealId,
-      null,
-      `Deal updated by ${req.role}`,
-      null
-    );
-
-    // Prepare response with updated custom fields
-    const dealResponse = {
-      ...updatedDeal.toJSON(),
-      customFields: updatedCustomFields,
-    };
-
-    res.status(200).json({
-      message: "Deal, person, and organization updated successfully",
-      deal: dealResponse,
-      person: updatedDeal.Person ? [updatedDeal.Person] : [],
-      organization: updatedDeal.Organization ? [updatedDeal.Organization] : [],
-      pipelineStages: pipelineStagesUnique,
-      currentStage: currentStageName,
-      customFieldsUpdated: Object.keys(updatedCustomFields).length,
-    });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-// exports.getDealSummary = async (req, res) => {
-//   try {
-//     // 1. Per-currency summary
-//     const currencySummary = await Deal.findAll({
-//       attributes: [
-//         "currency",
-//         [fn("SUM", col("value")), "totalValue"],
-//         // Replace with your actual weighted value logic if needed
-//         [fn("SUM", col("value")), "weightedValue"],
-//         [fn("COUNT", col("dealId")), "dealCount"]
-//       ],
-//       group: ["currency"]
-//     });
-
-//     // 2. Overall summary
-//     const overall = await Deal.findAll({
-//       attributes: [
-//         [fn("SUM", col("value")), "totalValue"],
-//         [fn("SUM", col("value")), "weightedValue"],
-//         [fn("COUNT", col("dealId")), "dealCount"]
-//       ]
-//     });
-
-//     res.status(200).json({
-//       overall: overall[0],         // { totalValue, weightedValue, dealCount }
-//       currencySummary              // array of per-currency summaries
-//     });
-//   } catch (error) {
-//     console.log(error);
-
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-exports.getDealSummary = async (req, res) => {
-  try {
-    // Fetch all deals with value, currency, and pipelineStage
-    const deals = await Deal.findAll({
-      attributes: ["value", "currency", "pipelineStage"],
-      raw: true,
-    });
-
-    // Probabilities for each stage
-    // Fetch dynamic probabilities from pipeline stages
-    const pipelineStages = await PipelineStage.findAll({
-      attributes: ["stageName", "probability"],
-      where: { isActive: true },
-    });
-
-    const stageProbabilities = pipelineStages.reduce((acc, stage) => {
-      acc[stage.stageName] = stage.probability || 0;
-      return acc;
-    }, {});
-
-    // Group deals by currency
-    const currencyMap = {};
-
-    let totalValue = 0;
-    let totalWeightedValue = 0;
-    let totalDealCount = 0;
-
-    deals.forEach((deal) => {
-      const { currency, value, pipelineStage } = deal;
-      if (!currencyMap[currency]) {
-        currencyMap[currency] = {
-          totalValue: 0,
-          weightedValue: 0,
-          dealCount: 0,
-        };
-      }
-      currencyMap[currency].totalValue += value || 0;
-      currencyMap[currency].weightedValue +=
-        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
-      currencyMap[currency].dealCount += 1;
-
-      totalValue += value || 0;
-      totalWeightedValue +=
-        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
-      totalDealCount += 1;
-    });
-
-    // Format result as array
-    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
-      currency,
-      totalValue: data.totalValue,
-      weightedValue: data.weightedValue,
-      dealCount: data.dealCount,
-    }));
-
-    // Optionally, sort by totalValue descending
-    summary.sort((a, b) => b.totalValue - a.totalValue);
-
-    res.status(200).json({
-      totalValue,
-      totalWeightedValue,
-      totalDealCount,
-      summary,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.archiveDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    await deal.update({ isArchived: true });
-    res.status(200).json({ message: "Deal archived successfully.", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.unarchiveDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    await deal.update({ isArchived: false });
-    res.status(200).json({ message: "Deal unarchived successfully.", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getDealsByStage = async (req, res) => {
-  try {
-    const allStages = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-      // ...add all your stages here
-    ];
-
-    const result = [];
-    let totalDeals = 0;
-
-    for (const stage of allStages) {
-      const deals = await Deal.findAll({
-        where: { pipelineStage: stage },
         order: [["createdAt", "DESC"]],
       });
+    } else {
+      dashboards = await DASHBOARD.findAll({
+        where: { ownerId },
+        include: [
+          {
+            model: Report,
+            as: "Reports",
+            required: false,
+          },
+          {
+            model: Goal,
+            as: "Goals",
+            required: false,
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+      });
+    }
 
-      const totalValue = deals.reduce(
-        (sum, deal) => sum + (deal.value || 0),
-        0
+    // Group dashboards by folder for backward compatibility
+    const dashboardsByFolder = {};
+    console.log("[DEBUG] Grouping dashboards, total count:", dashboards.length);
+
+    dashboards.forEach((dashboard) => {
+      let folder;
+
+      console.log(
+        `[DEBUG] Processing item: ${dashboard.name} (type: ${dashboard.type}, folder: ${dashboard.folder})`
       );
-      const dealCount = deals.length;
-      totalDeals += dealCount;
 
-      result.push({
-        stage,
-        totalValue,
-        dealCount,
-        deals,
+      if (dashboard.type === "folder") {
+        // Folders should appear as their own categories, not under "My dashboards"
+        // Skip folders - they don't get grouped anywhere, they ARE the groups
+        console.log(
+          `[DEBUG] Skipping folder "${dashboard.name}" - folders are categories, not items`
+        );
+        return; // Skip processing folders
+      } else {
+        // Dashboards use their folder field value
+        folder =
+          dashboard.folder === null ||
+          dashboard.folder === undefined ||
+          dashboard.folder === ""
+            ? "My dashboards"
+            : dashboard.folder;
+        console.log(
+          `[DEBUG] Dashboard "${dashboard.name}" grouped under: ${folder}`
+        );
+      }
+
+      if (!dashboardsByFolder[folder]) {
+        dashboardsByFolder[folder] = [];
+      }
+      dashboardsByFolder[folder].push(dashboard);
+    });
+
+    console.log("[DEBUG] Final grouping:", Object.keys(dashboardsByFolder));
+
+    res.status(200).json({
+      success: true,
+      byFolder: dashboardsByFolder,
+    });
+  } catch (error) {
+    console.error("Error fetching dashboards:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboards",
+      error: error.message,
+    });
+  }
+};
+
+exports.getDashboard = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
+
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
+      include: [
+        {
+          model: Report,
+          as: "Reports",
+          required: false,
+          order: [["position", "ASC"]],
+        },
+        {
+          model: Goal,
+          as: "Goals",
+          where: { isActive: true },
+          required: false,
+          order: [["createdAt", "DESC"]],
+        },
+      ],
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found",
       });
     }
 
     res.status(200).json({
-      totalDeals,
-      stages: result,
+      success: true,
+      data: dashboard,
     });
   } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error fetching dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard",
+      error: error.message,
+    });
   }
 };
 
-//this latest version of getDealsByStage function is used to get deals by stage with rotten days logic
-
-// exports.getDealsByStage = async (req, res) => {
-//   try {
-//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
-//     const Pipeline = require("../../models/deals/pipelineModel");
-//     const PipelineStage = require("../../models/deals/pipelineStageModel");
-
-//     let allStages = [
-//       "Qualified",
-//       "Contact Made",
-//       "Proposal Made",
-//       "Negotiations Started",
-//     ];
-
-//     // Apply user filtering for non-admin users
-//     let baseWhere = {};
-//     if (req.role !== "admin") {
-//       baseWhere.masterUserID = req.adminId;
-//     }
-
-//     // Try to get stages from pipeline system with rotten days info
-//     let stageRottenDaysMap = new Map();
-//     try {
-//       const masterUserID = req.adminId;
-//       const defaultPipeline = await Pipeline.findOne({
-//         where: {
-//           masterUserID,
-//           isDefault: true,
-//           isActive: true,
-//         },
-//         include: [
-//           {
-//             model: PipelineStage,
-//             as: "stages",
-//             where: { isActive: true },
-//             required: false,
-//             order: [["stageOrder", "ASC"]],
-//           },
-//         ],
-//       });
-
-//       if (
-//         defaultPipeline &&
-//         defaultPipeline.stages &&
-//         defaultPipeline.stages.length > 0
-//       ) {
-//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
-//         // Create map of stage name to rotten days
-//         defaultPipeline.stages.forEach((stage) => {
-//           stageRottenDaysMap.set(stage.stageName, {
-//             dealRottenDays: stage.dealRottenDays,
-//             stageColor: stage.color,
-//           });
-//         });
-//       }
-//     } catch (pipelineError) {
-//       console.log(
-//         "Pipeline system not available, using hardcoded stages:",
-//         pipelineError.message
-//       );
-//     }
-
-//     const result = [];
-//     let totalDeals = 0;
-
-//     for (const stage of allStages) {
-//       const deals = await Deal.findAll({
-//         where: {
-//           ...baseWhere,
-//           pipelineStage: stage,
-//         },
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       // Process deals with rotten logic
-//       const processedDeals = deals.map((deal) => {
-//         const dealObj = deal.toJSON();
-//         const stageInfo = stageRottenDaysMap.get(stage);
-
-//         if (stageInfo && stageInfo.dealRottenDays) {
-//           // Calculate days since deal entered this stage
-//           const daysSinceCreated = Math.floor(
-//             (new Date() - new Date(deal.createdAt)) / (1000 * 60 * 60 * 24)
-//           );
-
-//           const isRotten = daysSinceCreated > stageInfo.dealRottenDays;
-
-//           // Add rotten deal indicators
-//           dealObj.daysSinceCreated = daysSinceCreated;
-//           dealObj.isRotten = isRotten;
-//           dealObj.dealRottenDays = stageInfo.dealRottenDays;
-//           dealObj.daysOverdue = isRotten
-//             ? daysSinceCreated - stageInfo.dealRottenDays
-//             : 0;
-
-//           // Change color for rotten deals
-//           dealObj.displayColor = isRotten ? "#FF4444" : stageInfo.stageColor; // Red for rotten
-//           dealObj.rottenStatus = isRotten ? "rotten" : "fresh";
-//         } else {
-//           // No rotten days configured
-//           dealObj.isRotten = false;
-//           dealObj.rottenStatus = "fresh";
-//           dealObj.displayColor = stageInfo?.stageColor || "#007BFF";
-//         }
-
-//         return dealObj;
-//       });
-
-//       // Calculate stage statistics including rotten deals
-//       const rottenDealsCount = processedDeals.filter(
-//         (deal) => deal.isRotten
-//       ).length;
-//       const totalValue = processedDeals.reduce(
-//         (sum, deal) => sum + (deal.value || 0),
-//         0
-//       );
-//       const dealCount = processedDeals.length;
-//       totalDeals += dealCount;
-
-//       // Get stage info for display
-//       const stageInfo = stageRottenDaysMap.get(stage);
-
-//       result.push({
-//         stage,
-//         totalValue,
-//         dealCount,
-//         rottenDealsCount,
-//         freshDealsCount: dealCount - rottenDealsCount,
-//         rottenPercentage:
-//           dealCount > 0 ? Math.round((rottenDealsCount / dealCount) * 100) : 0,
-//         deals: processedDeals,
-//         stageInfo: {
-//           dealRottenDays: stageInfo?.dealRottenDays || null,
-//           stageColor: stageInfo?.stageColor || "#007BFF",
-//           hasRottenDaysConfigured: !!stageInfo?.dealRottenDays,
-//         },
-//       });
-//     }
-
-//     res.status(200).json({
-//       totalDeals,
-//       stages: result,
-//       rottenDealsInfo: {
-//         description:
-//           "Deals are marked as 'rotten' when they exceed the configured days for their stage",
-//         colorCoding: {
-//           fresh: "Original stage color",
-//           rotten: "#FF4444 (Red)",
-//         },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error in getDealsByStage:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// this function is latest version of getDealsByStage
-
-// exports.getDealsByStage = async (req, res) => {
-//   try {
-//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
-//     const Pipeline = require("../../models/deals/pipelineModel");
-//     const PipelineStage = require("../../models/deals/pipelineStageModel");
-
-//     let allStages = [
-//       "Qualified",
-//       "Contact Made",
-//       "Proposal Made",
-//       "Negotiations Started",
-//     ];
-
-//     // Try to get stages from pipeline system
-//     try {
-//       const masterUserID = req.adminId;
-//       const defaultPipeline = await Pipeline.findOne({
-//         where: {
-//           masterUserID,
-//           isDefault: true,
-//           isActive: true,
-//         },
-//         include: [
-//           {
-//             model: PipelineStage,
-//             as: "stages",
-//             where: { isActive: true },
-//             required: false,
-//             order: [["stageOrder", "ASC"]],
-//           },
-//         ],
-//       });
-
-//       if (
-//         defaultPipeline &&
-//         defaultPipeline.stages &&
-//         defaultPipeline.stages.length > 0
-//       ) {
-//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
-//       }
-//     } catch (pipelineError) {
-//       console.log(
-//         "Pipeline system not available, using hardcoded stages:",
-//         pipelineError.message
-//       );
-//     }
-
-//     const result = [];
-//     let totalDeals = 0;
-
-//     // Apply user filtering for non-admin users
-//     let baseWhere = {};
-//     if (req.role !== "admin") {
-//       baseWhere.masterUserID = req.adminId;
-//     }
-
-//     for (const stage of allStages) {
-//       const deals = await Deal.findAll({
-//         where: {
-//           ...baseWhere,
-//           pipelineStage: stage,
-//         },
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       const totalValue = deals.reduce(
-//         (sum, deal) => sum + (deal.value || 0),
-//         0
-//       );
-//       const dealCount = deals.length;
-//       totalDeals += dealCount;
-
-//       result.push({
-//         stage,
-//         totalValue,
-//         dealCount,
-//         deals,
-//       });
-//     }
-
-//     res.status(200).json({
-//       totalDeals,
-//       stages: result,
-//     });
-//   } catch (error) {
-//     console.error("Error in getDealsByStage:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// ...existing code...
-exports.getDealDetail = async (req, res) => {
+exports.updateDashboard = async (req, res) => {
   try {
-    const { dealId } = req.params;
+    const { dashboardId } = req.params;
+    const { name, folder } = req.body;
+    const ownerId = req.adminId;
 
-    // Email optimization parameters
-    const { emailPage = 1, emailLimit = 10 } = req.query;
-    const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
-    const MAX_EMAIL_LIMIT = 50;
-    const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
-
-    const deal = await Deal.findByPk(dealId, {
-      include: [
-        { model: DealDetails, as: "details" },
-        { model: Person, as: "Person" },
-        { model: Organization, as: "Organization" },
-      ],
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
     });
 
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    // Enhanced Pipeline Stage Processing like Pipedrive
-    const stageHistory = await DealStageHistory.findAll({
-      where: { dealId },
-      order: [["enteredAt", "ASC"]],
-    });
-
-    const now = new Date();
-    const dealCreatedAt = new Date(deal.createdAt);
-
-    // Define your complete pipeline order (customize as needed)
-    const pipelineOrder = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-      "Won",
-      "Lost",
-    ];
-
-    // Initialize pipeline stages with comprehensive tracking
-    let pipelineStagesDetail = [];
-    let currentStageName = deal.pipelineStage || "Qualified";
-    let totalDealDays = Math.floor(
-      (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
-    );
-
-    // Process stage history to calculate time spent in each stage
-    if (stageHistory.length > 0) {
-      // Calculate time spent in each historical stage
-      for (let i = 0; i < stageHistory.length; i++) {
-        const stage = stageHistory[i];
-        const nextStage = stageHistory[i + 1];
-        const stageStart = new Date(stage.enteredAt);
-        const stageEnd = nextStage ? new Date(nextStage.enteredAt) : now;
-
-        // Calculate days spent in this stage
-        const daysInStage = Math.max(
-          0,
-          Math.floor((stageEnd - stageStart) / (1000 * 60 * 60 * 24))
-        );
-
-        // Calculate hours and minutes for more precision
-        const totalMinutes = Math.floor((stageEnd - stageStart) / (1000 * 60));
-        const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-        const minutes = totalMinutes % 60;
-
-        pipelineStagesDetail.push({
-          stageName: stage.stageName,
-          enteredAt: stage.enteredAt,
-          exitedAt: nextStage ? nextStage.enteredAt : null,
-          days: daysInStage,
-          hours: hours,
-          minutes: minutes,
-          totalMinutes: totalMinutes,
-          isActive: !nextStage, // Current stage if no next stage
-          stageOrder: pipelineOrder.indexOf(stage.stageName),
-        });
-      }
-
-      // Update current stage name from the last history entry
-      currentStageName = stageHistory[stageHistory.length - 1].stageName;
-    } else {
-      // If no stage history, deal is still in initial stage
-      const daysInCurrentStage = Math.floor(
-        (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
-      );
-      const totalMinutes = Math.floor((now - dealCreatedAt) / (1000 * 60));
-      const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-      const minutes = totalMinutes % 60;
-
-      pipelineStagesDetail.push({
-        stageName: currentStageName,
-        enteredAt: deal.createdAt,
-        exitedAt: null,
-        days: daysInCurrentStage,
-        hours: hours,
-        minutes: minutes,
-        totalMinutes: totalMinutes,
-        isActive: true,
-        stageOrder: pipelineOrder.indexOf(currentStageName),
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found",
       });
     }
 
-    // Create aggregated stages map for duplicate stage handling
-    const stageDaysMap = new Map();
-    const stageDetailsMap = new Map();
-
-    pipelineStagesDetail.forEach((stage) => {
-      if (!stageDaysMap.has(stage.stageName)) {
-        stageDaysMap.set(stage.stageName, stage.days);
-        stageDetailsMap.set(stage.stageName, {
-          ...stage,
-          totalDays: stage.days,
-          visits: 1,
-          firstEntry: stage.enteredAt,
-          lastEntry: stage.enteredAt,
-        });
-      } else {
-        // Handle multiple visits to the same stage
-        const existingDays = stageDaysMap.get(stage.stageName);
-        const existingDetails = stageDetailsMap.get(stage.stageName);
-
-        stageDaysMap.set(stage.stageName, existingDays + stage.days);
-        stageDetailsMap.set(stage.stageName, {
-          ...existingDetails,
-          totalDays: existingDays + stage.days,
-          visits: existingDetails.visits + 1,
-          lastEntry: stage.enteredAt,
-          isActive: stage.isActive || existingDetails.isActive,
-        });
-      }
+    await dashboard.update({
+      name: name || dashboard.name,
+      folder: folder || dashboard.folder,
     });
 
-    // Create pipeline stages for frontend (Pipedrive-like structure)
-    const currentStageIndex = pipelineOrder.indexOf(currentStageName);
+    res.status(200).json({
+      success: true,
+      message: "Dashboard updated successfully",
+      data: dashboard,
+    });
+  } catch (error) {
+    console.error("Error updating dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update dashboard",
+      error: error.message,
+    });
+  }
+};
 
-    const pipelineStagesUnique = pipelineOrder.map((stageName, index) => {
-      const stageData = stageDetailsMap.get(stageName);
-      const days = stageDaysMap.get(stageName) || 0;
+exports.deleteDashboard = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
 
-      // Determine if this stage should be shown based on current stage
-      const shouldShow = index <= currentStageIndex;
-
-      // For stages that haven't been visited but are before current stage,
-      // show them as completed with 0 days
-      const hasBeenVisited = stageDetailsMap.has(stageName);
-      const isBeforeCurrentStage = index < currentStageIndex;
-      const isCurrentStage = index === currentStageIndex;
-
-      return {
-        stageName,
-        days,
-        hours: stageData?.hours || 0,
-        minutes: stageData?.minutes || 0,
-        totalMinutes: stageData?.totalMinutes || 0,
-        isActive: stageData?.isActive || false,
-        isCurrent: isCurrentStage,
-        isPassed: isBeforeCurrentStage || (hasBeenVisited && !isCurrentStage),
-        isFuture: index > currentStageIndex,
-        visits: stageData?.visits || 0,
-        firstEntry: stageData?.firstEntry || null,
-        lastEntry: stageData?.lastEntry || null,
-        stageOrder: index,
-        hasBeenVisited,
-        shouldShow,
-        // Add percentage of total time spent
-        percentage:
-          totalDealDays > 0 ? Math.round((days / totalDealDays) * 100) : 0,
-      };
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
     });
 
-    // Add pipeline insights (like Pipedrive)
-    const visitedStages = pipelineStagesUnique.filter((s) => s.hasBeenVisited);
-
-    const pipelineInsights = {
-      totalDealAge: totalDealDays,
-      currentStage: currentStageName,
-      currentStageIndex: currentStageIndex,
-      currentStageDays:
-        pipelineStagesUnique.find((s) => s.isCurrent)?.days || 0,
-      stagesCompleted: pipelineStagesUnique.filter((s) => s.isPassed).length,
-      stagesVisited: visitedStages.length,
-      totalStages: pipelineOrder.length,
-      progressPercentage: Math.round(
-        ((currentStageIndex + 1) / pipelineOrder.length) * 100
-      ),
-      stageChanges: pipelineStagesDetail.length,
-      averageDaysPerStage:
-        visitedStages.length > 0
-          ? Math.round(totalDealDays / visitedStages.length)
-          : 0,
-      // Add stage completion timeline
-      stageTimeline: pipelineStagesUnique.map((stage) => ({
-        stageName: stage.stageName,
-        status: stage.isCurrent
-          ? "current"
-          : stage.isPassed
-          ? "completed"
-          : "future",
-        days: stage.days,
-        percentage: stage.percentage,
-      })),
-    };
-
-    // Calculate avgTimeToWon for all won deals
-    const wonDeals = await Deal.findAll({ where: { status: "won" } });
-    let avgTimeToWon = 0;
-    if (wonDeals.length) {
-      const totalDays = wonDeals.reduce((sum, d) => {
-        if (d.wonDate && d.createdAt) {
-          const days = Math.floor(
-            (d.wonDate - d.createdAt) / (1000 * 60 * 60 * 24)
-          );
-          return sum + days;
-        }
-        return sum;
-      }, 0);
-      avgTimeToWon = Math.round(totalDays / wonDeals.length);
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found",
+      });
     }
 
-    // Overview calculations
-    const createdAt = deal.createdAt;
-    const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-    const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
-    const inactiveDays = 0; // Placeholder until you have activities
+    // Delete associated reports and goals
+    await Report.destroy({ where: { dashboardId } });
+    await Goal.destroy({ where: { dashboardId } });
+    await dashboard.destroy();
 
-    // Send all person data
-    const personArr = deal.Person
-      ? [deal.Person.toJSON ? deal.Person.toJSON() : deal.Person]
-      : [];
+    res.status(200).json({
+      success: true,
+      message: "Dashboard deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete dashboard",
+      error: error.message,
+    });
+  }
+};
 
-    // Send all organization data
-    const orgArr = deal.Organization
-      ? [
-          deal.Organization.toJSON
-            ? deal.Organization.toJSON()
-            : deal.Organization,
-        ]
-      : [];
+// Bulk delete multiple dashboards
+exports.bulkDeleteDashboards = async (req, res) => {
+  try {
+    const { dashboardIds } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
 
-    // Flat deal object (as before)
-    const dealObj = {
-      dealId: deal.dealId,
-      title: deal.title,
-      value: deal.value,
-      pipeline: deal.pipeline,
-      pipelineStage: deal.pipelineStage,
-      status: deal.status || "open",
-      createdAt: deal.createdAt,
-      expectedCloseDate: deal.expectedCloseDate,
-      serviceType: deal.serviceType,
-      proposalValue: deal.proposalValue,
-      esplProposalNo: deal.esplProposalNo,
-      projectLocation: deal.projectLocation,
-      organizationCountry: deal.organizationCountry,
-      proposalSentDate: deal.proposalSentDate,
-      sourceOrgin: deal.sourceOrgin,
-      sourceChannel: deal.sourceChannel,
-      sourceChannelId: deal.sourceChannelId,
-      statusSummary: deal.details?.statusSummary,
-      responsiblePerson: deal.details?.responsiblePerson,
-      rfpReceivedDate: deal.details?.rfpReceivedDate,
-      wonTime: deal.details?.wonTime,
-      lostTime: deal.details?.lostTime,
-      lostReason: deal.details?.lostReason,
-      // ...other deal fields
-    };
+    // Validate input
+    if (
+      !dashboardIds ||
+      !Array.isArray(dashboardIds) ||
+      dashboardIds.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard IDs array is required",
+      });
+    }
 
-    // Fetch participants for this deal
-    const participants = await DealParticipant.findAll({
-      where: { dealId },
+    // Get all dashboards for admin, or only user's dashboards for non-admin
+    let allUserDashboards;
+    if (role === "admin") {
+      allUserDashboards = await DASHBOARD.findAll({
+        where: {
+          type: { [Op.ne]: "folder" },
+        },
+      });
+    } else {
+      allUserDashboards = await DASHBOARD.findAll({
+        where: {
+          ownerId,
+          type: { [Op.ne]: "folder" },
+        },
+      });
+    }
+
+    // Check if user is trying to delete all dashboards
+    const remainingDashboards = allUserDashboards.filter(
+      (dashboard) => !dashboardIds.includes(dashboard.dashboardId)
+    );
+
+    if (remainingDashboards.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "It's required to keep at least one dashboard. Cannot delete all dashboards.",
+      });
+    }
+
+    // Find dashboards to delete (admin: all, non-admin: only own)
+    let dashboardsToDelete;
+    if (role === "admin") {
+      dashboardsToDelete = await DASHBOARD.findAll({
+        where: {
+          dashboardId: { [Op.in]: dashboardIds },
+        },
+      });
+    } else {
+      dashboardsToDelete = await DASHBOARD.findAll({
+        where: {
+          dashboardId: { [Op.in]: dashboardIds },
+          ownerId,
+        },
+      });
+    }
+
+    if (dashboardsToDelete.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No dashboards found to delete",
+      });
+    }
+
+    // Check if some dashboards were not found or not accessible
+    const foundIds = dashboardsToDelete.map((d) => d.dashboardId);
+    const notFoundIds = dashboardIds.filter((id) => !foundIds.includes(id));
+
+    // Delete associated reports and goals for all dashboards
+    await Report.destroy({
+      where: {
+        dashboardId: { [Op.in]: foundIds },
+      },
+    });
+
+    await Goal.destroy({
+      where: {
+        dashboardId: { [Op.in]: foundIds },
+      },
+    });
+
+    // Delete the dashboards
+    let deleteWhere = { dashboardId: { [Op.in]: foundIds } };
+    if (role !== "admin") deleteWhere.ownerId = ownerId;
+    const deletedCount = await DASHBOARD.destroy({
+      where: deleteWhere,
+    });
+
+    let message = `Successfully deleted ${deletedCount} dashboard(s)`;
+    if (notFoundIds.length > 0) {
+      message += `. Note: ${notFoundIds.length} dashboard(s) were not found or not accessible.`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: message,
+      data: {
+        deletedCount: deletedCount,
+        deletedIds: foundIds,
+        notFoundIds: notFoundIds,
+        remainingDashboards: remainingDashboards.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error bulk deleting dashboards:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete dashboards",
+      error: error.message,
+    });
+  }
+};
+
+// =============== FOLDER MANAGEMENT ===============
+
+exports.createFolder = async (req, res) => {
+  try {
+    const { name, parentId, folder } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate required fields
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Folder name is required",
+      });
+    }
+
+    // Check if a folder with the same name already exists in the same location
+    const existingFolder = await DASHBOARD.findOne({
+      where: {
+        name,
+        ownerId,
+        type: "folder",
+        parentId: parentId || null,
+      },
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({
+        success: false,
+        message: "A folder with this name already exists in this location",
+      });
+    }
+
+    // If creating subfolder, validate parent exists
+    if (parentId) {
+      const parentFolder = await DASHBOARD.findOne({
+        where: {
+          dashboardId: parentId,
+          ownerId,
+          type: "folder",
+        },
+      });
+
+      if (!parentFolder) {
+        return res.status(404).json({
+          success: false,
+          message: "Parent folder not found",
+        });
+      }
+    }
+
+    const newFolder = await DASHBOARD.create({
+      name,
+      folder: name, // Set folder field to its own name
+      type: "folder",
+      parentId: parentId || null,
+      ownerId,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Folder created successfully",
+      data: newFolder,
+    });
+  } catch (error) {
+    console.error("Error creating folder:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create folder",
+      error: error.message,
+    });
+  }
+};
+
+exports.getFolderContents = async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const ownerId = req.adminId;
+
+    // Verify folder ownership
+    const folder = await DASHBOARD.findOne({
+      where: {
+        dashboardId: folderId,
+        ownerId,
+        type: "folder",
+      },
+    });
+
+    if (!folder) {
+      return res.status(404).json({
+        success: false,
+        message: "Folder not found or access denied",
+      });
+    }
+
+    // Get all items in this folder
+    const contents = await DASHBOARD.findAll({
+      where: {
+        parentId: folderId,
+        ownerId,
+      },
       include: [
         {
-          model: Person,
-          as: "Person",
-          attributes: ["personId", "contactPerson", "email"],
+          model: Report,
+          as: "Reports",
+          required: false,
         },
         {
-          model: Organization,
-          as: "Organization",
-          attributes: ["leadOrganizationId", "organization", "masterUserID"],
+          model: Goal,
+          as: "Goals",
+          required: false,
         },
+      ],
+      order: [
+        ["type", "ASC"], // Folders first
+        ["name", "ASC"],
       ],
     });
 
-    const participantArr = await Promise.all(
-      participants.map(async (p) => {
-        const person = p.Person;
-        const organization = p.Organization;
+    res.status(200).json({
+      success: true,
+      data: {
+        folder,
+        contents,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching folder contents:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch folder contents",
+      error: error.message,
+    });
+  }
+};
 
-        let closedDeals = 0,
-          openDeals = 0,
-          ownerName = null;
+exports.moveToFolder = async (req, res) => {
+  try {
+    const { itemId } = req.params;
+    const { targetFolderId } = req.body;
+    const ownerId = req.adminId;
 
-        if (person) {
-          closedDeals = await Deal.count({
-            where: { personId: person.personId, status: "won" },
+    // Verify item ownership
+    const item = await DASHBOARD.findOne({
+      where: {
+        dashboardId: itemId,
+        ownerId,
+      },
+    });
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found or access denied",
+      });
+    }
+
+    // If moving to a folder, verify folder exists
+    if (targetFolderId) {
+      const targetFolder = await DASHBOARD.findOne({
+        where: {
+          dashboardId: targetFolderId,
+          ownerId,
+          type: "folder",
+        },
+      });
+
+      if (!targetFolder) {
+        return res.status(404).json({
+          success: false,
+          message: "Target folder not found",
+        });
+      }
+
+      // Prevent moving folder into itself or its descendants
+      if (item.type === "folder") {
+        const isDescendant = await checkIfDescendant(
+          targetFolderId,
+          itemId,
+          ownerId
+        );
+        if (isDescendant || targetFolderId === itemId) {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot move folder into itself or its descendants",
           });
-          openDeals = await Deal.count({
-            where: { personId: person.personId, status: "open" },
-          });
-          console.log(
-            "Person found:",
-            person.contactPerson,
-            "Closed Deals:",
-            closedDeals,
-            "Open Deals:",
-            openDeals
-          );
-
-          // Use ownerId or masterUserID from organization
-          console.log(organization.masterUserID, " organization masterUserID");
-          console.log(organization, " organization");
-
-          let ownerIdToUse = organization
-            ? organization.ownerId || organization.masterUserID
-            : null;
-          console.log(ownerIdToUse, " ownerIdToUse");
-
-          if (ownerIdToUse) {
-            const owner = await MasterUser.findOne({
-              where: { masterUserID: ownerIdToUse },
-            });
-            ownerName = owner ? owner.name : null;
-          }
         }
+      }
+    }
 
+    await item.update({
+      parentId: targetFolderId || null,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Item moved successfully",
+      data: item,
+    });
+  } catch (error) {
+    console.error("Error moving item:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to move item",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to check if target is a descendant of source
+async function checkIfDescendant(targetId, sourceId, ownerId) {
+  const descendants = await DASHBOARD.findAll({
+    where: {
+      parentId: sourceId,
+      ownerId,
+    },
+  });
+
+  for (const descendant of descendants) {
+    if (descendant.dashboardId === targetId) {
+      return true;
+    }
+    if (descendant.type === "folder") {
+      const isSubDescendant = await checkIfDescendant(
+        targetId,
+        descendant.dashboardId,
+        ownerId
+      );
+      if (isSubDescendant) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// =============== REPORT MANAGEMENT ===============
+
+exports.createReport = async (req, res) => {
+  try {
+    const { dashboardId, entity, type, config, position, name, description } =
+      req.body;
+    const ownerId = req.adminId;
+
+    // Validate required fields
+    if (!dashboardId || !entity || !type) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID, entity, and type are required",
+      });
+    }
+
+    // Verify dashboard ownership
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    // Default config based on report type
+    let defaultConfig = {};
+    switch (type) {
+      case "Performance":
+        defaultConfig = {
+          chartType: "pie",
+          metrics: ["win_rate", "loss_rate"],
+          period: "this_month",
+          groupBy: "status",
+        };
+        break;
+      case "Conversion":
+        defaultConfig = {
+          chartType: "funnel",
+          metrics: ["conversion_rate"],
+          period: "this_month",
+          stages: ["all"],
+        };
+        break;
+      case "Duration":
+        defaultConfig = {
+          chartType: "bar",
+          metrics: ["avg_days"],
+          period: "this_month",
+          groupBy: "pipeline_stage",
+        };
+        break;
+      case "Progress":
+        defaultConfig = {
+          chartType: "line",
+          metrics: ["deal_movement"],
+          period: "this_month",
+          groupBy: "stage",
+        };
+        break;
+      case "Products":
+        defaultConfig = {
+          chartType: "bar",
+          metrics: ["revenue", "quantity"],
+          period: "this_month",
+          groupBy: "product",
+        };
+        break;
+      default:
+        defaultConfig = {
+          chartType: "bar",
+          metrics: ["count"],
+          period: "this_month",
+        };
+    }
+
+    const finalConfig = { ...defaultConfig, ...config };
+
+    const newReport = await Report.create({
+      dashboardId,
+      entity,
+      type,
+      config: finalConfig,
+      position: position || 0,
+      name: name || `${entity} ${type} Report`,
+      description,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Report created successfully",
+      data: newReport,
+    });
+  } catch (error) {
+    console.error("Error creating report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create report",
+      error: error.message,
+    });
+  }
+};
+
+exports.getReportsForDashboard = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
+
+    // Verify dashboard ownership
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    const reports = await Report.findAll({
+      where: { dashboardId },
+      order: [
+        ["position", "ASC"],
+        ["createdAt", "ASC"],
+      ],
+    });
+
+    // Generate report data for each report
+    const reportsWithData = await Promise.all(
+      reports.map(async (report) => {
+        const reportData = await generateReportData(report, ownerId);
         return {
-          name: person ? person.contactPerson : null,
-          organization: organization ? organization.organization : null,
-          email: person ? person.email : null,
-          phone: person ? person.phone : null,
-          closedDeals,
-          openDeals,
-          owner: ownerName,
+          ...report.toJSON(),
+          data: reportData,
         };
       })
     );
 
-    // Optimized email fetching with pagination
-    // Get total email count first
-    const totalEmailsCount = await Email.count({
-      where: {
-        [Op.or]: [
-          { dealId },
-          ...(deal.email
-            ? [
-                { sender: deal.email },
-                { recipient: { [Op.like]: `%${deal.email}%` } },
-              ]
-            : []),
-        ],
-      },
+    res.status(200).json({
+      success: true,
+      data: reportsWithData,
     });
-
-    // Fetch emails linked to this deal with pagination and essential fields only
-    const emailsByDeal = await Email.findAll({
-      where: { dealId },
-      attributes: [
-        "emailID",
-        "messageId",
-        "sender",
-        "senderName",
-        "recipient",
-        "cc",
-        "bcc",
-        "subject",
-        "createdAt",
-        "folder",
-        "isRead",
-        "leadId",
-        "dealId",
-      ],
-      order: [["createdAt", "DESC"]],
-      limit: Math.ceil(safeEmailLimit / 2),
-      offset: Math.floor(emailOffset / 2),
+  } catch (error) {
+    console.error("Error fetching reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reports",
+      error: error.message,
     });
+  }
+};
 
-    // Fetch emails by address with pagination and essential fields only
-    let emailsByAddress = [];
-    if (deal.email) {
-      emailsByAddress = await Email.findAll({
-        where: {
-          [Op.or]: [
-            { sender: deal.email },
-            { recipient: { [Op.like]: `%${deal.email}%` } },
-          ],
-        },
-        attributes: [
-          "emailID",
-          "messageId",
-          "sender",
-          "senderName",
-          "recipient",
-          "cc",
-          "bcc",
-          "subject",
-          "createdAt",
-          "folder",
-          "isRead",
-          "leadId",
-          "dealId",
-        ],
-        order: [["createdAt", "DESC"]],
-        limit: Math.ceil(safeEmailLimit / 2),
-        offset: Math.floor(emailOffset / 2),
-      });
-    }
+exports.updateReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { entity, type, config, position, name, description } = req.body;
+    const ownerId = req.adminId;
 
-    // Merge and deduplicate emails
-    const allEmailsMap = new Map();
-    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
-    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
-    const allEmails = Array.from(allEmailsMap.values());
-
-    // Limit final email results and add optimization metadata
-    const limitedEmails = allEmails.slice(0, safeEmailLimit);
-
-    // Process emails for optimization
-    const optimizedEmails = limitedEmails.map((email) => {
-      const emailData = email.toJSON();
-
-      // Truncate email body if present (for memory optimization)
-      if (emailData.body) {
-        emailData.body =
-          emailData.body.length > 1000
-            ? emailData.body.substring(0, 1000) + "... [truncated]"
-            : emailData.body;
-      }
-
-      return emailData;
-    });
-
-    // Optimized file/attachment fetching with size limits
-    const emailIDs = limitedEmails.map((email) => email.emailID);
-    let files = [];
-    if (emailIDs.length > 0) {
-      files = await Attachment.findAll({
-        where: { emailID: emailIDs },
-        attributes: [
-          "attachmentID",
-          "emailID",
-          "filename",
-          "contentType",
-          "size",
-          "filePath",
-          "createdAt",
-        ],
-        order: [["createdAt", "DESC"]],
-        limit: 20, // Limit attachments to prevent large responses
-      });
-
-      // Build a map for quick email lookup
-      const emailMap = new Map();
-      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
-
-      // Combine each attachment with minimal email data
-      files = files.map((file) => {
-        const email = emailMap.get(file.emailID);
-        return {
-          ...file.toJSON(),
-          email: email
-            ? {
-                emailID: email.emailID,
-                subject: email.subject,
-                createdAt: email.createdAt,
-                sender: email.sender,
-                senderName: email.senderName,
-              }
-            : null,
-        };
-      });
-    }
-
-    // Fetch notes for this deal
-    let notes = await DealNote.findAll({
-      where: { dealId },
-      limit: 20,
-      order: [["createdAt", "DESC"]],
-    });
-    let leadNotes = [];
-    if (deal.leadId) {
-      leadNotes = await LeadNote.findAll({
-        where: { leadId: deal.leadId },
-        limit: 20,
-        order: [["createdAt", "DESC"]],
-      });
-    }
-    if (leadNotes.length > 0) {
-      const noteMap = new Map();
-      notes.forEach((n) => noteMap.set(n.noteId || n.id, n));
-      leadNotes.forEach((n) => noteMap.set(n.noteId || n.id, n));
-      notes = Array.from(noteMap.values());
-    }
-
-    // Fetch activities for this deal and its linked lead (if any)
-    // Fetch activities for this deal and its linked lead (if any) using Activity model
-    let activities = await Activity.findAll({
-      where: {
-        [Op.or]: [
-          { dealId },
-          deal.leadId ? { leadId: deal.leadId } : null,
-        ].filter(Boolean),
-      },
-      limit: 40, // fetch more to cover both
-      order: [["startDateTime", "DESC"]],
-    });
-    // Deduplicate activities by activityId or id
-    if (activities.length > 0) {
-      const actMap = new Map();
-      activities.forEach((a) => actMap.set(a.activityId || a.id, a));
-      activities = Array.from(actMap.values());
-    }
-
-    // Fetch custom field values for this deal
-    const customFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityId: dealId.toString(),
-        entityType: "deal",
-        masterUserID: req.adminId,
-      },
+    const report = await Report.findOne({
+      where: { reportId },
       include: [
         {
-          model: CustomField,
-          as: "CustomField",
-          where: { isActive: true },
-          required: true,
-        },
-      ],
-      order: [
-        [{ model: CustomField, as: "CustomField" }, "category", "ASC"],
-        [{ model: CustomField, as: "CustomField" }, "fieldGroup", "ASC"],
-        [{ model: CustomField, as: "CustomField" }, "displayOrder", "ASC"],
-      ],
-    });
-
-    // Format custom fields
-    const formattedCustomFields = {};
-    const fieldsByCategory = {};
-    const fieldsByGroup = {};
-
-    customFieldValues.forEach((value) => {
-      const field = value.CustomField;
-      const category = field.category || "Details";
-      const fieldGroup = field.fieldGroup || "Default";
-
-      formattedCustomFields[field.fieldId] = {
-        fieldId: field.fieldId,
-        fieldName: field.fieldName,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        value: value.value,
-        options: field.options,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        category: category,
-        fieldGroup: fieldGroup,
-      };
-
-      if (!fieldsByCategory[category]) {
-        fieldsByCategory[category] = [];
-      }
-      fieldsByCategory[category].push(formattedCustomFields[field.fieldId]);
-
-      if (!fieldsByGroup[fieldGroup]) {
-        fieldsByGroup[fieldGroup] = [];
-      }
-      fieldsByGroup[fieldGroup].push(formattedCustomFields[field.fieldId]);
-    });
-
-    console.log(
-      `Deal detail: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes, ${activities.length} activities`
-    );
-    console.log(
-      `Pipeline: ${currentStageName} (${pipelineInsights.currentStageDays} days), Total: ${pipelineInsights.totalDealAge} days, Progress: ${pipelineInsights.progressPercentage}%`
-    );
-    console.log(
-      `Stages:`,
-      pipelineStagesUnique.map((s) => `${s.stageName}:${s.days}d`).join(", ")
-    );
-
-    res.status(200).json({
-      deal: dealObj,
-      person: personArr,
-      organization: orgArr,
-      pipelineStages: pipelineStagesUnique, // Enhanced pipeline stages like Pipedrive (but maintains frontend compatibility)
-      currentStage: currentStageName,
-      overview: {
-        dealAge: `${totalDealDays} days`,
-        avgTimeToWon,
-        inactiveDays,
-        createdAt,
-        totalDealDays,
-      },
-      participants: participantArr,
-      emails: optimizedEmails,
-      notes,
-      activities,
-      files,
-      customFields: {
-        values: formattedCustomFields,
-        fieldsByCategory,
-        fieldsByGroup,
-      },
-      // Add metadata for debugging and pagination (maintaining response structure)
-      _emailMetadata: {
-        totalEmails: totalEmailsCount,
-        returnedEmails: optimizedEmails.length,
-        emailPage: parseInt(emailPage),
-        emailLimit: safeEmailLimit,
-        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
-        truncatedBodies: optimizedEmails.some(
-          (e) => e.body && e.body.includes("[truncated]")
-        ),
-      },
-      // Enhanced pipeline data (optional for frontend to use)
-      _pipelineMetadata: {
-        pipelineStagesDetail: pipelineStagesDetail, // Detailed stage history
-        pipelineInsights: pipelineInsights, // Pipeline analytics
-        stageTimeline: pipelineInsights.stageTimeline, // Stage completion timeline
-      },
-    });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.deleteDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
-
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    await deal.destroy();
-
-    res.status(200).json({ message: "Deal deleted successfully." });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.linkParticipant = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { personId } = req.body;
-
-    // Require at least personId
-    if (!dealId || !personId) {
-      return res
-        .status(400)
-        .json({ message: "dealId and personId are required." });
-    }
-
-    // Optionally, check if participant already linked
-    const exists = await DealParticipant.findOne({
-      where: { dealId, personId },
-    });
-    if (exists) {
-      return res
-        .status(409)
-        .json({ message: "Participant already linked to this deal." });
-    }
-
-    const participant = await DealParticipant.create({
-      dealId,
-      personId,
-    });
-
-    res
-      .status(201)
-      .json({ message: "Participant linked successfully.", participant });
-  } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.createNote = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { content } = req.body;
-    const createdBy = req.user?.masterUserID || req.adminId; // Adjust as per your auth
-
-    if (!content) {
-      return res.status(400).json({ message: "Note content is required." });
-    }
-
-    const note = await DealNote.create({
-      dealId,
-      content,
-      createdBy,
-    });
-
-    res.status(201).json({ message: "Note created successfully.", note });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getNotes = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const notes = await DealNote.findAll({
-      where: { dealId },
-      order: [["createdAt", "DESC"]],
-    });
-    res.status(200).json({ notes });
-  } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.saveAllDealFieldsWithCheck = async (req, res) => {
-  // Get all field names from Deal and DealDetails models
-  const dealFields = Object.keys(Deal.rawAttributes);
-  const dealDetailsFields = DealDetails
-    ? Object.keys(DealDetails.rawAttributes)
-    : [];
-  const allFieldNames = Array.from(
-    new Set([...dealFields, ...dealDetailsFields])
-  );
-
-  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
-  const filteredFieldNames = allFieldNames.filter(
-    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
-  );
-
-  // Accept array of { value, check } from req.body
-  const { checkedFields } = req.body || {};
-
-  // Build columns array to save: always include all fields, set check from checkedFields if provided
-  let columnsToSave = filteredFieldNames.map((field) => {
-    let check = false;
-    if (Array.isArray(checkedFields)) {
-      const found = checkedFields.find((item) => item.value === field);
-      check = found ? !!found.check : false;
-    }
-    return { key: field, check };
-  });
-
-  try {
-    let pref = await DealColumnPreference.findOne();
-    if (!pref) {
-      // Create the record if it doesn't exist
-      pref = await DealColumnPreference.create({ columns: columnsToSave });
-    } else {
-      // Update the existing record
-      pref.columns = columnsToSave;
-      await pref.save();
-    }
-    res
-      .status(200)
-      .json({ message: "All deal columns saved", columns: pref.columns });
-  } catch (error) {
-    console.log("Error saving all deal columns:", error);
-    res.status(500).json({ message: "Error saving all deal columns" });
-  }
-};
-exports.getDealFields = async (req, res) => {
-  try {
-    // Get deal column preferences
-    const pref = await DealColumnPreference.findOne({ where: {} });
-
-    let columns = [];
-    if (pref) {
-      // Parse columns if it's a string
-      columns =
-        typeof pref.columns === "string"
-          ? JSON.parse(pref.columns)
-          : pref.columns;
-    }
-
-    // Optionally: parse filterConfig for each column if needed
-    columns = columns.map((col) => {
-      if (col.filterConfig) {
-        col.filterConfig =
-          typeof col.filterConfig === "string"
-            ? JSON.parse(col.filterConfig)
-            : col.filterConfig;
-      }
-      return col;
-    });
-
-    // Fetch custom fields for deals (only if user is authenticated)
-    let customFields = [];
-    if (req.adminId) {
-      try {
-        customFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
-            isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-            "dealCheck", // Add dealCheck field
-          ],
-          order: [["fieldName", "ASC"]],
-        });
-      } catch (customFieldError) {
-        console.error("Error fetching custom fields:", customFieldError);
-        // Continue without custom fields if there's an error
-      }
-    } else {
-      console.warn("No adminId found in request - skipping custom fields");
-    }
-
-    // Format custom fields for column preferences
-    const customFieldColumns = customFields.map((field) => ({
-      key: field.fieldName,
-      label: field.fieldLabel,
-      type: field.fieldType,
-      isCustomField: true,
-      fieldId: field.fieldId,
-      isRequired: field.isRequired,
-      isImportant: field.isImportant,
-      fieldSource: field.fieldSource,
-      entityType: field.entityType,
-      check: field.check || false, // Include check field for leads
-      dealCheck: field.dealCheck || false, // Include dealCheck field for deals
-    }));
-
-    // Check if custom fields already exist in preferences and sync their dealCheck status
-    customFieldColumns.forEach((customCol) => {
-      const existingCol = columns.find((col) => col.key === customCol.key);
-      if (existingCol) {
-        // Keep the dealCheck value from database, don't override it
-        // existingCol.check is for leads, customCol.dealCheck is for deals
-        existingCol.dealCheck = customCol.dealCheck;
-      }
-    });
-
-    // Merge regular columns with custom field columns
-    const allColumns = [...columns, ...customFieldColumns];
-
-    // Remove duplicates (custom fields might already be in preferences)
-    const uniqueColumns = [];
-    const seenKeys = new Set();
-
-    allColumns.forEach((col) => {
-      if (!seenKeys.has(col.key)) {
-        seenKeys.add(col.key);
-        uniqueColumns.push(col);
-      }
-    });
-
-    res.status(200).json({
-      columns: uniqueColumns,
-      customFieldsCount: customFields.length,
-      totalColumns: uniqueColumns.length,
-      regularColumns: columns.length,
-    });
-  } catch (error) {
-    console.error("Error fetching deal fields:", error);
-    res.status(500).json({ message: "Error fetching deal fields" });
-  }
-};
-exports.updateDealColumnChecks = async (req, res) => {
-  // Expecting: { columns: [ { key: "columnName", check: true/false, dealCheck: true/false }, ... ] }
-  const { columns } = req.body;
-
-  if (!Array.isArray(columns)) {
-    return res.status(400).json({ message: "Columns array is required." });
-  }
-
-  try {
-    console.log("=== UPDATE DEAL COLUMN CHECKS DEBUG ===");
-    console.log("Incoming columns:", JSON.stringify(columns, null, 2));
-    console.log("adminId:", req.adminId);
-
-    // Find the global DealColumnPreference record
-    let pref = await DealColumnPreference.findOne();
-    if (!pref) {
-      return res.status(404).json({ message: "Preferences not found." });
-    }
-
-    // Parse columns if stored as string
-    let prefColumns =
-      typeof pref.columns === "string"
-        ? JSON.parse(pref.columns)
-        : pref.columns;
-
-    // Get custom fields to validate incoming custom field columns
-    let customFields = [];
-    if (req.adminId) {
-      try {
-        customFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
-            isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-            ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-            "dealCheck", // Add dealCheck field
-          ],
-        });
-      } catch (customFieldError) {
-        console.error("Error fetching custom fields:", customFieldError);
-      }
-    }
-
-    console.log("Found custom fields:", customFields.length);
-    console.log(
-      "Custom field names:",
-      customFields.map((f) => f.fieldName)
-    );
-
-    // Create a map of custom field names for quick lookup
-    const customFieldMap = {};
-    customFields.forEach((field) => {
-      customFieldMap[field.fieldName] = {
-        fieldId: field.fieldId,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        fieldSource: field.fieldSource,
-        entityType: field.entityType,
-      };
-    });
-
-    console.log("Custom field map keys:", Object.keys(customFieldMap));
-
-    // Update check and dealCheck status for existing columns
-    prefColumns = prefColumns.map((col) => {
-      const found = columns.find((c) => c.key === col.key);
-      if (found) {
-        return {
-          ...col,
-          check: found.check !== undefined ? !!found.check : col.check,
-          dealCheck:
-            found.dealCheck !== undefined ? !!found.dealCheck : col.dealCheck,
-        };
-      }
-      return col;
-    });
-
-    // Handle new custom field columns that don't exist in preferences yet
-    const existingKeys = new Set(prefColumns.map((col) => col.key));
-
-    columns.forEach((incomingCol) => {
-      // If this column doesn't exist in preferences but is a custom field, add it
-      if (
-        !existingKeys.has(incomingCol.key) &&
-        customFieldMap[incomingCol.key]
-      ) {
-        const customFieldInfo = customFieldMap[incomingCol.key];
-        prefColumns.push({
-          key: incomingCol.key,
-          label: customFieldInfo.fieldLabel,
-          type: customFieldInfo.fieldType,
-          isCustomField: true,
-          fieldId: customFieldInfo.fieldId,
-          isRequired: customFieldInfo.isRequired,
-          isImportant: customFieldInfo.isImportant,
-          fieldSource: customFieldInfo.fieldSource,
-          entityType: customFieldInfo.entityType,
-          check: incomingCol.check !== undefined ? !!incomingCol.check : false,
-          dealCheck:
-            incomingCol.dealCheck !== undefined
-              ? !!incomingCol.dealCheck
-              : false,
-        });
-      }
-    });
-
-    // Update check and dealCheck fields in CustomField table for custom fields
-    // 'check' field is for leads, 'dealCheck' field is for deals
-    const customFieldUpdates = [];
-
-    console.log("Processing custom field updates...");
-    columns.forEach((incomingCol) => {
-      console.log(`Processing column: ${incomingCol.key}`);
-
-      if (customFieldMap[incomingCol.key]) {
-        console.log(`Found custom field mapping for: ${incomingCol.key}`);
-
-        const customField = customFields.find(
-          (f) => f.fieldName === incomingCol.key
-        );
-
-        if (customField) {
-          console.log(
-            `Found custom field in database: ${customField.fieldName}, current check: ${customField.check}, current dealCheck: ${customField.dealCheck}`
-          );
-
-          const updates = {};
-
-          // Update check field if provided (for leads)
-          if (
-            incomingCol.check !== undefined &&
-            customField.check !== !!incomingCol.check
-          ) {
-            updates.check = !!incomingCol.check;
-            console.log(`Will update check field to: ${updates.check}`);
-          }
-
-          // Update dealCheck field if provided (for deals)
-          if (
-            incomingCol.dealCheck !== undefined &&
-            customField.dealCheck !== !!incomingCol.dealCheck
-          ) {
-            updates.dealCheck = !!incomingCol.dealCheck;
-            console.log(`Will update dealCheck field to: ${updates.dealCheck}`);
-          }
-
-          // Only add to updates if there are changes
-          if (Object.keys(updates).length > 0) {
-            customFieldUpdates.push({
-              fieldId: customField.fieldId,
-              updates: updates,
-            });
-            console.log(
-              `Added update for fieldId: ${customField.fieldId}`,
-              updates
-            );
-          } else {
-            console.log(`No changes needed for field: ${incomingCol.key}`);
-          }
-        } else {
-          console.log(
-            `Custom field not found in database for: ${incomingCol.key}`
-          );
-        }
-      } else {
-        console.log(`No custom field mapping found for: ${incomingCol.key}`);
-      }
-    });
-
-    console.log(
-      "Total custom field updates to process:",
-      customFieldUpdates.length
-    );
-
-    // Perform bulk update of CustomField check and dealCheck values
-    // 'check' field affects leads, 'dealCheck' field affects deals
-    if (customFieldUpdates.length > 0) {
-      console.log("Executing custom field updates...");
-
-      for (const update of customFieldUpdates) {
-        console.log(`Updating fieldId ${update.fieldId} with:`, update.updates);
-
-        // First, let's check what record we're trying to update
-        const existingRecord = await CustomField.findOne({
-          where: { fieldId: update.fieldId },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "masterUserID",
-            "fieldSource",
-            "check",
-            "dealCheck",
-          ],
-        });
-
-        console.log(
-          `Current record for fieldId ${update.fieldId}:`,
-          existingRecord ? existingRecord.toJSON() : "NOT FOUND"
-        );
-
-        const result = await CustomField.update(update.updates, {
-          where: {
-            fieldId: update.fieldId,
-            // Make the WHERE clause more flexible - either the user owns it OR it's a default/system field
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-              { fieldSource: "custom" }, // Add custom fields that might belong to this user
-            ],
-          },
-        });
-
-        console.log(`Update result for fieldId ${update.fieldId}:`, result);
-
-        // If no rows were updated, try a more relaxed update
-        if (result[0] === 0) {
-          console.log(
-            `No rows updated with restrictive WHERE clause, trying more relaxed update...`
-          );
-
-          const relaxedResult = await CustomField.update(update.updates, {
-            where: {
-              fieldId: update.fieldId,
-              // Only check fieldId - less restrictive
-            },
-          });
-
-          console.log(
-            `Relaxed update result for fieldId ${update.fieldId}:`,
-            relaxedResult
-          );
-        }
-      }
-
-      console.log(
-        `Updated ${customFieldUpdates.length} custom field check/dealCheck values`
-      );
-    } else {
-      console.log("No custom field updates to process");
-    }
-
-    // Save updated preferences
-    pref.columns = prefColumns;
-    await pref.save();
-
-    res.status(200).json({
-      message: "Deal columns updated",
-      columns: pref.columns,
-      customFieldsUpdated: customFieldUpdates.length,
-      totalColumns: prefColumns.length,
-      updatedFields: {
-        checkUpdates: customFieldUpdates.filter(
-          (u) => u.updates.check !== undefined
-        ).length,
-        dealCheckUpdates: customFieldUpdates.filter(
-          (u) => u.updates.dealCheck !== undefined
-        ).length,
-      },
-    });
-  } catch (error) {
-    console.error("Error updating deal columns:", error);
-    res.status(500).json({ message: "Error updating columns" });
-  }
-};
-
-exports.markDealAsWon = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    // Update status to 'won'
-    await deal.update({ status: "won" });
-
-    // Update DealDetails: wonTime and dealClosedOn
-    const now = new Date();
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        wonTime: now,
-        dealClosedOn: now,
-      });
-    } else {
-      await DealDetails.create({
-        dealId,
-        wonTime: now,
-        dealClosedOn: now,
-      });
-    }
-
-    // Add a new entry to DealStageHistory
-    await DealStageHistory.create({
-      dealId,
-      stageName: deal.pipelineStage, // keep current stage
-      enteredAt: now,
-      note: "Marked as won",
-    });
-
-    res.status(200).json({ message: "Deal marked as won", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.markDealAsLost = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { lostReason } = req.body; // Accept lostReason from request body
-
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    await deal.update({ status: "lost" });
-
-    // Update DealDetails: lostTime and lostReason
-    const now = new Date();
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        lostTime: now,
-        lostReason: lostReason || dealDetails.lostReason,
-      });
-    } else {
-      await DealDetails.create({
-        dealId,
-        lostTime: now,
-        lostReason: lostReason || null,
-      });
-    }
-
-    res.status(200).json({ message: "Deal marked as lost", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.markDealAsOpen = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const initialStage = "Qualified"; // Set your initial pipeline stage here
-
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    // Update deal status and reset pipelineStage
-    await deal.update({ status: "open", pipelineStage: initialStage });
-
-    // Reset closure fields in DealDetails
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        wonTime: null,
-        lostTime: null,
-        dealClosedOn: null,
-        lostReason: null,
-      });
-    }
-
-    // Add a new entry to DealStageHistory to track reopening
-    await DealStageHistory.create({
-      dealId,
-      stageName: initialStage,
-      enteredAt: new Date(),
-    });
-
-    res.status(200).json({ message: "Deal marked as open", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.getDealFieldsForFilter = (req, res) => {
-  const fields = [
-    { value: "dealId", label: "Deal ID" },
-    { value: "title", label: "Title" },
-    { value: "value", label: "Value" },
-    { value: "pipeline", label: "Pipeline" },
-    { value: "pipelineStage", label: "Pipeline Stage" },
-    { value: "status", label: "Status" },
-    { value: "expectedCloseDate", label: "Expected Close Date" },
-    { value: "serviceType", label: "Service Type" },
-    { value: "scopeOfServiceType", label: "Scope of Service Type" },
-    { value: "proposalValue", label: "Proposal Value" },
-    { value: "esplProposalNo", label: "ESPL Proposal No." },
-    { value: "projectLocation", label: "Project Location" },
-    { value: "organizationCountry", label: "Organization Country" },
-    { value: "proposalSentDate", label: "Proposal Sent Date" },
-    { value: "ownerId", label: "Owner" },
-    { value: "createdAt", label: "Deal Created" },
-    { value: "updatedAt", label: "Last Updated" },
-    { value: "masterUserID", label: "Creator" },
-    { value: "currency", label: "Currency" },
-    { value: "nextActivityDate", label: "Next Activity Date" },
-    { value: "responsiblePerson", label: "Responsible Person" },
-    { value: "rfpReceivedDate", label: "RFP Received Date" },
-    { value: "statusSummary", label: "Status Summary" },
-    { value: "wonTime", label: "Won Time" },
-    { value: "lostTime", label: "Lost Time" },
-    { value: "dealClosedOn", label: "Deal Closed On" },
-    { value: "lostReason", label: "Lost Reason" },
-    {
-      value: "stateAndCountryProjectLocation",
-      label: "State and Country Project Location",
-    },
-    { value: "visibleTo", label: "Visible To" },
-    { value: "archiveTime", label: "Archive Time" },
-    // ...add more as needed
-  ];
-  res.status(200).json({ fields });
-};
-
-// Bulk edit deals functionality
-exports.bulkEditDeals = async (req, res) => {
-  const { dealIds, updateData } = req.body;
-
-  // Validate input
-  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
-    return res.status(400).json({
-      message: "dealIds must be a non-empty array",
-    });
-  }
-
-  if (!updateData || Object.keys(updateData).length === 0) {
-    return res.status(400).json({
-      message: "updateData must contain at least one field to update",
-    });
-  }
-
-  // Check for potential duplicate issues when updating multiple deals with same values
-  if (dealIds.length > 1) {
-    const duplicateChecks = [];
-
-    // Check title uniqueness if updating title
-    if (updateData.title) {
-      const existingTitleCount = await Deal.count({
-        where: {
-          title: updateData.title,
-          dealId: { [Op.notIn]: dealIds },
-        },
-      });
-
-      if (existingTitleCount > 0) {
-        duplicateChecks.push({
-          field: "title",
-          value: updateData.title,
-          message: "Title already exists for another deal",
-        });
-      }
-    }
-
-    // Check other unique fields if they exist (add more as needed)
-    if (updateData.esplProposalNo) {
-      const existingProposalCount = await Deal.count({
-        where: {
-          esplProposalNo: updateData.esplProposalNo,
-          dealId: { [Op.notIn]: dealIds },
-        },
-      });
-
-      if (existingProposalCount > 0) {
-        duplicateChecks.push({
-          field: "esplProposalNo",
-          value: updateData.esplProposalNo,
-          message: "ESPL Proposal Number already exists for another deal",
-        });
-      }
-    }
-
-    // If we found duplicate issues, return error
-    if (duplicateChecks.length > 0) {
-      return res.status(400).json({
-        message:
-          "Cannot update multiple deals due to duplicate value constraints",
-        duplicateIssues: duplicateChecks,
-        suggestion:
-          "Please ensure unique values for fields that require uniqueness, or update deals individually",
-      });
-    }
-  }
-
-  console.log("Bulk edit deals request:", { dealIds, updateData });
-
-  try {
-    // Check access permissions
-    if (!["admin", "general", "master"].includes(req.role)) {
-      await logAuditTrail(
-        getProgramId("DEALS"),
-        "BULK_DEAL_UPDATE",
-        null,
-        "Access denied. You do not have permission to bulk edit deals.",
-        req.adminId
-      );
-      return res.status(403).json({
-        message:
-          "Access denied. You do not have permission to bulk edit deals.",
-      });
-    }
-
-    // Get all columns for different models
-    const dealFields = Object.keys(Deal.rawAttributes);
-    const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
-
-    // Split the update data by model
-    const dealData = {};
-    const dealDetailsData = {};
-    const personData = {};
-    const organizationData = {};
-    const customFields = {};
-
-    for (const key in updateData) {
-      if (dealFields.includes(key)) {
-        dealData[key] = updateData[key];
-      } else if (personFields.includes(key)) {
-        personData[key] = updateData[key];
-      } else if (organizationFields.includes(key)) {
-        organizationData[key] = updateData[key];
-      } else if (dealDetailsFields.includes(key)) {
-        dealDetailsData[key] = updateData[key];
-      } else {
-        // Treat as custom field
-        customFields[key] = updateData[key];
-      }
-    }
-
-    console.log("Processed update data:", {
-      dealData,
-      dealDetailsData,
-      personData,
-      organizationData,
-      customFields,
-    });
-
-    // Find deals to update
-    let whereClause = { dealId: { [Op.in]: dealIds } };
-
-    // Apply role-based filtering
-    if (req.role !== "admin") {
-      whereClause[Op.or] = [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId },
-      ];
-    }
-
-    const dealsToUpdate = await Deal.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: DealDetails,
-          as: "details",
-          required: false,
-        },
-        {
-          model: Person,
-          as: "Person",
-          required: false,
-        },
-        {
-          model: Organization,
-          as: "Organization",
-          required: false,
+          model: DASHBOARD,
+          as: "Dashboard",
+          where: { ownerId },
         },
       ],
     });
 
-    if (dealsToUpdate.length === 0) {
+    if (!report) {
       return res.status(404).json({
-        message:
-          "No deals found to update or you don't have permission to edit them",
+        success: false,
+        message: "Report not found or access denied",
       });
     }
 
-    console.log(`Found ${dealsToUpdate.length} deals to update`);
+    await report.update({
+      entity: entity || report.entity,
+      type: type || report.type,
+      config: config ? { ...report.config, ...config } : report.config,
+      position: position !== undefined ? position : report.position,
+      name: name || report.name,
+      description: description !== undefined ? description : report.description,
+    });
 
-    const updateResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
+    res.status(200).json({
+      success: true,
+      message: "Report updated successfully",
+      data: report,
+    });
+  } catch (error) {
+    console.error("Error updating report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update report",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const ownerId = req.adminId;
+
+    const report = await Report.findOne({
+      where: { reportId },
+      include: [
+        {
+          model: DASHBOARD,
+          as: "Dashboard",
+          where: { ownerId },
+        },
+      ],
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    await report.destroy();
+
+    res.status(200).json({
+      success: true,
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
+      error: error.message,
+    });
+  }
+};
+
+exports.getReportData = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const ownerId = req.adminId;
+
+    const report = await Report.findOne({
+      where: { reportId },
+      include: [
+        {
+          model: DASHBOARD,
+          as: "Dashboard",
+          where: { ownerId },
+        },
+      ],
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    const reportData = await generateReportData(report, ownerId);
+
+    res.status(200).json({
+      success: true,
+      data: reportData,
+    });
+  } catch (error) {
+    console.error("Error generating report data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate report data",
+      error: error.message,
+    });
+  }
+};
+
+// =============== GOAL MANAGEMENT ===============
+
+// Get available goal types for entity selection
+exports.getGoalTypes = async (req, res) => {
+  try {
+    const goalTypes = {
+      Deal: [
+        {
+          type: "Added",
+          description: "Based on the number or value of new deals",
+          metrics: ["count", "value"],
+        },
+        {
+          type: "Progressed",
+          description:
+            "Based on the number or value of deals entering a certain stage",
+          metrics: ["count", "value"],
+        },
+        {
+          type: "Won",
+          description: "Based on the number or value of won deals",
+          metrics: ["count", "value"],
+        },
+      ],
+      Activity: [
+        {
+          type: "Added",
+          description: "Based on the number of activities that were created",
+          metrics: ["count"],
+        },
+        {
+          type: "Completed",
+          description: "Based on the number of completed activities",
+          metrics: ["count"],
+        },
+      ],
+      Forecast: [
+        {
+          type: "Revenue",
+          description: "Based on forecasted revenue",
+          metrics: ["value"],
+        },
+      ],
     };
 
-    // Process each deal
-    for (const deal of dealsToUpdate) {
-      try {
-        console.log(`Processing deal ${deal.dealId}`);
+    res.status(200).json({
+      success: true,
+      data: goalTypes,
+    });
+  } catch (error) {
+    console.error("Error fetching goal types:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goal types",
+      error: error.message,
+    });
+  }
+};
 
-        // Track if owner is being changed
-        let ownerChanged = false;
-        let newOwner = null;
-        if (updateData.ownerId && updateData.ownerId !== deal.ownerId) {
-          ownerChanged = true;
-          newOwner = await MasterUser.findByPk(updateData.ownerId);
-        }
+exports.createGoal = async (req, res) => {
+  try {
+    const {
+      dashboardId,
+      entity,
+      goalType,
+      targetValue,
+      targetType,
+      period,
+      frequency,
+      startDate,
+      endDate,
+      description,
+      assignee,
+      assignId,
+      pipeline,
+      pipelineStage,
+      trackingMetric,
+      count,
+      value,
+      activityType, // Add activityType field for Activity goals
+      activityTypes, // Support multiple activity types
+    } = req.body;
+    const ownerId = req.adminId;
 
-        // Check if pipelineStage is changing and create stage history
-        if (
-          dealData.pipelineStage &&
-          dealData.pipelineStage !== deal.pipelineStage
-        ) {
-          await DealStageHistory.create({
-            dealId: deal.dealId,
-            stageName: dealData.pipelineStage,
-            enteredAt: new Date(),
-          });
-        }
+    // Validate required fields - dashboardId is now optional
+    if (!entity || !goalType) {
+      return res.status(400).json({
+        success: false,
+        message: "Entity and goal type are required",
+      });
+    }
 
-        // Update Deal table
-        if (Object.keys(dealData).length > 0) {
-          try {
-            await deal.update(dealData);
-            console.log(`Updated deal ${deal.dealId} with:`, dealData);
-          } catch (updateError) {
-            // Handle specific database constraint errors
-            if (
-              updateError.name === "SequelizeUniqueConstraintError" ||
-              updateError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              // Extract field name and value from error message
-              if (updateError.original?.sqlMessage) {
-                const match = updateError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField}: '${duplicateValue}' already exists. Please use a unique value.`
-              );
-            }
-
-            // Handle other constraint violations
-            if (updateError.name === "SequelizeValidationError") {
-              const validationErrors = updateError.errors
-                .map((err) => err.message)
-                .join(", ");
-              throw new Error(`Validation error: ${validationErrors}`);
-            }
-
-            if (updateError.name === "SequelizeForeignKeyConstraintError") {
-              throw new Error(
-                `Foreign key constraint error: Invalid reference to related data.`
-              );
-            }
-
-            // Re-throw original error if not a known constraint error
-            throw updateError;
-          }
-        }
-
-        // Update DealDetails table
-        if (Object.keys(dealDetailsData).length > 0) {
-          try {
-            let dealDetails = await DealDetails.findOne({
-              where: { dealId: deal.dealId },
-            });
-
-            if (dealDetails) {
-              await dealDetails.update(dealDetailsData);
-            } else {
-              await DealDetails.create({
-                dealId: deal.dealId,
-                ...dealDetailsData,
-              });
-            }
-            console.log(
-              `Updated deal details for ${deal.dealId}:`,
-              dealDetailsData
-            );
-          } catch (detailsError) {
-            // Handle specific database constraint errors for DealDetails
-            if (
-              detailsError.name === "SequelizeUniqueConstraintError" ||
-              detailsError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (detailsError.original?.sqlMessage) {
-                const match = detailsError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in deal details: '${duplicateValue}' already exists.`
-              );
-            }
-
-            if (detailsError.name === "SequelizeValidationError") {
-              const validationErrors = detailsError.errors
-                .map((err) => err.message)
-                .join(", ");
-              throw new Error(
-                `Deal details validation error: ${validationErrors}`
-              );
-            }
-
-            throw detailsError;
-          }
-        }
-
-        // Update Person table
-        if (Object.keys(personData).length > 0 && deal.personId) {
-          try {
-            const person = await Person.findByPk(deal.personId);
-            if (person) {
-              await person.update(personData);
-              console.log(`Updated person ${deal.personId}:`, personData);
-            }
-          } catch (personError) {
-            if (
-              personError.name === "SequelizeUniqueConstraintError" ||
-              personError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (personError.original?.sqlMessage) {
-                const match = personError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in person data: '${duplicateValue}' already exists.`
-              );
-            }
-
-            throw personError;
-          }
-        }
-
-        // Update Organization table
-        if (
-          Object.keys(organizationData).length > 0 &&
-          deal.leadOrganizationId
-        ) {
-          try {
-            const organization = await Organization.findByPk(
-              deal.leadOrganizationId
-            );
-            if (organization) {
-              await organization.update(organizationData);
-              console.log(
-                `Updated organization ${deal.leadOrganizationId}:`,
-                organizationData
-              );
-            }
-          } catch (orgError) {
-            if (
-              orgError.name === "SequelizeUniqueConstraintError" ||
-              orgError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (orgError.original?.sqlMessage) {
-                const match = orgError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in organization data: '${duplicateValue}' already exists.`
-              );
-            }
-
-            throw orgError;
-          }
-        }
-
-        // Handle custom fields
-        const savedCustomFields = {};
-        if (customFields && Object.keys(customFields).length > 0) {
-          for (const [fieldKey, value] of Object.entries(customFields)) {
-            try {
-              // Find custom field by fieldId first, then by fieldName
-              let customField = await CustomField.findOne({
-                where: {
-                  fieldId: fieldKey,
-                  entityType: { [Op.in]: ["deal", "both", "lead"] },
-                  isActive: true,
-                  [Op.or]: [
-                    { masterUserID: req.adminId },
-                    { fieldSource: "default" },
-                    { fieldSource: "system" },
-                  ],
-                },
-              });
-
-              if (!customField) {
-                customField = await CustomField.findOne({
-                  where: {
-                    fieldName: fieldKey,
-                    entityType: { [Op.in]: ["deal", "both", "lead"] },
-                    isActive: true,
-                    [Op.or]: [
-                      { masterUserID: req.adminId },
-                      { fieldSource: "default" },
-                      { fieldSource: "system" },
-                    ],
-                  },
-                });
-              }
-
-              if (
-                customField &&
-                value !== null &&
-                value !== undefined &&
-                value !== ""
-              ) {
-                // Check if custom field value already exists
-                const existingValue = await CustomFieldValue.findOne({
-                  where: {
-                    fieldId: customField.fieldId,
-                    entityId: deal.dealId,
-                    entityType: "deal",
-                  },
-                });
-
-                if (existingValue) {
-                  await existingValue.update({ value: value });
-                } else {
-                  await CustomFieldValue.create({
-                    fieldId: customField.fieldId,
-                    entityId: deal.dealId,
-                    entityType: "deal",
-                    value: value,
-                    masterUserID: req.adminId,
-                  });
-                }
-
-                savedCustomFields[customField.fieldName] = {
-                  fieldName: customField.fieldName,
-                  fieldType: customField.fieldType,
-                  value: value,
-                };
-              }
-            } catch (customFieldError) {
-              console.error(
-                `Error updating custom field ${fieldKey} for deal ${deal.dealId}:`,
-                customFieldError
-              );
-            }
-          }
-        }
-
-        // Send email notification if owner changed
-        if (ownerChanged && newOwner && newOwner.email) {
-          try {
-            const assigner = await MasterUser.findByPk(req.adminId);
-            if (assigner && assigner.email) {
-              await sendEmail(assigner.email, {
-                from: assigner.email,
-                to: newOwner.email,
-                subject: "You have been assigned a new deal",
-                text: `Hello ${newOwner.name},\n\nYou have been assigned a new deal: "${deal.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
-              });
-            }
-          } catch (emailError) {
-            console.error(
-              `Error sending email notification for deal ${deal.dealId}:`,
-              emailError
-            );
-          }
-        }
-
-        // Log audit trail for successful update
-        await historyLogger(
-          getProgramId("DEALS"),
-          "BULK_DEAL_UPDATE",
-          req.adminId,
-          deal.dealId,
-          null,
-          `Deal bulk updated by ${req.role}`,
-          { updateData }
-        );
-
-        updateResults.successful.push({
-          dealId: deal.dealId,
-          title: deal.title,
-          value: deal.value,
-          pipelineStage: deal.pipelineStage,
-          customFields: savedCustomFields,
+    // Additional validation for "Progressed" goals
+    if (goalType === "Progressed" && entity === "Deal") {
+      if (!pipeline) {
+        return res.status(400).json({
+          success: false,
+          message: "Pipeline is required for 'Progressed' deal goals",
         });
-      } catch (dealError) {
-        console.error(`Error updating deal ${deal.dealId}:`, dealError);
-
-        // Create more detailed error message
-        let errorMessage = dealError.message;
-        let errorType = "general";
-
-        if (
-          dealError.name === "SequelizeUniqueConstraintError" ||
-          dealError.original?.code === "ER_DUP_ENTRY"
-        ) {
-          errorType = "duplicate";
-        } else if (dealError.name === "SequelizeValidationError") {
-          errorType = "validation";
-        } else if (dealError.name === "SequelizeForeignKeyConstraintError") {
-          errorType = "foreign_key";
-        }
-
-        await logAuditTrail(
-          getProgramId("DEALS"),
-          "BULK_DEAL_UPDATE",
-          req.adminId,
-          `Error updating deal ${deal.dealId}: ${errorMessage}`,
-          req.adminId
-        );
-
-        updateResults.failed.push({
-          dealId: deal.dealId,
-          title: deal.title || `Deal ${deal.dealId}`,
-          error: errorMessage,
-          errorType: errorType,
-          errorCode: dealError.original?.code || dealError.name,
+      }
+      if (!pipelineStage) {
+        return res.status(400).json({
+          success: false,
+          message: "Pipeline stage is required for 'Progressed' deal goals",
         });
       }
     }
 
-    // Check for deals that were requested but not found
-    const foundDealIds = dealsToUpdate.map((deal) => deal.dealId);
-    const notFoundDealIds = dealIds.filter((id) => !foundDealIds.includes(id));
-
-    notFoundDealIds.forEach((dealId) => {
-      updateResults.skipped.push({
-        dealId: dealId,
-        reason: "Deal not found or no permission to edit",
+    // Validate target value or count/value based on tracking metric
+    if (!targetValue && !count && !value) {
+      return res.status(400).json({
+        success: false,
+        message: "Target value, count, or value is required",
       });
+    }
+
+    // Validate start date is required
+    if (!startDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date is required",
+      });
+    }
+
+    // Verify dashboard ownership if dashboardId is provided
+    if (dashboardId) {
+      const dashboard = await DASHBOARD.findOne({
+        where: {
+          dashboardId,
+          ownerId,
+        },
+      });
+
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: "Dashboard not found or access denied",
+        });
+      }
+    }
+
+    // Set default dates if not provided
+    const now = new Date();
+    let defaultStartDate, defaultEndDate;
+
+    // Parse startDate if provided
+    if (startDate) {
+      defaultStartDate = new Date(startDate);
+      // Validate startDate
+      if (isNaN(defaultStartDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid start date format",
+        });
+      }
+    }
+
+    // Parse endDate if provided, otherwise handle indefinite goals
+    if (endDate && endDate !== "" && endDate !== null) {
+      defaultEndDate = new Date(endDate);
+      // Validate endDate
+      if (isNaN(defaultEndDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid end date format",
+        });
+      }
+      // Validate end date is after start date
+      if (defaultEndDate <= defaultStartDate) {
+        return res.status(400).json({
+          success: false,
+          message: "End date must be after start date",
+        });
+      }
+    } else {
+      // No end date provided - goal continues indefinitely
+      // For display purposes, we can set a far future date or null
+      // Setting to null indicates an indefinite goal
+      defaultEndDate = null;
+
+      // If frequency is provided, we can calculate the current period's end date for tracking
+      // But the goal itself continues indefinitely
+      if (frequency === "Monthly") {
+        // For tracking current period only
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear(),
+          defaultStartDate.getMonth() + 1,
+          0
+        );
+      } else if (frequency === "Quarterly") {
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear(),
+          defaultStartDate.getMonth() + 3,
+          0
+        );
+      } else if (frequency === "Yearly") {
+        const currentPeriodEnd = new Date(
+          defaultStartDate.getFullYear() + 1,
+          0,
+          0
+        );
+      }
+      // Note: For indefinite goals, we track progress from start date to current date
+    }
+
+    // Determine display name for assignee
+    let assigneeDisplay = "Everyone";
+    if (assignId && assignId !== "everyone") {
+      // Try to fetch user name from MasterUser if assignId is present and not 'everyone'
+
+      const user = await MasterUser.findOne({
+        where: { masterUserID: assignId },
+      });
+      if (user && user.name) {
+        assigneeDisplay = user.name;
+      } else if (assignee && assignee !== "All" && assignee !== "everyone") {
+        assigneeDisplay = assignee;
+      }
+    } else if (assignee && assignee !== "All" && assignee !== "everyone") {
+      assigneeDisplay = assignee;
+    }
+
+    // Build goal name for UI as in screenshot
+    let goalName = description;
+    if (!goalName) {
+      if (entity === "Deal" && goalType === "Added") {
+        goalName = `Deals added ${assigneeDisplay}`;
+      } else if (entity === "Deal" && goalType === "Won") {
+        goalName = `Deals won ${assigneeDisplay}`;
+      } else if (entity === "Deal" && goalType === "Progressed") {
+        goalName = `Deals progressed ${assigneeDisplay}`;
+      } else if (entity === "Activity" && goalType === "Completed") {
+        goalName = `Activities completed ${assigneeDisplay}`;
+      } else {
+        goalName = `${entity} ${goalType} ${assigneeDisplay}`;
+      }
+    }
+
+    // Determine target value based on tracking metric
+    let finalTargetValue = targetValue;
+    if (trackingMetric === "Count" && count) {
+      finalTargetValue = count;
+    } else if (trackingMetric === "Value" && value) {
+      finalTargetValue = value;
+    }
+
+    // Handle activity types for Activity goals
+    let finalActivityType = null;
+    if (entity === "Activity") {
+      // Use activityTypes (multiple) or activityType (single)
+      const selectedActivityTypes = activityTypes || activityType;
+      if (selectedActivityTypes) {
+        if (Array.isArray(selectedActivityTypes)) {
+          finalActivityType = selectedActivityTypes.join(",");
+        } else {
+          finalActivityType = selectedActivityTypes;
+        }
+      }
+    }
+
+    // Get the next position for this dashboard
+    let nextPosition = 0;
+    if (dashboardId) {
+      const existingGoals = await Goal.findAll({
+        where: { dashboardId, isActive: true },
+        order: [["position", "DESC"]],
+        limit: 1,
+      });
+      if (existingGoals.length > 0) {
+        nextPosition = (existingGoals[0].position || 0) + 1;
+      }
+    }
+
+    const newGoal = await Goal.create({
+      dashboardId: dashboardId || null,
+      entity,
+      goalType,
+      targetValue: finalTargetValue,
+      targetType:
+        targetType || (trackingMetric === "Value" ? "currency" : "number"),
+      period: period || "Monthly", // Use period field as defined in model
+      startDate: defaultStartDate,
+      endDate: defaultEndDate,
+      description: goalName,
+      assignee: assignee || null,
+      assignId: assignId || null, // Add assignId field
+      pipeline: pipeline || null,
+      pipelineStage: pipelineStage || null, // Add pipelineStage field for "Progressed" goals
+      activityType: finalActivityType || null, // Add activityType field for Activity goals
+      trackingMetric: trackingMetric || "Count",
+      count: trackingMetric === "Count" ? count || finalTargetValue : null,
+      value: trackingMetric === "Value" ? value || finalTargetValue : null,
+      position: nextPosition, // Add position field
+      ownerId,
     });
 
-    console.log("Bulk update results:", updateResults);
-
-    res.status(200).json({
-      message: "Bulk edit operation completed",
-      results: updateResults,
-      summary: {
-        total: dealIds.length,
-        successful: updateResults.successful.length,
-        failed: updateResults.failed.length,
-        skipped: updateResults.skipped.length,
-        hasErrors: updateResults.failed.length > 0,
-        errorBreakdown: {
-          duplicateErrors: updateResults.failed.filter(
-            (f) => f.errorType === "duplicate"
-          ).length,
-          validationErrors: updateResults.failed.filter(
-            (f) => f.errorType === "validation"
-          ).length,
-          foreignKeyErrors: updateResults.failed.filter(
-            (f) => f.errorType === "foreign_key"
-          ).length,
-          generalErrors: updateResults.failed.filter(
-            (f) => f.errorType === "general"
-          ).length,
-        },
+    res.status(201).json({
+      success: true,
+      message: "Goal created successfully",
+      data: {
+        ...newGoal.toJSON(),
+        isIndefinite: !defaultEndDate,
+        durationInfo: !defaultEndDate
+          ? `Indefinite goal starting from ${defaultStartDate.toLocaleDateString()}`
+          : `Goal from ${defaultStartDate.toLocaleDateString()} to ${defaultEndDate.toLocaleDateString()}`,
       },
-      recommendations:
-        updateResults.failed.length > 0
-          ? [
-              "Check for duplicate values in fields that require uniqueness",
-              "Ensure all required fields are provided",
-              "Verify that referenced IDs exist in the system",
-              "Consider updating deals individually if bulk update continues to fail",
-            ]
-          : null,
     });
   } catch (error) {
-    console.error("Error in bulk edit deals:", error);
+    console.error("Error creating goal:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create goal",
+      error: error.message,
+    });
+  }
+};
 
-    await logAuditTrail(
-      getProgramId("DEALS"),
-      "BULK_DEAL_UPDATE",
-      null,
-      "Error in bulk edit deals: " + error.message,
-      req.adminId
+// Get all goals (not tied to specific dashboard)
+exports.getAllGoals = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const now = new Date();
+
+    const goals = await Goal.findAll({
+      where: {
+        ownerId,
+        isActive: true,
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Calculate progress for each goal
+    const goalsWithProgress = await Promise.all(
+      goals.map(async (goal) => {
+        const progress = await calculateGoalProgress(goal, ownerId);
+        return {
+          ...goal.toJSON(),
+          progress,
+        };
+      })
     );
 
+    // Group into Active and Past using endDate logic
+    const activeGoals = [];
+    const pastGoals = [];
+    goalsWithProgress.forEach((goal) => {
+      const endDate = goal.endDate ? new Date(goal.endDate) : null;
+      if (!endDate) {
+        // Ongoing goal (no end date)
+        activeGoals.push(goal);
+      } else {
+        // Compare endDate to current date (today)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
+        if (endDate >= today) {
+          activeGoals.push(goal);
+        } else {
+          pastGoals.push(goal);
+        }
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        Active: activeGoals,
+        Past: pastGoals,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching goals:", error);
     res.status(500).json({
-      message: "Internal server error during bulk edit",
+      success: false,
+      message: "Failed to fetch goals",
+      error: error.message,
+    });
+  }
+};
+
+// Add goal to dashboard
+exports.addGoalToDashboard = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const { dashboardId } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // For admin, do not filter by ownerId
+    const goal = await Goal.findOne({
+      where: role === "admin" ? { goalId } : { goalId, ownerId },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    // For admin, do not filter by ownerId
+    const dashboard = await DASHBOARD.findOne({
+      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    await goal.update({
+      dashboardId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goal added to dashboard successfully",
+      data: goal,
+    });
+  } catch (error) {
+    console.error("Error adding goal to dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add goal to dashboard",
+      error: error.message,
+    });
+  }
+};
+
+exports.getGoalsForDashboard = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // If no dashboardId provided, return all goals for user
+    if (!dashboardId || dashboardId === "all") {
+      const goals = await Goal.findAll({
+        where:
+          role === "admin" ? { isActive: true } : { ownerId, isActive: true },
+        order: [
+          ["position", "ASC"],
+          ["createdAt", "DESC"],
+        ],
+      });
+
+      // Calculate progress for each goal
+      const goalsWithProgress = await Promise.all(
+        goals.map(async (goal) => {
+          const progress = await calculateGoalProgress(goal, ownerId);
+          return {
+            ...goal.toJSON(),
+            progress,
+            isDraggable: true, // Add flag for frontend to show drag handle
+          };
+        })
+      );
+
+      return res.status(200).json({
+        success: true,
+        data: goalsWithProgress,
+      });
+    }
+
+    // Verify dashboard ownership (admin can access all dashboards)
+    const dashboard = await DASHBOARD.findOne({
+      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    const goals = await Goal.findAll({
+      where: {
+        dashboardId,
+        isActive: true,
+      },
+      order: [
+        ["position", "ASC"],
+        ["createdAt", "DESC"],
+      ],
+    });
+
+    // Calculate progress for each goal
+    const goalsWithProgress = await Promise.all(
+      goals.map(async (goal) => {
+        const progress = await calculateGoalProgress(goal, ownerId);
+        return {
+          ...goal.toJSON(),
+          progress,
+          isDraggable: true, // Add flag for frontend to show drag handle
+          position: goal.position || 0, // Ensure position is included
+        };
+      })
+    );
+
+    res.status(200).json({
+      success: true,
+      data: goalsWithProgress,
+    });
+  } catch (error) {
+    console.error("Error fetching goals:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goals",
+      error: error.message,
+    });
+  }
+};
+
+exports.updateGoal = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const {
+      entity,
+      goalType,
+      targetValue,
+      targetType,
+      period,
+      frequency,
+      startDate,
+      endDate,
+      description,
+      assignee,
+      assignId,
+      pipeline,
+      pipelineStage,
+      trackingMetric,
+      count,
+      value,
+      isActive,
+    } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // If admin, do not filter by ownerId
+    const goal = await Goal.findOne({
+      where: role === "admin" ? { goalId } : { goalId, ownerId },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    await goal.update({
+      entity: entity || goal.entity,
+      goalType: goalType || goal.goalType,
+      targetValue: targetValue !== undefined ? targetValue : goal.targetValue,
+      targetType: targetType || goal.targetType,
+      period: frequency || period || goal.period,
+      startDate: startDate || goal.startDate,
+      endDate: endDate || goal.endDate,
+      description: description !== undefined ? description : goal.description,
+      assignee: assignee !== undefined ? assignee : goal.assignee,
+      assignId: assignId !== undefined ? assignId : goal.assignId,
+      pipeline: pipeline !== undefined ? pipeline : goal.pipeline,
+      pipelineStage:
+        pipelineStage !== undefined ? pipelineStage : goal.pipelineStage,
+      trackingMetric: trackingMetric || goal.trackingMetric,
+      count: count !== undefined ? count : goal.count,
+      value: value !== undefined ? value : goal.value,
+      isActive: isActive !== undefined ? isActive : goal.isActive,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goal updated successfully",
+      data: goal,
+    });
+  } catch (error) {
+    console.error("Error updating goal:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update goal",
+      error: error.message,
+    });
+  }
+};
+
+// Reorder goals on dashboard (for drag and drop functionality)
+exports.reorderGoals = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const { goalOrders } = req.body; // Array of objects: [{goalId: 'id1', position: 0}, {goalId: 'id2', position: 1}, ...]
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Validate input
+    if (!Array.isArray(goalOrders) || goalOrders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Goal orders array is required",
+      });
+    }
+
+    // Verify dashboard ownership
+    const dashboard = await DASHBOARD.findOne({
+      where: role === "admin" ? { dashboardId } : { dashboardId, ownerId },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found or access denied",
+      });
+    }
+
+    // Get all goals for this dashboard to verify they exist
+    const existingGoals = await Goal.findAll({
+      where: {
+        dashboardId,
+        isActive: true,
+      },
+    });
+
+    const existingGoalIds = existingGoals.map((goal) => goal.goalId);
+
+    // Validate that all provided goalIds exist in this dashboard
+    const providedGoalIds = goalOrders.map((order) => order.goalId);
+    const invalidGoalIds = providedGoalIds.filter(
+      (id) => !existingGoalIds.includes(id)
+    );
+
+    if (invalidGoalIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid goal IDs: ${invalidGoalIds.join(", ")}`,
+      });
+    }
+
+    // Update positions for each goal
+    const updatePromises = goalOrders.map(({ goalId, position }) => {
+      return Goal.update(
+        { position: position || 0 },
+        {
+          where:
+            role === "admin"
+              ? { goalId, dashboardId }
+              : { goalId, dashboardId, ownerId },
+        }
+      );
+    });
+
+    await Promise.all(updatePromises);
+
+    // Fetch updated goals to return
+    const updatedGoals = await Goal.findAll({
+      where: {
+        dashboardId,
+        isActive: true,
+      },
+      order: [
+        ["position", "ASC"],
+        ["createdAt", "DESC"],
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goals reordered successfully",
+      data: updatedGoals,
+    });
+  } catch (error) {
+    console.error("Error reordering goals:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to reorder goals",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteGoal = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    await goal.destroy();
+
+    res.status(200).json({
+      success: true,
+      message: "Goal deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting goal:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete goal",
+      error: error.message,
+    });
+  }
+};
+
+exports.getGoalProgress = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    const progress = await calculateGoalProgress(goal, ownerId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        goal: goal.toJSON(),
+        progress,
+      },
+    });
+  } catch (error) {
+    console.error("Error calculating goal progress:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to calculate goal progress",
+      error: error.message,
+    });
+  }
+};
+
+// Get filtered data for a specific goal or all goals in a dashboard
+exports.getGoalData = async (req, res) => {
+  try {
+    const { goalId, dashboardId } = req.params;
+    const ownerId = req.adminId;
+    const role = req.role;
+    const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
+
+    // Support both single goal and dashboard-level queries
+    let goals = [];
+
+    if (goalId && goalId !== "dashboard") {
+      // Single goal query (existing functionality)
+      const goal = await Goal.findOne({
+        where: {
+          goalId,
+          ownerId,
+        },
+      });
+
+      if (!goal) {
+        return res.status(404).json({
+          success: false,
+          message: "Goal not found or access denied",
+        });
+      }
+
+      goals = [goal];
+    } else if (dashboardId || goalId === "dashboard") {
+      // Dashboard-level query (new functionality)
+      const targetDashboardId = dashboardId || req.query.dashboardId;
+
+      if (!targetDashboardId) {
+        return res.status(400).json({
+          success: false,
+          message: "Dashboard ID is required for dashboard-level goal data",
+        });
+      }
+
+      // Verify dashboard ownership (admin can access all dashboards)
+      const dashboard = await DASHBOARD.findOne({
+        where:
+          role === "admin"
+            ? { dashboardId: targetDashboardId }
+            : { dashboardId: targetDashboardId, ownerId },
+      });
+
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: "Dashboard not found or access denied",
+        });
+      }
+
+      // Get all goals for this dashboard
+      goals = await Goal.findAll({
+        where: {
+          dashboardId: targetDashboardId,
+          isActive: true,
+        },
+        order: [
+          ["position", "ASC"],
+          ["createdAt", "DESC"],
+        ],
+      });
+
+      if (goals.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: "No active goals found for this dashboard",
+          data: {
+            goals: [],
+            summary: {
+              totalGoals: 0,
+              completedGoals: 0,
+              avgProgress: 0,
+            },
+          },
+        });
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Either goalId or dashboardId is required",
+      });
+    }
+
+    // Helper to get default columns for an entity (first 5 dynamic columns)
+    async function getDefaultColumns(entity) {
+      const getModelColumns = (model) =>
+        Object.keys(model.rawAttributes).filter(
+          (col) =>
+            !/id$/i.test(col) && col !== "createdAt" && col !== "updatedAt"
+        );
+      const CustomFieldModel = require("../../models/customFieldModel");
+      async function getCustomFields(entityType) {
+        const fields = await CustomFieldModel.findAll({
+          where: { entityType, isActive: true },
+          attributes: ["fieldName"],
+        });
+        return fields.map((f) => f.fieldName);
+      }
+      let model, entityType;
+      if (entity === "Deal") {
+        model = require("../../models/deals/dealsModels");
+        entityType = "Deal";
+      } else if (entity === "Person") {
+        model = require("../../models/leads/leadPersonModel");
+        entityType = "Person";
+      } else if (entity === "Organization") {
+        model = require("../../models/leads/leadOrganizationModel");
+        entityType = "Organization";
+      }
+      const modelCols = getModelColumns(model);
+      const customCols = await getCustomFields(entityType);
+      return [...modelCols, ...customCols].slice(0, 5);
+    }
+
+    // Accept selectedColumns from body or query (object with Deal, Person, Organization arrays)
+    let selectedColumns =
+      req.body.selectedColumns || req.query.selectedColumns || {};
+    if (typeof selectedColumns === "string") {
+      try {
+        selectedColumns = JSON.parse(selectedColumns);
+      } catch (e) {
+        selectedColumns = {};
+      }
+    }
+    const selectedDeal = Array.isArray(selectedColumns.Deal)
+      ? selectedColumns.Deal
+      : [];
+    const selectedPerson = Array.isArray(selectedColumns.Person)
+      ? selectedColumns.Person
+      : [];
+    const selectedOrganization = Array.isArray(selectedColumns.Organization)
+      ? selectedColumns.Organization
+      : [];
+
+    // Process each goal to get detailed data
+    const goalsWithData = await Promise.all(
+      goals.map(async (goal) => {
+        let entityColumns = [];
+        if (goal.entity === "Deal") entityColumns = selectedDeal;
+        else if (goal.entity === "Person") entityColumns = selectedPerson;
+        else if (goal.entity === "Organization")
+          entityColumns = selectedOrganization;
+        if (!entityColumns || entityColumns.length === 0) {
+          entityColumns = await getDefaultColumns(goal.entity);
+        }
+        const goalData = await processGoalData(
+          goal,
+          ownerId,
+          periodFilter,
+          entityColumns
+        );
+        return goalData;
+      })
+    );
+
+    // If single goal, return single goal format for backward compatibility
+    if (goalId && goalId !== "dashboard") {
+      return res.status(200).json({
+        success: true,
+        data: goalsWithData[0],
+      });
+    }
+
+    // For dashboard queries, return array format with summary
+    const completedGoals = goalsWithData.filter(
+      (g) => g.summary.progress.percentage >= 100
+    ).length;
+    const avgProgress =
+      goalsWithData.length > 0
+        ? Math.round(
+            goalsWithData.reduce(
+              (sum, g) => sum + g.summary.progress.percentage,
+              0
+            ) / goalsWithData.length
+          )
+        : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        goals: goalsWithData,
+        summary: {
+          totalGoals: goalsWithData.length,
+          completedGoals: completedGoals,
+          avgProgress: avgProgress,
+          dashboardId: dashboardId || req.query.dashboardId,
+          periodFilter: periodFilter || "goal_duration",
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching goal data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch goal data",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to process individual goal data (extracted from original getGoalData)
+async function processGoalData(goal, ownerId, periodFilter) {
+  const {
+    entity,
+    goalType,
+    assignee,
+    assignId,
+    pipeline,
+    pipelineStage,
+    startDate,
+    endDate,
+    trackingMetric,
+  } = goal;
+
+  // Accept selectedColumns as a new argument (array of columns for this entity)
+  let selectedColumns = arguments[3] || [];
+
+  // Helper function to get date range for period filters
+  function getPeriodRange(filter) {
+    const now = new Date();
+    let start, end;
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    switch ((filter || "").toLowerCase()) {
+      case "yesterday":
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        end = new Date(today);
+        end.setDate(end.getDate() - 1);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "today":
+        start = new Date(today);
+        end = new Date(today);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "tomorrow":
+        start = new Date(today);
+        start.setDate(start.getDate() + 1);
+        end = new Date(today);
+        end.setDate(end.getDate() + 1);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "this_week":
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "last_week":
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay() - 7);
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "next_week":
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay() + 7);
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "this_month":
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+      case "last_month":
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        break;
+      case "next_month":
+        start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 2,
+          0,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+      case "this_quarter": {
+        const q = Math.floor(now.getMonth() / 3);
+        start = new Date(now.getFullYear(), q * 3, 1);
+        end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+        break;
+      }
+      case "last_quarter": {
+        const q = Math.floor(now.getMonth() / 3);
+        const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        const quarter = q === 0 ? 3 : q - 1;
+        start = new Date(year, quarter * 3, 1);
+        end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+        break;
+      }
+      case "next_quarter": {
+        const q = Math.floor(now.getMonth() / 3);
+        const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+        const quarter = q === 3 ? 0 : q + 1;
+        start = new Date(year, quarter * 3, 1);
+        end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+        break;
+      }
+      case "this_year":
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        break;
+      case "last_year":
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        break;
+      case "next_year":
+        start = new Date(now.getFullYear() + 1, 0, 1);
+        end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+        break;
+      case "month_to_date":
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = now;
+        break;
+      case "quarter_to_date": {
+        const q = Math.floor(now.getMonth() / 3);
+        start = new Date(now.getFullYear(), q * 3, 1);
+        end = now;
+        break;
+      }
+      case "year_to_date":
+        start = new Date(now.getFullYear(), 0, 1);
+        end = now;
+        break;
+      case "past_7_days":
+        start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        end = new Date(today);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "past_2_weeks":
+        start = new Date(today);
+        start.setDate(start.getDate() - 13);
+        end = new Date(today);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "next_7_days":
+        start = new Date(today);
+        end = new Date(today);
+        end.setDate(end.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "next_2_weeks":
+        start = new Date(today);
+        end = new Date(today);
+        end.setDate(end.getDate() + 13);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "past_1_month":
+        start = new Date(now);
+        start.setMonth(start.getMonth() - 1);
+        end = now;
+        break;
+      case "past_3_months":
+        start = new Date(now);
+        start.setMonth(start.getMonth() - 3);
+        end = now;
+        break;
+      case "past_6_months":
+        start = new Date(now);
+        start.setMonth(start.getMonth() - 6);
+        end = now;
+        break;
+      case "past_12_months":
+        start = new Date(now);
+        start.setMonth(start.getMonth() - 12);
+        end = now;
+        break;
+      case "next_3_months":
+        start = now;
+        end = new Date(now);
+        end.setMonth(end.getMonth() + 3);
+        break;
+      case "next_6_months":
+        start = now;
+        end = new Date(now);
+        end.setMonth(end.getMonth() + 6);
+        break;
+      case "next_12_months":
+        start = now;
+        end = new Date(now);
+        end.setMonth(end.getMonth() + 12);
+        break;
+      case "goal_duration":
+      default:
+        // Use goal's startDate and endDate (or current date if indefinite)
+        start = startDate;
+        end = endDate || now;
+    }
+    return { start, end };
+  }
+
+  // Build where clause based on goal criteria and period filter
+  let start, end;
+  try {
+    ({ start, end } = getPeriodRange(periodFilter));
+    // If start or end is invalid, fallback to goal duration
+    if (
+      !start ||
+      !end ||
+      isNaN(new Date(start).getTime()) ||
+      isNaN(new Date(end).getTime())
+    ) {
+      start = startDate;
+      end = endDate || new Date();
+    }
+  } catch (e) {
+    // Fallback to goal duration if getPeriodRange fails
+    start = startDate;
+    end = endDate || new Date();
+  }
+
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [start, end],
+    },
+  };
+
+  // Add assignee filter based on assignId and assignee values
+  if (assignId && assignId !== "everyone") {
+    // Specific user assigned
+    whereClause.masterUserID = assignId;
+  } else if (
+    assignee &&
+    assignee !== "All" &&
+    assignee !== "Company (everyone)" &&
+    assignee !== "everyone"
+  ) {
+    // Legacy assignee field (for backward compatibility)
+    whereClause.masterUserID = assignee;
+  }
+
+  // Add pipeline filter if specified
+  if (pipeline && entity === "Deal") {
+    if (pipeline.includes(",")) {
+      // Multiple pipelines (comma-separated)
+      const pipelines = pipeline
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      whereClause.pipeline = {
+        [Op.in]: pipelines,
+      };
+    } else {
+      // Single pipeline
+      whereClause.pipeline = pipeline;
+    }
+  }
+
+  let data = [];
+  let summary = {};
+  let breakdown = [];
+
+  // Process based on entity type - using simplified logic for dashboard view
+  if (entity === "Deal") {
+    if (goalType === "Added") {
+      // Build include for Person and Organization if needed
+      const include = [];
+      if (selectedColumns.some((col) => col.startsWith("person."))) {
+        include.push({
+          model: require("../../models/personModel"),
+          as: "person",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("person."))
+            .map((col) => col.replace("person.", "")),
+        });
+      }
+      if (selectedColumns.some((col) => col.startsWith("organization."))) {
+        include.push({
+          model: require("../../models/organizationModel"),
+          as: "organization",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("organization."))
+            .map((col) => col.replace("organization.", "")),
+        });
+      }
+      const dealAttributes = selectedColumns.filter(
+        (col) => !col.includes(".")
+      );
+      const addedDeals = await Deal.findAll({
+        where: whereClause,
+        attributes: dealAttributes,
+        order: [["createdAt", "DESC"]],
+        include,
+      });
+
+      // Assign fetched deals to data array for records, only include selected columns
+      data = addedDeals.map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
+
+      const currentValue =
+        trackingMetric === "Value"
+          ? addedDeals.reduce(
+              (sum, deal) => sum + parseFloat(deal.value || 0),
+              0
+            )
+          : addedDeals.length;
+
+      summary = {
+        totalCount: addedDeals.length,
+        totalValue: addedDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      breakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(
+              addedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : goal.period === "Quarterly"
+          ? generateQuarterlyBreakdown(
+              addedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : generateMonthlyBreakdown(
+              addedDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          // For different breakdown types: period.goal, period.goalTarget
+          // period.label: e.g. "Jul 2025" or "W31 2025" or "Q3 2025" based on breakdown type
+          // period.result: actual value for this period
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
+    } else if (goalType === "Won") {
+      const wonWhereClause = {
+        ...whereClause,
+        status: "won",
+        updatedAt: {
+          [Op.between]: [start, end],
+        },
+      };
+      const include = [];
+      if (selectedColumns.some((col) => col.startsWith("person."))) {
+        include.push({
+          model: require("../../models/personModel"),
+          as: "person",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("person."))
+            .map((col) => col.replace("person.", "")),
+        });
+      }
+      if (selectedColumns.some((col) => col.startsWith("organization."))) {
+        include.push({
+          model: require("../../models/organizationModel"),
+          as: "organization",
+          attributes: selectedColumns
+            .filter((col) => col.startsWith("organization."))
+            .map((col) => col.replace("organization.", "")),
+        });
+      }
+      const dealAttributes = selectedColumns.filter(
+        (col) => !col.includes(".")
+      );
+      const wonDeals = await Deal.findAll({
+        where: wonWhereClause,
+        attributes: dealAttributes,
+        order: [["updatedAt", "DESC"]],
+        include,
+      });
+      data = wonDeals.map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
+
+      const currentValue =
+        trackingMetric === "Value"
+          ? wonDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0)
+          : wonDeals.length;
+
+      summary = {
+        totalCount: wonDeals.length,
+        totalValue: wonDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      breakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : goal.period === "Quarterly"
+          ? generateQuarterlyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            )
+          : generateMonthlyBreakdown(
+              wonDeals,
+              goal,
+              trackingMetric,
+              "Deal",
+              start,
+              end
+            );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
+    } else if (goalType === "Progressed") {
+      // Use DealStageHistory for accurate tracking of deals entering a stage
+      const stageWhere = {
+        stageName: pipelineStage,
+        enteredAt: {
+          [Op.between]: [start, end],
+        },
+      };
+
+      // Find all DealStageHistory records for deals that entered the stage in the period
+      const progressedStages = await DealStageHistory.findAll({
+        where: stageWhere,
+        attributes: ["dealId", "stageName", "enteredAt"],
+        order: [["enteredAt", "DESC"]],
+      });
+
+      // Get unique dealIds
+      const progressedDealIds = progressedStages.map((s) => s.dealId);
+
+      // Build Deal filter for pipeline and assignee
+      const dealWhere = {};
+      if (pipeline) {
+        if (pipeline.includes(",")) {
+          const pipelines = pipeline
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          dealWhere.pipeline = { [Op.in]: pipelines };
+        } else {
+          dealWhere.pipeline = pipeline;
+        }
+      }
+      if (assignId && assignId !== "everyone") {
+        dealWhere.masterUserID = assignId;
+      } else if (
+        assignee &&
+        assignee !== "All" &&
+        assignee !== "Company (everyone)" &&
+        assignee !== "everyone"
+      ) {
+        dealWhere.masterUserID = assignee;
+      }
+
+      // Fetch deal details for those deals, applying filters
+      let progressedDeals = [];
+      if (progressedDealIds.length > 0) {
+        // Build include for Person and Organization if needed
+        const include = [];
+        if (selectedColumns.some((col) => col.startsWith("person."))) {
+          include.push({
+            model: require("../../models/personModel"),
+            as: "person",
+            attributes: selectedColumns
+              .filter((col) => col.startsWith("person."))
+              .map((col) => col.replace("person.", "")),
+          });
+        }
+        if (selectedColumns.some((col) => col.startsWith("organization."))) {
+          include.push({
+            model: require("../../models/organizationModel"),
+            as: "organization",
+            attributes: selectedColumns
+              .filter((col) => col.startsWith("organization."))
+              .map((col) => col.replace("organization.", "")),
+          });
+        }
+        const dealAttributes = selectedColumns.filter(
+          (col) => !col.includes(".")
+        );
+        progressedDeals = await Deal.findAll({
+          where: {
+            dealId: { [Op.in]: progressedDealIds },
+            ...dealWhere,
+          },
+          attributes: dealAttributes,
+          include,
+        });
+      }
+
+      // Deduplicate deals by dealId for records array
+      const uniqueDealsMap = new Map();
+      progressedDeals.forEach((deal) => {
+        uniqueDealsMap.set(deal.dealId, deal);
+      });
+      data = Array.from(uniqueDealsMap.values()).map((deal) => {
+        const record = {};
+        selectedColumns.forEach((col) => {
+          if (col.includes(".")) {
+            const [relation, field] = col.split(".");
+            record[col] = deal[relation] ? deal[relation][field] : null;
+          } else {
+            record[col] = deal[col];
+          }
+        });
+        return record;
+      });
+
+      // Calculate current value
+      const currentValue =
+        trackingMetric === "Value"
+          ? progressedDeals.reduce(
+              (sum, deal) => sum + parseFloat(deal.value || 0),
+              0
+            )
+          : progressedDeals.length;
+
+      summary = {
+        totalCount: progressedDeals.length,
+        totalValue: progressedDeals.reduce(
+          (sum, deal) => sum + parseFloat(deal.value || 0),
+          0
+        ),
+        goalTarget: parseFloat(goal.targetValue),
+        trackingMetric: trackingMetric,
+        progress: {
+          current: currentValue,
+          target: parseFloat(goal.targetValue),
+          percentage: Math.min(
+            100,
+            Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+          ),
+        },
+      };
+
+      // For breakdown, use enteredAt dates
+      breakdown =
+        goal.period === "Weekly"
+          ? generateWeeklyBreakdown(
+              progressedStages,
+              goal,
+              trackingMetric,
+              "DealProgressed",
+              start,
+              end,
+              "enteredAt"
+            )
+          : goal.period === "Quarterly"
+          ? generateQuarterlyBreakdown(
+              progressedStages,
+              goal,
+              trackingMetric,
+              "DealProgressed",
+              start,
+              end,
+              "enteredAt"
+            )
+          : generateMonthlyBreakdown(
+              progressedStages,
+              goal,
+              trackingMetric,
+              "DealProgressed",
+              start,
+              end,
+              "enteredAt"
+            );
+
+      // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+      if (Array.isArray(breakdown) && breakdown.length > 0) {
+        summary.periodSummary = breakdown.map((period) => {
+          const goalValue = period.goal || period.goalTarget || 0;
+          const result = period.result || 0;
+          const difference = result - goalValue;
+          const goalProgress =
+            goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+          return {
+            period: period.label || period.period || "",
+            goal: goalValue,
+            result,
+            difference,
+            goalProgress,
+          };
+        });
+      }
+    }
+    // Add other goal types as needed...
+  } else if (entity === "Activity") {
+    const activityWhereClause = { ...whereClause };
+
+    // Add activity type filter
+    if (goal.activityType && goal.activityType !== "all") {
+      if (goal.activityType.includes(",")) {
+        const activityTypes = goal.activityType
+          .split(",")
+          .map((type) => type.trim());
+        activityWhereClause.type = { [Op.in]: activityTypes };
+      } else {
+        activityWhereClause.type = goal.activityType;
+      }
+    }
+
+    // Add completion filter for "Completed" goals
+    if (goalType === "Completed") {
+      activityWhereClause.isDone = true;
+    }
+
+    const activities = await Activity.findAll({
+      where: activityWhereClause,
+      attributes: [
+        "activityId",
+        "type",
+        "subject",
+        "isDone",
+        "createdAt",
+        "assignedTo",
+        "markedAsDoneTime",
+      ],
+      order: [["createdAt", "DESC"]],
+      include: [
+        {
+          model: MasterUser,
+          attributes: [["name", "assignToUser"]],
+          as: "assignedUser", // <-- must match the alias in the association
+          required: false,
+        },
+      ],
+    });
+
+    // Assign fetched activities to data array for records
+    data = activities;
+
+    summary = {
+      totalCount: activities.length,
+      goalTarget: parseFloat(goal.targetValue),
+      trackingMetric: trackingMetric,
+      progress: {
+        current: activities.length,
+        target: parseFloat(goal.targetValue),
+        percentage: Math.min(
+          100,
+          Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
+        ),
+      },
+    };
+
+    breakdown =
+      goal.period === "Weekly"
+        ? generateWeeklyBreakdown(
+            activities,
+            goal,
+            trackingMetric,
+            "Activity",
+            start,
+            end
+          )
+        : goal.period === "Quarterly"
+        ? generateQuarterlyBreakdown(
+            activities,
+            goal,
+            trackingMetric,
+            "Activity",
+            start,
+            end
+          )
+        : generateMonthlyBreakdown(
+            activities,
+            goal,
+            trackingMetric,
+            "Activity",
+            start,
+            end
+          );
+
+    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      summary.periodSummary = breakdown.map((period) => {
+        const goalValue = period.goal || period.goalTarget || 0;
+        const result = period.result || 0;
+        const difference = result - goalValue;
+        const goalProgress =
+          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+        return {
+          period: period.label || period.period || "",
+          goal: goalValue,
+          result,
+          difference,
+          goalProgress,
+        };
+      });
+    }
+  } else if (entity === "Lead") {
+    const leads = await Lead.findAll({
+      where: whereClause,
+      attributes: ["leadId", "firstName", "lastName", "status", "createdAt"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Assign fetched leads to data array for records
+    data = leads;
+
+    summary = {
+      totalCount: leads.length,
+      goalTarget: parseFloat(goal.targetValue),
+      trackingMetric: trackingMetric,
+      progress: {
+        current: leads.length,
+        target: parseFloat(goal.targetValue),
+        percentage: Math.min(
+          100,
+          Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
+        ),
+      },
+    };
+
+    breakdown =
+      goal.period === "Weekly"
+        ? generateWeeklyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
+            start,
+            end
+          )
+        : goal.period === "Quarterly"
+        ? generateQuarterlyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
+            start,
+            end
+          )
+        : generateMonthlyBreakdown(
+            leads,
+            goal,
+            trackingMetric,
+            "Lead",
+            start,
+            end
+          );
+
+    // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+    if (Array.isArray(breakdown) && breakdown.length > 0) {
+      summary.periodSummary = breakdown.map((period) => {
+        const goalValue = period.goal || period.goalTarget || 0;
+        const result = period.result || 0;
+        const difference = result - goalValue;
+        const goalProgress =
+          goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+        return {
+          period: period.label || period.period || "",
+          goal: goalValue,
+          result,
+          difference,
+          goalProgress,
+        };
+      });
+    }
+  }
+
+  // Calculate duration info
+  const nowTime = new Date();
+  const isIndefinite = !endDate || endDate === null;
+  const goalStartDate = new Date(startDate);
+  const goalEndDate = endDate ? new Date(endDate) : null;
+
+  const durationInfo = {
+    startDate: startDate,
+    endDate: endDate,
+    isIndefinite: isIndefinite,
+    frequency: goal.period || "Monthly",
+    isActive:
+      nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+    status: isIndefinite
+      ? "ongoing"
+      : nowTime <= goalEndDate
+      ? "active"
+      : "expired",
+  };
+
+  return {
+    goal: goal.toJSON(),
+    records: data,
+    summary: summary,
+    monthlyBreakdown: breakdown,
+    period: { startDate: start, endDate: end },
+    duration: durationInfo,
+    filters: {
+      entity: entity,
+      goalType: goalType,
+      assignee: assignee,
+      assignId: assignId,
+      pipeline: pipeline,
+      pipelineStage: pipelineStage,
+      activityType: entity === "Activity" ? goal.activityType : null,
+    },
+  };
+}
+// DEPRECATED: exports.getProgressedGoalData - not used
+// exports.getProgressedGoalData = async (req, res) => {
+//   try {
+//     const { goalId } = req.params;
+//     const ownerId = req.adminId;
+//     const periodFilter = req.query.periodFilter; // e.g. 'yesterday', 'this_week', 'last_month', etc.
+
+//     const goal = await Goal.findOne({
+//       where: {
+//         goalId,
+//         ownerId,
+//       },
+//     });
+
+//     if (!goal) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Goal not found or access denied",
+//       });
+//     }
+
+//     const {
+//       entity,
+//       goalType,
+//       assignee,
+//       assignId,
+//       pipeline,
+//       pipelineStage,
+//       startDate,
+//       endDate,
+//       trackingMetric,
+//     } = goal;
+
+//     // Helper function to get date range for period filters
+//     function getPeriodRange(filter) {
+//       const now = new Date();
+//       let start, end;
+//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+//       switch ((filter || "").toLowerCase()) {
+//         case "yesterday":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "today":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "tomorrow":
+//           start = new Date(today);
+//           start.setDate(start.getDate() + 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay());
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() + 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_two_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 14);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - end.getDay() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_month":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 1,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "last_month":
+//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+//           break;
+//         case "next_month":
+//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 2,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "this_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "last_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+//           const quarter = q === 0 ? 3 : q - 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "next_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+//           const quarter = q === 3 ? 0 : q + 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "this_year":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "last_year":
+//           start = new Date(now.getFullYear() - 1, 0, 1);
+//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "next_year":
+//           start = new Date(now.getFullYear() + 1, 0, 1);
+//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "month_to_date":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = now;
+//           break;
+//         case "quarter_to_date": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = now;
+//           break;
+//         }
+//         case "year_to_date":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = now;
+//           break;
+//         case "past_7_days":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 6);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_2_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 13);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_7_days":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_2_weeks":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 13);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_1_month":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 1);
+//           end = now;
+//           break;
+//         case "past_3_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 3);
+//           end = now;
+//           break;
+//         case "past_6_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 6);
+//           end = now;
+//           break;
+//         case "past_12_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 12);
+//           end = now;
+//           break;
+//         case "next_3_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 3);
+//           break;
+//         case "next_6_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 6);
+//           break;
+//         case "next_12_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 12);
+//           break;
+//         case "goal_duration":
+//         default:
+//           // Use goal's startDate and endDate (or current date if indefinite)
+//           start = startDate;
+//           end = endDate || now;
+//       }
+//       return { start, end };
+//     }
+
+//     // Build where clause based on goal criteria and period filter
+//     let start, end;
+//     try {
+//       ({ start, end } = getPeriodRange(periodFilter));
+//       // If start or end is invalid, fallback to goal duration
+//       if (
+//         !start ||
+//         !end ||
+//         isNaN(new Date(start).getTime()) ||
+//         isNaN(new Date(end).getTime())
+//       ) {
+//         start = startDate;
+//         end = endDate || new Date();
+//       }
+//     } catch (e) {
+//       // Fallback to goal duration if getPeriodRange fails
+//       start = startDate;
+//       end = endDate || new Date();
+//     }
+//     const whereClause = {
+//       createdAt: {
+//         [Op.between]: [start, end],
+//       },
+//     };
+
+//     // Add assignee filter based on assignId and assignee values
+//     if (assignId && assignId !== "everyone") {
+//       // Specific user assigned
+//       whereClause.masterUserID = assignId;
+//     } else if (
+//       assignee &&
+//       assignee !== "All" &&
+//       assignee !== "Company (everyone)" &&
+//       assignee !== "everyone"
+//     ) {
+//       // Legacy assignee field (for backward compatibility)
+//       whereClause.masterUserID = assignee;
+//     }
+//     // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
+
+//     // Add pipeline filter if specified
+//     if (pipeline && entity === "Deal") {
+//       if (pipeline.includes(",")) {
+//         // Multiple pipelines (comma-separated)
+//         const pipelines = pipeline
+//           .split(",")
+//           .map((p) => p.trim())
+//           .filter((p) => p !== "");
+//         whereClause.pipeline = {
+//           [Op.in]: pipelines,
+//         };
+//       } else {
+//         // Single pipeline
+//         whereClause.pipeline = pipeline;
+//       }
+//     }
+
+//     let data = [];
+//     let summary = {};
+//     let monthlyBreakdown = [];
+
+//     if (entity === "Deal") {
+//       // Handle different goal types with specific logic
+//       if (goalType === "Progressed") {
+//         // Use DealStageHistory for accurate stage progression tracking
+//         if (pipelineStage) {
+//           // Query DealStageHistory to find deals that entered this stage during the period
+//           const stageEntries = await DealStageHistory.findAll({
+//             where: {
+//               stageName: pipelineStage,
+//               enteredAt: {
+//                 [Op.between]: [start, end],
+//               },
+//             },
+//             include: [
+//               {
+//                 model: Deal,
+//                 as: "Deal",
+//                 where: {
+//                   ...(assignId && assignId !== "everyone"
+//                     ? { masterUserID: assignId }
+//                     : {}),
+//                   ...(assignee &&
+//                   assignee !== "All" &&
+//                   assignee !== "Company (everyone)" &&
+//                   assignee !== "everyone" &&
+//                   (!assignId || assignId === "everyone")
+//                     ? { masterUserID: assignee }
+//                     : {}),
+//                   ...(pipeline
+//                     ? pipeline.includes(",")
+//                       ? {
+//                           pipeline: {
+//                             [Op.in]: pipeline
+//                               .split(",")
+//                               .map((p) => p.trim())
+//                               .filter((p) => p !== ""),
+//                           },
+//                         }
+//                       : { pipeline: pipeline }
+//                     : {}),
+//                 },
+//                 attributes: [
+//                   "dealId",
+//                   "title",
+//                   "value",
+//                   "pipeline",
+//                   "pipelineStage",
+//                   "status",
+//                   "masterUserID",
+//                   "createdAt",
+//                   "updatedAt",
+//                 ],
+//               },
+//             ],
+//             order: [["enteredAt", "DESC"]],
+//           });
+
+//           // Format the data for frontend with stage entry information
+//           data = stageEntries.map((entry) => ({
+//             id: entry.Deal.dealId,
+//             title: entry.Deal.title,
+//             value: parseFloat(entry.Deal.value || 0),
+//             pipeline: entry.Deal.pipeline,
+//             stage: entry.Deal.pipelineStage,
+//             status: entry.Deal.status,
+//             owner: entry.Deal.masterUserID,
+//             enteredStageAt: entry.enteredAt,
+//             createdAt: entry.Deal.createdAt,
+//             updatedAt: entry.Deal.updatedAt,
+//           }));
+
+//           // Calculate current value based on tracking metric
+//           const currentValue =
+//             trackingMetric === "Value"
+//               ? data.reduce((sum, deal) => sum + deal.value, 0)
+//               : data.length;
+
+//           // Calculate summary
+//           summary = {
+//             totalCount: data.length,
+//             totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//             goalTarget: parseFloat(goal.targetValue),
+//             trackingMetric: trackingMetric,
+//             targetStage: pipelineStage,
+//             progress: {
+//               current: currentValue,
+//               target: parseFloat(goal.targetValue),
+//               percentage: Math.min(
+//                 100,
+//                 Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//               ),
+//             },
+//           };
+
+//           // Generate breakdown by stage entry date (weekly, quarterly, or monthly based on period)
+//           monthlyBreakdown =
+//             goal.period === "Weekly"
+//               ? generateWeeklyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 )
+//               : goal.period === "Quarterly"
+//               ? generateQuarterlyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 )
+//               : generateMonthlyBreakdownForProgressed(
+//                   stageEntries,
+//                   goal,
+//                   trackingMetric
+//                 );
+//         } else {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Pipeline stage is required for progressed goals",
+//           });
+//         }
+//       } else if (goalType === "Added") {
+//         // ...existing code for Added...
+//         const addedDeals = await Deal.findAll({
+//           where: whereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "createdAt",
+//             "updatedAt",
+//           ],
+//           order: [["createdAt", "DESC"]],
+//         });
+//         data = addedDeals.map((deal) => ({
+//           id: deal.dealId,
+//           title: deal.title,
+//           value: parseFloat(deal.value || 0),
+//           pipeline: deal.pipeline,
+//           stage: deal.pipelineStage,
+//           status: deal.status,
+//           owner: deal.masterUserID,
+//           createdAt: deal.createdAt,
+//           updatedAt: deal.updatedAt,
+//         }));
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
+//         monthlyBreakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : goal.period === "Quarterly"
+//             ? generateQuarterlyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 addedDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       } else if (goalType === "Won") {
+//         // Efficiently get only won deals in the period, applying all filters
+//         const wonWhereClause = {
+//           ...whereClause,
+//           status: "won",
+//           updatedAt: {
+//             [Op.between]: [start, end],
+//           },
+//         };
+//         const wonDeals = await Deal.findAll({
+//           where: wonWhereClause,
+//           attributes: [
+//             "dealId",
+//             "title",
+//             "value",
+//             "pipeline",
+//             "pipelineStage",
+//             "status",
+//             "masterUserID",
+//             "createdAt",
+//             "updatedAt",
+//           ],
+//           order: [["updatedAt", "DESC"]],
+//         });
+//         data = wonDeals.map((deal) => ({
+//           id: deal.dealId,
+//           title: deal.title,
+//           value: parseFloat(deal.value || 0),
+//           pipeline: deal.pipeline,
+//           stage: deal.pipelineStage,
+//           status: deal.status,
+//           owner: deal.masterUserID,
+//           createdAt: deal.createdAt,
+//           updatedAt: deal.updatedAt,
+//         }));
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
+//         monthlyBreakdown =
+//           goal.period === "Weekly"
+//             ? generateWeeklyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : goal.period === "Quarterly"
+//             ? generateQuarterlyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               )
+//             : generateMonthlyBreakdown(
+//                 wonDeals,
+//                 goal,
+//                 trackingMetric,
+//                 "Deal",
+//                 start,
+//                 end
+//               );
+//       } else {
+//         // Unsupported goal type for Deal entity
+//         return res.status(400).json({
+//           success: false,
+//           message: `Unsupported goal type '${goalType}' for Deal entity. Supported types: Added, Progressed, Won`,
+//         });
+//       }
+
+//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+//         summary.periodSummary = monthlyBreakdown.map((period) => {
+//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+//           // period.label: e.g. "Jul 2025" or "W31 2025" based on breakdown type
+//           // period.result: actual value for this period
+//           const goalValue = period.goal || period.goalTarget || 0;
+//           const result = period.result || 0;
+//           const difference = result - goalValue;
+//           const goalProgress =
+//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+//           return {
+//             period: period.label || period.period || "",
+//             goal: goalValue,
+//             result,
+//             difference,
+//             goalProgress,
+//           };
+//         });
+//       }
+//     } else if (entity === "Activity") {
+//       // For Activity goals, use separate activityType and pipeline fields
+//       const activityTypeFilter = goal.activityType; // Use dedicated activityType field
+//       const pipelineFilter = goal.pipeline; // Pipeline is separate for Activity goals
+
+//       // Build where clause for activities
+//       const activityWhereClause = { ...whereClause };
+
+//       // Add activity type filter if specified
+//       if (activityTypeFilter && activityTypeFilter !== "all") {
+//         if (activityTypeFilter.includes(",")) {
+//           // Multiple activity types (comma-separated)
+//           const activityTypes = activityTypeFilter
+//             .split(",")
+//             .map((type) => type.trim());
+//           activityWhereClause.type = {
+//             [Op.in]: activityTypes,
+//           };
+//         } else {
+//           // Single activity type
+//           activityWhereClause.type = activityTypeFilter;
+//         }
+//       }
+
+//       // Handle goalType-specific filtering
+//       if (goalType === "Completed") {
+//         // For completed activities, filter by completion status
+//         activityWhereClause.isDone = true; // Use 'isDone' field for completion status
+//       } else if (goalType === "Added") {
+//         // For added activities, no additional filter needed - count all activities in date range
+//         // The date range filtering is already handled by whereClause
+//       }
+
+//       // Add pipeline filter by checking linked deals
+//       // Activities must be linked to deals in the specified pipeline(s)
+//       let includeClause = [];
+//       if (
+//         pipelineFilter &&
+//         pipelineFilter !== "All pipelines" &&
+//         pipelineFilter !== "all"
+//       ) {
+//         let pipelineWhereClause = {};
+
+//         if (pipelineFilter.includes(",")) {
+//           // Multiple pipelines (comma-separated)
+//           const pipelines = pipelineFilter
+//             .split(",")
+//             .map((pipeline) => pipeline.trim())
+//             .filter((pipeline) => pipeline !== "");
+//           pipelineWhereClause.pipeline = {
+//             [Op.in]: pipelines,
+//           };
+//         } else {
+//           // Single pipeline
+//           pipelineWhereClause.pipeline = pipelineFilter;
+//         }
+
+//         includeClause.push({
+//           model: Deal,
+//           where: pipelineWhereClause,
+//           required: true, // INNER JOIN - only activities linked to deals in these pipelines
+//           attributes: ["dealId", "pipeline", "title"], // Include deal info in response
+//         });
+//       } else {
+//         // If no pipeline filter, still include deal info but make it optional
+//         includeClause.push({
+//           model: Deal,
+//           required: false, // LEFT JOIN - include activities even if not linked to deals
+//           attributes: ["dealId", "pipeline", "title"],
+//         });
+//       }
+
+//       const activities = await Activity.findAll({
+//         where: activityWhereClause,
+//         include: includeClause, // Include deal information for pipeline filtering
+//         attributes: [
+//           "activityId",
+//           "type", // Use 'type' instead of 'activityType'
+//           "subject",
+//           "dealId", // Include dealId to show linked deal
+//           "isDone", // Include completion status
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
+
+//       data = activities.map((activity) => ({
+//         id: activity.activityId,
+//         type: activity.type, // Use 'type' instead of 'activityType'
+//         subject: activity.subject,
+//         dealId: activity.dealId,
+//         dealTitle: activity.Deal ? activity.Deal.title : null, // Include linked deal title
+//         pipeline: activity.Deal ? activity.Deal.pipeline : null, // Include pipeline from linked deal
+//         isDone: activity.isDone, // Include completion status
+//         owner: activity.masterUserID,
+//         createdAt: activity.createdAt,
+//         updatedAt: activity.updatedAt,
+//       }));
+
+//       summary = {
+//         totalCount: activities.length,
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         activityTypeFilter: activityTypeFilter, // Include filter info in response
+//         pipelineFilter: pipelineFilter, // Include pipeline filter info
+//         goalType: goalType, // Include goal type in response
+//         filterDescription:
+//           pipelineFilter &&
+//           pipelineFilter !== "all" &&
+//           pipelineFilter !== "All pipelines"
+//             ? `${goalType} activities of type "${
+//                 activityTypeFilter || "any"
+//               }" linked to deals in "${
+//                 pipelineFilter.includes(",")
+//                   ? pipelineFilter
+//                       .split(",")
+//                       .map((p) => p.trim())
+//                       .join(", ") + " pipelines"
+//                   : pipelineFilter + " pipeline"
+//               }"`
+//             : `${goalType} activities of type "${activityTypeFilter || "any"}"${
+//                 pipelineFilter ? " (any pipeline)" : ""
+//               }`,
+//         progress: {
+//           current: activities.length,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((activities.length / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
+
+//       // Generate breakdown for Activity goals based on period setting
+//       monthlyBreakdown =
+//         goal.period === "Weekly"
+//           ? generateWeeklyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             )
+//           : goal.period === "Quarterly"
+//           ? generateQuarterlyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             )
+//           : generateMonthlyBreakdown(
+//               activities,
+//               goal,
+//               trackingMetric,
+//               "Activity",
+//               start,
+//               end
+//             );
+
+//       // Add periodSummary for UI table (Goal, Result, Difference, Goal progress)
+//       if (Array.isArray(monthlyBreakdown) && monthlyBreakdown.length > 0) {
+//         summary.periodSummary = monthlyBreakdown.map((period) => {
+//           // For weekly breakdown: period.goal, for monthly breakdown: period.goalTarget
+//           // period.label: e.g. "W31 2025" for weekly or "Jul 2025" for monthly
+//           // period.result: actual value for this period
+//           const goalValue = period.goal || period.goalTarget || 0;
+//           const result = period.result || 0;
+//           const difference = result - goalValue;
+//           const goalProgress =
+//             goalValue > 0 ? `${Math.round((result / goalValue) * 100)}%` : "0%";
+//           return {
+//             period: period.label || period.period || "",
+//             goal: goalValue,
+//             result,
+//             difference,
+//             goalProgress,
+//           };
+//         });
+//       }
+//     } else if (entity === "Lead") {
+//       const leads = await Lead.findAll({
+//         where: whereClause,
+//         attributes: [
+//           "leadId",
+//           "firstName",
+//           "lastName",
+//           "email",
+//           "status",
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
+
+//       data = leads.map((lead) => ({
+//         id: lead.leadId,
+//         name: `${lead.firstName} ${lead.lastName}`,
+//         email: lead.email,
+//         status: lead.status,
+//         owner: lead.masterUserID,
+//         createdAt: lead.createdAt,
+//         updatedAt: lead.updatedAt,
+//       }));
+
+//       summary = {
+//         totalCount: leads.length,
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         progress: {
+//           current: leads.length,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((leads.length / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
+
+//       // Generate breakdown based on goal's period setting
+//       monthlyBreakdown =
+//         goal.period === "Weekly"
+//           ? generateWeeklyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             )
+//           : goal.period === "Quarterly"
+//           ? generateQuarterlyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             )
+//           : generateMonthlyBreakdown(
+//               leads,
+//               goal,
+//               trackingMetric,
+//               "Lead",
+//               start,
+//               end
+//             );
+//     }
+
+//     // Calculate comprehensive duration information
+//     const nowTime = new Date();
+//     const isIndefinite = !endDate || endDate === null;
+//     const goalStartDate = new Date(startDate);
+//     const goalEndDate = endDate ? new Date(endDate) : null;
+
+//     // Calculate periods based on frequency
+//     let totalPeriods = 1;
+//     let currentPeriod = 1;
+//     let periodType = goal.period || "Monthly";
+
+//     if (!isIndefinite && goalEndDate) {
+//       const totalMonths =
+//         (goalEndDate.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//         (goalEndDate.getMonth() - goalStartDate.getMonth()) +
+//         1;
+
+//       if (periodType === "Monthly") {
+//         totalPeriods = totalMonths;
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//             (nowTime.getMonth() - goalStartDate.getMonth()) +
+//             1
+//         );
+//       } else if (periodType === "Quarterly") {
+//         totalPeriods = Math.ceil(totalMonths / 3);
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           Math.ceil(
+//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//               (nowTime.getMonth() - goalStartDate.getMonth()) +
+//               1) /
+//               3
+//           )
+//         );
+//       } else if (periodType === "Yearly") {
+//         totalPeriods = Math.ceil(totalMonths / 12);
+//         currentPeriod = Math.min(
+//           totalPeriods,
+//           Math.ceil(
+//             ((nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//               (nowTime.getMonth() - goalStartDate.getMonth()) +
+//               1) /
+//               12
+//           )
+//         );
+//       }
+//     } else if (isIndefinite) {
+//       // For indefinite goals, calculate current period from start
+//       const monthsFromStart =
+//         (nowTime.getFullYear() - goalStartDate.getFullYear()) * 12 +
+//         (nowTime.getMonth() - goalStartDate.getMonth()) +
+//         1;
+
+//       if (periodType === "Monthly") {
+//         currentPeriod = monthsFromStart;
+//       } else if (periodType === "Quarterly") {
+//         currentPeriod = Math.ceil(monthsFromStart / 3);
+//       } else if (periodType === "Yearly") {
+//         currentPeriod = Math.ceil(monthsFromStart / 12);
+//       }
+//       totalPeriods = null; // Indefinite
+//     }
+
+//     const durationInfo = {
+//       startDate: startDate,
+//       endDate: endDate,
+//       isIndefinite: isIndefinite,
+//       frequency: periodType,
+//       totalPeriods: totalPeriods,
+//       currentPeriod: currentPeriod,
+//       durationDays: isIndefinite
+//         ? null
+//         : Math.ceil((goalEndDate - goalStartDate) / (1000 * 60 * 60 * 24)),
+//       isActive:
+//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+//       timeRemaining: isIndefinite
+//         ? null
+//         : Math.max(
+//             0,
+//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+//           ),
+//       timeElapsed: Math.max(
+//         0,
+//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+//       ),
+//       status: isIndefinite
+//         ? "ongoing"
+//         : nowTime <= goalEndDate
+//         ? "active"
+//         : "expired",
+//       trackingPeriod: isIndefinite
+//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+//       periodProgress: totalPeriods
+//         ? `${currentPeriod} of ${totalPeriods} ${periodType.toLowerCase()} periods`
+//         : `${currentPeriod} ${periodType.toLowerCase()} period(s) elapsed`,
+//       targetPerPeriod: calculateTargetPerPeriod(
+//         goal.targetValue,
+//         periodType,
+//         totalPeriods
+//       ),
+//     };
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         goal: goal.toJSON(),
+//         records: data,
+//         summary: summary,
+//         monthlyBreakdown: monthlyBreakdown,
+//         period: {
+//           startDate: startDate,
+//           endDate: endDate,
+//         },
+//         duration: durationInfo,
+//         filters: {
+//           entity: entity,
+//           goalType: goalType,
+//           assignee: assignee,
+//           assignId: assignId,
+//           pipeline: pipeline, // Show pipeline for all entities (Activity goals filter by linked deal pipeline)
+//           pipelineStage: pipelineStage,
+//           activityType: entity === "Activity" ? goal.activityType : null, // Show activity type for Activity goals from dedicated field
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching goal data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch goal data",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// // DEPRECATED: Get progressed goal data with detailed stage tracking - not used
+// exports.getProgressedGoalData = async (req, res) => {
+//   try {
+//     const { goalId } = req.params;
+//     const ownerId = req.adminId;
+//     const periodFilter = req.query.periodFilter;
+
+//     const goal = await Goal.findOne({
+//       where: {
+//         goalId,
+//         ownerId,
+//       },
+//     });
+
+//     if (!goal) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Goal not found or access denied",
+//       });
+//     }
+
+//     // Check if goal type is supported (Progressed or Added)
+//     if (
+//       (goal.goalType !== "Progressed" && goal.goalType !== "Added") ||
+//       goal.entity !== "Deal"
+//     ) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "This endpoint is only for 'Progressed' or 'Added' deal goals",
+//       });
+//     }
+
+//     const {
+//       assignee,
+//       assignId,
+//       pipeline,
+//       pipelineStage,
+//       startDate,
+//       endDate,
+//       trackingMetric,
+//     } = goal;
+
+//     // Use the same date range logic as getGoalData
+//     function getPeriodRange(filter) {
+//       const now = new Date();
+//       let start, end;
+//       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+//       switch ((filter || "").toLowerCase()) {
+//         case "yesterday":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() - 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "today":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "tomorrow":
+//           start = new Date(today);
+//           start.setDate(start.getDate() + 1);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 1);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay());
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "last_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() - 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_week":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - start.getDay() + 7);
+//           end = new Date(start);
+//           end.setDate(start.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "this_month":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 1,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "last_month":
+//           start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+//           end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+//           break;
+//         case "next_month":
+//           start = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+//           end = new Date(
+//             now.getFullYear(),
+//             now.getMonth() + 2,
+//             0,
+//             23,
+//             59,
+//             59,
+//             999
+//           );
+//           break;
+//         case "this_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = new Date(now.getFullYear(), q * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "last_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+//           const quarter = q === 0 ? 3 : q - 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "next_quarter": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           const year = q === 3 ? now.getFullYear() + 1 : now.getFullYear();
+//           const quarter = q === 3 ? 0 : q + 1;
+//           start = new Date(year, quarter * 3, 1);
+//           end = new Date(year, quarter * 3 + 3, 0, 23, 59, 59, 999);
+//           break;
+//         }
+//         case "this_year":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "last_year":
+//           start = new Date(now.getFullYear() - 1, 0, 1);
+//           end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "next_year":
+//           start = new Date(now.getFullYear() + 1, 0, 1);
+//           end = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+//           break;
+//         case "month_to_date":
+//           start = new Date(now.getFullYear(), now.getMonth(), 1);
+//           end = now;
+//           break;
+//         case "quarter_to_date": {
+//           const q = Math.floor(now.getMonth() / 3);
+//           start = new Date(now.getFullYear(), q * 3, 1);
+//           end = now;
+//           break;
+//         }
+//         case "year_to_date":
+//           start = new Date(now.getFullYear(), 0, 1);
+//           end = now;
+//           break;
+//         case "past_7_days":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 6);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_2_weeks":
+//           start = new Date(today);
+//           start.setDate(start.getDate() - 13);
+//           end = new Date(today);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_7_days":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 6);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "next_2_weeks":
+//           start = new Date(today);
+//           end = new Date(today);
+//           end.setDate(end.getDate() + 13);
+//           end.setHours(23, 59, 59, 999);
+//           break;
+//         case "past_1_month":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 1);
+//           end = now;
+//           break;
+//         case "past_3_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 3);
+//           end = now;
+//           break;
+//         case "past_6_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 6);
+//           end = now;
+//           break;
+//         case "next_3_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 3);
+//           break;
+//         case "next_6_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 6);
+//           break;
+//         case "past_12_months":
+//           start = new Date(now);
+//           start.setMonth(start.getMonth() - 12);
+//           end = now;
+//           break;
+//         case "next_12_months":
+//           start = now;
+//           end = new Date(now);
+//           end.setMonth(end.getMonth() + 12);
+//           break;
+//         case "goal_duration":
+//         default:
+//           start = startDate;
+//           end = endDate || now;
+//       }
+//       return { start, end };
+//     }
+
+//     let start, end;
+//     try {
+//       ({ start, end } = getPeriodRange(periodFilter));
+//       if (
+//         !start ||
+//         !end ||
+//         isNaN(new Date(start).getTime()) ||
+//         isNaN(new Date(end).getTime())
+//       ) {
+//         start = startDate;
+//         end = endDate || new Date();
+//       }
+//     } catch (e) {
+//       start = startDate;
+//       end = endDate || new Date();
+//     }
+
+//     // Build where clause for deals based on goal type
+//     const whereClause = {};
+
+//     // Add assignee filter
+//     if (assignId && assignId !== "everyone") {
+//       whereClause.masterUserID = assignId;
+//     } else if (
+//       assignee &&
+//       assignee !== "All" &&
+//       assignee !== "Company (everyone)" &&
+//       assignee !== "everyone"
+//     ) {
+//       whereClause.masterUserID = assignee;
+//     }
+
+//     // Add pipeline filter
+//     if (pipeline) {
+//       if (pipeline.includes(",")) {
+//         // Multiple pipelines (comma-separated)
+//         const pipelines = pipeline
+//           .split(",")
+//           .map((p) => p.trim())
+//           .filter((p) => p !== "");
+//         whereClause.pipeline = {
+//           [Op.in]: pipelines,
+//         };
+//       } else {
+//         // Single pipeline
+//         whereClause.pipeline = pipeline;
+//       }
+//     }
+
+//     let data = [];
+//     let summary = {};
+//     let monthlyBreakdown = [];
+
+//     // Handle different goal types
+//     if (goal.goalType === "Progressed") {
+//       // Track deals that entered the specific pipeline stage during the period
+//       if (pipelineStage) {
+//         // Query DealStageHistory to find deals that entered this stage during the period
+//         const stageEntries = await DealStageHistory.findAll({
+//           where: {
+//             stageName: pipelineStage,
+//             enteredAt: {
+//               [Op.between]: [start, end],
+//             },
+//           },
+//           include: [
+//             {
+//               model: Deal,
+//               as: "Deal",
+//               where: whereClause,
+//               attributes: [
+//                 "dealId",
+//                 "title",
+//                 "value",
+//                 "pipeline",
+//                 "pipelineStage",
+//                 "status",
+//                 "masterUserID",
+//                 "createdAt",
+//                 "updatedAt",
+//               ],
+//             },
+//           ],
+//           order: [["enteredAt", "DESC"]],
+//         });
+
+//         // Format the data for frontend
+//         data = stageEntries.map((entry) => ({
+//           id: entry.Deal.dealId,
+//           title: entry.Deal.title,
+//           value: parseFloat(entry.Deal.value || 0),
+//           pipeline: entry.Deal.pipeline,
+//           stage: entry.Deal.pipelineStage,
+//           status: entry.Deal.status,
+//           owner: entry.Deal.masterUserID,
+//           enteredStageAt: entry.enteredAt,
+//           createdAt: entry.Deal.createdAt,
+//           updatedAt: entry.Deal.updatedAt,
+//         }));
+
+//         // Calculate current value based on tracking metric
+//         const currentValue =
+//           trackingMetric === "Value"
+//             ? data.reduce((sum, deal) => sum + deal.value, 0)
+//             : data.length;
+
+//         // Calculate summary
+//         summary = {
+//           totalCount: data.length,
+//           totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//           goalTarget: parseFloat(goal.targetValue),
+//           trackingMetric: trackingMetric,
+//           targetStage: pipelineStage,
+//           progress: {
+//             current: currentValue,
+//             target: parseFloat(goal.targetValue),
+//             percentage: Math.min(
+//               100,
+//               Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//             ),
+//           },
+//         };
+
+//         // Generate monthly breakdown by stage entry date
+//         monthlyBreakdown = generateMonthlyBreakdownForProgressed(
+//           stageEntries,
+//           goal,
+//           trackingMetric
+//         );
+//       } else {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Pipeline stage is required for progressed goals",
+//         });
+//       }
+//     } else if (goal.goalType === "Added") {
+//       // Track deals that were added (created) during the period
+//       const addedWhereClause = {
+//         ...whereClause,
+//         createdAt: {
+//           [Op.between]: [start, end],
+//         },
+//       };
+
+//       // Get all deals that were added during the period
+//       const addedDeals = await Deal.findAll({
+//         where: addedWhereClause,
+//         attributes: [
+//           "dealId",
+//           "title",
+//           "value",
+//           "pipeline",
+//           "pipelineStage",
+//           "status",
+//           "masterUserID",
+//           "createdAt",
+//           "updatedAt",
+//         ],
+//         order: [["createdAt", "DESC"]],
+//       });
+
+//       // Format the data for frontend
+//       data = addedDeals.map((deal) => ({
+//         id: deal.dealId,
+//         title: deal.title,
+//         value: parseFloat(deal.value || 0),
+//         pipeline: deal.pipeline,
+//         stage: deal.pipelineStage,
+//         status: deal.status,
+//         owner: deal.masterUserID,
+//         createdAt: deal.createdAt,
+//         updatedAt: deal.updatedAt,
+//       }));
+
+//       // Calculate current value based on tracking metric
+//       const currentValue =
+//         trackingMetric === "Value"
+//           ? data.reduce((sum, deal) => sum + deal.value, 0)
+//           : data.length;
+
+//       // Calculate summary
+//       summary = {
+//         totalCount: data.length,
+//         totalValue: data.reduce((sum, deal) => sum + deal.value, 0),
+//         goalTarget: parseFloat(goal.targetValue),
+//         trackingMetric: trackingMetric,
+//         progress: {
+//           current: currentValue,
+//           target: parseFloat(goal.targetValue),
+//           percentage: Math.min(
+//             100,
+//             Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+//           ),
+//         },
+//       };
+
+//       // Generate monthly breakdown for added deals
+//       monthlyBreakdown = generateMonthlyBreakdown(
+//         addedDeals,
+//         goal,
+//         trackingMetric,
+//         "Deal"
+//       );
+//     }
+
+//     // Enhanced duration info
+//     const nowTime = new Date();
+//     const isIndefinite = !endDate || endDate === null;
+//     const goalStartDate = new Date(startDate);
+//     const goalEndDate = endDate ? new Date(endDate) : null;
+
+//     const durationInfo = {
+//       startDate: startDate,
+//       endDate: endDate,
+//       isIndefinite: isIndefinite,
+//       frequency: goal.period || "Monthly",
+//       isActive:
+//         nowTime >= goalStartDate && (isIndefinite || nowTime <= goalEndDate),
+//       timeRemaining: isIndefinite
+//         ? null
+//         : Math.max(
+//             0,
+//             Math.ceil((goalEndDate - nowTime) / (1000 * 60 * 60 * 24))
+//           ),
+//       timeElapsed: Math.max(
+//         0,
+//         Math.ceil((nowTime - goalStartDate) / (1000 * 60 * 60 * 24))
+//       ),
+//       status: isIndefinite
+//         ? "ongoing"
+//         : nowTime <= goalEndDate
+//         ? "active"
+//         : "expired",
+//       trackingPeriod: isIndefinite
+//         ? `From ${goalStartDate.toLocaleDateString()} onwards (indefinite)`
+//         : `${goalStartDate.toLocaleDateString()} to ${goalEndDate.toLocaleDateString()}`,
+//     };
+
+//     res.status(200).json({
+//       success: true,
+//       data: {
+//         goal: goal.toJSON(),
+//         records: data,
+//         summary: summary,
+//         monthlyBreakdown: monthlyBreakdown,
+//         period: {
+//           startDate: start,
+//           endDate: end,
+//         },
+//         duration: durationInfo,
+//         filters: {
+//           entity: goal.entity,
+//           goalType: goal.goalType,
+//           assignee: assignee,
+//           assignId: assignId,
+//           pipeline: pipeline,
+//           pipelineStage: pipelineStage,
+//         },
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching progressed goal data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch progressed goal data",
+//       error: error.message,
+//     });
+//   }
+// };
+// Get progressed goal data (legacy endpoint)
+
+// =============== HELPER FUNCTIONS ===============
+
+async function generateReportData(report, ownerId) {
+  try {
+    const { entity, type, config } = report;
+    const period = config.period || "this_month";
+
+    // Get date range based on period
+    const dateRange = getDateRange(period);
+
+    let data = {};
+
+    if (entity === "Deal") {
+      data = await generateDealReportData(type, config, dateRange, ownerId);
+    } else if (entity === "Lead") {
+      data = await generateLeadReportData(type, config, dateRange, ownerId);
+    } else if (entity === "Activity") {
+      data = await generateActivityReportData(type, config, dateRange, ownerId);
+    }
+
+    return {
+      ...data,
+      generatedAt: new Date(),
+      period: period,
+      dateRange: dateRange,
+    };
+  } catch (error) {
+    console.error("Error generating report data:", error);
+    return {
+      error: "Failed to generate report data",
+      generatedAt: new Date(),
+    };
+  }
+}
+
+async function generateDealReportData(type, config, dateRange, ownerId) {
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [dateRange.start, dateRange.end],
+    },
+  };
+
+  // Add user filter for non-admin users
+  if (ownerId) {
+    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+  }
+
+  switch (type) {
+    case "Performance":
+      const dealStats = await Deal.findAll({
+        attributes: [
+          "status",
+          [Deal.sequelize.fn("COUNT", Deal.sequelize.col("dealId")), "count"],
+          [Deal.sequelize.fn("SUM", Deal.sequelize.col("value")), "totalValue"],
+        ],
+        where: whereClause,
+        group: ["status"],
+      });
+
+      return {
+        chartType: "pie",
+        labels: dealStats.map((stat) => stat.status || "Open"),
+        datasets: [
+          {
+            data: dealStats.map((stat) => stat.get("count")),
+            backgroundColor: ["#4CAF50", "#2196F3", "#FF9800", "#F44336"],
+          },
+        ],
+        summary: {
+          total: dealStats.reduce(
+            (sum, stat) => sum + parseInt(stat.get("count")),
+            0
+          ),
+          totalValue: dealStats.reduce(
+            (sum, stat) => sum + parseFloat(stat.get("totalValue") || 0),
+            0
+          ),
+        },
+      };
+
+    case "Conversion":
+      const conversionData = await Deal.findAll({
+        attributes: [
+          "pipelineStage",
+          [Deal.sequelize.fn("COUNT", Deal.sequelize.col("dealId")), "count"],
+        ],
+        where: whereClause,
+        group: ["pipelineStage"],
+      });
+
+      return {
+        chartType: "funnel",
+        stages: conversionData.map((stage) => ({
+          name: stage.pipelineStage || "Unknown",
+          value: parseInt(stage.get("count")),
+        })),
+      };
+
+    case "Duration":
+      const durationData = await Deal.findAll({
+        attributes: [
+          "pipelineStage",
+          [
+            Deal.sequelize.fn(
+              "AVG",
+              Deal.sequelize.fn(
+                "DATEDIFF",
+                Deal.sequelize.fn("NOW"),
+                Deal.sequelize.col("createdAt")
+              )
+            ),
+            "avgDays",
+          ],
+        ],
+        where: whereClause,
+        group: ["pipelineStage"],
+      });
+
+      return {
+        chartType: "bar",
+        labels: durationData.map((stage) => stage.pipelineStage || "Unknown"),
+        datasets: [
+          {
+            label: "Average Days",
+            data: durationData.map((stage) =>
+              Math.round(parseFloat(stage.get("avgDays")) || 0)
+            ),
+            backgroundColor: "#2196F3",
+          },
+        ],
+      };
+
+    default:
+      return { error: "Unknown report type" };
+  }
+}
+
+async function generateLeadReportData(type, config, dateRange, ownerId) {
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [dateRange.start, dateRange.end],
+    },
+  };
+
+  if (ownerId) {
+    whereClause.masterUserID = ownerId;
+  }
+
+  const leadStats = await Lead.findAll({
+    attributes: [
+      "status",
+      [Lead.sequelize.fn("COUNT", Lead.sequelize.col("leadId")), "count"],
+    ],
+    where: whereClause,
+    group: ["status"],
+  });
+
+  return {
+    chartType: "pie",
+    labels: leadStats.map((stat) => stat.status || "Open"),
+    datasets: [
+      {
+        data: leadStats.map((stat) => parseInt(stat.get("count"))),
+        backgroundColor: ["#4CAF50", "#2196F3", "#FF9800"],
+      },
+    ],
+    summary: {
+      total: leadStats.reduce(
+        (sum, stat) => sum + parseInt(stat.get("count")),
+        0
+      ),
+    },
+  };
+}
+
+async function generateActivityReportData(type, config, dateRange, ownerId) {
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [dateRange.start, dateRange.end],
+    },
+  };
+
+  if (ownerId) {
+    whereClause.masterUserID = ownerId;
+  }
+
+  const activityStats = await Activity.findAll({
+    attributes: [
+      "activityType",
+      [
+        Activity.sequelize.fn("COUNT", Activity.sequelize.col("activityId")),
+        "count",
+      ],
+    ],
+    where: whereClause,
+    group: ["activityType"],
+  });
+
+  return {
+    chartType: "bar",
+    labels: activityStats.map((stat) => stat.activityType || "Unknown"),
+    datasets: [
+      {
+        label: "Activity Count",
+        data: activityStats.map((stat) => parseInt(stat.get("count"))),
+        backgroundColor: "#FF9800",
+      },
+    ],
+    summary: {
+      total: activityStats.reduce(
+        (sum, stat) => sum + parseInt(stat.get("count")),
+        0
+      ),
+    },
+  };
+}
+
+// Helper function to generate breakdown data for goals (used in getGoalsForDashboard)
+async function generateGoalBreakdownData(
+  goal,
+  ownerId,
+  periodFilter = "goal_duration"
+) {
+  const {
+    entity,
+    goalType,
+    assignee,
+    assignId,
+    pipeline,
+    pipelineStage,
+    startDate,
+    endDate,
+    trackingMetric,
+    activityType,
+  } = goal;
+
+  // Helper function to get date range for period filters
+  function getPeriodRange(filter) {
+    const now = new Date();
+    let start, end;
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    switch ((filter || "").toLowerCase()) {
+      case "yesterday":
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        end = new Date(today);
+        end.setDate(end.getDate() - 1);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "today":
+        start = new Date(today);
+        end = new Date(today);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "this_week":
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "last_week":
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay() - 7);
+        end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case "this_month":
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        end = new Date(
+          now.getFullYear(),
+          now.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+          999
+        );
+        break;
+      case "last_month":
+        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        break;
+      case "this_year":
+        start = new Date(now.getFullYear(), 0, 1);
+        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        break;
+      case "last_year":
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        end = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+        break;
+      case "goal_duration":
+      default:
+        // Use goal's startDate and endDate (or current date if indefinite)
+        start = startDate;
+        end = endDate || now;
+    }
+    return { start, end };
+  }
+
+  // Build where clause based on goal criteria and period filter
+  let start, end;
+  try {
+    ({ start, end } = getPeriodRange(periodFilter));
+    // If start or end is invalid, fallback to goal duration
+    if (
+      !start ||
+      !end ||
+      isNaN(new Date(start).getTime()) ||
+      isNaN(new Date(end).getTime())
+    ) {
+      start = startDate;
+      end = endDate || new Date();
+    }
+  } catch (e) {
+    // Fallback to goal duration if getPeriodRange fails
+    start = startDate;
+    end = endDate || new Date();
+  }
+
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [start, end],
+    },
+  };
+
+  // Add assignee filter based on assignId and assignee values
+  if (assignId && assignId !== "everyone") {
+    // Specific user assigned
+    whereClause.masterUserID = assignId;
+  } else if (
+    assignee &&
+    assignee !== "All" &&
+    assignee !== "Company (everyone)" &&
+    assignee !== "everyone"
+  ) {
+    // Legacy assignee field (for backward compatibility)
+    whereClause.masterUserID = assignee;
+  }
+
+  // Add pipeline filter if specified
+  if (pipeline && entity === "Deal") {
+    if (pipeline.includes(",")) {
+      // Multiple pipelines (comma-separated)
+      const pipelines = pipeline
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      whereClause.pipeline = {
+        [Op.in]: pipelines,
+      };
+    } else {
+      // Single pipeline
+      whereClause.pipeline = pipeline;
+    }
+  }
+
+  let breakdown = [];
+  let summary = {};
+
+  try {
+    if (entity === "Deal") {
+      // Handle different goal types with specific logic
+      if (goalType === "Progressed") {
+        // Use DealStageHistory for accurate stage progression tracking
+        if (pipelineStage) {
+          // Only filter by columns that exist in DealStageHistory
+          const stageHistoryWhereClause = {
+            newStage: pipelineStage,
+            updatedAt: {
+              [Op.between]: [start, end],
+            },
+          };
+
+          // Build Deal include where clause for pipeline and assignee
+          const dealWhere = {};
+          if (pipeline) {
+            if (pipeline.includes(",")) {
+              const pipelines = pipeline
+                .split(",")
+                .map((p) => p.trim())
+                .filter((p) => p !== "");
+              dealWhere.pipeline = { [Op.in]: pipelines };
+            } else {
+              dealWhere.pipeline = pipeline;
+            }
+          }
+          if (assignId && assignId !== "everyone") {
+            dealWhere.masterUserID = assignId;
+          } else if (
+            assignee &&
+            assignee !== "All" &&
+            assignee !== "Company (everyone)" &&
+            assignee !== "everyone"
+          ) {
+            dealWhere.masterUserID = assignee;
+          }
+
+          const includeClause = [
+            {
+              model: Deal,
+              where: Object.keys(dealWhere).length > 0 ? dealWhere : undefined,
+              required: true,
+            },
+          ];
+
+          const stageEntries = await DealStageHistory.findAll({
+            where: stageHistoryWhereClause,
+            include: includeClause,
+            attributes: [
+              "dealId",
+              "oldStage",
+              "newStage",
+              "updatedAt",
+              "dealValue",
+            ],
+            order: [["updatedAt", "DESC"]],
+          });
+
+          const currentValue =
+            trackingMetric === "Value"
+              ? stageEntries.reduce(
+                  (sum, entry) => sum + parseFloat(entry.dealValue || 0),
+                  0
+                )
+              : stageEntries.length;
+
+          summary = {
+            totalCount: stageEntries.length,
+            totalValue: stageEntries.reduce(
+              (sum, entry) => sum + parseFloat(entry.dealValue || 0),
+              0
+            ),
+            goalTarget: parseFloat(goal.targetValue),
+            trackingMetric: trackingMetric,
+            progress: {
+              current: currentValue,
+              target: parseFloat(goal.targetValue),
+              percentage: Math.min(
+                100,
+                Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+              ),
+            },
+          };
+
+          // Generate breakdown by stage entry date
+          breakdown =
+            goal.period === "Weekly"
+              ? generateWeeklyBreakdownForProgressed(
+                  stageEntries,
+                  goal,
+                  trackingMetric,
+                  start,
+                  end
+                )
+              : generateMonthlyBreakdownForProgressed(
+                  stageEntries,
+                  goal,
+                  trackingMetric,
+                  start,
+                  end
+                );
+        }
+      } else if (goalType === "Added") {
+        const addedDeals = await Deal.findAll({
+          where: whereClause,
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "pipelineStage",
+            "status",
+            "masterUserID",
+            "createdAt",
+          ],
+          order: [["createdAt", "DESC"]],
+        });
+
+        const currentValue =
+          trackingMetric === "Value"
+            ? addedDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              )
+            : addedDeals.length;
+
+        summary = {
+          totalCount: addedDeals.length,
+          totalValue: addedDeals.reduce(
+            (sum, deal) => sum + parseFloat(deal.value || 0),
+            0
+          ),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        breakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(
+                addedDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              )
+            : generateMonthlyBreakdown(
+                addedDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              );
+      } else if (goalType === "Won") {
+        const wonWhereClause = {
+          ...whereClause,
+          status: "won",
+          updatedAt: {
+            [Op.between]: [start, end],
+          },
+        };
+
+        const wonDeals = await Deal.findAll({
+          where: wonWhereClause,
+          attributes: [
+            "dealId",
+            "title",
+            "value",
+            "pipeline",
+            "pipelineStage",
+            "status",
+            "masterUserID",
+            "updatedAt",
+          ],
+          order: [["updatedAt", "DESC"]],
+        });
+
+        const currentValue =
+          trackingMetric === "Value"
+            ? wonDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              )
+            : wonDeals.length;
+
+        summary = {
+          totalCount: wonDeals.length,
+          totalValue: wonDeals.reduce(
+            (sum, deal) => sum + parseFloat(deal.value || 0),
+            0
+          ),
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: trackingMetric,
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        breakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(
+                wonDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              )
+            : generateMonthlyBreakdown(
+                wonDeals,
+                goal,
+                trackingMetric,
+                "Deal",
+                start,
+                end
+              );
+      }
+    } else if (entity === "Activity") {
+      // Build where clause for activities
+      const activityWhereClause = { ...whereClause };
+
+      // Add activity type filter if specified
+      if (activityType) {
+        if (activityType.includes(",")) {
+          // Multiple activity types (comma-separated)
+          const activityTypes = activityType
+            .split(",")
+            .map((type) => type.trim())
+            .filter((type) => type !== "");
+          activityWhereClause.type = {
+            [Op.in]: activityTypes,
+          };
+        } else {
+          // Single activity type
+          activityWhereClause.type = activityType;
+        }
+      }
+
+      // Add pipeline filter for Activity goals via Deal association
+      const includeClause = [];
+      if (pipeline) {
+        const dealWhereClause = {};
+        if (pipeline.includes(",")) {
+          const pipelines = pipeline
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
+          dealWhereClause.pipeline = {
+            [Op.in]: pipelines,
+          };
+        } else {
+          dealWhereClause.pipeline = pipeline;
+        }
+
+        includeClause.push({
+          model: Deal,
+          where: dealWhereClause,
+          required: true,
+        });
+      }
+
+      if (goalType === "Added") {
+        const addedActivities = await Activity.findAll({
+          where: activityWhereClause,
+          include: includeClause,
+          attributes: [
+            "activityId",
+            "type",
+            "isDone",
+            "masterUserID",
+            "dealId",
+            "createdAt",
+            "assignedTo",
+            "markedAsDoneTime",
+          ],
+          include: [
+            {
+              model: MasterUser,
+              attributes: [["name", "assignToUser"]],
+              as: "assignedUser", // <-- must match the alias in the association
+              required: false,
+            },
+          ],
+          order: [["createdAt", "DESC"]],
+        });
+
+        const currentValue = addedActivities.length;
+
+        summary = {
+          totalCount: addedActivities.length,
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: "Count",
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        breakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(
+                addedActivities,
+                goal,
+                "Count",
+                "Activity",
+                start,
+                end
+              )
+            : generateMonthlyBreakdown(
+                addedActivities,
+                goal,
+                "Count",
+                "Activity",
+                start,
+                end
+              );
+      } else if (goalType === "Completed") {
+        activityWhereClause.isDone = true;
+
+        const completedActivities = await Activity.findAll({
+          where: activityWhereClause,
+          include: includeClause,
+          attributes: [
+            "activityId",
+            "type",
+            "isDone",
+            "masterUserID",
+            "dealId",
+            "updatedAt",
+            "assignedTo",
+            "markedAsDoneTime",
+          ],
+          include: [
+            {
+              model: MasterUser,
+              attributes: [["name", "assignToUser"]],
+              as: "assignedUser", // <-- must match the alias in the association
+              required: false,
+            },
+          ],
+          order: [["updatedAt", "DESC"]],
+        });
+
+        const currentValue = completedActivities.length;
+
+        summary = {
+          totalCount: completedActivities.length,
+          goalTarget: parseFloat(goal.targetValue),
+          trackingMetric: "Count",
+          progress: {
+            current: currentValue,
+            target: parseFloat(goal.targetValue),
+            percentage: Math.min(
+              100,
+              Math.round((currentValue / parseFloat(goal.targetValue)) * 100)
+            ),
+          },
+        };
+
+        breakdown =
+          goal.period === "Weekly"
+            ? generateWeeklyBreakdown(
+                completedActivities,
+                goal,
+                "Count",
+                "Activity",
+                start,
+                end
+              )
+            : generateMonthlyBreakdown(
+                completedActivities,
+                goal,
+                "Count",
+                "Activity",
+                start,
+                end
+              );
+      }
+    }
+  } catch (error) {
+    console.error("Error generating goal breakdown data:", error);
+    breakdown = [];
+    summary = {
+      totalCount: 0,
+      totalValue: 0,
+      goalTarget: parseFloat(goal.targetValue),
+      trackingMetric: trackingMetric || "Count",
+      progress: {
+        current: 0,
+        target: parseFloat(goal.targetValue),
+        percentage: 0,
+      },
+    };
+  }
+
+  return {
+    breakdown,
+    summary,
+    periodInfo: {
+      start,
+      end,
+      periodFilter,
+    },
+  };
+}
+
+async function calculateGoalProgress(goal, ownerId) {
+  const {
+    entity,
+    goalType,
+    targetValue,
+    startDate,
+    endDate,
+    assignee,
+    assignId,
+    pipeline,
+    pipelineStage,
+    trackingMetric,
+  } = goal;
+
+  // Handle indefinite goals (endDate is null)
+  const currentDate = new Date();
+  const effectiveEndDate = endDate || currentDate;
+
+  const whereClause = {
+    createdAt: {
+      [Op.between]: [startDate, effectiveEndDate],
+    },
+  };
+
+  // Add assignee filter based on assignId and assignee values
+  if (assignId && assignId !== "everyone") {
+    // Specific user assigned
+    whereClause.masterUserID = assignId;
+  } else if (
+    assignee &&
+    assignee !== "All" &&
+    assignee !== "Company (everyone)" &&
+    assignee !== "everyone"
+  ) {
+    // Legacy assignee field (for backward compatibility)
+    whereClause.masterUserID = assignee;
+  } else if (ownerId && !assignId && !assignee) {
+    // Fallback to owner ID if no specific assignment
+    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+  }
+  // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
+
+  // Add pipeline filter if specified
+  if (pipeline && entity === "Deal") {
+    if (pipeline.includes(",")) {
+      // Multiple pipelines (comma-separated)
+      const pipelines = pipeline
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p !== "");
+      whereClause.pipeline = {
+        [Op.in]: pipelines,
+      };
+    } else {
+      // Single pipeline
+      whereClause.pipeline = pipeline;
+    }
+  }
+
+  let currentValue = 0;
+
+  try {
+    if (entity === "Deal") {
+      if (goalType === "Added") {
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", { where: whereClause });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: whereClause });
+          currentValue = count;
+        }
+      } else if (goalType === "Won") {
+        const wonWhereClause = {
+          ...whereClause,
+          status: "won",
+        };
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", { where: wonWhereClause });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: wonWhereClause });
+          currentValue = count;
+        }
+      } else if (goalType === "Progressed") {
+        // Count deals that moved to specific stage or progressed beyond qualified
+        let progressedWhereClause = { ...whereClause };
+        if (pipelineStage) {
+          // Track deals entering specific pipeline stage
+          progressedWhereClause.pipelineStage = pipelineStage;
+        } else {
+          // Fallback: deals that progressed beyond "Qualified"
+          progressedWhereClause.pipelineStage = { [Op.ne]: "Qualified" };
+        }
+
+        if (trackingMetric === "Value") {
+          const result = await Deal.sum("value", {
+            where: progressedWhereClause,
+          });
+          currentValue = result || 0;
+        } else {
+          const count = await Deal.count({ where: progressedWhereClause });
+          currentValue = count;
+        }
+      }
+    } else if (entity === "Lead") {
+      const count = await Lead.count({ where: whereClause });
+      currentValue = count;
+    } else if (entity === "Activity") {
+      const count = await Activity.count({ where: whereClause });
+      currentValue = count;
+    } else if (entity === "Forecast") {
+      // For forecast, calculate based on deal projections
+      const result = await Deal.sum("value", {
+        where: {
+          ...whereClause,
+          status: { [Op.in]: ["open", "qualified"] },
+        },
+      });
+      currentValue = result || 0;
+    }
+
+    const percentage = Math.min(
+      100,
+      Math.round((currentValue / targetValue) * 100)
+    );
+
+    return {
+      currentValue,
+      targetValue: parseFloat(targetValue),
+      percentage,
+      status:
+        percentage >= 100
+          ? "completed"
+          : percentage >= 75
+          ? "on_track"
+          : "behind",
+    };
+  } catch (error) {
+    console.error("Error calculating goal progress:", error);
+    return {
+      currentValue: 0,
+      targetValue: parseFloat(targetValue),
+      percentage: 0,
+      status: "error",
+      error: error.message,
+    };
+  }
+}
+
+function getDateRange(period) {
+  const now = new Date();
+  let start, end;
+
+  switch (period) {
+    case "today":
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      break;
+    case "this_week":
+      start = new Date(now.setDate(now.getDate() - now.getDay()));
+      end = new Date(now.setDate(now.getDate() - now.getDay() + 6));
+      break;
+    case "this_month":
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      break;
+    case "this_quarter":
+      const quarter = Math.floor(now.getMonth() / 3);
+      start = new Date(now.getFullYear(), quarter * 3, 1);
+      end = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+      break;
+    case "this_year":
+      start = new Date(now.getFullYear(), 0, 1);
+      end = new Date(now.getFullYear(), 11, 31);
+      break;
+    default:
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  }
+
+  return { start, end };
+}
+
+// Generate monthly breakdown based on goal's actual duration and frequency
+function generateMonthlyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  const { startDate, endDate, period, targetValue } = goal;
+  const currentDate = new Date();
+  const isIndefinite = !endDate || endDate === null;
+
+  // Use filter dates if provided, otherwise use goal dates
+  const effectiveStartDate = filterStartDate
+    ? new Date(filterStartDate)
+    : new Date(startDate);
+  const effectiveEndDate = filterEndDate
+    ? new Date(filterEndDate)
+    : isIndefinite
+    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
+    : new Date(endDate);
+
+  // Calculate monthly target based on frequency
+  let monthlyTarget = parseFloat(targetValue);
+  if (period === "Quarterly") {
+    monthlyTarget = parseFloat(targetValue) / 3; // Divide quarterly target by 3 months
+  } else if (period === "Yearly") {
+    monthlyTarget = parseFloat(targetValue) / 12; // Divide yearly target by 12 months
+  }
+  // For Monthly frequency, target remains the same
+
+  const monthlyBreakdown = [];
+
+  // Generate months from effective start date to effective end date
+  let currentMonth = new Date(
+    effectiveStartDate.getFullYear(),
+    effectiveStartDate.getMonth(),
+    1
+  );
+
+  while (currentMonth <= effectiveEndDate) {
+    const monthStart = new Date(currentMonth);
+    const monthEnd = new Date(
+      currentMonth.getFullYear(),
+      currentMonth.getMonth() + 1,
+      0
+    );
+
+    // Adjust first month to start from effective start date
+    if (
+      monthStart.getMonth() === effectiveStartDate.getMonth() &&
+      monthStart.getFullYear() === effectiveStartDate.getFullYear()
+    ) {
+      monthStart.setDate(effectiveStartDate.getDate());
+    }
+
+    // Adjust last month to end at effective end date
+    if (
+      monthEnd.getMonth() === effectiveEndDate.getMonth() &&
+      monthEnd.getFullYear() === effectiveEndDate.getFullYear()
+    ) {
+      monthEnd.setDate(effectiveEndDate.getDate());
+    }
+
+    // Filter records for this month
+    const monthRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= monthStart && recordDate <= monthEnd;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let monthResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      monthResult = monthRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      monthResult = monthRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = monthResult - monthlyTarget;
+    const percentage =
+      monthResult > 0 ? Math.round((monthResult / monthlyTarget) * 100) : 0;
+
+    // Format period display
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const periodDisplay = `${
+      monthNames[currentMonth.getMonth()]
+    } ${currentMonth.getFullYear()}`;
+
+    monthlyBreakdown.push({
+      period: periodDisplay,
+      goal: monthlyTarget,
+      result: monthResult,
+      difference: difference,
+      percentage: percentage,
+      monthStart: monthStart.toISOString(),
+      monthEnd: monthEnd.toISOString(),
+      recordCount: monthRecords.length,
+      isCurrentMonth:
+        currentMonth.getMonth() === currentDate.getMonth() &&
+        currentMonth.getFullYear() === currentDate.getFullYear(),
+      isFutureMonth: currentMonth > currentDate,
+    });
+
+    // Move to next month
+    currentMonth.setMonth(currentMonth.getMonth() + 1);
+  }
+
+  return monthlyBreakdown;
+}
+
+// Calculate target per period based on frequency
+function calculateTargetPerPeriod(totalTarget, frequency, totalPeriods) {
+  const target = parseFloat(totalTarget);
+
+  if (frequency === "Monthly") {
+    return target; // Monthly targets remain the same
+  } else if (frequency === "Quarterly") {
+    return target / 3; // Quarterly target divided by 3 months
+  } else if (frequency === "Yearly") {
+    return target / 12; // Yearly target divided by 12 months
+  }
+
+  return target; // Default case
+}
+
+// Generate monthly breakdown for progressed goals based on stage entry dates
+function generateMonthlyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const monthlyData = new Map();
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const monthKey = `${entryDate.getFullYear()}-${String(
+      entryDate.getMonth() + 1
+    ).padStart(2, "0")}`;
+    const monthLabel = entryDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+    });
+
+    if (!monthlyData.has(monthKey)) {
+      monthlyData.set(monthKey, {
+        period: monthLabel,
+        label: monthLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const monthData = monthlyData.get(monthKey);
+    monthData.count += 1;
+    monthData.value += parseFloat(entry.Deal?.value || 0);
+    monthData.deals.push(entry);
+  });
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(monthlyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([monthKey, data]) => {
+      const goalTarget = parseFloat(goal.targetValue);
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const goalProgress =
+        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
+
+      return {
+        period: data.period,
+        label: data.label,
+        goalTarget: goalTarget,
+        result: result,
+        difference: difference,
+        goalProgress: goalProgress,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
+}
+
+// Generate weekly breakdown for progressed goals based on stage entry dates
+function generateWeeklyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const weeklyData = new Map();
+
+  // Helper function to get week number
+  function getWeekNumber(date) {
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    );
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  }
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const weekNumber = getWeekNumber(entryDate);
+    const year = entryDate.getFullYear();
+    const weekKey = `${year}-W${weekNumber}`;
+    const weekLabel = `W${weekNumber} ${year}`;
+
+    if (!weeklyData.has(weekKey)) {
+      weeklyData.set(weekKey, {
+        period: weekLabel,
+        label: weekLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const weekData = weeklyData.get(weekKey);
+    weekData.count += 1;
+    weekData.value += parseFloat(entry.Deal?.value || 0);
+    weekData.deals.push(entry);
+  });
+
+  // Calculate weekly target based on goal duration
+  const currentDate = new Date();
+  const isIndefinite = !goal.endDate || goal.endDate === null;
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
+  const goalStartDate = new Date(goal.startDate);
+  const totalDays = Math.ceil(
+    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalWeeks = Math.ceil(totalDays / 7);
+  const weeklyTarget = parseFloat(goal.targetValue) / totalWeeks;
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(weeklyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([weekKey, data]) => {
+      const goalTarget = weeklyTarget;
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const goalProgress =
+        goalTarget > 0 ? `${Math.round((result / goalTarget) * 100)}%` : "0%";
+
+      return {
+        period: data.period,
+        label: data.label,
+        goal: goalTarget, // Use 'goal' key to match weekly breakdown format
+        result: result,
+        difference: difference,
+        goalProgress: goalProgress,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
+}
+function generateQuarterlyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  if (!records || records.length === 0) return [];
+
+  const now = new Date();
+  const startDate = filterStartDate || new Date(goal.startDate);
+  const endDate =
+    filterEndDate || (goal.endDate ? new Date(goal.endDate) : now);
+
+  // Use the filtered date range, not the goal's full duration
+  const effectiveStartDate = new Date(
+    Math.max(startDate.getTime(), new Date(goal.startDate).getTime())
+  );
+  const effectiveEndDate = new Date(
+    Math.min(
+      endDate.getTime(),
+      goal.endDate ? new Date(goal.endDate).getTime() : now.getTime()
+    )
+  );
+
+  const quarterlyBreakdown = [];
+
+  // Helper function to get quarter start date
+  function getQuarterStart(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
+    return new Date(year, quarterStartMonth, 1);
+  }
+
+  // Helper function to get quarter end date
+  function getQuarterEnd(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterEndMonth = Math.floor(month / 3) * 3 + 2; // 2, 5, 8, or 11
+    return new Date(year, quarterEndMonth + 1, 0, 23, 59, 59, 999); // Last day of quarter
+  }
+
+  // Helper function to get quarter number (1-4)
+  function getQuarterNumber(date) {
+    return Math.floor(date.getMonth() / 3) + 1;
+  }
+
+  // Calculate quarterly target based on goal's target and period
+  let quarterlyTarget = parseFloat(goal.targetValue);
+  if (goal.period === "Monthly") {
+    quarterlyTarget = quarterlyTarget * 3; // 3 months per quarter
+  } else if (goal.period === "Weekly") {
+    quarterlyTarget = quarterlyTarget * 13; // ~13 weeks per quarter
+  } else if (goal.period === "Yearly") {
+    quarterlyTarget = quarterlyTarget / 4; // 4 quarters per year
+  }
+  // If goal.period === "Quarterly", use the target as-is
+
+  // Start from the first quarter that intersects with effective start date
+  let currentQuarterStart = getQuarterStart(effectiveStartDate);
+
+  // Generate breakdown for each quarter within the effective period
+  while (currentQuarterStart <= effectiveEndDate) {
+    const quarterEnd = getQuarterEnd(currentQuarterStart);
+
+    // Adjust quarter boundaries to fit within effective date range
+    let quarterStart = new Date(
+      Math.max(currentQuarterStart.getTime(), effectiveStartDate.getTime())
+    );
+    let quarterEndAdjusted = new Date(
+      Math.min(quarterEnd.getTime(), effectiveEndDate.getTime())
+    );
+
+    // Don't process quarters that are entirely in the future beyond effective end date
+    if (quarterStart > effectiveEndDate) {
+      break;
+    }
+
+    // Filter records for this quarter
+    const quarterRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= quarterStart && recordDate <= quarterEndAdjusted;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let quarterResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      quarterResult = quarterRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      quarterResult = quarterRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = quarterResult - quarterlyTarget;
+    const percentage =
+      quarterlyTarget > 0
+        ? Math.round((quarterResult / quarterlyTarget) * 100)
+        : 0;
+
+    // Format period display (Q3 2025 format)
+    const quarterNumber = getQuarterNumber(currentQuarterStart);
+    const year = currentQuarterStart.getFullYear();
+    const periodDisplay = `Q${quarterNumber} ${year}`;
+
+    // Check if this is the current quarter
+    const currentQuarterStart_check = getQuarterStart(now);
+    const isCurrentQuarter =
+      currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
+
+    quarterlyBreakdown.push({
+      period: periodDisplay,
+      goal: quarterlyTarget, // Keep the actual quarterly target
+      result: quarterResult,
+      difference: difference,
+      percentage: percentage,
+      quarterStart: quarterStart.toISOString(),
+      quarterEnd: quarterEndAdjusted.toISOString(),
+      recordCount: quarterRecords.length,
+      isCurrentQuarter: isCurrentQuarter,
+      isFutureQuarter: currentQuarterStart > now,
+      quarterNumber: quarterNumber,
+      year: year,
+    });
+
+    // Move to next quarter
+    currentQuarterStart = new Date(
+      currentQuarterStart.getFullYear(),
+      currentQuarterStart.getMonth() + 3,
+      1
+    );
+  }
+
+  return quarterlyBreakdown;
+}
+// Generate weekly breakdown specifically for Activity goals
+function generateWeeklyBreakdown(
+  records,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  const { startDate, endDate, period, targetValue } = goal;
+  const currentDate = new Date();
+  const isIndefinite = !endDate || endDate === null;
+
+  // Use filter dates if provided, otherwise use goal dates
+  const effectiveStartDate = filterStartDate
+    ? new Date(filterStartDate)
+    : new Date(startDate);
+  const effectiveEndDate = filterEndDate
+    ? new Date(filterEndDate)
+    : isIndefinite
+    ? new Date(currentDate.getFullYear() + 1, 0, 31) // Extend to end of January next year for indefinite goals
+    : new Date(endDate);
+
+  // Calculate weekly target based on goal duration and frequency
+  let weeklyTarget = parseFloat(targetValue);
+
+  // Calculate total weeks in the effective period
+  const totalDays = Math.ceil(
+    (effectiveEndDate - effectiveStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalWeeks = Math.ceil(totalDays / 7);
+
+  if (period === "Monthly" || period === "Quarterly" || period === "Yearly") {
+    // For any frequency, distribute the total target across the actual weeks in the goal period
+    weeklyTarget = parseFloat(targetValue) / totalWeeks;
+  }
+  // Round to reasonable decimal places
+  weeklyTarget = Math.round(weeklyTarget * 100) / 100;
+
+  const weeklyBreakdown = [];
+
+  // Helper function to get week number
+  function getWeekNumber(date) {
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+    );
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  }
+
+  // Helper function to get start of week (Monday)
+  function getStartOfWeek(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+    return new Date(d.setDate(diff));
+  }
+
+  // Helper function to get end of week (Sunday)
+  function getEndOfWeek(date) {
+    const startOfWeek = getStartOfWeek(date);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+    return endOfWeek;
+  }
+
+  // Start from the week containing the effective start date
+  let currentWeekStart = getStartOfWeek(effectiveStartDate);
+
+  while (currentWeekStart <= effectiveEndDate) {
+    const weekStart = new Date(currentWeekStart);
+    const weekEnd = getEndOfWeek(currentWeekStart);
+
+    // Adjust first week to start from effective start date
+    if (
+      currentWeekStart <= effectiveStartDate &&
+      weekEnd >= effectiveStartDate
+    ) {
+      weekStart.setTime(effectiveStartDate.getTime());
+    }
+
+    // Adjust last week to end at effective end date
+    if (weekEnd >= effectiveEndDate) {
+      weekEnd.setTime(effectiveEndDate.getTime());
+    }
+
+    // Don't process weeks that are entirely in the future beyond effective end date
+    if (weekStart > effectiveEndDate) {
+      break;
+    }
+
+    // Filter records for this week
+    const weekRecords = records.filter((record) => {
+      const recordDate = new Date(record.createdAt);
+      return recordDate >= weekStart && recordDate <= weekEnd;
+    });
+
+    // Calculate result based on tracking metric and entity type
+    let weekResult = 0;
+    if (entityType === "Deal" && trackingMetric === "Value") {
+      weekResult = weekRecords.reduce(
+        (sum, deal) => sum + parseFloat(deal.value || 0),
+        0
+      );
+    } else {
+      weekResult = weekRecords.length; // Count for all other cases
+    }
+
+    // Calculate progress metrics
+    const difference = weekResult - weeklyTarget;
+    const percentage =
+      weeklyTarget > 0 ? Math.round((weekResult / weeklyTarget) * 100) : 0;
+
+    // Format period display (W31 2025 format)
+    const weekNumber = getWeekNumber(currentWeekStart);
+    const year = currentWeekStart.getFullYear();
+    const periodDisplay = `W${weekNumber} ${year}`;
+
+    // Check if this is the current week
+    const currentWeekStart_check = getStartOfWeek(currentDate);
+    const isCurrentWeek =
+      currentWeekStart.getTime() === currentWeekStart_check.getTime();
+
+    weeklyBreakdown.push({
+      period: periodDisplay,
+      goal: weeklyTarget, // Keep the actual weekly target (with decimals)
+      result: weekResult,
+      difference: difference,
+      percentage: percentage,
+      weekStart: weekStart.toISOString(),
+      weekEnd: weekEnd.toISOString(),
+      recordCount: weekRecords.length,
+      isCurrentWeek: isCurrentWeek,
+      isFutureWeek: currentWeekStart > currentDate,
+      weekNumber: weekNumber,
+      year: year,
+    });
+
+    // Move to next week
+    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+  }
+
+  return weeklyBreakdown;
+}
+
+// Generate quarterly breakdown for progressed goals based on stage entry dates
+function generateQuarterlyBreakdownForProgressed(
+  stageEntries,
+  goal,
+  trackingMetric,
+  entityType,
+  filterStartDate = null,
+  filterEndDate = null
+) {
+  if (!stageEntries || stageEntries.length === 0) return [];
+
+  const quarterlyData = new Map();
+
+  // Helper function to get quarter number (1-4)
+  function getQuarterNumber(date) {
+    return Math.floor(date.getMonth() / 3) + 1;
+  }
+
+  // Helper function to get quarter start date
+  function getQuarterStart(date) {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const quarterStartMonth = Math.floor(month / 3) * 3; // 0, 3, 6, or 9
+    return new Date(year, quarterStartMonth, 1);
+  }
+
+  stageEntries.forEach((entry) => {
+    const entryDate = new Date(entry.enteredAt);
+    const quarterNumber = getQuarterNumber(entryDate);
+    const year = entryDate.getFullYear();
+    const quarterKey = `${year}-Q${quarterNumber}`;
+    const quarterLabel = `Q${quarterNumber} ${year}`;
+
+    if (!quarterlyData.has(quarterKey)) {
+      quarterlyData.set(quarterKey, {
+        period: quarterLabel,
+        label: quarterLabel,
+        count: 0,
+        value: 0,
+        deals: [],
+      });
+    }
+
+    const quarterData = quarterlyData.get(quarterKey);
+    quarterData.count += 1;
+    quarterData.value += parseFloat(entry.Deal?.value || 0);
+    quarterData.deals.push(entry);
+  });
+
+  // Calculate quarterly target based on goal duration
+  const currentDate = new Date();
+  const isIndefinite = !goal.endDate || goal.endDate === null;
+  const effectiveEndDate = isIndefinite ? currentDate : new Date(goal.endDate);
+  const goalStartDate = new Date(goal.startDate);
+  const totalDays = Math.ceil(
+    (effectiveEndDate - goalStartDate) / (1000 * 60 * 60 * 24)
+  );
+  const totalQuarters = Math.ceil(totalDays / 91); // Approximate 91 days per quarter
+  let quarterlyTarget = parseFloat(goal.targetValue) / totalQuarters;
+
+  // Adjust target based on goal period
+  if (goal.period === "Monthly") {
+    quarterlyTarget = parseFloat(goal.targetValue) * 3; // 3 months per quarter
+  } else if (goal.period === "Weekly") {
+    quarterlyTarget = parseFloat(goal.targetValue) * 13; // ~13 weeks per quarter
+  } else if (goal.period === "Yearly") {
+    quarterlyTarget = parseFloat(goal.targetValue) / 4; // 4 quarters per year
+  } else if (goal.period === "Quarterly") {
+    quarterlyTarget = parseFloat(goal.targetValue); // Use as-is for quarterly goals
+  }
+
+  // Convert to array and sort by date
+  const breakdown = Array.from(quarterlyData.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([quarterKey, data]) => {
+      const goalTarget = quarterlyTarget;
+      const result = trackingMetric === "Value" ? data.value : data.count;
+      const difference = result - goalTarget;
+      const percentage =
+        goalTarget > 0 ? Math.round((result / goalTarget) * 100) : 0;
+
+      return {
+        period: data.period,
+        label: data.label,
+        goal: goalTarget, // Use 'goal' key to match quarterly breakdown format
+        result: result,
+        difference: difference,
+        percentage: percentage,
+        count: data.count,
+        value: data.value,
+        deals: data.deals.length,
+      };
+    });
+
+  return breakdown;
+}
+// Bulk delete multiple or single goals
+exports.bulkDeleteGoal = async (req, res) => {
+  try {
+    let { goalIds } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Support both single and multiple deletion
+    if (!goalIds) {
+      // Try to get from query or params for single delete
+      if (req.body.goalId) {
+        goalIds = [req.body.goalId];
+      } else if (req.query.goalId) {
+        goalIds = [req.query.goalId];
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "goalIds array or goalId is required",
+        });
+      }
+    } else if (!Array.isArray(goalIds)) {
+      goalIds = [goalIds];
+    }
+
+    // Find goals to delete (admin: all, non-admin: only own)
+    let goalsToDelete;
+    if (role === "admin") {
+      goalsToDelete = await Goal.findAll({
+        where: {
+          goalId: { [Op.in]: goalIds },
+        },
+      });
+    } else {
+      goalsToDelete = await Goal.findAll({
+        where: {
+          goalId: { [Op.in]: goalIds },
+          ownerId,
+        },
+      });
+    }
+
+    if (!goalsToDelete || goalsToDelete.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No goals found to delete",
+      });
+    }
+
+    // Check if some goals were not found or not accessible
+    const foundIds = goalsToDelete.map((g) => g.goalId);
+    const notFoundIds = goalIds.filter((id) => !foundIds.includes(id));
+
+    // Delete the goals
+    let deleteWhere = { goalId: { [Op.in]: foundIds } };
+    if (role !== "admin") deleteWhere.ownerId = ownerId;
+    const deletedCount = await Goal.destroy({ where: deleteWhere });
+
+    let message = `Successfully deleted ${deletedCount} goal(s)`;
+    if (notFoundIds.length > 0) {
+      message += `. Note: ${notFoundIds.length} goal(s) were not found or not accessible.`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: message,
+      data: {
+        deletedCount: deletedCount,
+        deletedIds: foundIds,
+        notFoundIds: notFoundIds,
+      },
+    });
+  } catch (error) {
+    console.error("Error bulk deleting goals:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete goals",
       error: error.message,
     });
   }
