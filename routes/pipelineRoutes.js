@@ -30,8 +30,8 @@ router.post(
   pipelineController.createStage
 );
 router.post("/stages/:stageId", validateAdmin, pipelineController.updateStage);
-router.post(
-  "/stages/:stageId",
+router.delete(
+  "/delete/stage/:stageId",
   validateAdmin,
   pipelineController.deleteStage
 );
