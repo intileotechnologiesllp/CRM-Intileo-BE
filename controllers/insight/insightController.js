@@ -2038,24 +2038,24 @@ exports.getGoalData = async (req, res) => {
     }
 
     // Accept selectedColumns from body or query (object with Deal, Person, Organization arrays)
-    let selectedColumns =
-      req.body.selectedColumns || req.query.selectedColumns || {};
-    if (typeof selectedColumns === "string") {
-      try {
-        selectedColumns = JSON.parse(selectedColumns);
-      } catch (e) {
-        selectedColumns = {};
-      }
-    }
-    const selectedDeal = Array.isArray(selectedColumns.Deal)
-      ? selectedColumns.Deal
-      : [];
-    const selectedPerson = Array.isArray(selectedColumns.Person)
-      ? selectedColumns.Person
-      : [];
-    const selectedOrganization = Array.isArray(selectedColumns.Organization)
-      ? selectedColumns.Organization
-      : [];
+    // let selectedColumns =
+    //   req.body.selectedColumns || req.query.selectedColumns || {};
+    // if (typeof selectedColumns === "string") {
+    //   try {
+    //     selectedColumns = JSON.parse(selectedColumns);
+    //   } catch (e) {
+    //     selectedColumns = {};
+    //   }
+    // }
+    // const selectedDeal = Array.isArray(selectedColumns.Deal)
+    //   ? selectedColumns.Deal
+    //   : [];
+    // const selectedPerson = Array.isArray(selectedColumns.Person)
+    //   ? selectedColumns.Person
+    //   : [];
+    // const selectedOrganization = Array.isArray(selectedColumns.Organization)
+    //   ? selectedColumns.Organization
+    //   : [];
 
     // Process each goal to get detailed data
     const goalsWithData = await Promise.all(
