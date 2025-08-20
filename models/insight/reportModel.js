@@ -11,7 +11,7 @@ const Report = sequelize.define(
     },
     dashboardId: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+       allowNull: true, // Allow null for reports not assigned to dashboard yet
       references: { model: "dashboards", key: "dashboardId" },
     },
     name: {
@@ -24,6 +24,8 @@ const Report = sequelize.define(
     config: { type: DataTypes.JSON, allowNull: true }, // chart config, filters, etc.
     position: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 0 },
     description: { type: DataTypes.TEXT, allowNull: true },
+    folderId: { type: DataTypes.INTEGER, allowNull: true }, // reference to parent folder
+    ownerId: { type: DataTypes.INTEGER, allowNull: false }, // userId
   },
   {
     tableName: "Reports",
