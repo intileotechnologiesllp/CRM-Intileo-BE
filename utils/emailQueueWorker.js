@@ -1432,6 +1432,17 @@ async function startUserSpecificInboxWorkers() {
                 // Check if we need to queue more batches (only for first batch with dynamic fetch)
                 if (page === 1 && dynamicFetch) {
                   try {
+                    // 🛡️ Check failure tracking to prevent auto-pagination for failing users
+                    const failureKey = `gmail_failures_${masterUserID}`;
+                    const userFailures = global[failureKey] || { count: 0, resetTime: 0 };
+                    
+                    if (userFailures.count > 0) {
+                      console.log(
+                        `[AutoPagination] 🚫 Skipping auto-pagination for user ${masterUserID} due to ${userFailures.count} recent failures`
+                      );
+                      return; // Skip auto-pagination for users with recent failures
+                    }
+
                     // Get total email count dynamically by connecting to IMAP
                     console.log(
                       `[AutoPagination] Connecting to IMAP to get actual email count for user ${masterUserID}...`
@@ -1530,12 +1541,21 @@ async function startUserSpecificInboxWorkers() {
 
                     // Calculate how many batches we need
                     const totalBatches = Math.ceil(totalEmails / batchSize);
+                    const maxAllowedBatches = 100; // 🛡️ Safety limit to prevent system overload
+                    const actualBatches = Math.min(totalBatches, maxAllowedBatches);
+                    
                     console.log(
                       `[AutoPagination] User ${masterUserID}: Need ${totalBatches} total batches (${batchSize} emails per batch)`
                     );
+                    
+                    if (totalBatches > maxAllowedBatches) {
+                      console.log(
+                        `[AutoPagination] ⚠️ Limiting user ${masterUserID} to ${maxAllowedBatches} batches (from ${totalBatches}) to prevent system overload`
+                      );
+                    }
 
                     // Only queue additional batches if we need more than 1 batch
-                    if (totalBatches > 1) {
+                    if (actualBatches > 1) {
                       const amqpUrl =
                         process.env.RABBITMQ_URL || "amqp://localhost";
                       const tempConnection = await amqp.connect(amqpUrl);
@@ -1544,7 +1564,7 @@ async function startUserSpecificInboxWorkers() {
                       // Queue remaining batches (pages 2, 3, 4, etc.)
                       for (
                         let nextPage = 2;
-                        nextPage <= totalBatches;
+                        nextPage <= actualBatches;
                         nextPage++
                       ) {
                         const nextSkipCount = (nextPage - 1) * batchSize;
@@ -1589,7 +1609,7 @@ async function startUserSpecificInboxWorkers() {
 
                       console.log(
                         `[AutoPagination] Successfully queued ${
-                          totalBatches - 1
+                          actualBatches - 1
                         } additional batches for user ${masterUserID}`
                       );
                     } else {
