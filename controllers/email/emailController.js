@@ -462,8 +462,151 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
   return thread;
 }
 
+// 🧠 INTELLIGENT CHUNKING: Helper function to fetch emails in date-based chunks for ALL providers
+const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unknown', userID = 'unknown') => {
+  const formatDateForIMAP = (date) => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const allChunkedMessages = [];
+  const today = new Date();
+  const maxChunks = 50; // Increased chunks for larger history
+  let successfulChunks = 0;
+  let failedChunks = 0;
+  
+  console.log(`[Batch ${page}] 🔄 Starting ${provider} chunked fetch for USER ${userID}: ${chunkDays}-day chunks, max ${maxChunks} chunks`);
+  console.log(`[Batch ${page}] 📊 USER ${userID} CHUNKING STRATEGY: Will process up to ${maxChunks * chunkDays} days of email history in ${chunkDays}-day chunks`);
+  
+  for (let chunk = 0; chunk < maxChunks; chunk++) {
+    let chunkMessages = [];
+    try {
+      const chunkEndDate = new Date(today.getTime() - (chunk * chunkDays * 24 * 60 * 60 * 1000));
+      const chunkStartDate = new Date(today.getTime() - ((chunk + 1) * chunkDays * 24 * 60 * 60 * 1000));
+      
+      const endDateStr = formatDateForIMAP(chunkEndDate);
+      const startDateStr = formatDateForIMAP(chunkStartDate);
+      
+      console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
+      
+      // Search for emails in this date range with progressive timeout
+      const baseTimeout = 20000; // Base 20 seconds
+      const progressiveTimeout = baseTimeout + (chunk * 3000); // Add 3s per chunk for older data
+      
+      const searchPromise = connection.search([
+        ["SINCE", startDateStr],
+        ["BEFORE", endDateStr]
+      ], {
+        bodies: "HEADER",
+        struct: true,
+      });
+      
+      const chunkTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${provider} chunk ${chunk + 1} timeout`)), progressiveTimeout)
+      );
+      
+      chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
+      successfulChunks++;
+      console.log(`[Batch ${page}] ✅ USER ${userID} ${provider} Chunk ${chunk + 1}: Found ${chunkMessages.length} emails (${(progressiveTimeout/1000)}s timeout)`);
+      
+      allChunkedMessages.push(...chunkMessages);
+      
+      // Smart stopping logic
+      if (chunkMessages.length === 0) {
+        console.log(`[Batch ${page}] 🏁 USER ${userID} ${provider} no more emails found, stopping at chunk ${chunk + 1}`);
+        break;
+      }
+      
+      // Memory protection - if we have too many emails, stop chunking
+      if (allChunkedMessages.length > 5000) {
+        console.log(`[Batch ${page}] 🛡️ USER ${userID} ${provider} memory protection: ${allChunkedMessages.length} emails collected, stopping chunking`);
+        break;
+      }
+      
+    } catch (error) {
+      failedChunks++;
+      console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} Chunk ${chunk + 1} failed: ${error.message}, continuing...`);
+      
+      // If too many consecutive chunks fail, stop
+      if (failedChunks > 5 && successfulChunks === 0) {
+        console.log(`[Batch ${page}] ❌ USER ${userID} ${provider} too many failed chunks (${failedChunks}), stopping chunking`);
+        break;
+      }
+      
+      // Continue with next chunk even if this one fails
+    }
+    
+    // Brief pause between chunks to prevent rate limiting
+    if (chunk < maxChunks - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second pause
+    }
+  }
+  
+  console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
+  console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} CHUNK SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${Math.min(chunk + 1, maxChunks)} total chunks`);
+  return allChunkedMessages;
+      
+      console.log(`[Batch ${page}] 📅 ${provider} Chunk ${chunk + 1}: ${startDateStr} to ${endDateStr}`);
+      
+      // Search for emails in this date range with timeout
+      const searchPromise = connection.search([
+        ["SINCE", startDateStr],
+        ["BEFORE", endDateStr]
+      ], {
+        bodies: "HEADER",
+        struct: true,
+      });
+      
+      const chunkTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${provider} chunk ${chunk + 1} timeout`)), 12000) // Increased from 8s to 12s
+      );
+      
+      const chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
+      console.log(`[Batch ${page}] ✅ ${provider} Chunk ${chunk + 1}: Found ${chunkMessages.length} emails`);
+      console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} Progress: ${allChunkedMessages.length} total emails collected so far (${chunk + 1}/${maxChunks} chunks)`);
+      
+      // Smart stopping logic
+      if (chunkMessages.length === 0) {
+        console.log(`[Batch ${page}] 🏁 USER ${userID} ${provider} no more emails found, stopping at chunk ${chunk + 1}`);
+        break;
+      }
+      
+      // Memory protection - if we have too many emails, stop chunking
+      if (allChunkedMessages.length > 5000) {
+        console.log(`[Batch ${page}] 🛡️ USER ${userID} ${provider} memory protection: ${allChunkedMessages.length} emails collected, stopping chunking`);
+        break;
+      }
+      
+    } catch (error) {
+      failedChunks++;
+      console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} Chunk ${chunk + 1} failed: ${error.message}, continuing...`);
+      
+      // If too many consecutive chunks fail, stop
+      if (failedChunks > 5 && successfulChunks === 0) {
+        console.log(`[Batch ${page}] ❌ USER ${userID} ${provider} too many failed chunks (${failedChunks}), stopping chunking`);
+        break;
+      }
+      
+      // Continue with next chunk even if this one fails
+    }
+    
+    // Brief pause between chunks to prevent rate limiting
+    if (chunk < maxChunks - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second pause
+    }
+  }
+  
+  console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
+  console.log(`[Batch ${page}] � USER ${userID} ${provider} CHUNK SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${Math.min(chunk + 1, maxChunks)} total chunks`);
+  return allChunkedMessages;
+};
+
 exports.queueFetchAllEmails = async (req, res) => {
-  const { batchSize = 50, days = 7 } = req.query;
+  const { batchSize = 50, days = "all" } = req.query; // Enable ALL emails for all providers
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
@@ -632,7 +775,7 @@ exports.fetchInboxEmails = async (req, res) => {
   let {
     batchSize = 50,
     page = 1,
-    days = 7,
+    days = "all", // Enable ALL emails for all providers
     startUID,
     endUID,
     allUIDsInBatch,
@@ -853,10 +996,128 @@ exports.fetchInboxEmails = async (req, res) => {
           // For dynamic fetch, get all emails and then slice for this batch
           let allMessages;
           if (!days || days === 0 || days === "all") {
-            allMessages = await connection.search(["ALL"], {
-              bodies: "HEADER",
-              struct: true,
-            });
+            // 🧠 INTELLIGENT CHUNKING for ALL email providers
+            console.log(`[Batch ${page}] 📧 Provider: ${provider || 'unknown'} - analyzing inbox size...`);
+            
+            try {
+              // Step 1: Quick test to determine inbox size (works for all providers)
+              const testDate = formatDateForIMAP(
+                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+              );
+              const testPromise = connection.search([["SINCE", testDate]], {
+                bodies: "HEADER",
+                struct: true,
+              });
+              const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Test timeout")), 8000) // Increased timeout
+              );
+              
+              let testMessages;
+              let chunkStrategy;
+              let chunkDays;
+              
+              try {
+                testMessages = await Promise.race([testPromise, timeoutPromise]);
+                console.log(`[Batch ${page}] 🔍 Found ${testMessages.length} emails in last 7 days for ${provider || 'unknown'}`);
+                
+                // Get total inbox count for detailed logging
+                let totalInboxCount = 0;
+                try {
+                  console.log(`[Batch ${page}] 📊 Getting total inbox count for user ${masterUserID}...`);
+                  const totalPromise = connection.search(["ALL"], { bodies: "HEADER", struct: true });
+                  const totalTimeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Total count timeout")), 10000)
+                  );
+                  const totalMessages = await Promise.race([totalPromise, totalTimeout]);
+                  totalInboxCount = totalMessages.length;
+                  console.log(`[Batch ${page}] 📧 USER ${masterUserID} TOTAL INBOX SIZE: ${totalInboxCount} emails`);
+                  console.log(`[Batch ${page}] 📈 USER ${masterUserID} INBOX ANALYSIS: ${testMessages.length} recent emails out of ${totalInboxCount} total emails`);
+                  console.log(`[Batch ${page}] 📊 USER ${masterUserID} INBOX PERCENTAGE: ${((testMessages.length / totalInboxCount) * 100).toFixed(1)}% of emails are from last 7 days`);
+                } catch (error) {
+                  console.log(`[Batch ${page}] ⚠️ Could not get total inbox count for user ${masterUserID}: ${error.message}`);
+                  console.log(`[Batch ${page}] 📧 USER ${masterUserID} INBOX SIZE: Unable to determine total (using recent count: ${testMessages.length})`);
+                }
+                
+                // Step 2: Determine inbox size category and chunking strategy
+                if (testMessages.length > 100) {
+                  chunkStrategy = "ULTRA_SMALL"; 
+                  chunkDays = 30; // 30-day chunks for very large inboxes
+                  console.log(`[Batch ${page}] 🔴 VERY LARGE inbox detected (${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: ULTRA_SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
+                } else if (testMessages.length > 20) {
+                  chunkStrategy = "SMALL"; 
+                  chunkDays = 90; // 90-day chunks for large inboxes
+                  console.log(`[Batch ${page}] 🟡 LARGE inbox detected (${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🟡 USER ${masterUserID} INBOX STRATEGY: SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
+                } else {
+                  chunkStrategy = "NORMAL";
+                  console.log(`[Batch ${page}] 🟢 NORMAL inbox detected (${testMessages.length} recent) - using NORMAL processing`);
+                  console.log(`[Batch ${page}] 🟢 USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) due to ${testMessages.length} recent emails`);
+                }
+              } catch (testError) {
+                // If test fails, assume large inbox and force chunking
+                console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} inbox test failed: ${testError.message} - FORCING CHUNKING for safety`);
+                console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: FORCED ULTRA_SMALL chunks (30-day periods) due to timeout - assuming LARGE inbox`);
+                chunkStrategy = "ULTRA_SMALL";
+                chunkDays = 30;
+                testMessages = [];
+              }
+              
+              // Step 3: Apply chunking strategy to get ALL emails (works for all providers)
+              if (chunkStrategy === "ULTRA_SMALL" || chunkStrategy === "SMALL") {
+                const effectiveChunkDays = chunkDays || 30; // Fallback value
+                console.log(`[Batch ${page}] 🔄 Fetching ALL emails using ${effectiveChunkDays}-day chunks for ${provider || 'unknown'}...`);
+                console.log(`[Batch ${page}] 🔄 USER ${masterUserID} CHUNKING: Starting ${chunkStrategy} chunking (${effectiveChunkDays}-day periods)`);
+                
+                try {
+                  allMessages = await fetchEmailsInChunks(connection, effectiveChunkDays, page, provider || 'unknown', masterUserID);
+                } catch (chunkError) {
+                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} CHUNKING FAILED: ${chunkError.message} - falling back to direct search`);
+                  // Fallback to direct search with smaller timeout
+                  try {
+                    const fallbackPromise = connection.search(["ALL"], {
+                      bodies: "HEADER", 
+                      struct: true,
+                    });
+                    const fallbackTimeout = new Promise((_, reject) =>
+                      setTimeout(() => reject(new Error(`${provider || 'Email'} fallback timeout`)), 10000)
+                    );
+                    allMessages = await Promise.race([fallbackPromise, fallbackTimeout]);
+                    console.log(`[Batch ${page}] ✅ USER ${masterUserID} FALLBACK SUCCESS: Found ${allMessages.length} emails`);
+                  } catch (fallbackError) {
+                    console.log(`[Batch ${page}] ❌ USER ${masterUserID} FALLBACK FAILED: ${fallbackError.message} - returning empty result`);
+                    allMessages = [];
+                  }
+                }
+              } else {
+                // Normal inbox: Get all emails at once (all providers)
+                console.log(`[Batch ${page}] 📧 Fetching ALL emails directly for ${provider || 'unknown'}...`);
+                console.log(`[Batch ${page}] 📧 USER ${masterUserID} DIRECT FETCH: Processing all emails at once for small inbox`);
+                
+                try {
+                  const searchPromise = connection.search(["ALL"], {
+                    bodies: "HEADER", 
+                    struct: true,
+                  });
+                  const normalTimeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`${provider || 'Email'} search timeout`)), 15000)
+                  );
+                  allMessages = await Promise.race([searchPromise, normalTimeout]);
+                } catch (directError) {
+                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} DIRECT FETCH FAILED: ${directError.message} - returning empty result`);
+                  allMessages = [];
+                }
+              }
+              
+              console.log(`[Batch ${page}] ✅ ${provider || 'unknown'} intelligent chunking completed: ${allMessages.length} total emails found`);
+              console.log(`[Batch ${page}] ✅ USER ${masterUserID} FETCH COMPLETED: Found ${allMessages.length} total emails using ${chunkStrategy} strategy`);
+              
+            } catch (error) {
+              console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} intelligent chunking failed: ${error.message} - FORCING CHUNKING as fallback`);
+              // Force chunking as fallback when everything fails
+              console.log(`[Batch ${page}] 🔄 Forcing 30-day chunking for ${provider || 'unknown'} as safety fallback...`);
+              allMessages = await fetchEmailsInChunks(connection, 30, page, provider || 'unknown');
+            }
           } else {
             const sinceDate = formatDateForIMAP(
               new Date(Date.now() - days * 24 * 60 * 60 * 1000)
@@ -868,8 +1129,17 @@ exports.fetchInboxEmails = async (req, res) => {
             });
           }
 
+          // 🛡️ UNIVERSAL SAFETY: Limit emails for ALL providers to prevent memory issues
+          const maxSafeEmails = 2000; // Reasonable limit for all providers
+          if (allMessages.length > maxSafeEmails) {
+            console.log(
+              `[Batch ${page}] ⚠️ Found ${allMessages.length} emails for ${provider || 'provider'}, limiting to last ${maxSafeEmails} for safety`
+            );
+            allMessages = allMessages.slice(-maxSafeEmails); // Keep the most recent emails
+          }
+
           console.log(
-            `[Batch ${page}] Found ${allMessages.length} total emails dynamically`
+            `[Batch ${page}] Found ${allMessages.length} total emails dynamically for ${provider || 'provider'}`
           );
 
           // Calculate pagination for this specific batch
