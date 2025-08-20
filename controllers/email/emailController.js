@@ -1440,11 +1440,11 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
           () =>
             reject(
               new Error(
-                `IMAP connection timeout after 60 seconds for adminId ${adminId}`
+                `IMAP connection timeout after 2 minutes for adminId ${adminId}`
               )
             ),
-          60000
-        );
+          120000
+        ); // 2 minutes - increased for Gmail
       });
 
       try {
@@ -1476,11 +1476,11 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
           () =>
             reject(
               new Error(
-                `Email fetch operation timeout after 2.5 minutes for adminId ${adminId}`
+                `Email fetch operation timeout after 10 minutes for adminId ${adminId}`
               )
             ),
-          150000
-        ); // 2.5 minutes
+          600000
+        ); // 10 minutes - increased for large Gmail mailboxes
       });
 
       return await Promise.race([operationPromise, timeoutPromise]);
@@ -1501,29 +1501,50 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       //   return { message: "No emails found." };
       // }
 
-      //...................original code.................
+      //...................optimized for Gmail performance.................
+      // For better Gmail performance, fetch only recent emails (last 2 days instead of 7)
       const sinceDate = formatDateForIMAP(
-        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
       );
-      console.log(`Using SINCE date: ${sinceDate}`);
+      console.log(`Using optimized SINCE date for Gmail: ${sinceDate}`);
 
       const searchCriteria = [["SINCE", sinceDate]];
       const fetchOptions = {
-        bodies: "",
+        bodies: "HEADER", // Only fetch headers first for better performance
         struct: true,
       };
 
+      console.log("Searching for recent emails (headers only)...");
       const messages = await connection.search(searchCriteria, fetchOptions);
+
+      console.log(`Total recent emails found: ${messages.length}`);
+
+      if (messages.length === 0) {
+        console.log("No recent emails found.");
+        return { message: "No recent emails found." };
+      }
+
+      // Get the most recent email UID
+      const recentHeaderMessage = messages[messages.length - 1];
+      const recentUID = recentHeaderMessage.attributes.uid;
+      
+      console.log(`Fetching full body for most recent email UID: ${recentUID}`);
+      
+      // Now fetch only the full body of the most recent email
+      const fullMessages = await connection.search(
+        [["UID", recentUID]], 
+        { bodies: "", struct: true }
+      );
+
+      if (!fullMessages || fullMessages.length === 0) {
+        console.log("Could not fetch full message body.");
+        return { message: "Could not fetch full message body." };
+      }
 
       console.log(`Total emails found: ${messages.length}`);
 
-      if (messages.length === 0) {
-        console.log("No emails found.");
-        return { message: "No emails found." };
-      }
-
-      // Get the most recent email
-      const recentMessage = messages[messages.length - 1];
+      // Get the full message data
+      const recentMessage = fullMessages[0];
       const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
       const rawBody = rawBodyPart ? rawBodyPart.body : null;
 
