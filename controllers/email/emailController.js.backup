@@ -504,7 +504,7 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
         ["SINCE", startDateStr],
         ["BEFORE", endDateStr]
       ], {
-        bodies: "HEADER",
+        bodies: "HEADER", // Use headers only for lightweight chunking
         struct: true,
       });
       
@@ -515,6 +515,38 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
       successfulChunks++;
       console.log(`[Batch ${page}] ✅ USER ${userID} ${provider} Chunk ${chunk + 1}: Found ${chunkMessages.length} emails (${(progressiveTimeout/1000)}s timeout)`);
+      
+      // 🚀 STRATEGY 2: Buffer emails and process in batches
+      if (chunkMessages.length > 0) {
+        console.log(`� [DEBUG] [Batch ${page}] Adding ${chunkMessages.length} emails to buffer (current buffer: ${emailBuffer.length})`);
+        emailBuffer.push(...chunkMessages);
+        
+        // Process buffer when threshold is reached
+        if (emailBuffer.length >= PROCESS_THRESHOLD) {
+          console.log(`💾 [DEBUG] [Batch ${page}] BUFFER THRESHOLD REACHED: Processing ${emailBuffer.length} emails`);
+          
+          try {
+            const processedCount = await processEmailBuffer(emailBuffer, page, userID, provider, connection);
+            totalProcessedEmails += processedCount;
+            
+            console.log(`✅ [DEBUG] [Batch ${page}] Buffer processed: ${processedCount}/${emailBuffer.length} emails saved to database`);
+            console.log(`📊 [DEBUG] [Batch ${page}] Running total: ${totalProcessedEmails} emails processed so far`);
+            
+            // Clear buffer after processing
+            emailBuffer = [];
+            
+            // Check session limits
+            if (totalProcessedEmails >= 5000) {
+              console.log(`🛡️ [Batch ${page}] SESSION LIMIT REACHED: ${totalProcessedEmails} emails processed, will continue in next session`);
+              break;
+            }
+            
+          } catch (processError) {
+            console.error(`❌ [DEBUG] [Batch ${page}] Failed to process buffer:`, processError.message);
+            emailBuffer = []; // Clear buffer to prevent memory issues
+          }
+        }
+      }
       
       allChunkedMessages.push(...chunkMessages);
       
@@ -560,7 +592,251 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
   
   console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
   console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} CHUNK SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${lastChunkProcessed} total chunks`);
+  
   return allChunkedMessages;
+};
+
+// 🚀 NEW: Incremental email processing function
+const processChunkEmails = async (messages, page, userID, provider, connection) => {
+  const Email = require("../../models/email/emailModel");
+  const simpleParser = require("mailparser").simpleParser;
+  let processedCount = 0;
+  
+  console.log(`📧 [DEBUG] Processing ${messages.length} emails from chunk incrementally`);
+  
+  // Process emails in smaller batches for memory management
+  const BATCH_SIZE = 10; // Reduced batch size for full body fetching
+  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+    const batchEnd = Math.min(i + BATCH_SIZE, messages.length);
+    const emailBatch = messages.slice(i, batchEnd);
+    
+    console.log(`📦 [DEBUG] Processing email batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(messages.length/BATCH_SIZE)} (emails ${i+1}-${batchEnd})`);
+    
+    for (let j = 0; j < emailBatch.length; j++) {
+      const message = emailBatch[j];
+      const globalIndex = i + j;
+      
+      try {
+        console.log(`🔍 [DEBUG] Processing email ${globalIndex + 1}/${messages.length} from ${provider}`);
+        
+        // Fetch full email body using UID
+        console.log(`📥 [DEBUG] Fetching full body for UID: ${message.uid}`);
+        const fullMessages = await connection.fetch([message.uid], {
+          bodies: "",
+          struct: true
+        });
+        
+        if (!fullMessages || fullMessages.length === 0) {
+          console.log(`⚠️ [DEBUG] Could not fetch full body for UID ${message.uid}, skipping`);
+          continue;
+        }
+        
+        const fullMessage = fullMessages[0];
+        
+        // Extract raw body from full email structure
+        const rawBodyPart = fullMessage.parts ? fullMessage.parts.find(part => part.which === "") : null;
+        const rawBody = rawBodyPart ? rawBodyPart.body : null;
+        
+        if (!rawBody) {
+          console.log(`⚠️ [DEBUG] Email ${globalIndex + 1} has no body content, skipping`);
+          continue;
+        }
+        
+        // Parse email data from IMAP message body
+        const parsedEmail = await simpleParser(rawBody);
+        
+        // Extract references
+        const referencesHeader = parsedEmail.headers.get("references");
+        const references = referencesHeader
+          ? referencesHeader.split(/\s+/).filter(Boolean).join(", ")
+          : null;
+
+        // Check read status (use original message attributes since that has flags)
+        let isRead = false;
+        if (message.attributes && message.attributes.flags) {
+          isRead = message.attributes.flags.includes("\\Seen");
+        }
+
+        const emailData = {
+          messageId: parsedEmail.messageId || null,
+          inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+          references,
+          sender: parsedEmail.from
+            ? parsedEmail.from.value[0].address
+            : null,
+          senderName: parsedEmail.from
+            ? parsedEmail.from.value[0].name
+            : null,
+          recipient: parsedEmail.to
+            ? parsedEmail.to.value.map((to) => to.address).join(", ")
+            : null,
+          cc: parsedEmail.cc
+            ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+            : null,
+          bcc: parsedEmail.bcc
+            ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+            : null,
+          subject: parsedEmail.subject || null,
+          body: parsedEmail.html || parsedEmail.text || "",
+          textContent: parsedEmail.text || "",
+          htmlContent: parsedEmail.html || "",
+          date: parsedEmail.date ? new Date(parsedEmail.date) : new Date(),
+          folder: 'inbox',
+          uid: message.uid || null,
+          isRead,
+          masterUserID: userID,
+          hasAttachments: !!(parsedEmail.attachments && parsedEmail.attachments.length > 0),
+          attachmentCount: parsedEmail.attachments ? parsedEmail.attachments.length : 0,
+          priority: parsedEmail.priority || "normal",
+          size: message.size || 0,
+        };
+        
+        if (emailData && emailData.messageId) {
+          // Check if email already exists
+          console.log(`🔍 [DEBUG] Checking if email exists: ${emailData.messageId}`);
+          const existingEmail = await Email.findOne({
+            where: { messageId: emailData.messageId },
+          });
+
+          if (!existingEmail) {
+            console.log(`💾 [DEBUG] Creating new email: ${emailData.messageId}`);
+            const savedEmail = await Email.create(emailData);
+            console.log(`✅ [DEBUG] Database save successful, emailID: ${savedEmail.emailID}`);
+            processedCount++;
+          } else {
+            console.log(`⚠️ [DEBUG] Email already exists: ${emailData.messageId}`);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ [DEBUG] Failed to process email ${globalIndex + 1}:`, error.message);
+      }
+    }
+    
+    // Brief pause between batches
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  return processedCount;
+};
+
+// 🚀 STRATEGY 2: Process email buffer in smaller batches
+const processEmailBuffer = async (buffer, page, userID, provider, connection) => {
+  const Email = require("../../models/email/emailModel");
+  const simpleParser = require("mailparser").simpleParser;
+  let processedCount = 0;
+  
+  console.log(`📦 [DEBUG] [Batch ${page}] Processing buffer of ${buffer.length} emails for ${provider}`);
+  
+  for (const [globalIndex, message] of buffer.entries()) {
+    try {
+      console.log(`📧 [DEBUG] [Batch ${page}] Processing email ${globalIndex + 1}/${buffer.length} (UID: ${message.uid})`);
+      
+      // Check if email already exists
+      const existingEmail = await Email.findOne({
+        where: {
+          uid: message.uid.toString(),
+          userID: userID,
+          provider: provider,
+        },
+      });
+
+      if (existingEmail) {
+        console.log(`⚠️ [DEBUG] Email ${globalIndex + 1} already exists in database (UID: ${message.uid}), skipping`);
+        continue;
+      }
+
+      // Fetch full email body for this specific message
+      const fullMessages = await connection.search(
+        [`UID:${message.uid}`],
+        { bodies: '', envelope: true, struct: true }
+      );
+        
+      if (!fullMessages || fullMessages.length === 0) {
+        console.log(`⚠️ [DEBUG] Could not fetch full body for UID ${message.uid}, skipping`);
+        continue;
+      }
+        
+      const fullMessage = fullMessages[0];
+        
+      // Extract raw body from full email structure
+      const rawBodyPart = fullMessage.parts ? fullMessage.parts.find(part => part.which === "") : null;
+      const rawBody = rawBodyPart ? rawBodyPart.body : null;
+        
+      if (!rawBody) {
+        console.log(`⚠️ [DEBUG] Email ${globalIndex + 1} has no body content, skipping`);
+        continue;
+      }
+        
+      // Parse email data from IMAP message body
+      const parsedEmail = await simpleParser(rawBody);
+        
+      // Extract references
+      const referencesHeader = parsedEmail.headers.get("references");
+      const references = referencesHeader
+        ? referencesHeader.split(/\s+/).filter(Boolean).join(", ")
+        : null;
+
+      // Check read status (use original message attributes since that has flags)
+      let isRead = false;
+      if (message.attributes && message.attributes.flags) {
+        isRead = message.attributes.flags.includes("\\Seen");
+      }
+
+      const emailData = {
+        messageId: parsedEmail.messageId || null,
+        inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
+        references,
+        sender: parsedEmail.from
+          ? parsedEmail.from.value[0].address
+          : null,
+        senderName: parsedEmail.from
+          ? parsedEmail.from.value[0].name
+          : null,
+        recipient: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.address).join(", ")
+          : null,
+        cc: parsedEmail.cc
+          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
+          : null,
+        bcc: parsedEmail.bcc
+          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
+          : null,
+        subject: parsedEmail.subject || null,
+        body: parsedEmail.text || null,
+        htmlBody: parsedEmail.html || null,
+        attachments: parsedEmail.attachments
+          ? JSON.stringify(
+              parsedEmail.attachments.map((att) => ({
+                filename: att.filename,
+                contentType: att.contentType,
+                size: att.size,
+              }))
+            )
+          : null,
+        date: message.attributes?.date
+          ? new Date(message.attributes.date)
+          : new Date(),
+        uid: message.uid.toString(),
+        userID: userID,
+        provider: provider,
+        isRead: isRead,
+        folder: "inbox",
+        timestamp: Date.now(),
+      };
+
+      // Save email to database
+      const savedEmail = await Email.create(emailData);
+      processedCount++;
+      
+      console.log(`✅ [DEBUG] [Batch ${page}] Email ${globalIndex + 1}/${buffer.length} saved successfully (ID: ${savedEmail.id})`);
+      
+    } catch (error) {
+      console.error(`❌ [DEBUG] [Batch ${page}] Failed to process email ${globalIndex + 1}:`, error.message);
+    }
+  }
+  
+  console.log(`📦 [DEBUG] [Batch ${page}] Buffer processing complete: ${processedCount}/${buffer.length} emails saved`);
+  return processedCount;
 };
 
 exports.queueFetchAllEmails = async (req, res) => {
@@ -943,19 +1219,17 @@ exports.fetchInboxEmails = async (req, res) => {
 
     // Helper function to fetch emails from a specific folder using dynamic calculation
     const fetchEmailsFromFolder = async (folderName, folderType) => {
+      let allMessages = []; // Declare at function scope to be accessible for pagination
+      let messages = []; // Declare at function scope to be accessible throughout
       try {
         await connection.openBox(folderName);
         let searchCriteria;
-        let allMessages; // Declare allMessages at function scope
-        let skipCount = 0; // Declare skipCount at function scope with default value
-        let batchSize = 50; // Declare batchSize at function scope with default value
 
         // Check if we should use dynamic UID calculation
         if (req.query.dynamicFetch) {
           console.log(`[Batch ${page}] Using dynamic UID calculation...`);
 
           // For dynamic fetch, get all emails and then slice for this batch
-          allMessages; // Already declared above
           if (!days || days === 0 || days === "all") {
             // 🧠 INTELLIGENT CHUNKING for ALL email providers
             console.log(`[Batch ${page}] 📧 Provider: ${provider || 'unknown'} - analyzing inbox size...`);
@@ -1000,25 +1274,30 @@ exports.fetchInboxEmails = async (req, res) => {
                 }
                 
                 // Step 2: Determine inbox size category and chunking strategy
+                console.log(`🔍 [DEBUG] [Batch ${page}] STRATEGY DETECTION RESULTS:`);
+                console.log(`   - Test query returned: ${testMessages.length} emails`);
+                console.log(`   - Determining strategy based on recent email count...`);
+                
                 if (testMessages.length > 50) {
                   chunkStrategy = "ULTRA_SMALL"; 
                   chunkDays = 15; // Ultra-small 15-day chunks for very large inboxes
-                  console.log(`[Batch ${page}] 🔴 VERY LARGE inbox detected (${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: ULTRA_SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
+                  console.log(`🔴 [DEBUG] [Batch ${page}] VERY LARGE inbox detected (${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
+                  console.log(`🔴 [DEBUG] [Batch ${page}] USER ${masterUserID} INBOX STRATEGY: ULTRA_SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
                 } else if (testMessages.length > 10) {
                   chunkStrategy = "SMALL"; 
                   chunkDays = 30; // 30-day chunks for medium inboxes
-                  console.log(`[Batch ${page}] 🟡 LARGE inbox detected (${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🟡 USER ${masterUserID} INBOX STRATEGY: SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
+                  console.log(`🟡 [DEBUG] [Batch ${page}] LARGE inbox detected (${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
+                  console.log(`🟡 [DEBUG] [Batch ${page}] USER ${masterUserID} INBOX STRATEGY: SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
                 } else {
                   chunkStrategy = "NORMAL";
-                  console.log(`[Batch ${page}] 🟢 NORMAL inbox detected (${testMessages.length} recent) - using NORMAL processing`);
-                  console.log(`[Batch ${page}] 🟢 USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) due to ${testMessages.length} recent emails`);
+                  console.log(`🟢 [DEBUG] [Batch ${page}] NORMAL inbox detected (${testMessages.length} recent) - using NORMAL processing`);
+                  console.log(`🟢 [DEBUG] [Batch ${page}] USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) due to ${testMessages.length} recent emails`);
                 }
+                console.log(`📊 [DEBUG] [Batch ${page}] STRATEGY SELECTED: ${chunkStrategy} with ${chunkDays || 'N/A'} day chunks`);
               } catch (testError) {
                 // If test fails, assume large inbox and force ultra-safe chunking
-                console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} inbox test failed: ${testError.message} - FORCING ULTRA-SAFE CHUNKING`);
-                console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: FORCED ULTRA_SMALL chunks (15-day periods) due to timeout - assuming MASSIVE inbox`);
+                console.log(`⚠️ [DEBUG] [Batch ${page}] ${provider || 'unknown'} inbox test failed: ${testError.message} - FORCING ULTRA-SAFE CHUNKING`);
+                console.log(`🔴 [DEBUG] [Batch ${page}] USER ${masterUserID} INBOX STRATEGY: FORCED ULTRA_SMALL chunks (15-day periods) due to timeout - assuming MASSIVE inbox`);
                 chunkStrategy = "ULTRA_SMALL";
                 chunkDays = 15; // Ultra-conservative 15-day chunks
                 testMessages = [];
@@ -1110,8 +1389,8 @@ exports.fetchInboxEmails = async (req, res) => {
           );
 
           // 📊 SMART BATCH SIZING: Smaller batches for larger inboxes
-          skipCount = parseInt(req.query.skipCount) || 0; // Assign to existing variable
-          batchSize = parseInt(req.query.batchSize) || 50; // Assign to existing variable
+          const skipCount = parseInt(req.query.skipCount) || 0;
+          let batchSize = parseInt(req.query.batchSize) || 50;
           
           // Dynamic batch sizing based on inbox size
           if (allMessages.length > 10000) {
@@ -1138,10 +1417,10 @@ exports.fetchInboxEmails = async (req, res) => {
             );
             return {
               processedCount: 0,
-              totalEmails: allMessages ? allMessages.length : 0,
-              currentBatchEnd: allMessages ? Math.min(skipCount + batchSize, allMessages.length) : 0,
-              hasMoreEmails: allMessages ? (skipCount + batchSize < allMessages.length) : false,
-              remainingEmails: allMessages ? Math.max(0, allMessages.length - (skipCount + batchSize)) : 0
+              totalEmails: allMessages.length,
+              currentBatchEnd: skipCount,
+              hasMoreEmails: false,
+              remainingEmails: 0
             };
           }
 
@@ -1244,6 +1523,11 @@ exports.fetchInboxEmails = async (req, res) => {
 
         let processedCount = 0;
 
+        // Debug logging for processing start
+        console.log(`📧 [DEBUG] Starting to process ${actualBatchSize} emails in chunks of ${25}`);
+        console.log(`📊 [DEBUG] Total chunks planned: ${Math.ceil(actualBatchSize / 25)}`);
+        console.log(`📋 [DEBUG] Processing mode: ${allUIDsInBatch ? 'UID-based' : (req.query.dynamicFetch ? 'dynamic' : 'direct')}`);
+
         // Process emails in smaller chunks for better memory management
         const CHUNK_SIZE = 25; // Process 25 emails at a time
         for (
@@ -1255,9 +1539,9 @@ exports.fetchInboxEmails = async (req, res) => {
           const chunk = messages.slice(chunkStart, chunkEnd);
 
           console.log(
-            `[Batch ${page}] Processing chunk ${
+            `📦 [DEBUG] [Batch ${page}] Processing chunk ${
               Math.floor(chunkStart / CHUNK_SIZE) + 1
-            } (emails ${chunkStart + 1}-${chunkEnd})`
+            }/${Math.ceil(actualBatchSize / CHUNK_SIZE)} (emails ${chunkStart + 1}-${chunkEnd})`
           );
 
           // Process each email in the chunk
@@ -1345,22 +1629,25 @@ exports.fetchInboxEmails = async (req, res) => {
               };
 
               // Check if email already exists
+              console.log(`🔍 [DEBUG] [Batch ${page}] Checking if email exists: ${emailData.messageId}`);
               const existingEmail = await Email.findOne({
                 where: { messageId: emailData.messageId },
               });
 
               let savedEmail;
               if (!existingEmail) {
+                console.log(`💾 [DEBUG] [Batch ${page}] Creating new email: ${emailData.messageId}`);
                 savedEmail = await Email.create(emailData);
                 console.log(
-                  `[Batch ${page}] Email ${
+                  `✅ [Batch ${page}] Email ${
                     globalIndex + 1
                   }/${actualBatchSize} saved: ${emailData.messageId}`
                 );
+                console.log(`📊 [DEBUG] [Batch ${page}] Database save successful, emailID: ${savedEmail.emailID}`);
                 processedCount++;
               } else {
                 console.log(
-                  `[Batch ${page}] Email ${
+                  `⚠️ [Batch ${page}] Email ${
                     globalIndex + 1
                   }/${actualBatchSize} already exists: ${emailData.messageId}`
                 );
@@ -1465,6 +1752,12 @@ exports.fetchInboxEmails = async (req, res) => {
         console.log(
           `📧 [Batch ${page}] SUCCESSFULLY PROCESSED ${processedCount} NEW EMAILS in ${folderType} folder!`
         );
+        console.log(`📊 [DEBUG] [Batch ${page}] PROCESSING SUMMARY:`);
+        console.log(`   - Total emails found: ${allMessages ? allMessages.length : 0}`);
+        console.log(`   - Emails processed in this batch: ${actualBatchSize}`);
+        console.log(`   - New emails saved to database: ${processedCount}`);
+        console.log(`   - Duplicates skipped: ${actualBatchSize - processedCount}`);
+        console.log(`   - Chunks processed: ${Math.ceil(actualBatchSize / 25)}`);
 
         // Return both count and pagination info for auto-pagination
         return {
@@ -1598,21 +1891,22 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
       const nextSkipCount = paginationInfo.currentBatchEnd;
       const nextPage = page + 1;
       
-      console.log(`
-🔄 AUTO-PAGINATION TRIGGERED FOR USER ${masterUserID}:
-📊 Total emails found by chunking: ${paginationInfo.totalEmails}
-✅ Current batch processed: ${skipCount + 1}-${paginationInfo.currentBatchEnd}
-🔄 Remaining emails to process: ${paginationInfo.remainingEmails}
-⏭️ Queuing next batch: Page ${nextPage}, Skip: ${nextSkipCount}
-      `);
+      console.log(`🔄 [DEBUG] AUTO-PAGINATION TRIGGERED FOR USER ${masterUserID}:`);
+      console.log(`   📊 Total emails found by chunking: ${paginationInfo.totalEmails}`);
+      console.log(`   ✅ Current batch processed: ${skipCount + 1}-${paginationInfo.currentBatchEnd}`);
+      console.log(`   🔄 Remaining emails to process: ${paginationInfo.remainingEmails}`);
+      console.log(`   ⏭️ Queuing next batch: Page ${nextPage}, Skip: ${nextSkipCount}`);
+      console.log(`   📧 Progress: ${Math.round((paginationInfo.currentBatchEnd / paginationInfo.totalEmails) * 100)}% complete`);
 
       try {
         // Queue the next batch for this user
+        console.log(`🔗 [DEBUG] Connecting to RabbitMQ for auto-pagination...`);
         const queueConnection = await amqp.connect('amqp://localhost');
         const queueChannel = await queueConnection.createChannel();
         const queueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
         
         await queueChannel.assertQueue(queueName, { durable: true });
+        console.log(`📝 [DEBUG] Queue ${queueName} asserted successfully`);
         
         const nextBatchJob = {
           adminId: masterUserID,
@@ -1626,6 +1920,7 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
           timestamp: new Date().toISOString()
         };
         
+        console.log(`📤 [DEBUG] Publishing next batch job to queue ${queueName}:`, JSON.stringify(nextBatchJob, null, 2));
         await queueChannel.sendToQueue(
           queueName,
           Buffer.from(JSON.stringify(nextBatchJob)),
@@ -1635,13 +1930,15 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
         await queueChannel.close();
         await queueConnection.close();
         
-        console.log(`✅ AUTO-PAGINATION: Successfully queued next batch (Page ${nextPage}) for user ${masterUserID}`);
+        console.log(`✅ [DEBUG] AUTO-PAGINATION: Successfully queued next batch (Page ${nextPage}) for user ${masterUserID}`);
         
       } catch (queueError) {
-        console.error(`❌ AUTO-PAGINATION: Failed to queue next batch for user ${masterUserID}:`, queueError.message);
+        console.error(`❌ [DEBUG] AUTO-PAGINATION: Failed to queue next batch for user ${masterUserID}:`, queueError.message);
       }
     } else if (paginationInfo) {
-      console.log(`✅ AUTO-PAGINATION: All ${paginationInfo.totalEmails} emails processed for user ${masterUserID} - no more batches needed`);
+      console.log(`🎉 [DEBUG] AUTO-PAGINATION: All ${paginationInfo.totalEmails} emails processed for user ${masterUserID} - no more batches needed`);
+    } else {
+      console.log(`⚠️ [DEBUG] AUTO-PAGINATION: No pagination info available for user ${masterUserID}`);
     }
 
     res.status(200).json({
