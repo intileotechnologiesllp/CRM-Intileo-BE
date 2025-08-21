@@ -11,21 +11,31 @@ const Report = sequelize.define(
     },
     dashboardId: {
       type: DataTypes.INTEGER,
-       allowNull: true, // Allow null for reports not assigned to dashboard yet
-      references: { model: "dashboards", key: "dashboardId" },
+      allowNull: true,
+      references: { 
+        model: "Dashboards", // Changed to match actual table name
+        key: "dashboardId" 
+      },
     },
     name: {
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "Untitled Report",
     },
-    entity: { type: DataTypes.STRING, allowNull: false }, // e.g. "Lead", "Deal"
-    type: { type: DataTypes.STRING, allowNull: false }, // e.g. "Performance", "Conversion"
-    config: { type: DataTypes.JSON, allowNull: true }, // chart config, filters, etc.
+    entity: { type: DataTypes.STRING, allowNull: false },
+    type: { type: DataTypes.STRING, allowNull: false },
+    config: { type: DataTypes.JSON, allowNull: true },
     position: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 0 },
     description: { type: DataTypes.TEXT, allowNull: true },
-    folderId: { type: DataTypes.INTEGER, allowNull: true }, // reference to parent folder
-    ownerId: { type: DataTypes.INTEGER, allowNull: false }, // userId
+    folderId: { 
+      type: DataTypes.INTEGER, 
+      allowNull: true,
+      // references: {
+      //   model: "ReportFolders", // Reference the correct table
+      //   key: "reportFolderId"
+      // }
+    },
+    ownerId: { type: DataTypes.INTEGER, allowNull: false },
   },
   {
     tableName: "Reports",

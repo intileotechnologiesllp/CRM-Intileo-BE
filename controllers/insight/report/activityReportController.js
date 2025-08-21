@@ -1,8 +1,10 @@
 
-const DASHBOARD = require("../../../../models/insight/dashboardModel");
-const Report = require("../../../../models/insight/reportModel");
+const DASHBOARD = require("../../../models/insight/dashboardModel");
+const Report = require("../../../models/insight/reportModel");
 const Goal = require("../../../models/insight/goalModel");
 const MasterUser = require("../../../models/master/masterUserModel");
+const Activity = require("../../../models/activity/activityModel")
+const ReportFolder = require("../../../models/insight/reportFolderModel")
 const { Op, Sequelize  } = require("sequelize");
 
 
@@ -20,10 +22,12 @@ exports.createActivityReport = async (req, res) => {
       filter,
       xaxis,
       yaxis,
-      filters
+      filters,
+      page = 1,      // Default to page 1
+      limit = 6      // Default to 6 items per page
     } = req.body;
     const ownerId = req.adminId;
-
+    const role = req.role
     // Validate required fields - dashboardId is now optional
     if (!entity || !type) {
       return res.status(400).json({
@@ -49,18 +53,10 @@ exports.createActivityReport = async (req, res) => {
       }
     }
 
-    // Build goal name for UI as in screenshot
-    let Name = description;
-    if (!Name) {
-      if (entity === "Activity" && type === "Performance") {
-        Name = `Activity Performance`;
-      } else {
-        Name = `${entity} ${type}`;
-      }
-    }
-
-    // For Activity Performance reports, generate the data immediately
+    // For Activity Performance reports, generate the data
     let reportData = null;
+    let paginationInfo = null;
+    
     if (entity === "Activity" && type === "Performance") {
       // Validate required fields for performance reports
       if (!xaxis || !yaxis) {
@@ -71,7 +67,10 @@ exports.createActivityReport = async (req, res) => {
       }
 
       try {
-        reportData = await generateActivityPerformanceData(ownerId, xaxis, yaxis, filters);
+        // Generate data with pagination
+        const result = await generateActivityPerformanceData(ownerId, role, xaxis, yaxis, filters, page, limit);
+        reportData = result.data;
+        paginationInfo = result.pagination;
       } catch (error) {
         console.error("Error generating activity performance data:", error);
         return res.status(500).json({
@@ -82,11 +81,31 @@ exports.createActivityReport = async (req, res) => {
       }
     }
 
+    // If no dashboardId or folderId is provided, just return the data with pagination info
+    // if (!dashboardId && !folderId) {
+    //   return res.status(200).json({
+    //     success: true,
+    //     message: "Data generated successfully",
+    //     data: reportData,
+    //     pagination: paginationInfo
+    //   });
+    // }
+
+    // Build goal name for UI as in screenshot
+    let Name = description;
+    if (!Name) {
+      if (entity === "Activity" && type === "Performance") {
+        Name = `Activity Performance`;
+      } else {
+        Name = `${entity} ${type}`;
+      }
+    }
+
     // Get the next position for this dashboard
     let nextPosition = 0;
     if (dashboardId) {
       const existingReports = await Report.findAll({
-        where: { dashboardId, isActive: true },
+        where: { dashboardId },
         order: [["position", "DESC"]],
         limit: 1,
       });
@@ -97,6 +116,7 @@ exports.createActivityReport = async (req, res) => {
 
     const newReport = await Report.create({
       dashboardId: dashboardId || null,
+      folderId: folderId || null,
       entity,
       type,
       description: Name,
@@ -118,6 +138,7 @@ exports.createActivityReport = async (req, res) => {
         ...newReport.toJSON(),
         reportData // Include the generated data in the response
       },
+      pagination: paginationInfo // Include pagination info if available
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -129,12 +150,19 @@ exports.createActivityReport = async (req, res) => {
   }
 };
 
-// Helper function to generate activity performance data
-async function generateActivityPerformanceData(ownerId, xaxis, yaxis, filters) {
-  // Base where condition - only show activities owned by the user
-  const baseWhere = {
-    masterUserID: ownerId,
-  };
+
+// Helper function to generate activity performance data with pagination
+async function generateActivityPerformanceData(ownerId, role, xaxis, yaxis, filters, page = 1, limit = 6) {
+  // Calculate offset for pagination
+  const offset = (page - 1) * limit;
+  
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhere = {};
+  
+  // If user is not admin, filter by ownerId
+  if (role !== 'admin') {
+    baseWhere.masterUserID = ownerId;
+  }
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -181,25 +209,25 @@ async function generateActivityPerformanceData(ownerId, xaxis, yaxis, filters) {
   let attributes = [];
   
   // Handle xaxis special cases
-  if (xaxis === 'Owner') {
+  if (xaxis === 'Owner' || xaxis === 'assignedTo') {
     includeModels.push({
       model: MasterUser,
-      as: 'assignee',
+      as: 'assignedUser', // Use the correct alias
       attributes: ['masterUserID', 'name'],
       required: true
     });
-    groupBy.push('assignee.masterUserID');
-    attributes.push([Sequelize.col('assignee.name'), 'xValue']);
+    groupBy.push('assignedUser.masterUserID');
+    attributes.push([Sequelize.col('assignedUser.name'), 'xValue']);
   } else if (xaxis === 'Team') {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: 'assignee',
+      as: 'assignedUser', // Use the correct alias
       attributes: ['masterUserID', 'team'],
       required: true
     });
-    groupBy.push('assignee.team');
-    attributes.push([Sequelize.col('assignee.team'), 'xValue']);
+    groupBy.push('assignedUser.team');
+    attributes.push([Sequelize.col('assignedUser.team'), 'xValue']);
   } else {
     // Regular column from Activity table
     groupBy.push(xaxis);
@@ -228,21 +256,49 @@ async function generateActivityPerformanceData(ownerId, xaxis, yaxis, filters) {
     attributes.push([Sequelize.fn('SUM', Sequelize.col(yaxis)), 'yValue']);
   }
 
-  // Execute query
+  // Get total count for pagination
+  const totalCountResult = await Activity.findAll({
+    where: baseWhere,
+    attributes: [
+      [Sequelize.fn('COUNT', Sequelize.fn('DISTINCT', Sequelize.col(groupBy[0]))), 'total']
+    ],
+    include: includeModels,
+    raw: true
+  });
+  
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  const totalPages = Math.ceil(totalCount / limit);
+
+  // Execute query with pagination
   const results = await Activity.findAll({
     where: baseWhere,
     attributes: attributes,
     include: includeModels,
     group: groupBy,
     raw: true,
-    order: [[Sequelize.literal('yValue'), 'DESC']]
+    order: [[Sequelize.literal('yValue'), 'DESC']],
+    limit: limit,
+    offset: offset
   });
 
   // Format the results for the frontend
-  return results.map(item => ({
+  const formattedResults = results.map(item => ({
     label: item.xValue || 'Unknown',
     value: item.yValue || 0
   }));
+
+  // Return data with pagination info
+  return {
+    data: formattedResults,
+    pagination: {
+      currentPage: page,
+      totalPages: totalPages,
+      totalItems: totalCount,
+      itemsPerPage: limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    }
+  };
 }
 
 // Helper function to convert operator strings to Sequelize operators
@@ -270,4 +326,117 @@ function getConditionObject(column, operator, value) {
     case 'isNotEmpty': return { [column]: { [Op.and]: [{ [Op.not]: null }, { [Op.ne]: '' }] } };
     default: return { [column]: { [Op.eq]: conditionValue } };
   }
-}
+};
+
+
+exports.saveActivityReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { dashboardId, folderId } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate that reportId is provided
+    if (!reportId) {
+      return res.status(400).json({
+        success: false,
+        message: "Report ID is required",
+      });
+    }
+
+    // Validate that at least one field is provided
+    if (dashboardId === undefined && folderId === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one of dashboardId or folderId is required",
+      });
+    }
+
+    // Find the report and verify ownership
+    const report = await Report.findOne({
+      where: {
+        reportId,
+        ownerId, // Ensure user can only update their own reports
+      },
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    // Verify dashboard ownership if dashboardId is provided and changing
+    if (dashboardId !== undefined && dashboardId !== report.dashboardId) {
+      const dashboard = await DASHBOARD.findOne({
+        where: {
+          dashboardId,
+          ownerId,
+        },
+      });
+
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: "Dashboard not found or access denied",
+        });
+      }
+    }
+
+    // Verify folder ownership if folderId is provided and changing
+    if (folderId !== undefined && folderId !== report.folderId) {
+      const folder = await ReportFolder.findOne({
+        where: {
+          reportFolderId: folderId,
+          ownerId,
+        },
+      });
+
+      if (!folder) {
+        return res.status(404).json({
+          success: false,
+          message: "Folder not found or access denied",
+        });
+      }
+    }
+
+    // Prepare update data - only dashboardId and folderId
+    const updateData = {};
+    if (dashboardId !== undefined) updateData.dashboardId = dashboardId;
+    if (folderId !== undefined) updateData.folderId = folderId;
+
+    // Update the report
+    const [updatedCount] = await Report.update(updateData, {
+      where: {
+        reportId,
+        ownerId, // Ensure only the owner can update
+      },
+    });
+
+    if (updatedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or no changes made",
+      });
+    }
+
+    // Get the updated report
+    const updatedReport = await Report.findOne({
+      where: { reportId },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Report updated successfully",
+      data: updatedReport
+    });
+
+  } catch (error) {
+    console.error("Error updating report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update report",
+      error: error.message,
+    });
+  }
+};

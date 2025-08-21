@@ -10,6 +10,7 @@ const { verifyToken } = require("../../../middlewares/authMiddleware");
 
 router.post("/create-activityreport", verifyToken, activityReportController.createActivityReport);
 
+router.patch("/save-activityreport/:reportId", verifyToken, activityReportController.saveActivityReport);
 
 
 module.exports = router;
