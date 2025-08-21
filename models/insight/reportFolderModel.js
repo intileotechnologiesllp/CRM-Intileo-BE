@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
 
-const Dashboard = sequelize.define(
+const ReportFolder = sequelize.define(
   "ReportFolder",
   {
     reportFolderId: {
@@ -18,4 +18,4 @@ const Dashboard = sequelize.define(
   }
 );
 
-module.exports = Dashboard;
+module.exports = ReportFolder;
