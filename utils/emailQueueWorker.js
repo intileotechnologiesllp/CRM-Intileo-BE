@@ -1033,11 +1033,11 @@ async function startUserSpecificSyncWorkers() {
                   () =>
                     reject(
                       new Error(
-                        `Sync worker timeout after 5 minutes for user ${masterUserID}`
+                        `Sync worker timeout after 15 minutes for user ${masterUserID}`
                       )
                     ),
-                  300000
-                ); // 5 minute timeout
+                  900000
+                ); // 15 minute timeout
               });
 
               const syncPromise = (async () => {
@@ -1375,9 +1375,9 @@ async function startUserSpecificInboxWorkers() {
                 // Add timeout to prevent hanging workers
                 const timeoutPromise = new Promise((_, reject) => {
                   setTimeout(
-                    () => reject(new Error("Worker timeout after 5 minutes")),
-                    300000
-                  ); // 5 minute timeout
+                    () => reject(new Error("Worker timeout after 15 minutes")),
+                    900000 // Increased from 5 minutes (300000) to 15 minutes (900000) for large inboxes
+                  ); // 15 minute timeout
                 });
 
                 const fetchPromise = fetchInboxEmails(
@@ -1539,9 +1539,24 @@ async function startUserSpecificInboxWorkers() {
                       `[AutoPagination] User ${masterUserID}: Found ${totalEmails} total emails in inbox`
                     );
 
-                    // Calculate how many batches we need
+                    // Calculate how many batches we need with smart limits
                     const totalBatches = Math.ceil(totalEmails / batchSize);
-                    const maxAllowedBatches = 100; // 🛡️ Safety limit to prevent system overload
+                    
+                    // Dynamic batch limits based on inbox size
+                    let maxAllowedBatches;
+                    if (totalEmails > 10000) {
+                      maxAllowedBatches = 500; // Massive inbox: allow 500 batches
+                      console.log(`[AutoPagination] � MASSIVE INBOX DETECTED: ${totalEmails} emails, allowing ${maxAllowedBatches} batches`);
+                    } else if (totalEmails > 5000) {
+                      maxAllowedBatches = 300; // Large inbox: allow 300 batches
+                      console.log(`[AutoPagination] 📈 LARGE INBOX DETECTED: ${totalEmails} emails, allowing ${maxAllowedBatches} batches`);
+                    } else if (totalEmails > 2000) {
+                      maxAllowedBatches = 200; // Medium inbox: allow 200 batches
+                      console.log(`[AutoPagination] 📊 MEDIUM INBOX DETECTED: ${totalEmails} emails, allowing ${maxAllowedBatches} batches`);
+                    } else {
+                      maxAllowedBatches = 100; // Small inbox: 100 batches (original limit)
+                    }
+                    
                     const actualBatches = Math.min(totalBatches, maxAllowedBatches);
                     
                     console.log(
