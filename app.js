@@ -37,7 +37,7 @@ const activityReportRoutes = require("./routes/insight/report/activityReportRout
 const customFieldRoutes = require("./routes/customFieldRoutes.js"); // Import custom field routes
 const pipelineRoutes = require("./routes/pipelineRoutes.js"); // Import pipeline routes
 const globalSearchRoutes = require("./routes/globalSearchRoutes.js"); // Import global search routes
-
+const reportFolderRoutes = require("./routes/insight/reportFolderRoutes.js")
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
@@ -94,6 +94,7 @@ app.use("/api/deals", dealRoutes); // Register deal routes
 app.use("/api/activities", activityRoutes); // Register activity routes
 app.use("/api/insights", insightRoutes); // Register insight routes
 app.use("/api/activityreport", activityReportRoutes); // Register activity report routes
+app.use("/api/reportFolder", reportFolderRoutes); // Register report folder routes
 app.use("/api/search", globalSearchRoutes); // Register global search routes
 app.use("/api/custom-fields", customFieldRoutes); // Register custom field routes
 app.use("/api/pipelines", pipelineRoutes); // Register pipeline routes
