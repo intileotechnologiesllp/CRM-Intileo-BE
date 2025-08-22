@@ -21,6 +21,29 @@ exports.createActivityReport = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
+    // Define available options for xaxis and yaxis
+    const xaxisArray = [
+      "Owner",
+      "Team",
+      "status",
+      "type",
+      "subject",
+      "location",
+      "priority",
+      "subject",
+      "contactPerson",
+      "organization",
+      "isDone",
+      "startDateTime",
+      "endDateTime",
+      "createdAt"
+    ];
+
+    const yaxisArray = [
+      "no of activities",
+      "duration",
+    ];
+
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
@@ -130,7 +153,11 @@ exports.createActivityReport = async (req, res) => {
       message: "Data generated successfully",
       data: reportData,
       pagination: paginationInfo,
-      config: reportConfig
+      config: reportConfig,
+      availableOptions: {
+        xaxis: xaxisArray,
+        yaxis: yaxisArray
+      }
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -313,140 +340,6 @@ async function generateExistingActivityPerformanceData(
   };
 }
 
-exports.saveActivityReport = async (req, res) => {
-  try {
-    const {
-      dashboardId,
-      folderId,
-      name,
-      entity,
-      type,
-      description,
-      xaxis,
-      yaxis,
-      filters,
-    } = req.body;
-    const ownerId = req.adminId;
-
-    // Validate required fields
-    if (!entity || !type || !xaxis || !yaxis) {
-      return res.status(400).json({
-        success: false,
-        message: "Entity, type, xaxis, and yaxis are required",
-      });
-    }
-
-    // Verify dashboard ownership if dashboardId is provided
-    if (dashboardId) {
-      const dashboard = await DASHBOARD.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: "Dashboard not found or access denied",
-        });
-      }
-    }
-
-    // Check if report already exists with same configuration (xaxis and yaxis)
-    const allReports = await Report.findAll({
-      where: {
-        ownerId,
-        entity,
-        type
-      }
-    });
-
-    // Find report with matching xaxis and yaxis in config
-    const existingReport = allReports.find(report => {
-      try {
-        const config = typeof report.config === 'string' 
-          ? JSON.parse(report.config) 
-          : report.config;
-        
-        return config.xaxis === xaxis && config.yaxis === yaxis;
-      } catch (error) {
-        console.error('Error parsing config:', error);
-        return false;
-      }
-    });
-
-    let reportData = null;
-    let report;
-
-    // Generate report data (you can add your data generation logic here)
-    // For example: reportData = await generateReportData(xaxis, yaxis, filters);
-
-    // Prepare config object
-    const configObj = {
-      xaxis,
-      yaxis,
-      filters: filters || {},
-      data: reportData,
-    };
-
-    if (existingReport) {
-      // Update existing report
-      const updateData = {
-        ...(dashboardId !== undefined && { dashboardId }),
-        ...(folderId !== undefined && { folderId }),
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        config: configObj,
-      };
-
-      await Report.update(updateData, {
-        where: { reportId: existingReport.reportId }
-      });
-
-      report = await Report.findByPk(existingReport.reportId);
-    } else {
-      // Create new report
-      const reportName = description || `${entity} ${type}`;
-      
-      // Get next position for dashboard
-      let nextPosition = 0;
-      if (dashboardId) {
-        const lastReport = await Report.findOne({
-          where: { dashboardId },
-          order: [["position", "DESC"]],
-        });
-        nextPosition = lastReport ? (lastReport.position || 0) + 1 : 0;
-      }
-
-      report = await Report.create({
-        dashboardId: dashboardId || null,
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-      });
-    }
-
-    res.status(existingReport ? 200 : 201).json({
-      success: true,
-      message: existingReport ? "Report updated successfully" : "Report created successfully",
-      data: {
-        ...report.toJSON(),
-        config: report.config,
-        reportData,
-      }
-    });
-
-  } catch (error) {
-    console.error("Error saving report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to save report",
-      error: error.message,
-    });
-  }
-};
 
 // Helper function to generate activity performance data with pagination
 async function generateActivityPerformanceData(
@@ -654,6 +547,142 @@ function getConditionObject(column, operator, value) {
   }
 }
 
+exports.saveActivityReport = async (req, res) => {
+  try {
+    const {
+      dashboardId,
+      folderId,
+      name,
+      entity,
+      type,
+      description,
+      xaxis,
+      yaxis,
+      filters,
+    } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate required fields
+    if (!entity || !type || !xaxis || !yaxis || !dashboardId || !folderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Entity, type, xaxis, and yaxis are required",
+      });
+    }
+
+    // Verify dashboard ownership if dashboardId is provided
+    if (dashboardId) {
+      const dashboard = await DASHBOARD.findOne({
+        where: { dashboardId, ownerId },
+      });
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: "Dashboard not found or access denied",
+        });
+      }
+    }
+
+    // Check if report already exists with same configuration (xaxis and yaxis)
+    const allReports = await Report.findAll({
+      where: {
+        ownerId,
+        entity,
+        type
+      }
+    });
+
+    // Find report with matching xaxis and yaxis in config
+    const existingReport = allReports.find(report => {
+      try {
+        const config = typeof report.config === 'string' 
+          ? JSON.parse(report.config) 
+          : report.config;
+        
+        return config.xaxis === xaxis && config.yaxis === yaxis;
+      } catch (error) {
+        console.error('Error parsing config:', error);
+        return false;
+      }
+    });
+
+    let reportData = null;
+    let report;
+
+    // Generate report data (you can add your data generation logic here)
+    // For example: reportData = await generateReportData(xaxis, yaxis, filters);
+
+    // Prepare config object
+    const configObj = {
+      xaxis,
+      yaxis,
+      filters: filters || {},
+      data: reportData,
+    };
+
+    if (existingReport) {
+      // Update existing report
+      const updateData = {
+        ...(dashboardId !== undefined && { dashboardId }),
+        ...(folderId !== undefined && { folderId }),
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        config: configObj,
+      };
+
+      await Report.update(updateData, {
+        where: { reportId: existingReport.reportId }
+      });
+
+      report = await Report.findByPk(existingReport.reportId);
+    } else {
+      // Create new report
+      const reportName = description || `${entity} ${type}`;
+      
+      // Get next position for dashboard
+      let nextPosition = 0;
+      if (dashboardId) {
+        const lastReport = await Report.findOne({
+          where: { dashboardId },
+          order: [["position", "DESC"]],
+        });
+        nextPosition = lastReport ? (lastReport.position || 0) : 0;
+      }
+
+      report = await Report.create({
+        dashboardId: dashboardId || null,
+        folderId: folderId || null,
+        entity,
+        type,
+        description: reportName,
+        name: name || reportName,
+        position: nextPosition,
+        config: configObj,
+        ownerId,
+      });
+    }
+
+    res.status(existingReport ? 200 : 201).json({
+      success: true,
+      message: existingReport ? "Report updated successfully" : "Report created successfully",
+      data: {
+        ...report.toJSON(),
+        config: report.config,
+        reportData,
+      }
+    });
+
+  } catch (error) {
+    console.error("Error saving report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save report",
+      error: error.message,
+    });
+  }
+};
+
+
 exports.updateActivityReport = async (req, res) => {
   try {
     const { reportId } = req.params;
@@ -829,6 +858,7 @@ exports.deleteActivityReport = async (req, res) => {
 exports.getActivityReportSummary = async (req, res) => {
   try {
     const {
+      reportId,
       entity,
       type,
       xaxis,
@@ -845,12 +875,12 @@ exports.getActivityReportSummary = async (req, res) => {
     const role = req.role;
 
     // Validate required fields
-    if (!entity || !type) {
-      return res.status(400).json({
-        success: false,
-        message: "Entity and type are required",
-      });
-    }
+    // if (!entity || !type) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Entity and type are required",
+    //   });
+    // }
 
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
@@ -971,7 +1001,7 @@ exports.getActivityReportSummary = async (req, res) => {
     let reportData = [];
     let summary = {};
 
-    if (xaxis && yaxis) {
+    if (xaxis && yaxis && !reportId) {
       const reportResult = await generateActivityPerformanceData(
         ownerId,
         role,
@@ -1002,6 +1032,52 @@ exports.getActivityReportSummary = async (req, res) => {
           minValue: minValue,
         };
       }
+    } else if(!xaxis && !yaxis && reportId){
+        const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+      } = existingReports.dataValues;
+
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const { xaxis: existingxaxis, yaxis: existingyaxis, filters: existingfilters } = config;
+
+      const reportResult = await generateActivityPerformanceData(
+        ownerId,
+        role,
+        existingxaxis,
+        existingyaxis,
+        existingfilters,
+        page,
+        limit
+      );
+      reportData = reportResult.data;
+
+      // Calculate summary statistics
+      if (reportData.length > 0) {
+        const totalValue = reportData.reduce(
+          (sum, item) => sum + (item.value || 0),
+          0
+        );
+        const avgValue = totalValue / reportData.length;
+        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
+        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+
+        summary = {
+          totalRecords: totalCount,
+          totalCategories: reportData.length,
+          totalValue: totalValue,
+          avgValue: parseFloat(avgValue.toFixed(2)),
+          maxValue: maxValue,
+          minValue: minValue,
+        };
+      }
+
     }
 
     // Format activities for response
