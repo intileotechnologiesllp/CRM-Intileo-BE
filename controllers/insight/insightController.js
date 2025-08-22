@@ -93,6 +93,7 @@ const Lead = require("../../models/leads/leadsModel");
 const Activity = require("../../models/activity/activityModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
+const ReportFolder = require("../../models/insight/reportFolderModel");
 
 // =============== DASHBOARD MANAGEMENT ===============
 
@@ -6157,6 +6158,197 @@ exports.bulkDeleteGoal = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to delete goals",
+      error: error.message,
+    });
+  }
+};
+
+
+exports.bulkDeleteReports = async (req, res) => {
+  try {
+    const { reportIds, folderIds } = req.body; // Array of report IDs to delete
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Validate that reportIds is provided and is an array
+    if (!reportIds || !Array.isArray(reportIds) || reportIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Report IDs array is required and must not be empty",
+      });
+    }
+
+    // Build where condition based on user role
+    const whereCondition = {
+      reportId: {
+        [Op.in]: reportIds
+      },
+    };
+
+    const whereConditionFolder = {
+      reportFolderId: {
+        [Op.in]: folderIds
+      },
+    };
+
+    // If user is not admin, only allow deletion of their own reports
+    if (role !== "admin") {
+      whereCondition.ownerId = ownerId;
+    }
+
+    if (role !== "admin") {
+      whereConditionFolder.ownerId = ownerId;
+    }
+
+    // First, find all reports to verify existence and permissions
+    const reports = await Report.findAll({
+      where: whereCondition,
+      attributes: ['reportId', 'ownerId', 'name']
+    });
+
+    // Check if all requested reports were found
+    const foundReportIds = reports.map(report => report.reportId);
+    const notFoundReportIds = reportIds.filter(id => !foundReportIds.includes(id));
+
+    if (notFoundReportIds.length > 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Some reports not found or access denied",
+        details: {
+          notFoundReportIds,
+          foundReportIds
+        }
+      });
+    }
+
+    // Delete the reports
+    const deletedCount = await Report.destroy({
+      where: whereCondition
+    });
+
+    const deletedfolderCount = await ReportFolder.destroy({
+      where: whereConditionFolder,
+    });
+
+    if (deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No reports found or already deleted",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully deleted ${deletedCount} report(s)`,
+      data: {
+        deletedCount,
+        deletedfolderCount,
+        deletedFolderIds: folderIds,
+        deletedReportIds: foundReportIds,
+        notFoundReportIds: notFoundReportIds.length > 0 ? notFoundReportIds : undefined
+      },
+    });
+  } catch (error) {
+    console.error("Error deleting reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete reports",
+      error: error.message,
+    });
+  }
+};
+
+exports.GetAllReports = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Build where condition based on user role
+    const whereCondition = {};
+
+    // If user is not admin, only show their own reports and folders
+    if (role !== "admin") {
+      whereCondition.ownerId = ownerId;
+    }
+
+    // Get all folders for the user
+    const folders = await ReportFolder.findAll({
+      where: whereCondition,
+      attributes: ['reportFolderId', 'name', 'ownerId'],
+      order: [['createdAt', 'ASC']]
+    });
+
+    // Get all reports for the user
+    const reports = await Report.findAll({
+      where: whereCondition,
+      attributes: ['reportId', 'ownerId', 'name', 'folderId', 'description', 'entity', 'type', 'createdAt'],
+      order: [['createdAt', 'ASC']]
+    });
+
+    // Organize reports by folder
+    const folderMap = new Map();
+    
+    // Add all folders to the map
+    folders.forEach(folder => {
+      folderMap.set(folder.reportFolderId, {
+        folderId: folder.reportFolderId,
+        ownerId: folder.ownerId,
+        name: folder.name,
+        reports: []
+      });
+    });
+
+    // Add reports without folders (folderId = null) to a special "Uncategorized" section
+    const uncategorizedReports = [];
+
+    // Distribute reports to their respective folders
+    reports.forEach(report => {
+      if (report.folderId && folderMap.has(report.folderId)) {
+        folderMap.get(report.folderId).reports.push({
+          reportId: report.reportId,
+          ownerId: report.ownerId,
+          name: report.name,
+          description: report.description,
+          entity: report.entity,
+          type: report.type,
+          createdAt: report.createdAt
+        });
+      } else {
+        uncategorizedReports.push({
+          reportId: report.reportId,
+          ownerId: report.ownerId,
+          name: report.name,
+          description: report.description,
+          entity: report.entity,
+          type: report.type,
+          createdAt: report.createdAt
+        });
+      }
+    });
+
+    // Convert map to array
+    const folderData = Array.from(folderMap.values());
+
+    // Add uncategorized reports as a special folder if there are any
+    if (uncategorizedReports.length > 0) {
+      folderData.push({
+        folderId: null,
+        ownerId: ownerId,
+        name: "Uncategorized",
+        reports: uncategorizedReports
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched all reports`,
+      data: folderData
+    });
+  } catch (error) {
+    console.error("Error getting all reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get all reports",
       error: error.message,
     });
   }
