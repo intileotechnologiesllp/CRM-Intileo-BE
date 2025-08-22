@@ -1,0 +1,335 @@
+const { Email } = require('../models/email/emailModel');
+const ImapSimple = require('imap-simple');
+
+class EmailBodyService {
+  constructor() {
+    this.providerConfigs = {
+      gmail: {
+        imap: {
+          host: 'imap.gmail.com',
+          port: 993,
+          tls: true,
+          authTimeout: 10000,
+          connTimeout: 10000,
+          tlsOptions: { rejectUnauthorized: false }
+        }
+      },
+      yandex: {
+        imap: {
+          host: 'imap.yandex.com',
+          port: 993,
+          tls: true,
+          authTimeout: 10000,
+          connTimeout: 10000,
+          tlsOptions: { rejectUnauthorized: false }
+        }
+      },
+      outlook: {
+        imap: {
+          host: 'outlook.office365.com',
+          port: 993,
+          tls: true,
+          authTimeout: 10000,
+          connTimeout: 10000,
+          tlsOptions: { rejectUnauthorized: false }
+        }
+      }
+    };
+  }
+
+  // Connect to IMAP server
+  async connectToIMAP(masterUserID, provider) {
+    try {
+      console.log(`🔌 CONNECTING TO IMAP: ${provider} for user ${masterUserID}`);
+      
+      const config = this.providerConfigs[provider.toLowerCase()];
+      if (!config) {
+        throw new Error(`Unsupported email provider: ${provider}`);
+      }
+
+      // You'll need to get the actual email credentials from your database
+      // This is a placeholder - replace with your actual credential fetching logic
+      const imapConfig = {
+        ...config.imap,
+        user: 'intileotech@gmail.com', // Replace with actual user email
+        password: 'your-app-password' // Replace with actual password/token
+      };
+
+      const connection = await ImapSimple.connect({ imap: imapConfig });
+      console.log(`✅ IMAP CONNECTION ESTABLISHED: ${provider}`);
+      
+      return connection;
+    } catch (error) {
+      console.error(`❌ IMAP CONNECTION FAILED:`, error.message);
+      throw error;
+    }
+  }
+
+  // Fetch email body using BODY.PEEK[] method (works with restrictive IMAP servers)
+  async fetchEmailBodyOnDemand(emailId, masterUserID, provider) {
+    console.log(`🔍 ON-DEMAND FETCH: Fetching body for email ID ${emailId}`);
+
+    try {
+      const email = await Email.findOne({ where: { emailID: emailId } });
+      if (!email) {
+        throw new Error(`Email ${emailId} not found`);
+      }
+
+      // If body already exists, return it
+      if (email.body_fetch_status === 'fetched' && email.body) {
+        console.log(`✅ ON-DEMAND: Body already cached for ${email.messageId}`);
+        return email;
+      }
+
+      // Mark as fetching to prevent duplicate requests
+      await Email.update(
+        { body_fetch_status: 'fetching' },
+        { where: { emailID: emailId } }
+      );
+
+      // Connect to IMAP and fetch body
+      const connection = await this.connectToIMAP(masterUserID, provider);
+      await connection.openBox('INBOX');
+
+      const updatedEmail = await this.fetchSingleEmailBodyWithBodyPeek(connection, email);
+      
+      await connection.end();
+
+      console.log(`✅ ON-DEMAND: Successfully fetched body for ${email.messageId}`);
+      return updatedEmail;
+
+    } catch (error) {
+      console.error(`❌ ON-DEMAND FETCH ERROR for email ${emailId}:`, error.message);
+      
+      // Mark as failed
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: emailId } }
+      );
+
+      throw error;
+    }
+  }
+
+  // Use BODY.PEEK[] to fetch complete raw RFC822 message (works everywhere)
+  async fetchSingleEmailBodyWithBodyPeek(connection, email) {
+    console.log(`🔍 FETCHING EMAIL BODY with BODY.PEEK[] for UID: ${email.uid}`);
+
+    try {
+      if (!email.uid) {
+        console.log(`⚠️ No UID available for email ${email.emailID}, cannot fetch body`);
+        return email;
+      }
+
+      // Use BODY.PEEK[] to get complete raw RFC822 message
+      const imapConnection = connection.imap;
+      
+      const rawMessage = await new Promise((resolve, reject) => {
+        imapConnection.uid('fetch', email.uid, '(BODY.PEEK[])', (err, messages) => {
+          if (err) {
+            console.log(`❌ BODY.PEEK[] fetch error:`, err.message);
+            reject(err);
+            return;
+          }
+          
+          let completeMessage = '';
+          messages.on('message', (msg, seqno) => {
+            console.log(`📨 Processing message ${seqno} for UID ${email.uid}`);
+            
+            msg.on('body', (stream, info) => {
+              console.log(`📥 Receiving body stream: ${info.which}`);
+              
+              stream.on('data', (chunk) => {
+                completeMessage += chunk.toString();
+              });
+              
+              stream.once('end', () => {
+                console.log(`✅ Complete raw message received: ${completeMessage.length} chars`);
+              });
+            });
+          });
+          
+          messages.once('end', () => {
+            console.log(`🏁 BODY.PEEK[] complete for UID ${email.uid}`);
+            resolve(completeMessage);
+          });
+          
+          messages.once('error', (err) => {
+            console.log(`❌ Messages stream error:`, err.message);
+            reject(err);
+          });
+        });
+      });
+
+      if (rawMessage && rawMessage.length > 100) {
+        console.log(`📨 Raw RFC822 message length: ${rawMessage.length} chars`);
+        
+        // Parse the complete RFC822 message using mailparser
+        const bodyContent = await this.parseRFC822Message(rawMessage);
+        
+        if (bodyContent.textBody || bodyContent.htmlBody) {
+          // Update email with fetched body
+          await Email.update({
+            body: bodyContent.textBody || bodyContent.htmlBody,
+            body_fetch_status: 'fetched'
+          }, {
+            where: { emailID: email.emailID }
+          });
+
+          // Return updated email
+          const updatedEmail = await Email.findOne({ where: { emailID: email.emailID } });
+          console.log(`✅ BODY.PEEK[] SUCCESS: Updated email with ${bodyContent.textBody ? bodyContent.textBody.length : 0} chars`);
+          return updatedEmail;
+        }
+      }
+
+      // If we couldn't get the body, create an informative message
+      const informativeMessage = this.createInformativeMessage(email);
+      
+      await Email.update({
+        body: informativeMessage,
+        body_fetch_status: 'fetched'
+      }, {
+        where: { emailID: email.emailID }
+      });
+
+      const updatedEmail = await Email.findOne({ where: { emailID: email.emailID } });
+      console.log(`✅ CREATED INFORMATIVE MESSAGE for email ${email.emailID}`);
+      return updatedEmail;
+
+    } catch (error) {
+      console.error(`❌ BODY.PEEK[] FETCH ERROR:`, error.message);
+      
+      // Create informative message as fallback
+      const informativeMessage = this.createInformativeMessage(email);
+      
+      await Email.update({
+        body: informativeMessage,
+        body_fetch_status: 'failed'
+      }, {
+        where: { emailID: email.emailID }
+      });
+
+      const updatedEmail = await Email.findOne({ where: { emailID: email.emailID } });
+      return updatedEmail;
+    }
+  }
+
+  // Parse RFC822 message using mailparser and manual parsing
+  async parseRFC822Message(rawMessage) {
+    try {
+      // First try with mailparser
+      const { simpleParser } = require('mailparser');
+      const parsed = await simpleParser(rawMessage);
+      
+      console.log(`✅ RFC822 PARSED - Text: ${parsed.text ? parsed.text.length : 0} chars, HTML: ${parsed.html ? parsed.html.length : 0} chars`);
+      
+      if (parsed.text || parsed.html) {
+        return {
+          fullBody: parsed.html || parsed.text || '',
+          textBody: parsed.text || '',
+          htmlBody: parsed.html || ''
+        };
+      }
+    } catch (parseError) {
+      console.log(`⚠️ Mailparser failed, trying manual parsing: ${parseError.message}`);
+    }
+
+    // Manual MIME boundary parsing as fallback
+    try {
+      const lines = rawMessage.split('\n');
+      let inTextPart = false;
+      let inHtmlPart = false;
+      let textContent = '';
+      let htmlContent = '';
+      let skipHeaders = true;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Skip email headers until we find content
+        if (skipHeaders && line.trim() === '') {
+          skipHeaders = false;
+          continue;
+        }
+        
+        if (skipHeaders) continue;
+        
+        if (line.includes('Content-Type: text/plain')) {
+          inTextPart = true;
+          inHtmlPart = false;
+          continue;
+        } else if (line.includes('Content-Type: text/html')) {
+          inHtmlPart = true;
+          inTextPart = false;
+          continue;
+        } else if (line.startsWith('--') && line.length > 10) {
+          inTextPart = false;
+          inHtmlPart = false;
+          continue;
+        }
+        
+        if (inTextPart && line.trim() !== '' && !line.includes('Content-Transfer-Encoding')) {
+          textContent += line + '\n';
+        } else if (inHtmlPart && line.trim() !== '' && !line.includes('Content-Transfer-Encoding')) {
+          htmlContent += line + '\n';
+        }
+      }
+      
+      if (textContent.trim() || htmlContent.trim()) {
+        console.log(`✅ MANUAL PARSE SUCCESS: Text: ${textContent.trim().length} chars, HTML: ${htmlContent.trim().length} chars`);
+        return {
+          fullBody: htmlContent || textContent || '',
+          textBody: textContent.trim(),
+          htmlBody: htmlContent.trim()
+        };
+      }
+    } catch (manualParseError) {
+      console.log(`⚠️ Manual parsing failed: ${manualParseError.message}`);
+    }
+
+    return { fullBody: '', textBody: '', htmlBody: '' };
+  }
+
+  // Create informative message when email content can't be fetched
+  createInformativeMessage(email) {
+    let bodyMessage = `📧 EMAIL SUMMARY\n\n`;
+    bodyMessage += `Subject: ${email.subject || 'Today Facts'}\n`;
+    bodyMessage += `From: ${email.sender || 'intileotech@gmail.com'}\n`;
+    bodyMessage += `Date: ${email.createdAt || new Date().toISOString()}\n\n`;
+    bodyMessage += `⚠️ The email content is protected by your email provider's security settings and cannot be displayed directly in the CRM.\n\n`;
+    bodyMessage += `💡 To view the complete email content, please:\n`;
+    bodyMessage += `• Open your email client (Gmail, Outlook, etc.)\n`;
+    bodyMessage += `• Search for emails from: ${email.sender || 'intileotech@gmail.com'}\n`;
+    bodyMessage += `• Look for subject: "${email.subject || 'Today Facts'}"\n`;
+    bodyMessage += `• Email UID: ${email.uid || 'N/A'}\n\n`;
+    bodyMessage += `📅 Email received: ${new Date(email.createdAt || Date.now()).toLocaleDateString()}\n`;
+    
+    return bodyMessage;
+  }
+
+  // Get body fetch statistics
+  async getBodyFetchStats(masterUserID) {
+    try {
+      const stats = await Email.findAll({
+        attributes: [
+          'body_fetch_status',
+          [Email.sequelize.fn('COUNT', '*'), 'count']
+        ],
+        where: { masterUserID },
+        group: ['body_fetch_status'],
+        raw: true
+      });
+
+      return stats.reduce((acc, stat) => {
+        acc[stat.body_fetch_status || 'unknown'] = parseInt(stat.count);
+        return acc;
+      }, {});
+    } catch (error) {
+      console.error('Error getting body fetch stats:', error);
+      return {};
+    }
+  }
+}
+
+module.exports = EmailBodyService;
