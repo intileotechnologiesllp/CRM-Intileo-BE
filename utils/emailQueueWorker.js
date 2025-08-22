@@ -170,16 +170,23 @@ async function startWorker() {
       if (msg !== null) {
         // Enforce small batch size and log memory for fetchRecentEmail
         const { adminId } = JSON.parse(msg.content.toString());
+        console.log(`🚀 [DEBUG] [EmailWorker] Starting job for adminId ${adminId}`);
         logMemoryUsage(`Before fetchRecentEmail for adminId ${adminId}`);
+        const jobStartTime = new Date();
+        
         try {
           await limit(async () => {
             // Pass smaller batch size to fetchRecentEmail for memory safety
+            console.log(`📧 [DEBUG] [EmailWorker] Calling fetchRecentEmail for adminId ${adminId} with batchSize: 5`);
             await fetchRecentEmail(adminId, { batchSize: 5 });
           });
+          const jobDuration = new Date() - jobStartTime;
+          console.log(`✅ [DEBUG] [EmailWorker] Job completed for adminId ${adminId} in ${jobDuration}ms`);
           channel.ack(msg);
         } catch (error) {
+          const jobDuration = new Date() - jobStartTime;
           console.error(
-            `Error processing email fetch for adminId ${adminId}:`,
+            `❌ [DEBUG] [EmailWorker] Error processing email fetch for adminId ${adminId} after ${jobDuration}ms:`,
             error
           );
           channel.nack(msg, false, false); // Discard the message on error

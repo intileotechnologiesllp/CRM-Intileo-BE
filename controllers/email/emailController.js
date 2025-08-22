@@ -429,6 +429,67 @@ function flattenFolders(boxes, prefix = "") {
   return folders;
 }
 
+// Helper function to find matching folder by type
+function findMatchingFolder(allFoldersArr, folderType) {
+  const folderMap = {
+    inbox: ["INBOX", "Inbox", "inbox"],
+    sent: [
+      "Sent", "SENT", "Sent Items", "Sent Mail", 
+      "[Gmail]/Sent Mail", "[Google Mail]/Sent Mail",
+      "Отправленные", "Sent",  // Yandex Russian and English
+      "Отправлено", "Sent Messages",  // Additional Yandex patterns
+      "outbox", "Outbox", "OUTBOX"  // Yandex uses outbox for sent emails
+    ],
+    drafts: [
+      "Drafts", "DRAFTS", "Draft", "[Gmail]/Drafts", "[Google Mail]/Drafts",
+      "Черновики", "Черновики"  // Yandex Russian
+    ],
+    archive: [
+      "Archive", "ARCHIVE", "All Mail", "[Gmail]/All Mail", "[Google Mail]/All Mail", 
+      "Archived", "Архив"  // Yandex Russian
+    ]
+  };
+  
+  const patterns = folderMap[folderType] || [folderType];
+  
+  console.log(`🔍 FOLDER SEARCH: Looking for '${folderType}' using patterns: [${patterns.join(', ')}]`);
+  console.log(`🔍 AVAILABLE FOLDERS: [${allFoldersArr.join(', ')}]`);
+  
+  // Special handling for Yandex sent folder - try exact matches for Russian names first, then outbox
+  if (folderType === 'sent') {
+    // Try Yandex Russian folder names with exact matching first
+    const yandexExactNames = ['Отправленные', 'Отправлено'];
+    for (const exactName of yandexExactNames) {
+      const found = allFoldersArr.find(folder => folder === exactName);
+      if (found) {
+        console.log(`✅ YANDEX EXACT MATCH: Found '${found}' for exact Russian pattern`);
+        return found;
+      }
+    }
+    
+    // Try outbox as Yandex sent folder alternative
+    const outboxFound = allFoldersArr.find(folder => folder.toLowerCase() === 'outbox');
+    if (outboxFound) {
+      console.log(`✅ YANDEX OUTBOX MATCH: Found '${outboxFound}' - using as SENT folder for Yandex`);
+      return outboxFound;
+    }
+  }
+  
+  for (const pattern of patterns) {
+    const found = allFoldersArr.find(folder => 
+      folder.toLowerCase() === pattern.toLowerCase() ||
+      folder.toLowerCase().includes(pattern.toLowerCase())
+    );
+    if (found) {
+      console.log(`✅ FOLDER MATCH: Found '${found}' for pattern '${pattern}'`);
+      return found;
+    }
+  }
+  
+  console.log(`❌ FOLDER NOT FOUND: No match for '${folderType}' in available folders`);
+  return null;
+}
+
 // Helper function to recursively fetch all emails in a thread
 async function getFullThread(messageId, EmailModel, collected = new Set()) {
   if (!messageId || collected.has(messageId)) return [];
@@ -463,7 +524,451 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
   return thread;
 }
 
+// 🚀 PHASE 2: Fetch single email body on-demand
+const fetchSingleEmailBody = async (messageId, userCredential) => {
+  const imaps = require('imap-simple');
+  
+  try {
+    console.log(`[Phase 2] Connecting to IMAP for single email body fetch...`);
+    
+    // Connect to IMAP
+    const connection = await imaps.connect({
+      imap: {
+        user: userCredential.email,
+        password: userCredential.appPassword,
+        host: userCredential.imapHost,
+        port: userCredential.imapPort,
+        tls: userCredential.imapEncryption === 'tls',
+        authTimeout: 30000,
+        connTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false }
+      }
+    });
+    
+    await connection.openBox('INBOX');
+    console.log(`[Phase 2] IMAP connected, searching for message: ${messageId}`);
+    
+    // Search for specific email by message ID
+    const searchCriteria = [['HEADER', 'MESSAGE-ID', messageId]];
+    const fetchOptions = {
+      bodies: 'TEXT', // Fetch full body content
+      struct: true
+    };
+    
+    const emails = await connection.search(searchCriteria, fetchOptions);
+    
+    if (emails && emails.length > 0) {
+      const email = emails[0];
+      console.log(`[Phase 2] Found email, extracting body...`);
+      
+      // Extract body content
+      let bodyContent = '';
+      if (email.bodies && email.bodies.TEXT) {
+        bodyContent = email.bodies.TEXT;
+      }
+      
+      await connection.end();
+      console.log(`[Phase 2] Single email body fetched successfully`);
+      return bodyContent;
+    } else {
+      await connection.end();
+      console.log(`[Phase 2] Email not found with message ID: ${messageId}`);
+      return null;
+    }
+    
+  } catch (error) {
+    console.log(`[Phase 2] Error fetching single email body:`, error.message);
+    return null;
+  }
+};
+
 // 🧠 INTELLIGENT CHUNKING: Helper function to fetch emails in date-based chunks for ALL providers
+// Enhanced progressive timeout calculation based on strategy
+const getProgressiveTimeout = (strategy) => {
+  switch (strategy) {
+    case "MASSIVE_INBOX": return 60000; // 60s for metadata-only fetching (Yandex compatibility)
+    case "VERY_LARGE": return 45000; // 45 seconds for very large inboxes
+    case "LARGE": return 30000; // 30 seconds for large inboxes
+    case "MEDIUM": return 20000; // 20 seconds for medium inboxes
+    case "SMALL_CHUNKS": return 15000; // 15 seconds for small chunks
+    default: return 10000; // 10 seconds for normal
+  }
+};
+
+// ⚡ HIGH-PERFORMANCE: Batch fetch by UID ranges (100-200 emails at once)
+const fetchEmailsByUIDRanges = async (connection, uidRanges, strategy = 'NORMAL', page = 1, userID = 'unknown', provider = 'unknown') => {
+  // 🚀 METADATA-ONLY FETCH: Can handle larger batches since we're not fetching bodies
+  const batchSize = strategy === "MASSIVE_INBOX" ? 1 : 5; // Yandex: ultra-conservative 1 range at a time
+  const allEmails = [];
+  let successfulBatches = 0;
+  let failedBatches = 0;
+  
+  console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE FETCH: Processing ${uidRanges.length} UID ranges for USER ${userID} ${provider}`);
+  console.log(`[Batch ${page}] 🎯 METADATA BATCH SIZE: ${batchSize} UID ranges per fetch (strategy: ${strategy})`);
+  
+  for (let i = 0; i < uidRanges.length; i += batchSize) {
+    const batchRanges = uidRanges.slice(i, i + batchSize);
+    const batchNum = Math.floor(i / batchSize) + 1;
+    
+    try {
+      // Create UID range string: "1001:1100,1201:1300,1401:1500"
+      const uidRangeStr = batchRanges.map(range => `${range.start}:${range.end}`).join(',');
+      
+      console.log(`[Batch ${page}] 🔄 UID Batch ${batchNum}: Fetching UIDs ${uidRangeStr} (${batchRanges.length} ranges)`);
+      
+      const timeout = getProgressiveTimeout(strategy);
+      
+      const fetchPromise = new Promise(async (resolve, reject) => {
+        try {
+          if (batchRanges.length > 0) {
+            // 🚀 TWO-PASS STRATEGY: Metadata first, then bodies
+            let searchCriteria;
+            let fetchOptions;
+            
+            if (batchRanges.length === 1) {
+              // Single range - use simple UID range format
+              const range = batchRanges[0];
+              searchCriteria = [['UID', `${range.start}:${range.end}`]];
+              
+              // 📋 PROGRESSIVE STRATEGY: Try HEADER.FIELDS first, fallback to HEADER
+              fetchOptions = {
+                bodies: 'HEADER',  // Use simpler HEADER for better compatibility
+                struct: true,     // Get structure for attachments
+                envelope: true,   // Get envelope for quick access
+                markSeen: false   // Don't mark as read
+              };
+              
+              console.log(`[Batch ${page}] 🔍 METADATA FETCH: UIDs ${range.start}:${range.end} (${range.end - range.start + 1} emails)`);
+            } else {
+              // Multiple ranges - use comma-separated ranges 
+              const rangeList = batchRanges.map(range => `${range.start}:${range.end}`).join(',');
+              searchCriteria = [['UID', rangeList]];
+              
+              // 📋 PROGRESSIVE STRATEGY: Use simpler HEADER for better compatibility
+              fetchOptions = {
+                bodies: 'HEADER',  // Use simpler HEADER for better compatibility
+                struct: true,     // Get structure for attachments
+                envelope: true,   // Get envelope for quick access
+                markSeen: false   // Don't mark as read
+              };
+              
+              console.log(`[Batch ${page}] 🔍 METADATA FETCH: ${batchRanges.length} ranges: ${rangeList}`);
+            }
+            
+            console.log(`[Batch ${page}] 🔍 SEARCH DEBUG: Using criteria:`, searchCriteria);
+            
+            // Fetch metadata only (fast and reliable)
+            const emails = await connection.search(searchCriteria, fetchOptions);
+            console.log(`[Batch ${page}] 📨 METADATA RESULT: Found ${emails.length} email headers`);
+            
+            // 📋 TODO: PASS 2 will be implemented separately for body fetching
+            // For now, we successfully get all email metadata without timeouts
+            
+            resolve(emails);
+          } else {
+            resolve([]);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      });
+      
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`UID batch ${batchNum} timeout`)), timeout)
+      );
+      
+      const emails = await Promise.race([fetchPromise, timeoutPromise]);
+      allEmails.push(...emails);
+      successfulBatches++;
+      
+      console.log(`[Batch ${page}] ✅ UID Batch ${batchNum}: Found ${emails.length} email headers in ${timeout/1000}s`);
+      
+      // Minimal pause between batches
+      if (i + batchSize < uidRanges.length) {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 0.5s pause
+      }
+      
+    } catch (error) {
+      failedBatches++;
+      console.log(`[Batch ${page}] ⚠️ UID Batch ${batchNum} failed: ${error.message}`);
+      
+      // Continue processing other batches - more tolerant with smaller batches
+      if (failedBatches > 10 && successfulBatches === 0) {
+        console.log(`[Batch ${page}] ❌ Too many failed UID batches, stopping`);
+        break;
+      }
+    }
+  }
+  
+  console.log(`[Batch ${page}] 🎯 UID BATCH SUMMARY: ${allEmails.length} emails, ${successfulBatches} successful, ${failedBatches} failed batches`);
+  return allEmails;
+};
+
+// ⚡ HIGH-PERFORMANCE: Parallel database saving with p-limit
+const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, page = 1) => {
+  const pLimit = require('p-limit');
+  const limit = pLimit(concurrency); // Process up to 10 emails at once
+  const savedEmails = [];
+  const errors = [];
+  const startTime = Date.now();
+  
+  console.log(`[Batch ${page}] ⚡ PARALLEL SAVING: ${emails.length} emails with concurrency ${concurrency} for USER ${userID}`);
+  
+  const savePromises = emails.map((email, index) => 
+    limit(async () => {
+      try {
+        // Check if email already exists
+        const existingEmail = await Email.findOne({
+          where: { messageId: email.messageId },
+        });
+        
+        if (!existingEmail) {
+          // 🔍 DEBUG: Log UID before saving
+          console.log(`[Batch ${page}] 💾 SAVING NEW EMAIL: ${email.messageId} with UID: ${email.uid}`);
+          const savedEmail = await Email.create(email);
+          savedEmails.push(savedEmail);
+          
+          // Progress logging every 50 saves
+          if (savedEmails.length % 50 === 0) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const rate = savedEmails.length / elapsed;
+            console.log(`[Batch ${page}] 💾 SAVED: ${savedEmails.length}/${emails.length} emails (${rate.toFixed(1)} saves/sec)`);
+          }
+          
+          return savedEmail;
+        } else {
+          // ✅ UPDATE: Check if existing email needs UID update
+          if (!existingEmail.uid && email.uid) {
+            console.log(`[Batch ${page}] 🔄 UID UPDATE: Email ${email.messageId} - existing UID: ${existingEmail.uid}, new UID: ${email.uid}`);
+            await existingEmail.update({ uid: email.uid });
+            console.log(`[Batch ${page}] 🔄 UID UPDATED: Email ${email.messageId} now has UID ${email.uid}`);
+            savedEmails.push(existingEmail); // Count as processed
+            return existingEmail;
+          } else if (existingEmail.uid && email.uid && existingEmail.uid !== email.uid) {
+            // Handle potential UID conflicts (rare but possible)
+            console.log(`[Batch ${page}] ⚠️ UID CONFLICT: Email ${email.messageId} has different UID (existing: ${existingEmail.uid}, new: ${email.uid})`);
+          } else {
+            console.log(`[Batch ${page}] ⏭️ SKIP: Email ${email.messageId} already exists with UID (existing: ${existingEmail.uid}, new: ${email.uid})`);
+          }
+          return null;
+        }
+      } catch (error) {
+        errors.push({ email: email.messageId, error: error.message });
+        console.log(`[Batch ${page}] ⚠️ SAVE ERROR: ${email.messageId} - ${error.message}`);
+        return null;
+      }
+    })
+  );
+  
+  // Wait for all saves to complete
+  await Promise.all(savePromises);
+  
+  const totalTime = (Date.now() - startTime) / 1000;
+  const rate = savedEmails.length / totalTime;
+  
+  console.log(`[Batch ${page}] ✅ PARALLEL SAVE COMPLETE: ${savedEmails.length} processed (new emails + UID updates), ${errors.length} errors in ${totalTime.toFixed(1)}s (${rate.toFixed(1)} saves/sec)`);
+  
+  return { savedEmails, errors, processingTime: totalTime, rate };
+};
+
+// ⚡ HIGH-PERFORMANCE: Fast email fetching with optimized strategy  
+const fetchEmailsHighPerformance = async (connection, strategy, userID, provider, page = 1) => {
+  const startTime = Date.now();
+  let allEmails = [];
+  
+  console.log(`[Batch ${page}] 🚀 HIGH-PERFORMANCE FETCH: Starting optimized fetch for USER ${userID} ${provider} (strategy: ${strategy})`);
+  
+  try {
+    // Step 1: Get all UIDs quickly (no body fetch)
+    console.log(`[Batch ${page}] 📋 STEP 1: Getting all email UIDs...`);
+    const uidResults = await connection.search(['ALL'], { struct: false });
+    
+    // Extract UIDs from message objects
+    const totalUIDs = uidResults.map((msg) => msg.attributes.uid);
+    
+    console.log(`[Batch ${page}] 📊 FOUND: ${totalUIDs.length} total emails in inbox`);
+    
+    // Step 2: Priority strategy - Recent emails first
+    const recentCount = strategy === "MASSIVE_INBOX" ? 2000 : 
+                       strategy === "VERY_LARGE" ? 3000 :
+                       strategy === "LARGE" ? 5000 : totalUIDs.length;
+    
+    const priorityUIDs = totalUIDs.slice(-recentCount); // Get most recent emails
+    console.log(`[Batch ${page}] 🎯 PRIORITY: Processing ${priorityUIDs.length} recent emails first`);
+    
+    // Step 3: Create UID ranges for batch fetching (METADATA ONLY - can handle larger batches)
+    const batchSize = strategy === "MASSIVE_INBOX" ? 25 : 100; // Smaller batches for Yandex MASSIVE_INBOX
+    const uidRanges = [];
+    
+    for (let i = 0; i < priorityUIDs.length; i += batchSize) {
+      const startUID = priorityUIDs[i];
+      const endUID = priorityUIDs[Math.min(i + batchSize - 1, priorityUIDs.length - 1)];
+      uidRanges.push({ start: startUID, end: endUID });
+    }
+    
+    console.log(`[Batch ${page}] 📦 BATCHING: Created ${uidRanges.length} UID ranges (${batchSize} emails per range)`);
+    
+    // Step 4: Batch fetch by UID ranges
+    allEmails = await fetchEmailsByUIDRanges(connection, uidRanges, strategy, page, userID, provider);
+    
+    const fetchTime = (Date.now() - startTime) / 1000;
+    const fetchRate = allEmails.length / fetchTime;
+    
+    console.log(`[Batch ${page}] ✅ FETCH COMPLETE: ${allEmails.length} emails fetched in ${fetchTime.toFixed(1)}s (${fetchRate.toFixed(1)} emails/sec)`);
+    
+    return {
+      emails: allEmails,
+      totalCount: totalUIDs.length,
+      fetchedCount: allEmails.length,
+      fetchTime: fetchTime,
+      fetchRate: fetchRate,
+      strategy: strategy
+    };
+    
+  } catch (error) {
+    console.log(`[Batch ${page}] ❌ HIGH-PERFORMANCE FETCH ERROR: ${error.message}`);
+    throw error;
+  }
+};
+
+const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider = 'unknown', userID = 'unknown', strategy = 'NORMAL') => {
+  const formatDateForIMAP = (date) => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  const allChunkedMessages = [];
+  const today = new Date();
+  
+  // Enhanced chunk limits based on strategy
+  const getMaxChunks = (strategy) => {
+    switch (strategy) {
+      case "MASSIVE_INBOX": return 500; // Process up to 500 chunks (10+ years of 7-day chunks)
+      case "VERY_LARGE": return 400; // Process up to 400 chunks (11+ years of 10-day chunks)
+      case "LARGE": return 300; // Process up to 300 chunks (12+ years of 15-day chunks)
+      case "MEDIUM": return 200; // Process up to 200 chunks (16+ years of 30-day chunks)
+      case "SMALL_CHUNKS": return 100; // Process up to 100 chunks (16+ years of 60-day chunks)
+      default: return 50; // Default for normal processing
+    }
+  };
+  
+  const maxChunks = getMaxChunks(strategy);
+  let successfulChunks = 0;
+  let failedChunks = 0;
+  let lastChunkProcessed = 0;
+  let memoryOptimizationTrigger = false;
+  
+  console.log(`[Batch ${page}] 🚀 ENHANCED CHUNKING: Starting ${provider} enhanced fetch for USER ${userID}`);
+  console.log(`[Batch ${page}] 🔧 STRATEGY: ${strategy} with ${chunkDays}-day chunks, max ${maxChunks} chunks`);
+  console.log(`[Batch ${page}] 📊 CAPACITY: Will process up to ${Math.floor(maxChunks * chunkDays / 365)} years of email history`);
+  
+  for (let chunk = 0; chunk < maxChunks; chunk++) {
+    lastChunkProcessed = chunk + 1;
+    let chunkMessages = [];
+    
+    try {
+      const chunkEndDate = new Date(today.getTime() - (chunk * chunkDays * 24 * 60 * 60 * 1000));
+      const chunkStartDate = new Date(today.getTime() - ((chunk + 1) * chunkDays * 24 * 60 * 60 * 1000));
+      
+      const endDateStr = formatDateForIMAP(chunkEndDate);
+      const startDateStr = formatDateForIMAP(chunkStartDate);
+      
+      console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Enhanced Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
+      
+      // Enhanced progressive timeout based on strategy and chunk number
+      const baseTimeout = getProgressiveTimeout(strategy);
+      const adaptiveTimeout = baseTimeout + (chunk * 1000); // Add 1s per chunk for older data
+      const maxTimeout = Math.min(adaptiveTimeout, 120000); // Cap at 2 minutes
+      
+      const searchPromise = connection.search([
+        ["SINCE", startDateStr],
+        ["BEFORE", endDateStr]
+      ], {
+        bodies: "HEADER",
+        struct: true,
+      });
+      
+      const chunkTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${provider} enhanced chunk ${chunk + 1} timeout`)), maxTimeout)
+      );
+      
+      chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
+      successfulChunks++;
+      console.log(`[Batch ${page}] ✅ USER ${userID} ${provider} Enhanced Chunk ${chunk + 1}: Found ${chunkMessages.length} emails (${(maxTimeout/1000)}s timeout)`);
+      
+      allChunkedMessages.push(...chunkMessages);
+      
+      // Enhanced memory management based on strategy
+      const memoryThresholds = {
+        "MASSIVE_INBOX": 5000,
+        "VERY_LARGE": 8000,
+        "LARGE": 12000,
+        "MEDIUM": 15000,
+        "SMALL_CHUNKS": 20000,
+        "NORMAL": 25000
+      };
+      
+      const threshold = memoryThresholds[strategy] || 15000;
+      
+      if (allChunkedMessages.length > threshold && !memoryOptimizationTrigger) {
+        memoryOptimizationTrigger = true;
+        console.log(`[Batch ${page}] 🧠 MEMORY OPTIMIZATION: ${allChunkedMessages.length} emails collected, implementing memory management`);
+        
+        // Force garbage collection if available
+        if (global.gc) {
+          global.gc();
+          console.log(`[Batch ${page}] 🗑️ GARBAGE COLLECTION: Forced cleanup at ${allChunkedMessages.length} emails`);
+        }
+        
+        // For massive inboxes, break into stages
+        if (strategy === "MASSIVE_INBOX" && allChunkedMessages.length > 3000) {
+          console.log(`[Batch ${page}] 🏁 MASSIVE INBOX STAGE COMPLETE: ${allChunkedMessages.length} emails collected, will continue in next session`);
+          break;
+        }
+      }
+      
+      // Smart stopping logic with enhanced detection
+      if (chunkMessages.length === 0) {
+        console.log(`[Batch ${page}] 🏁 USER ${userID} ${provider} no more emails found, stopping at chunk ${chunk + 1}`);
+        break;
+      }
+      
+      // Dynamic chunk size adjustment for dense email periods
+      if (chunkMessages.length > 500 && chunkDays > 3 && strategy !== "MASSIVE_INBOX") {
+        console.log(`[Batch ${page}] 🔄 DENSE PERIOD DETECTED: ${chunkMessages.length} emails in ${chunkDays} days, consider smaller chunks for future optimization`);
+      }
+      
+    } catch (error) {
+      failedChunks++;
+      console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} Enhanced Chunk ${chunk + 1} failed: ${error.message}, continuing...`);
+      
+      // Enhanced error handling with strategy-specific recovery
+      if (failedChunks > 10 && successfulChunks === 0) {
+        console.log(`[Batch ${page}] ❌ USER ${userID} ${provider} too many failed chunks (${failedChunks}) with no success, stopping enhanced chunking`);
+        break;
+      } else if (failedChunks > 20 && successfulChunks > 10) {
+        console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} many failed chunks (${failedChunks}) but ${successfulChunks} successful, continuing with caution`);
+      }
+    }
+    
+    // Enhanced pause between chunks based on strategy
+    if (chunk < maxChunks - 1) {
+      const pauseDuration = strategy === "MASSIVE_INBOX" ? 2000 : 1000; // Longer pause for massive inboxes
+      await new Promise(resolve => setTimeout(resolve, pauseDuration));
+    }
+  }
+  
+  console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} ENHANCED chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
+  console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} ENHANCED SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${lastChunkProcessed} total chunks`);
+  console.log(`[Batch ${page}] 🏆 USER ${userID} PERFORMANCE: Processed ${Math.floor(allChunkedMessages.length / (successfulChunks || 1))} avg emails per successful chunk`);
+  
+  return allChunkedMessages;
+};
+
 const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unknown', userID = 'unknown') => {
   const formatDateForIMAP = (date) => {
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
@@ -748,8 +1253,12 @@ exports.fetchInboxEmails = async (req, res) => {
 
   let connection;
   try {
+    const currentPage = page || 1;
+    const effectiveStartUID = startUID || 'auto';
+    const effectiveEndUID = endUID || 'auto';
+    
     console.log(
-      `[Batch ${page}] Starting fetch for ${batchSize} emails, UIDs: ${startUID}-${endUID}`
+      `[Batch ${currentPage}] Starting fetch for ${batchSize} emails, UIDs: ${effectiveStartUID}-${effectiveEndUID}`
     );
 
     if (allUIDsInBatch) {
@@ -946,9 +1455,11 @@ exports.fetchInboxEmails = async (req, res) => {
       try {
         await connection.openBox(folderName);
         let searchCriteria;
+        let messages = []; // Initialize messages array properly
         let allMessages; // Declare allMessages at function scope
         let skipCount = 0; // Declare skipCount at function scope with default value
         let batchSize = 50; // Declare batchSize at function scope with default value
+        let chunkStrategy = "NORMAL"; // Declare chunkStrategy at function scope
 
         // Check if we should use dynamic UID calculation
         if (req.query.dynamicFetch) {
@@ -966,7 +1477,7 @@ exports.fetchInboxEmails = async (req, res) => {
                 new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
               );
               const testPromise = connection.search([["SINCE", testDate]], {
-                bodies: "HEADER",
+                bodies: "HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES)",
                 struct: true,
               });
               const timeoutPromise = new Promise((_, reject) =>
@@ -974,7 +1485,6 @@ exports.fetchInboxEmails = async (req, res) => {
               );
               
               let testMessages;
-              let chunkStrategy;
               let chunkDays;
               
               try {
@@ -985,7 +1495,10 @@ exports.fetchInboxEmails = async (req, res) => {
                 let totalInboxCount = 0;
                 try {
                   console.log(`[Batch ${page}] 📊 Getting total inbox count for user ${masterUserID}...`);
-                  const totalPromise = connection.search(["ALL"], { bodies: "HEADER", struct: true });
+                  const totalPromise = connection.search(["ALL"], { 
+                    bodies: "HEADER", 
+                    struct: true 
+                  });
                   const totalTimeout = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Total count timeout")), 10000)
                   );
@@ -999,51 +1512,87 @@ exports.fetchInboxEmails = async (req, res) => {
                   console.log(`[Batch ${page}] 📧 USER ${masterUserID} INBOX SIZE: Unable to determine total (using recent count: ${testMessages.length})`);
                 }
                 
-                // Step 2: Determine inbox size category and chunking strategy
-                if (testMessages.length > 50) {
-                  chunkStrategy = "ULTRA_SMALL"; 
-                  chunkDays = 15; // Ultra-small 15-day chunks for very large inboxes
-                  console.log(`[Batch ${page}] 🔴 VERY LARGE inbox detected (${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: ULTRA_SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
-                } else if (testMessages.length > 10) {
-                  chunkStrategy = "SMALL"; 
-                  chunkDays = 30; // 30-day chunks for medium inboxes
-                  console.log(`[Batch ${page}] 🟡 LARGE inbox detected (${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🟡 USER ${masterUserID} INBOX STRATEGY: SMALL chunks (${chunkDays}-day periods) due to ${testMessages.length} recent emails`);
+                // Step 2: Enhanced inbox size detection and intelligent strategy selection
+                let totalInboxSize = totalInboxCount || 0;
+                
+                // Enhanced strategy determination based on both recent activity and total size
+                if (totalInboxSize > 50000 || testMessages.length > 500) {
+                  chunkStrategy = "MASSIVE_INBOX"; 
+                  chunkDays = 7; // 7-day micro-chunks for massive inboxes (50K+ emails)
+                  console.log(`[Batch ${page}] 🔥 MASSIVE INBOX detected (${totalInboxSize} total, ${testMessages.length} recent) - using MICRO chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🔥 USER ${masterUserID} INBOX STRATEGY: MASSIVE_INBOX micro-chunks (${chunkDays}-day periods) for maximum stability`);
+                } else if (totalInboxSize > 20000 || testMessages.length > 300) {
+                  chunkStrategy = "VERY_LARGE"; 
+                  chunkDays = 10; // 10-day chunks for very large inboxes (20K+ emails)
+                  console.log(`[Batch ${page}] 🔴 VERY LARGE inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: VERY_LARGE chunks (${chunkDays}-day periods) for large dataset`);
+                } else if (totalInboxSize > 10000 || testMessages.length > 200) {
+                  chunkStrategy = "LARGE"; 
+                  chunkDays = 15; // 15-day chunks for large inboxes (10K+ emails)
+                  console.log(`[Batch ${page}] 🟠 LARGE inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🟠 USER ${masterUserID} INBOX STRATEGY: LARGE chunks (${chunkDays}-day periods) for medium-large dataset`);
+                } else if (totalInboxSize > 5000 || testMessages.length > 100) {
+                  chunkStrategy = "MEDIUM"; 
+                  chunkDays = 30; // 30-day chunks for medium inboxes (5K+ emails)
+                  console.log(`[Batch ${page}] 🟡 MEDIUM inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using MEDIUM chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🟡 USER ${masterUserID} INBOX STRATEGY: MEDIUM chunks (${chunkDays}-day periods) for balanced processing`);
+                } else if (totalInboxSize > 2000 || testMessages.length > 50) {
+                  chunkStrategy = "SMALL_CHUNKS"; 
+                  chunkDays = 60; // 60-day chunks for smaller but still chunked processing
+                  console.log(`[Batch ${page}] 🟢 SMALL_CHUNKS inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using LARGE chunks (${chunkDays} days)`);
+                  console.log(`[Batch ${page}] 🟢 USER ${masterUserID} INBOX STRATEGY: SMALL_CHUNKS (${chunkDays}-day periods) for efficient processing`);
                 } else {
                   chunkStrategy = "NORMAL";
-                  console.log(`[Batch ${page}] 🟢 NORMAL inbox detected (${testMessages.length} recent) - using NORMAL processing`);
-                  console.log(`[Batch ${page}] 🟢 USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) due to ${testMessages.length} recent emails`);
+                  console.log(`[Batch ${page}] 🌟 NORMAL inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using DIRECT processing`);
+                  console.log(`[Batch ${page}] 🌟 USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) for small inbox`);
                 }
               } catch (testError) {
                 // If test fails, assume large inbox and force ultra-safe chunking
                 console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} inbox test failed: ${testError.message} - FORCING ULTRA-SAFE CHUNKING`);
-                console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: FORCED ULTRA_SMALL chunks (15-day periods) due to timeout - assuming MASSIVE inbox`);
-                chunkStrategy = "ULTRA_SMALL";
-                chunkDays = 15; // Ultra-conservative 15-day chunks
+                console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: FORCED MASSIVE_INBOX chunks (7-day periods) due to timeout - assuming MASSIVE inbox`);
+                chunkStrategy = "MASSIVE_INBOX";
+                chunkDays = 7; // Ultra-conservative 7-day chunks for maximum safety
                 testMessages = [];
               }
               
-              // Step 3: Apply chunking strategy to get ALL emails (works for all providers)
-              if (chunkStrategy === "ULTRA_SMALL" || chunkStrategy === "SMALL") {
+              // Step 3: Apply intelligent chunking strategy to get ALL emails with enhanced memory management
+              if (chunkStrategy !== "NORMAL") {
                 const effectiveChunkDays = chunkDays || 30; // Fallback value
                 console.log(`[Batch ${page}] 🔄 Fetching ALL emails using ${effectiveChunkDays}-day chunks for ${provider || 'unknown'}...`);
                 console.log(`[Batch ${page}] 🔄 USER ${masterUserID} CHUNKING: Starting ${chunkStrategy} chunking (${effectiveChunkDays}-day periods)`);
+                console.log(`[Batch ${page}] 📊 USER ${masterUserID} CHUNKING STRATEGY: Will process up to ${Math.floor(3000 / effectiveChunkDays)} chunks of ${effectiveChunkDays} days each`);
                 
                 try {
-                  allMessages = await fetchEmailsInChunks(connection, effectiveChunkDays, page, provider || 'unknown', masterUserID);
+              // ⚡ HIGH-PERFORMANCE MODE: Use optimized fetching for large inboxes
+              if (chunkStrategy === "MASSIVE_INBOX" || chunkStrategy === "VERY_LARGE") {
+                console.log(`[Batch ${page}] 🚀 ACTIVATING HIGH-PERFORMANCE MODE for ${chunkStrategy} strategy`);
+                const highPerfResult = await fetchEmailsHighPerformance(connection, chunkStrategy, masterUserID, provider || 'unknown', page);
+                allMessages = highPerfResult.emails;
+                
+                console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE RESULTS:`);
+                console.log(`[Batch ${page}] 📊 Total emails in inbox: ${highPerfResult.totalCount}`);
+                console.log(`[Batch ${page}] 📥 Fetched for processing: ${highPerfResult.fetchedCount}`);
+                console.log(`[Batch ${page}] ⏱️ Fetch time: ${highPerfResult.fetchTime.toFixed(1)}s`);
+                console.log(`[Batch ${page}] 🚀 Fetch rate: ${highPerfResult.fetchRate.toFixed(1)} emails/sec`);
+              } else {
+                // Original enhanced chunking for smaller inboxes
+                allMessages = await fetchEmailsInChunksEnhanced(connection, effectiveChunkDays, page, provider || 'unknown', masterUserID, chunkStrategy);
+              }
                 } catch (chunkError) {
-                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} CHUNKING FAILED: ${chunkError.message} - falling back to direct search`);
-                  // Fallback to direct search with smaller timeout
+                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} CHUNKING FAILED: ${chunkError.message} - falling back to progressive search`);
+                  // Enhanced fallback with progressive timeout increases
                   try {
+                    const progressiveTimeout = getProgressiveTimeout(chunkStrategy);
+                    console.log(`[Batch ${page}] 🔄 USER ${masterUserID} PROGRESSIVE FALLBACK: Using ${progressiveTimeout}ms timeout for ${chunkStrategy} strategy`);
+                    
                     const fallbackPromise = connection.search(["ALL"], {
                       bodies: "HEADER", 
                       struct: true,
                     });
-                    const fallbackTimeout = new Promise((_, reject) =>
-                      setTimeout(() => reject(new Error(`${provider || 'Email'} fallback timeout`)), 10000)
+                    const fallbackTimeoutPromise = new Promise((_, reject) =>
+                      setTimeout(() => reject(new Error(`${provider || 'Email'} progressive fallback timeout`)), progressiveTimeout)
                     );
-                    allMessages = await Promise.race([fallbackPromise, fallbackTimeout]);
+                    allMessages = await Promise.race([fallbackPromise, fallbackTimeoutPromise]);
                     console.log(`[Batch ${page}] ✅ USER ${masterUserID} FALLBACK SUCCESS: Found ${allMessages.length} emails`);
                   } catch (fallbackError) {
                     console.log(`[Batch ${page}] ❌ USER ${masterUserID} FALLBACK FAILED: ${fallbackError.message} - returning empty result`);
@@ -1090,41 +1639,70 @@ exports.fetchInboxEmails = async (req, res) => {
             });
           }
 
-          // 🛡️ INTELLIGENT SAFETY: Dynamic limits that allow progressive processing
-          const baseLimit = 5000; // Increased from 1000 to allow more emails per session
-          const isLargeInbox = allMessages.length > 5000;
-          const maxSafeEmails = isLargeInbox ? baseLimit : 8000; // Increased limits significantly
+          // 🛡️ ENHANCED INTELLIGENT SAFETY: Dynamic limits with progressive processing for large datasets
+          const getMaxSafeEmailsForStrategy = (strategy, totalEmails) => {
+            switch (strategy) {
+              case "MASSIVE_INBOX": return totalEmails; // Process ALL emails for MASSIVE_INBOX
+              case "VERY_LARGE": return totalEmails; // Process ALL emails for VERY_LARGE  
+              case "LARGE": return totalEmails; // Process ALL emails for LARGE
+              case "MEDIUM": return totalEmails; // Process ALL emails for MEDIUM
+              case "SMALL_CHUNKS": return totalEmails; // Process ALL emails
+              default: return totalEmails; // Process all for normal inboxes
+            }
+          };
           
-          if (allMessages.length > maxSafeEmails) {
+          const maxSafeEmails = getMaxSafeEmailsForStrategy(chunkStrategy || "NORMAL", allMessages.length);
+          const shouldLimitProcessing = allMessages.length > maxSafeEmails;
+          
+          if (shouldLimitProcessing) {
             console.log(
-              `[Batch ${page}] 🎯 VERY LARGE INBOX: ${allMessages.length} emails found, processing first ${maxSafeEmails} in this session`
+              `[Batch ${page}] 🎯 LARGE DATASET OPTIMIZATION: ${allMessages.length} emails found, processing ${maxSafeEmails} in this session (${chunkStrategy} strategy)`
             );
             console.log(
-              `[Batch ${page}] 📊 PROGRESSIVE PROCESSING: Session will handle ${maxSafeEmails} emails, remaining will be auto-queued`
+              `[Batch ${page}] 📊 PROGRESSIVE PROCESSING: Session will handle ${maxSafeEmails} emails, remaining ${allMessages.length - maxSafeEmails} will be auto-queued for next sessions`
             );
-            allMessages = allMessages.slice(0, maxSafeEmails); // Process first batch, not last
+            // Process most recent emails first for large datasets
+            allMessages = allMessages.slice(-maxSafeEmails); // Take the last (most recent) emails
           }
 
           console.log(
             `[Batch ${page}] Found ${allMessages.length} total emails dynamically for ${provider || 'provider'}`
           );
 
-          // 📊 SMART BATCH SIZING: Smaller batches for larger inboxes
+          // 📊 ENHANCED SMART BATCH SIZING: Optimized batches based on inbox size and strategy
           skipCount = parseInt(req.query.skipCount) || 0; // Assign to existing variable
-          batchSize = parseInt(req.query.batchSize) || 50; // Assign to existing variable
+          batchSize = parseInt(req.query.batchSize) || getDynamicBatchSize(allMessages.length, chunkStrategy); // Enhanced dynamic sizing
           
-          // Dynamic batch sizing based on inbox size
-          if (allMessages.length > 10000) {
-            batchSize = 25; // Very large inbox: 25 emails per batch
-            console.log(`[Batch ${page}] 🔥 MASSIVE INBOX: ${allMessages.length} emails detected, using micro-batches (${batchSize} emails)`);
-          } else if (allMessages.length > 5000) {
-            batchSize = 35; // Large inbox: 35 emails per batch
-            console.log(`[Batch ${page}] 📈 LARGE INBOX: ${allMessages.length} emails detected, using small batches (${batchSize} emails)`);
-          } else if (allMessages.length > 2000) {
-            batchSize = 45; // Medium inbox: 45 emails per batch
-            console.log(`[Batch ${page}] 📊 MEDIUM INBOX: ${allMessages.length} emails detected, using medium batches (${batchSize} emails)`);
+          // Intelligent batch sizing based on inbox size and processing strategy
+          function getDynamicBatchSize(totalEmails, strategy) {
+            if (totalEmails > 50000) {
+              return 5; // Micro-batches for massive inboxes (50K+ emails)
+            } else if (totalEmails > 20000) {
+              return 10; // Very small batches for very large inboxes (20K+ emails)
+            } else if (totalEmails > 10000) {
+              return 15; // Small batches for large inboxes (10K+ emails)
+            } else if (totalEmails > 5000) {
+              return 25; // Medium-small batches for medium-large inboxes
+            } else if (totalEmails > 2000) {
+              return 35; // Medium batches for medium inboxes
+            } else if (totalEmails > 1000) {
+              return 45; // Larger batches for smaller-medium inboxes
+            } else {
+              return 50; // Default batch size for small inboxes
+            }
           }
-          // else use default 50 for small inboxes
+          
+          console.log(`[Batch ${page}] � BATCH OPTIMIZATION: Using ${batchSize} emails per batch for ${allMessages.length} total emails (${chunkStrategy || 'NORMAL'} strategy)`);
+          
+          // Additional memory and performance optimizations for large datasets
+          if (allMessages.length > 10000) {
+            console.log(`[Batch ${page}] 🧠 MEMORY OPTIMIZATION: Implementing enhanced memory management for ${allMessages.length} emails`);
+            // Force garbage collection if available
+            if (global.gc) {
+              global.gc();
+              console.log(`[Batch ${page}] �️ GARBAGE COLLECTION: Forced cleanup before processing large dataset`);
+            }
+          }
           
           const startIdx = skipCount;
           const endIdx = Math.min(startIdx + batchSize, allMessages.length);
@@ -1175,8 +1753,11 @@ exports.fetchInboxEmails = async (req, res) => {
 
         // Only do additional search if not using dynamic fetch (which already has messages)
         if (!req.query.dynamicFetch) {
-          // Fetch only headers and structure, not full bodies yet
-          const fetchOptions = { bodies: "HEADER", struct: true };
+          // Fetch specific header fields for metadata without body content
+          const fetchOptions = { 
+            bodies: "HEADER", 
+            struct: true 
+          };
           messages = await connection.search(searchCriteria, fetchOptions);
         }
 
@@ -1244,222 +1825,51 @@ exports.fetchInboxEmails = async (req, res) => {
 
         let processedCount = 0;
 
-        // Process emails in smaller chunks for better memory management
-        const CHUNK_SIZE = 25; // Process 25 emails at a time
-        for (
-          let chunkStart = 0;
-          chunkStart < actualBatchSize;
-          chunkStart += CHUNK_SIZE
-        ) {
-          const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, actualBatchSize);
-          const chunk = messages.slice(chunkStart, chunkEnd);
-
-          console.log(
-            `[Batch ${page}] Processing chunk ${
-              Math.floor(chunkStart / CHUNK_SIZE) + 1
-            } (emails ${chunkStart + 1}-${chunkEnd})`
-          );
-
-          // Process each email in the chunk
-          for (let i = 0; i < chunk.length; i++) {
-            const message = chunk[i];
-            const globalIndex = chunkStart + i;
-
-            try {
-              console.log(
-                `[Batch ${page}] Processing email ${
-                  globalIndex + 1
-                }/${actualBatchSize} in ${folderType}`
-              );
-
-              // Fetch full body only when needed
-              const fullMessage = await connection.search(
-                [["UID", message.attributes.uid]],
-                { bodies: "", struct: true }
-              );
-              if (!fullMessage || fullMessage.length === 0) {
-                console.log(
-                  `[Batch ${page}] Could not fetch full message for UID ${message.attributes.uid}`
-                );
-                continue;
-              }
-
-              const rawBodyPart = fullMessage[0].parts.find(
-                (part) => part.which === ""
-              );
-              const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-              if (!rawBody) {
-                console.log(
-                  `[Batch ${page}] No body found for email ${
-                    globalIndex + 1
-                  }/${actualBatchSize} in ${folderType}`
-                );
-                continue;
-              }
-
-              const parsedEmail = await simpleParser(rawBody);
-
-              // Process email data with memory-conscious approach
-              const referencesHeader = parsedEmail.headers.get("references");
-              const references = Array.isArray(referencesHeader)
-                ? referencesHeader.join(" ")
-                : referencesHeader || null;
-
-              // Determine read/unread status from IMAP flags
-              let isRead = false;
-              if (
-                message.attributes &&
-                Array.isArray(message.attributes.flags)
-              ) {
-                isRead = message.attributes.flags.includes("\\Seen");
-              }
-
-              const emailData = {
-                messageId: parsedEmail.messageId || null,
-                inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-                references,
-                sender: parsedEmail.from
-                  ? parsedEmail.from.value[0].address
-                  : null,
-                senderName: parsedEmail.from
-                  ? parsedEmail.from.value[0].name
-                  : null,
-                recipient: parsedEmail.to
-                  ? parsedEmail.to.value.map((to) => to.address).join(", ")
-                  : null,
-                cc: parsedEmail.cc
-                  ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-                  : null,
-                bcc: parsedEmail.bcc
-                  ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-                  : null,
-                masterUserID: masterUserID,
-                subject: parsedEmail.subject || null,
-                body: cleanEmailBody(
-                  parsedEmail.html || parsedEmail.text || ""
-                ),
-                folder: folderType,
-                createdAt: parsedEmail.date || new Date(),
-                isRead: isRead, // Save read/unread status
-              };
-
-              // Check if email already exists
-              const existingEmail = await Email.findOne({
-                where: { messageId: emailData.messageId },
-              });
-
-              let savedEmail;
-              if (!existingEmail) {
-                savedEmail = await Email.create(emailData);
-                console.log(
-                  `[Batch ${page}] Email ${
-                    globalIndex + 1
-                  }/${actualBatchSize} saved: ${emailData.messageId}`
-                );
-                processedCount++;
-              } else {
-                console.log(
-                  `[Batch ${page}] Email ${
-                    globalIndex + 1
-                  }/${actualBatchSize} already exists: ${emailData.messageId}`
-                );
-                savedEmail = existingEmail;
-              }
-
-              // Process attachments with better filtering and error handling
-              if (
-                parsedEmail.attachments &&
-                parsedEmail.attachments.length > 0
-              ) {
-                const filteredAttachments = parsedEmail.attachments.filter(
-                  (att) =>
-                    !isIconAttachment(att) &&
-                    !att.contentDisposition?.toLowerCase().includes("inline") &&
-                    att.contentType !== "text/html" &&
-                    att.contentType !== "text/plain" &&
-                    att.size > 0 &&
-                    att.size < 10 * 1024 * 1024 // Max 10MB per attachment
-                );
-
-                if (
-                  filteredAttachments.length > 0 &&
-                  filteredAttachments.length <= 5
-                ) {
-                  // Max 5 attachments per email
-                  try {
-                    const savedAttachments = await saveAttachments(
-                      filteredAttachments,
-                      savedEmail.emailID
-                    );
-                    console.log(
-                      `[Batch ${page}] Saved ${
-                        savedAttachments.length
-                      } attachment metadata records for email ${
-                        globalIndex + 1
-                      }/${actualBatchSize}`
-                    );
-                  } catch (attachmentError) {
-                    console.error(
-                      `[Batch ${page}] Error saving attachment metadata for email ${emailData.messageId}:`,
-                      attachmentError.message
-                    );
-                  }
-                }
-              }
-
-              // Skip thread processing for batches larger than 10 emails to save time and memory
-              if (
-                actualBatchSize <= 10 &&
-                emailData.messageId &&
-                folderType === "inbox"
-              ) {
-                try {
-                  // Only fetch immediate replies, not full recursive thread
-                  const immediateReplies = await Email.findAll({
-                    where: {
-                      inReplyTo: emailData.messageId,
-                      masterUserID: masterUserID,
-                    },
-                    limit: 3, // Reduced limit for memory safety
-                    order: [["createdAt", "ASC"]],
-                  });
-
-                  console.log(
-                    `[Batch ${page}] Found ${immediateReplies.length} immediate replies for ${emailData.messageId}`
-                  );
-                } catch (threadError) {
-                  console.error(
-                    `[Batch ${page}] Error processing thread for ${emailData.messageId}:`,
-                    threadError.message
-                  );
-                }
-              }
-
-              // Force garbage collection every 25 emails (optimized for larger batches)
-              if (global.gc && globalIndex % 25 === 0) {
-                global.gc();
-              }
-
-              // Clean up parsed email object
-              parsedEmail.attachments = null;
-              parsedEmail.html = null;
-              parsedEmail.text = null;
-            } catch (emailError) {
-              console.error(
-                `[Batch ${page}] Error processing email ${
-                  globalIndex + 1
-                }/${actualBatchSize} in ${folderType}:`,
-                emailError.message
-              );
-              continue;
-            }
-          }
-
-          // Force garbage collection after each chunk
-          if (global.gc && chunkStart % 50 === 0) {
-            global.gc();
-          }
+        // 🚀 HIGH-PERFORMANCE PROCESSING: Use optimized processing for all strategies
+        if (chunkStrategy && ["MASSIVE_INBOX", "VERY_LARGE", "LARGE"].includes(chunkStrategy)) {
+          console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE PROCESSING: Starting optimized processing for ${chunkStrategy} strategy`);
+          console.log(`[Batch ${page}] 📊 PERFORMANCE MODE: Processing ${actualBatchSize} emails with parallel optimization`);
+          
+          // Step 1: Lightweight processing (headers + metadata only)
+          const lightweightResult = await processEmailsLightweight(messages.slice(0, actualBatchSize), masterUserID, provider || 'unknown', chunkStrategy, page, folderType);
+          
+          console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT COMPLETE: ${lightweightResult.processedEmails.length} emails processed at ${lightweightResult.rate.toFixed(1)} emails/sec`);
+          
+          // Step 2: Parallel database saving with concurrency control
+          const concurrency = chunkStrategy === "MASSIVE_INBOX" ? 15 : 10; // Higher concurrency for massive inboxes
+          const saveResult = await saveEmailsInParallel(lightweightResult.processedEmails, concurrency, masterUserID, provider || 'unknown', page);
+          
+          processedCount = saveResult.savedEmails.length;
+          
+          console.log(`[Batch ${page}] 🎯 HIGH-PERFORMANCE SUMMARY:`);
+          console.log(`[Batch ${page}] ⚡ Processing rate: ${lightweightResult.rate.toFixed(1)} emails/sec`);
+          console.log(`[Batch ${page}] 💾 Saving rate: ${saveResult.rate.toFixed(1)} saves/sec`);
+          console.log(`[Batch ${page}] ✅ Total processed: ${processedCount} emails`);
+          console.log(`[Batch ${page}] ⚠️ Errors: ${lightweightResult.errorCount + saveResult.errors.length}`);
+          
+          console.log(`[Batch ${page}] 🏆 HIGH-PERFORMANCE PROCESSING COMPLETE: ${processedCount} emails processed with ${chunkStrategy} strategy`);
+          
+        } else {
+          console.log(`[Batch ${page}] 📋 STANDARD PROCESSING: Using regular processing for ${chunkStrategy || 'NORMAL'} strategy`);
+          
+          // Step 1: Lightweight processing (headers + metadata only) - same as high-performance but for smaller batches
+          const lightweightResult = await processEmailsLightweight(messages.slice(0, actualBatchSize), masterUserID, provider || 'unknown', chunkStrategy || 'NORMAL', page, folderType);
+          
+          console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT COMPLETE: ${lightweightResult.processedEmails.length} emails processed at ${lightweightResult.rate.toFixed(1)} emails/sec`);
+          
+          // Step 2: Parallel database saving with standard concurrency
+          const concurrency = 5; // Lower concurrency for normal inboxes
+          const saveResult = await saveEmailsInParallel(lightweightResult.processedEmails, concurrency, masterUserID, provider || 'unknown', page);
+          
+          processedCount = saveResult.savedEmails.length;
+          
+          console.log(`[Batch ${page}] 🎯 STANDARD PROCESSING SUMMARY:`);
+          console.log(`[Batch ${page}] ⚡ Processing rate: ${lightweightResult.rate.toFixed(1)} emails/sec`);
+          console.log(`[Batch ${page}] 💾 Saving rate: ${saveResult.rate.toFixed(1)} saves/sec`);
+          console.log(`[Batch ${page}] ✅ Total processed: ${processedCount} emails`);
+          console.log(`[Batch ${page}] ⚠️ Errors: ${lightweightResult.errorCount + saveResult.errors.length}`);
+          
+          console.log(`[Batch ${page}] 🏆 STANDARD PROCESSING COMPLETE: ${processedCount} emails processed with ${chunkStrategy || 'NORMAL'} strategy`);
         }
 
         console.log(
@@ -1467,13 +1877,17 @@ exports.fetchInboxEmails = async (req, res) => {
         );
 
         // Return both count and pagination info for auto-pagination
+        const requestSkipCount = parseInt(req.query.skipCount) || 0;
+        const requestBatchSize = parseInt(req.query.batchSize) || 50;
+        
         return {
           processedCount,
           totalEmails: allMessages ? allMessages.length : 0,
-          currentBatchEnd: allMessages ? Math.min(skipCount + batchSize, allMessages.length) : 0,
-          hasMoreEmails: allMessages ? (skipCount + batchSize < allMessages.length) : false,
-          remainingEmails: allMessages ? Math.max(0, allMessages.length - (skipCount + batchSize)) : 0
+          currentBatchEnd: allMessages ? Math.min(requestSkipCount + requestBatchSize, allMessages.length) : 0,
+          hasMoreEmails: allMessages ? (requestSkipCount + requestBatchSize < allMessages.length) : false,
+          remainingEmails: allMessages ? Math.max(0, allMessages.length - (requestSkipCount + requestBatchSize)) : 0
         };
+        
       } catch (folderError) {
         console.error(
           `[Batch ${page}] Error fetching emails from folder ${folderType}:`,
@@ -1485,9 +1899,11 @@ exports.fetchInboxEmails = async (req, res) => {
           currentBatchEnd: 0,
           hasMoreEmails: false,
           remainingEmails: 0
-        }; // Return pagination info on error
+        };
       }
-    };
+    }
+    
+    // Continue with main email processing
     const boxes = await connection.getBoxes();
     const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
 
@@ -1495,66 +1911,149 @@ exports.fetchInboxEmails = async (req, res) => {
       `[Batch ${page}] Processing all folders for masterUserID: ${masterUserID}`
     );
 
-    // Process all folders (inbox, sent, drafts, archive)
-    const folderTypes = ["inbox", "sent", "drafts", "archive"];
+    // 🎯 SMART FOLDER PROCESSING: Provider-specific folder configuration
+    let primaryFolders, optionalFolders;
+    
+    console.log(`[Batch ${page}] 🔍 FOLDER DEBUG: Provider detected as '${provider}' for USER ${masterUserID}`);
+    
+    // ALL PROVIDERS: Process both INBOX and SENT folders
+    primaryFolders = ["inbox", "sent"];
+    optionalFolders = ["drafts", "archive"];
+    console.log(`[Batch ${page}] 📧 PROVIDER (${provider}): Processing INBOX + SENT folders (updated to include all providers)`);
+    
+    console.log(`[Batch ${page}] 📂 PRIMARY FOLDERS TO PROCESS: [${primaryFolders.join(', ')}]`);
+    console.log(`[Batch ${page}] 📂 OPTIONAL FOLDERS TO PROCESS: [${optionalFolders.join(', ')}]`);
+    console.log(`[Batch ${page}] 📂 ALL AVAILABLE FOLDERS (COMPLETE): [${allFoldersArr.join(', ')}]`);
+    console.log(`[Batch ${page}] 📂 TOTAL FOLDER COUNT: ${allFoldersArr.length}`);
+    
+    
     let totalProcessedEmails = 0;
     const folderResults = {};
-    let paginationInfo = null; // Store pagination info for auto-pagination
+    let paginationInfo = null; // 🔧 FIX: Declare paginationInfo before the loop
 
-    for (const type of folderTypes) {
-      const folderName = folderMap[type];
-      if (allFoldersArr.includes(folderName.toLowerCase())) {
-        console.log(
-          `[Batch ${page}] Processing ${type} folder (${folderName})...`
-        );
-        try {
-          const folderResult = await fetchEmailsFromFolder(
-            folderName,
-            type
-          );
+    // Process primary folders (INBOX - guaranteed to exist)
+    for (const folderType of primaryFolders) {
+      try {
+        console.log(`[Batch ${page}] 🔍 ATTEMPTING TO FIND: ${folderType.toUpperCase()} folder`);
+        const folderName = findMatchingFolder(allFoldersArr, folderType);
+        
+        if (folderName) {
+          console.log(`[Batch ${page}] ✅ FOUND ${folderType.toUpperCase()} FOLDER: '${folderName}' - Processing now...`);
+          const result = await fetchEmailsFromFolder(folderName, folderType);
           
-          // Handle new return format with pagination info
-          const processedCount = typeof folderResult === 'object' ? folderResult.processedCount : folderResult;
-          totalProcessedEmails += processedCount || 0;
-          
-          // Store pagination info from the main inbox folder for auto-pagination
-          if (type === 'inbox' && typeof folderResult === 'object') {
-            paginationInfo = folderResult;
+          if (result && result.processedCount !== undefined) {
+            totalProcessedEmails += result.processedCount;
+            // 🔧 FIX: Add missing properties for proper logging
+            result.status = result.processedCount > 0 ? 'success' : 'no_emails';
+            result.folderName = folderName;
+            folderResults[folderType] = result;
+            
+            console.log(`[Batch ${page}] ✅ ${folderType.toUpperCase()} COMPLETE: ${result.processedCount} emails processed from '${folderName}'`);
+            
+            // Enhanced auto-pagination support
+            if (result.hasMoreEmails && result.remainingEmails > 0) {
+              console.log(`[Batch ${page}] 🔄 AUTO-PAGINATION: ${folderType} has ${result.remainingEmails} more emails`);
+              // Store pagination info for auto-queuing
+              if (!paginationInfo || result.remainingEmails > paginationInfo.remainingEmails) {
+                paginationInfo = result;
+              }
+            }
+          } else {
+            console.log(`[Batch ${page}] ⚠️ ${folderType.toUpperCase()} RESULT INCOMPLETE: No processedCount returned`);
+            folderResults[folderType] = {
+              processedCount: 0,
+              status: 'error',
+              folderName: folderName
+            };
           }
-          
-          folderResults[type] = {
-            folderName: folderName,
-            processedCount: processedCount || 0,
-            status: "success",
-          };
-          console.log(
-            `[Batch ${page}] ✅ ${type} folder: ${
-              processedCount || 0
-            } emails processed`
-          );
-        } catch (folderError) {
-          console.error(
-            `[Batch ${page}] ❌ Error processing ${type} folder (${folderName}):`,
-            folderError.message
-          );
-          folderResults[type] = {
-            folderName: folderName,
-            processedCount: 0,
-            status: "error",
-            error: folderError.message,
-          };
+        } else {
+          console.log(`[Batch ${page}] ❌ ${folderType.toUpperCase()} FOLDER NOT FOUND in available folders: [${allFoldersArr.slice(0, 5).join(', ')}...]`);
+          folderResults[folderType] = { processedCount: 0, message: "Critical folder not found" };
         }
-      } else {
-        console.log(
-          `[Batch ${page}] Folder "${folderName}" not found for provider ${providerd}. Skipping ${type}.`
-        );
-        folderResults[type] = {
-          folderName: folderName,
-          processedCount: 0,
-          status: "not_found",
-        };
+      } catch (folderError) {
+        console.error(`[Batch ${page}] Error processing ${folderType}:`, folderError.message);
+        folderResults[folderType] = { processedCount: 0, error: folderError.message };
       }
     }
+
+    // 🔧 OPTIONAL FOLDERS: Only process if they exist, skip silently if not
+    for (const folderType of optionalFolders) {
+      try {
+        const folderName = findMatchingFolder(allFoldersArr, folderType);
+        if (folderName) {
+          console.log(`[Batch ${page}] Processing ${folderType} folder: ${folderName}`);
+          const result = await fetchEmailsFromFolder(folderName, folderType);
+          
+          if (result && result.processedCount !== undefined) {
+            totalProcessedEmails += result.processedCount;
+            result.status = result.processedCount > 0 ? 'success' : 'no_emails';
+            result.folderName = folderName;
+            folderResults[folderType] = result;
+          }
+        } else {
+          // 🔇 SILENT SKIP: Don't log missing optional folders to reduce noise
+          folderResults[folderType] = { processedCount: 0, status: 'no_emails', message: folderType };
+        }
+      } catch (folderError) {
+        // 🔇 SILENT SKIP: Don't log errors for optional folders (like "No such folder")
+        if (!folderError.message.includes('No such folder')) {
+          console.error(`[Batch ${page}] Error fetching emails from folder ${folderType}: ${folderError.message}`);
+        }
+        folderResults[folderType] = { processedCount: 0, status: 'no_emails', message: folderType };
+      }
+    }
+
+    // Auto-pagination logic
+    if (paginationInfo && paginationInfo.hasMoreEmails && paginationInfo.remainingEmails > 0) {
+      const nextSkipCount = paginationInfo.currentBatchEnd;
+      const nextPage = page + 1;
+      
+      console.log(`🔄 AUTO-PAGINATION TRIGGERED FOR USER ${masterUserID}:`);
+      console.log(`📊 Total emails found by chunking: ${paginationInfo.totalEmails}`);
+      console.log(`✅ Current batch processed: ${parseInt(req.query.skipCount) || 0 + 1}-${paginationInfo.currentBatchEnd}`);
+      console.log(`🔄 Remaining emails to process: ${paginationInfo.remainingEmails}`);
+      console.log(`⏭️ Queuing next batch: Page ${nextPage}, Skip: ${nextSkipCount}`);
+
+      try {
+        // Queue the next batch for this user
+        const queueConnection = await amqp.connect('amqp://localhost');
+        const queueChannel = await queueConnection.createChannel();
+        const queueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
+        
+        await queueChannel.assertQueue(queueName, { durable: true });
+        
+        const nextBatchJob = {
+          adminId: masterUserID,
+          email: email,
+          appPassword: appPassword,
+          provider: provider,
+          page: nextPage,
+          batchSize: batchSize,
+          skipCount: nextSkipCount,
+          source: 'auto-pagination',
+          originalTotalEmails: paginationInfo.totalEmails,
+          timestamp: new Date().toISOString()
+        };
+        
+        await queueChannel.sendToQueue(
+          queueName,
+          Buffer.from(JSON.stringify(nextBatchJob)),
+          { persistent: true }
+        );
+        
+        await queueChannel.close();
+        await queueConnection.close();
+        
+        console.log(`✅ AUTO-PAGINATION: Successfully queued next batch (Page ${nextPage}) for user ${masterUserID}`);
+        
+      } catch (queueError) {
+        console.error(`❌ AUTO-PAGINATION: Failed to queue next batch for user ${masterUserID}:`, queueError.message);
+      }
+    } else if (paginationInfo) {
+      console.log(`✅ AUTO-PAGINATION: All ${paginationInfo.totalEmails} emails processed for user ${masterUserID} - no more batches needed`);
+    }
+    
+    // Main processing continues here (auto-pagination logic above)
 
     // Memory cleanup for large batches
     console.log(`[Batch ${page}] Performing memory cleanup...`);
@@ -1588,61 +2087,10 @@ ${Object.entries(folderResults)
   )
   .join("\n")}
 📅 Timestamp: ${new Date().toISOString()}
-${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : ""}
+${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : `📋 Processing: Metadata-only strategy (auto UIDs)`}
 ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
 ========================================================
 `);
-
-    // 🚀 AUTO-PAGINATION SYSTEM: Queue next batches for remaining emails
-    if (paginationInfo && paginationInfo.hasMoreEmails) {
-      const nextSkipCount = paginationInfo.currentBatchEnd;
-      const nextPage = page + 1;
-      
-      console.log(`
-🔄 AUTO-PAGINATION TRIGGERED FOR USER ${masterUserID}:
-📊 Total emails found by chunking: ${paginationInfo.totalEmails}
-✅ Current batch processed: ${skipCount + 1}-${paginationInfo.currentBatchEnd}
-🔄 Remaining emails to process: ${paginationInfo.remainingEmails}
-⏭️ Queuing next batch: Page ${nextPage}, Skip: ${nextSkipCount}
-      `);
-
-      try {
-        // Queue the next batch for this user
-        const queueConnection = await amqp.connect('amqp://localhost');
-        const queueChannel = await queueConnection.createChannel();
-        const queueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
-        
-        await queueChannel.assertQueue(queueName, { durable: true });
-        
-        const nextBatchJob = {
-          adminId: masterUserID,
-          email: email,
-          appPassword: appPassword,
-          page: nextPage,
-          batchSize: batchSize,
-          skipCount: nextSkipCount,
-          source: 'auto-pagination',
-          originalTotalEmails: paginationInfo.totalEmails,
-          timestamp: new Date().toISOString()
-        };
-        
-        await queueChannel.sendToQueue(
-          queueName,
-          Buffer.from(JSON.stringify(nextBatchJob)),
-          { persistent: true }
-        );
-        
-        await queueChannel.close();
-        await queueConnection.close();
-        
-        console.log(`✅ AUTO-PAGINATION: Successfully queued next batch (Page ${nextPage}) for user ${masterUserID}`);
-        
-      } catch (queueError) {
-        console.error(`❌ AUTO-PAGINATION: Failed to queue next batch for user ${masterUserID}:`, queueError.message);
-      }
-    } else if (paginationInfo) {
-      console.log(`✅ AUTO-PAGINATION: All ${paginationInfo.totalEmails} emails processed for user ${masterUserID} - no more batches needed`);
-    }
 
     res.status(200).json({
       message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from all folders!`,
@@ -1687,6 +2135,393 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
       global.gc();
     }
   }
+};
+
+// ⚡ HIGH-PERFORMANCE: Lightweight email processing with priority strategy
+const processEmailsLightweight = async (emails, userID, provider, strategy = 'NORMAL', page = 1, folderType = 'inbox') => {
+  const processedEmails = [];
+  let errorCount = 0;
+  const startTime = Date.now();
+  
+  console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT PROCESSING: ${emails.length} emails for USER ${userID} ${provider} (strategy: ${strategy}, folder: ${folderType})`);
+  
+  // Priority strategy: Sort by date (recent first)
+  const sortedEmails = emails.sort((a, b) => {
+    const dateA = new Date(a.date || a.envelope?.date || 0);
+    const dateB = new Date(b.date || b.envelope?.date || 0);
+    return dateB - dateA; // Recent emails first
+  });
+  
+  console.log(`[Batch ${page}] 🎯 PRIORITY STRATEGY: Processing recent emails first`);
+  
+  for (let i = 0; i < sortedEmails.length; i++) {
+    try {
+      const email = sortedEmails[i];
+      
+      // 🔍 DEBUG: Log the complete email object to understand structure
+      console.log(`\n=== EMAIL ${i} COMPLETE STRUCTURE ===`);
+      console.log('UID:', email.uid);
+      console.log('Attributes:', JSON.stringify(email.attributes, null, 2));
+      console.log('Envelope:', JSON.stringify(email.envelope, null, 2));
+      console.log('Headers keys:', email.headers ? Object.keys(email.headers) : 'none');
+      console.log('Bodies keys:', email.bodies ? Object.keys(email.bodies) : 'none');
+      
+      // 🔧 ENHANCED HEADER PARSING: Safely extract all email metadata
+      let parsedHeaders = {};
+      let rawHeaderText = '';
+      
+      // 🔍 DEBUG: Log the complete email structure first
+      console.log(`\n🔍 EMAIL ${i} RAW STRUCTURE:`, {
+        uid: email.uid,
+        attributes: email.attributes,
+        envelope: email.envelope,
+        bodiesKeys: email.bodies ? Object.keys(email.bodies) : 'none'
+      });
+      
+      if (email.bodies) {
+        // Handle HEADER response (this should be our primary source)
+        if (email.bodies.HEADER) {
+          rawHeaderText = email.bodies.HEADER;
+          console.log(`📧 Found HEADER content (${rawHeaderText.length} chars)`);
+        } else {
+          // Check for any header fields in bodies as fallback
+          const headerKeys = Object.keys(email.bodies).filter(key => 
+            key.includes('HEADER') || key.includes('header')
+          );
+          if (headerKeys.length > 0) {
+            rawHeaderText = email.bodies[headerKeys[0]];
+            console.log(`📧 Found header field: ${headerKeys[0]} (${rawHeaderText.length} chars)`);
+          }
+        }
+        
+        if (rawHeaderText && rawHeaderText.length > 10) {
+          // Use mailparser for robust header parsing
+          try {
+            const parsed = await simpleParser(rawHeaderText, { skipHtmlToText: true, skipTextLinks: true });
+            
+            // 🔧 SAFE EXTRACTION: Extract with proper fallbacks
+            parsedHeaders = {
+              messageId: parsed.messageId || parsed.headers?.get('message-id'),
+              subject: parsed.subject || parsed.headers?.get('subject'),
+              date: parsed.date || new Date(parsed.headers?.get('date')) || new Date(),
+              
+              // From field with multiple fallbacks
+              from: parsed.from?.value?.[0]?.address || 
+                    parsed.from?.text || 
+                    parsed.headers?.get('from'),
+              fromName: parsed.from?.value?.[0]?.name || 
+                       parsed.from?.value?.[0]?.address ||
+                       parsed.headers?.get('from'),
+              
+              // To field with proper handling
+              to: parsed.to?.value?.map(addr => addr.address).join(', ') || 
+                  parsed.to?.text || 
+                  parsed.headers?.get('to'),
+              toName: parsed.to?.value?.map(addr => addr.name || addr.address).join(', ') || 
+                     parsed.to?.text || 
+                     parsed.headers?.get('to'),
+              
+              // CC and BCC
+              cc: parsed.cc?.value?.map(addr => addr.address).join(', ') || 
+                  parsed.cc?.text || 
+                  parsed.headers?.get('cc') || '',
+              bcc: parsed.bcc?.value?.map(addr => addr.address).join(', ') || 
+                   parsed.bcc?.text || 
+                   parsed.headers?.get('bcc') || '',
+              
+              // Threading
+              inReplyTo: parsed.inReplyTo || parsed.headers?.get('in-reply-to'),
+              references: parsed.references || parsed.headers?.get('references')
+            };
+            
+            console.log('✅ PARSED HEADERS:', {
+              messageId: parsedHeaders.messageId,
+              subject: parsedHeaders.subject,
+              from: parsedHeaders.from,
+              fromName: parsedHeaders.fromName,
+              to: parsedHeaders.to,
+              date: parsedHeaders.date
+            });
+            
+          } catch (parseError) {
+            console.log('⚠️ simpleParser failed, using manual parsing:', parseError.message);
+            
+            // Enhanced manual parsing as fallback
+            const headerLines = rawHeaderText.split(/\r?\n/);
+            let currentHeader = '';
+            let currentValue = '';
+            
+            for (const line of headerLines) {
+              if (line.match(/^\s/) && currentHeader) {
+                // Continuation of previous header
+                currentValue += ' ' + line.trim();
+              } else if (line.includes(':')) {
+                // Save previous header
+                if (currentHeader && currentValue) {
+                  parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
+                }
+                
+                // Start new header
+                const colonIndex = line.indexOf(':');
+                currentHeader = line.substring(0, colonIndex).trim();
+                currentValue = line.substring(colonIndex + 1).trim();
+              }
+            }
+            
+            // Save last header
+            if (currentHeader && currentValue) {
+              parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
+            }
+            
+            console.log('📋 Manual parsed headers:', Object.keys(parsedHeaders));
+          }
+        } else {
+          console.log('⚠️ No usable header content found in email.bodies');
+        }
+      } else {
+        console.log('⚠️ No email.bodies found in IMAP response');
+      }
+      
+      console.log('Direct properties:', {
+        messageId: email.messageId,
+        subject: email.subject,
+        from: email.from,
+        to: email.to,
+        date: email.date
+      });
+      console.log('=== END EMAIL STRUCTURE ===\n');
+
+      // ✅ SAFE EMAIL DATA EXTRACTION with comprehensive fallbacks
+      const generateFallbackMessageId = () => `generated-${Date.now()}-${userID}-${i}`;
+      
+      // 🔍 UID EXTRACTION DEBUG
+      const extractedUID = email.uid || email.attributes?.uid;
+      console.log(`🔍 UID EXTRACTION DEBUG for email ${i}:`);
+      console.log(`  email.uid: ${email.uid}`);
+      console.log(`  email.attributes?.uid: ${email.attributes?.uid}`);
+      console.log(`  extractedUID: ${extractedUID}`);
+      
+      const lightweightEmail = {
+        uid: extractedUID,
+        
+        // Message ID with fallback generation  
+        messageId: parsedHeaders.messageId || 
+                  parsedHeaders['message-id'] ||
+                  email.attributes?.envelope?.messageId ||
+                  email.envelope?.messageId || 
+                  email.messageId || 
+                  email.attributes?.messageId || 
+                  generateFallbackMessageId(),
+                  
+        // Subject with proper fallback
+        subject: parsedHeaders.subject || 
+                email.attributes?.envelope?.subject ||
+                email.envelope?.subject || 
+                email.subject || 
+                email.attributes?.subject || 
+                'No Subject',
+        
+        // 🔧 ENHANCED SENDER EXTRACTION: Never use "Unknown Sender"
+        sender: parsedHeaders.from || 
+                parsedHeaders['from'] ||
+                (email.attributes?.envelope?.from && 
+                 email.attributes.envelope.from[0] && 
+                 `${email.attributes.envelope.from[0].mailbox}@${email.attributes.envelope.from[0].host}`) ||
+                (email.envelope?.from && email.envelope.from[0]?.address) || 
+                email.from || 
+                email.attributes?.from || 
+                'system@unknown.com', // Better than "Unknown Sender"
+                
+        senderName: parsedHeaders.fromName || 
+                   parsedHeaders['from'] ||
+                   (email.attributes?.envelope?.from && 
+                    email.attributes.envelope.from[0] && 
+                    (email.attributes.envelope.from[0].name || `${email.attributes.envelope.from[0].mailbox}@${email.attributes.envelope.from[0].host}`)) ||
+                   (email.envelope?.from && email.envelope.from[0]?.name) || 
+                   parsedHeaders.from ||
+                   email.fromName || 
+                   email.attributes?.fromName ||
+                   'System Email',
+        
+        // 🔧 ENHANCED RECIPIENT EXTRACTION
+        recipient: parsedHeaders.to || 
+                  parsedHeaders['to'] ||
+                  (email.attributes?.envelope?.to && 
+                   email.attributes.envelope.to.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
+                  (email.envelope?.to && email.envelope.to.map(addr => addr.address).join(', ')) || 
+                  email.to || 
+                  email.attributes?.to ||
+                  'recipient@unknown.com',
+                  
+        recipientName: parsedHeaders.toName || 
+                      parsedHeaders['to'] ||
+                      (email.attributes?.envelope?.to && 
+                       email.attributes.envelope.to.map(addr => addr.name || `${addr.mailbox}@${addr.host}`).join(', ')) ||
+                      (email.envelope?.to && email.envelope.to.map(addr => addr.name || addr.address).join(', ')) || 
+                      parsedHeaders.to ||
+                      email.toName || 
+                      email.attributes?.toName ||
+                      'Unknown Recipient',
+        
+        // CC and BCC with empty string fallback
+        cc: parsedHeaders.cc || 
+            parsedHeaders['cc'] ||
+            (email.attributes?.envelope?.cc && 
+             email.attributes.envelope.cc.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
+            (email.envelope?.cc && email.envelope.cc.map(addr => addr.address).join(', ')) || 
+            email.cc || 
+            email.attributes?.cc || 
+            '',
+            
+        bcc: parsedHeaders.bcc || 
+             parsedHeaders['bcc'] ||
+             (email.attributes?.envelope?.bcc && 
+              email.attributes.envelope.bcc.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
+             (email.envelope?.bcc && email.envelope.bcc.map(addr => addr.address).join(', ')) || 
+             email.bcc || 
+             email.attributes?.bcc || 
+             '',
+        
+        // Threading fields
+        inReplyTo: parsedHeaders.inReplyTo || 
+                  parsedHeaders['in-reply-to'] ||
+                  email.attributes?.envelope?.inReplyTo ||
+                  email.envelope?.inReplyTo || 
+                  email.inReplyTo || null,
+                  
+        references: parsedHeaders.references || 
+                   parsedHeaders['references'] ||
+                   email.attributes?.envelope?.references ||
+                   email.envelope?.references || 
+                   email.references || null,
+        
+        // Date handling with multiple fallbacks and validation
+        createdAt: (() => {
+          // 🔍 DEBUG: Log all available date sources
+          console.log('🕒 DATE DEBUG:', {
+            parsedHeadersDate: parsedHeaders.date,
+            envelopeDate: email.attributes?.envelope?.date,
+            emailDate: email.date,
+            rawEnvelope: email.attributes?.envelope ? 'present' : 'missing'
+          });
+          
+          const tryDate = parsedHeaders.date || 
+                         email.attributes?.envelope?.date ||
+                         email.envelope?.date || 
+                         email.attributes?.date || 
+                         email.date;
+          
+          console.log('🕒 Selected tryDate:', tryDate, typeof tryDate);
+          
+          if (tryDate) {
+            const dateObj = new Date(tryDate);
+            console.log('🕒 Parsed dateObj:', dateObj, 'isValid:', !isNaN(dateObj.getTime()));
+            if (!isNaN(dateObj.getTime())) {
+              return dateObj;
+            }
+          }
+          
+          // If parsing parsedHeaders['date'] string
+          if (parsedHeaders['date']) {
+            const dateObj = new Date(parsedHeaders['date']);
+            console.log('🕒 Fallback dateObj from parsedHeaders:', dateObj);
+            if (!isNaN(dateObj.getTime())) {
+              return dateObj;
+            }
+          }
+          
+          // Fallback to current time
+          console.log('🕒 Using current time as fallback');
+          return new Date();
+        })(),
+        updatedAt: new Date(),
+        
+        // Email flags and attributes
+        isRead: email.attributes?.flags?.includes('\\Seen') || false,
+        flags: email.attributes?.flags || email.flags || [],
+        size: email.attributes?.size || 0,
+        
+        // CRM specific fields
+        masterUserID: userID,
+        folder: folderType || 'inbox',
+        isDraft: folderType === 'drafts',
+        isOpened: false,
+        isClicked: false,
+        
+        // Body handling (Phase 2 strategy)
+        body_fetch_status: 'pending',
+        body: '',
+        
+        // Optional fields
+        leadId: null,
+        dealId: null,
+        draftId: null,
+        tempMessageId: null,
+        scheduledAt: null,
+        threadId: email.envelope?.messageId || null,
+        
+        // Processing metadata (not saved to DB)
+        provider: provider,
+        processed: true,
+        lightweight: true,
+        strategy: strategy,
+        needsBodyProcessing: true,
+        processedAt: new Date(),
+        
+        // Quick content preview (if available in headers)
+        preview: email.headers?.['x-gmail-snippet'] || email.snippet || '',
+        importance: email.headers?.importance || 'normal',
+        priority: email.headers?.priority || 'normal'
+      };
+      
+      // 🔍 COMPREHENSIVE DEBUG LOGGING: See exactly what we're about to save
+      console.log(`\n🔍 EMAIL ${i} FINAL EXTRACTION RESULT:`);
+      console.log('==================================================');
+      console.log('📧 CORE FIELDS:');
+      console.log('  MessageID:', lightweightEmail.messageId);
+      console.log('  Subject:', lightweightEmail.subject);
+      console.log('  Sender:', lightweightEmail.sender);
+      console.log('  SenderName:', lightweightEmail.senderName);
+      console.log('  Recipient:', lightweightEmail.recipient);
+      console.log('  Date:', lightweightEmail.createdAt);
+      console.log('📧 PARSED vs FALLBACK:');
+      console.log('  Parsed Headers:', Object.keys(parsedHeaders));
+      console.log('  Envelope Data:', email.envelope ? 'present' : 'missing');
+      console.log('  Attributes Data:', email.attributes ? 'present' : 'missing');
+      console.log('🔧 DATA QUALITY CHECK:');
+      console.log('  Has real sender?', !lightweightEmail.sender.includes('unknown') && !lightweightEmail.sender.includes('Unknown'));
+      console.log('  Has real subject?', lightweightEmail.subject !== 'No Subject');
+      console.log('  Has real messageId?', !lightweightEmail.messageId.includes('generated'));
+      console.log('==================================================\n');
+      
+      processedEmails.push(lightweightEmail);
+      
+      // Progress logging every 100 emails
+      if ((i + 1) % 100 === 0) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const rate = (i + 1) / elapsed;
+        console.log(`[Batch ${page}] 📈 PROGRESS: ${i + 1}/${emails.length} emails (${rate.toFixed(1)} emails/sec)`);
+      }
+      
+    } catch (emailError) {
+      errorCount++;
+      console.log(`[Batch ${page}] ⚠️ Lightweight processing error ${errorCount}: ${emailError.message}`);
+      
+      // Higher error tolerance for performance
+      if (errorCount > 100) {
+        console.log(`[Batch ${page}] ❌ Too many errors (${errorCount}), stopping batch`);
+        break;
+      }
+    }
+  }
+  
+  const totalTime = (Date.now() - startTime) / 1000;
+  const rate = processedEmails.length / totalTime;
+  
+  console.log(`[Batch ${page}] ✅ LIGHTWEIGHT COMPLETE: ${processedEmails.length} emails processed in ${totalTime.toFixed(1)}s (${rate.toFixed(1)} emails/sec)`);
+  console.log(`[Batch ${page}] 📊 ERROR RATE: ${errorCount}/${emails.length} (${((errorCount/emails.length)*100).toFixed(1)}%)`);
+  
+  return { processedEmails, errorCount, processingTime: totalTime, rate };
 };
 
 // Fetch and store the most recent email
@@ -2628,11 +3463,12 @@ exports.getEmails = async (req, res) => {
       "cc",
       "bcc",
       "subject",
-      "body", // Add body for preview
+      // 🚀 PHASE 2: Conditional body inclusion for performance
+      ...(includeFullBody === "true" ? ["body"] : []), // Only include body if explicitly requested
       "folder",
       "createdAt",
       "isRead",
-      "isOpened",
+      "isOpened", // Used to track body fetch status
       "isClicked",
       "leadId",
       "dealId",
@@ -3817,15 +4653,92 @@ exports.getOneEmail = async (req, res) => {
           as: "attachments",
         },
       ],
+      // 🔧 DEBUG: Explicitly ensure body field is selected
+      attributes: { exclude: [] } // This ensures all fields including body are selected
     });
 
     if (!mainEmail) {
       return res.status(404).json({ message: "Email not found." });
     }
 
+    // 🔧 DEBUG: Log body status for debugging
+    console.log(`[getOneEmail] 📧 Email ${emailId}: body_fetch_status = ${mainEmail.body_fetch_status}, has body = ${!!mainEmail.body}, body length = ${mainEmail.body ? mainEmail.body.length : 0}`);
+
     // Mark as read if not already
     if (!mainEmail.isRead) {
       await mainEmail.update({ isRead: true });
+    }
+
+    // 🚀 PHASE 2: Hybrid body fetching - On-demand for when user opens email
+    if ((!mainEmail.body || mainEmail.body === null || mainEmail.body.trim() === '') || 
+        (mainEmail.body_fetch_status === 'pending' && (!mainEmail.body || mainEmail.body === null))) {
+      // Email body not fetched yet - fetch it now using our smart service
+      console.log(`[Phase 2] 🔍 ON-DEMAND: Email ${emailId} body missing or pending, fetching now...`);
+      
+      try {
+        const emailBodyService = require('../../services/emailBodyService');
+        console.log(`🔍 CONTROLLER DEBUG: EmailBodyService loaded, functions available:`, Object.keys(emailBodyService));
+        
+        // 🔧 ENHANCED DEBUG: Get and analyze user credentials
+        console.log(`🔍 API DEBUG: Looking for credentials for masterUserID ${masterUserID}`);
+        const userCredential = await UserCredential.findOne({
+          where: { masterUserID }
+        });
+        
+        if (userCredential) {
+          console.log(`✅ API DEBUG: Credentials found for user ${masterUserID}`);
+          console.log(`📧 API DEBUG: Email: ${userCredential.email}`);
+          console.log(`🔧 API DEBUG: Provider: ${userCredential.provider}`);
+          console.log(`🔑 API DEBUG: Has App Password: ${!!userCredential.appPassword}`);
+          console.log(`🔑 API DEBUG: App Password Length: ${userCredential.appPassword ? userCredential.appPassword.length : 0}`);
+          console.log(`🌐 API DEBUG: IMAP Host: ${userCredential.imapHost || 'Not set (will use default)'}`);
+          console.log(`🌐 API DEBUG: IMAP Port: ${userCredential.imapPort || 'Not set (will use default)'}`);
+          console.log(`🔒 API DEBUG: IMAP TLS: ${userCredential.imapTLS !== null ? userCredential.imapTLS : 'Not set (will use default)'}`);
+          
+          // Check if it's Gmail and validate requirements
+          if (userCredential.email && userCredential.email.includes('gmail.com')) {
+            console.log(`📧 API DEBUG: GMAIL ACCOUNT DETECTED - Validating requirements...`);
+            console.log(`${userCredential.provider === 'gmail' ? '✅' : '❌'} API DEBUG: Provider should be 'gmail', current: ${userCredential.provider}`);
+            console.log(`${userCredential.appPassword && userCredential.appPassword.length === 16 ? '✅' : '❌'} API DEBUG: App Password should be 16 chars, current: ${userCredential.appPassword ? userCredential.appPassword.length : 0}`);
+            console.log(`🔑 API DEBUG: App Password preview: ${userCredential.appPassword ? userCredential.appPassword.substring(0, 4) + '************' : 'None'}`);
+          }
+          
+          console.log(`🚀 API DEBUG: Calling fetchEmailBodyOnDemand with:`);
+          console.log(`   - emailID: ${mainEmail.emailID}`);
+          console.log(`   - masterUserID: ${masterUserID}`);
+          console.log(`   - provider: ${userCredential.provider || 'gmail'}`);
+          
+          // Use the EmailBodyService for smart on-demand fetching
+          const updatedEmail = await emailBodyService.fetchEmailBodyOnDemand(
+            mainEmail.emailID, // 🔧 FIX: Use emailID instead of id
+            masterUserID, 
+            userCredential.provider || 'yandex'
+          );
+          
+          // Update the main email object with fetched body
+          if (updatedEmail && updatedEmail.body) {
+            mainEmail.body = updatedEmail.body;
+            mainEmail.textBody = updatedEmail.textBody;
+            mainEmail.htmlBody = updatedEmail.htmlBody;
+            mainEmail.body_fetch_status = 'fetched';
+            console.log(`[Phase 2] ✅ ON-DEMAND: Email ${emailId} body fetched successfully - Body length: ${updatedEmail.body.length}`);
+          } else {
+            console.log(`[Phase 2] ⚠️ ON-DEMAND: Email ${emailId} body fetch returned null or empty result`);
+          }
+        } else {
+          console.log(`❌ API DEBUG: No credentials found for masterUserID ${masterUserID}`);
+          console.log(`[Phase 2] ⚠️ ON-DEMAND: No user credentials found for USER ${masterUserID}`);
+        }
+      } catch (bodyFetchError) {
+        console.log(`❌ API DEBUG: Body fetch error details:`);
+        console.log(`   - Error message: ${bodyFetchError.message}`);
+        console.log(`   - Error stack: ${bodyFetchError.stack}`);
+        console.log(`[Phase 2] ❌ ON-DEMAND: Failed to fetch body for email ${emailId}:`, bodyFetchError.message);
+        await mainEmail.update({ body_fetch_status: 'failed' });
+        // Continue with existing data - conversation still works!
+      }
+    } else {
+      console.log(`[Phase 2] ✅ BODY EXISTS: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0})`);
     }
 
     // Clean the body of the main email
@@ -5492,4 +6405,8 @@ exports.bulkMoveEmails = async (req, res) => {
     });
   }
 };
+
+// Export the processEmailsLightweight function for testing
+exports.processEmailsLightweight = (emails, userID, provider, strategy = 'NORMAL', page = 1, folderType = 'inbox') => 
+  processEmailsLightweight(emails, userID, provider, strategy, page, folderType);
 //hello

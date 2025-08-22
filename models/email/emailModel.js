@@ -110,6 +110,11 @@ const Email = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    uid: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'IMAP UID for email body fetching'
+    },
     leadId: {
       type: DataTypes.INTEGER,
       allowNull: true, // Allow NULL values for emails not linked to a lead
