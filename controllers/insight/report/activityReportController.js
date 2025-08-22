@@ -1,6 +1,9 @@
 const DASHBOARD = require("../../../models/insight/dashboardModel");
 const Report = require("../../../models/insight/reportModel");
-const Goal = require("../../../models/insight/goalModel");
+const Deal = require("../../../models/deals/dealsModels");
+const Lead = require("../../../models/leads/leadsModel");
+const Organization = require("../../../models/leads/leadOrganizationModel");
+const Person = require("../../../models/leads/leadPersonModel");
 const MasterUser = require("../../../models/master/masterUserModel");
 const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
@@ -36,12 +39,97 @@ exports.createActivityReport = async (req, res) => {
       "isDone",
       "startDateTime",
       "endDateTime",
-      "createdAt"
+      "createdAt",
     ];
 
-    const yaxisArray = [
-      "no of activities",
-      "duration",
+    const yaxisArray = ["no of activities", "duration"];
+
+    // Add this to your createActivityReport function or make it available globally
+    const availableFilterColumns = [
+      // Activity table columns
+      "subject",
+      "type",
+      "priority",
+      "status",
+      "location",
+      "contactPerson",
+      "organization",
+      "isDone",
+      "startDateTime",
+      "endDateTime",
+      "createdAt",
+
+      // Deal table columns (prefix with Deal.)
+      "Deal.title",
+      "Deal.value",
+      "Deal.currency",
+      "Deal.pipeline",
+      "Deal.pipelineStage",
+      "Deal.label",
+      "Deal.expectedCloseDate",
+      "Deal.sourceChannel",
+      "Deal.serviceType",
+      "Deal.proposalValue",
+      "Deal.proposalCurrency",
+      "Deal.esplProposalNo",
+      "Deal.projectLocation",
+      "Deal.organizationCountry",
+      "Deal.proposalSentDate",
+      "Deal.sourceRequired",
+      "Deal.questionerShared",
+      "Deal.sectorialSector",
+      "Deal.sbuClass",
+      "Deal.phone",
+      "Deal.email",
+      "Deal.sourceOrgin",
+      "Deal.status",
+      "Deal.productName",
+      "Deal.weightedValue",
+      "Deal.probability",
+      "Deal.stage",
+      "Deal.lostReason",
+      "Deal.archiveStatus",
+
+      // Lead table columns (prefix with Lead.)
+      "Lead.contactPerson",
+      "Lead.organization",
+      "Lead.title",
+      "Lead.valueLabels",
+      "Lead.expectedCloseDate",
+      "Lead.sourceChannel",
+      "Lead.sourceChannelID",
+      "Lead.serviceType",
+      "Lead.scopeOfServiceType",
+      "Lead.phone",
+      "Lead.email",
+      "Lead.company",
+      "Lead.proposalValue",
+      "Lead.esplProposalNo",
+      "Lead.projectLocation",
+      "Lead.organizationCountry",
+      "Lead.proposalSentDate",
+      "Lead.status",
+      "Lead.SBUClass",
+      "Lead.sectoralSector",
+      "Lead.sourceOrigin",
+      "Lead.leadQuality",
+      "Lead.value",
+      "Lead.proposalValueCurrency",
+      "Lead.valueCurrency",
+
+      // Organization table columns (prefix with Organization.)
+      "Organization.organization",
+      "Organization.organizationLabels",
+      "Organization.address",
+
+      // Person table columns (prefix with Person.)
+      "Person.firstName",
+      "Person.lastName",
+      "Person.email",
+      "Person.phone",
+      "Person.jobTitle",
+      "Person.department",
+      "Person.organization",
     ];
 
     // For Activity Performance reports, generate the data
@@ -77,9 +165,8 @@ exports.createActivityReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
-            filters: filters || {}
+            filters: filters || {},
           };
-
         } catch (error) {
           console.error("Error generating activity performance data:", error);
           return res.status(500).json({
@@ -102,7 +189,11 @@ exports.createActivityReport = async (req, res) => {
 
       // Parse the config JSON string
       const config = JSON.parse(configString);
-      const { xaxis: existingxaxis, yaxis: existingyaxis, filters: existingfilters } = config;
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        filters: existingfilters,
+      } = config;
 
       if (existingentity === "Activity" && existingtype === "Performance") {
         // Validate required fields for performance reports
@@ -130,13 +221,12 @@ exports.createActivityReport = async (req, res) => {
 
           reportConfig = {
             reportId,
-            entity : existingentity,
-            type :  existingtype,
-            xaxis : existingxaxis,
-            yaxis : existingyaxis,
-            filters: existingfilters || {}
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            filters: existingfilters || {},
           };
-
         } catch (error) {
           console.error("Error generating activity performance data:", error);
           return res.status(500).json({
@@ -156,8 +246,9 @@ exports.createActivityReport = async (req, res) => {
       config: reportConfig,
       availableOptions: {
         xaxis: xaxisArray,
-        yaxis: yaxisArray
-      }
+        yaxis: yaxisArray,
+        filters: availableFilterColumns
+      },
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -178,6 +269,7 @@ async function generateExistingActivityPerformanceData(
   page = 1,
   limit = 6
 ) {
+  let includeModels = [];
   // Calculate offset for pagination
   const offset = (page - 1) * limit;
 
@@ -190,48 +282,58 @@ async function generateExistingActivityPerformanceData(
   }
 
   // Handle filters if provided
+  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
     );
 
     if (validConditions.length > 0) {
-      // Start with the first condition
-      let combinedCondition = getConditionObject(
-        validConditions[0].column,
-        validConditions[0].operator,
-        validConditions[0].value
-      );
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
 
-      // Add remaining conditions with their logical operators
-      for (let i = 1; i < validConditions.length; i++) {
-        const currentCondition = getConditionObject(
-          validConditions[i].column,
-          validConditions[i].operator,
-          validConditions[i].value
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
         );
+      });
 
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
           filters.logicalOperators[i - 1] || "AND"
         ).toUpperCase();
 
         if (logicalOp === "AND") {
-          combinedCondition = {
-            [Op.and]: [combinedCondition, currentCondition],
-          };
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
         } else {
-          combinedCondition = {
-            [Op.or]: [combinedCondition, currentCondition],
-          };
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
         }
       }
 
       Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
     }
   }
 
   // Handle special cases for xaxis (like Owner which needs join)
-  let includeModels = [];
+
   let groupBy = [];
   let attributes = [];
 
@@ -256,9 +358,9 @@ async function generateExistingActivityPerformanceData(
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // Regular column from Activity table
-    groupBy.push(existingxaxis);
-    attributes.push([existingxaxis, "xValue"]);
+    // For regular columns, explicitly specify the Activity table
+    groupBy.push(`Activity.${xaxis}`);
+    attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
@@ -282,9 +384,9 @@ async function generateExistingActivityPerformanceData(
       "yValue",
     ]);
   } else {
-    // For other existingyaxis values, assume they're column names that need to be summed
+    // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(existingyaxis)),
+      Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)),
       "yValue",
     ]);
   }
@@ -340,7 +442,6 @@ async function generateExistingActivityPerformanceData(
   };
 }
 
-
 // Helper function to generate activity performance data with pagination
 async function generateActivityPerformanceData(
   ownerId,
@@ -351,6 +452,8 @@ async function generateActivityPerformanceData(
   page = 1,
   limit = 6
 ) {
+  let includeModels = [];
+
   // Calculate offset for pagination
   const offset = (page - 1) * limit;
 
@@ -363,48 +466,58 @@ async function generateActivityPerformanceData(
   }
 
   // Handle filters if provided
+  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
     );
 
     if (validConditions.length > 0) {
-      // Start with the first condition
-      let combinedCondition = getConditionObject(
-        validConditions[0].column,
-        validConditions[0].operator,
-        validConditions[0].value
-      );
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
 
-      // Add remaining conditions with their logical operators
-      for (let i = 1; i < validConditions.length; i++) {
-        const currentCondition = getConditionObject(
-          validConditions[i].column,
-          validConditions[i].operator,
-          validConditions[i].value
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
         );
+      });
 
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
           filters.logicalOperators[i - 1] || "AND"
         ).toUpperCase();
 
         if (logicalOp === "AND") {
-          combinedCondition = {
-            [Op.and]: [combinedCondition, currentCondition],
-          };
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
         } else {
-          combinedCondition = {
-            [Op.or]: [combinedCondition, currentCondition],
-          };
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
         }
       }
 
       Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
     }
   }
 
   // Handle special cases for xaxis (like Owner which needs join)
-  let includeModels = [];
+
   let groupBy = [];
   let attributes = [];
 
@@ -429,9 +542,9 @@ async function generateActivityPerformanceData(
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // Regular column from Activity table
-    groupBy.push(xaxis);
-    attributes.push([xaxis, "xValue"]);
+    // For regular columns, explicitly specify the Activity table
+    groupBy.push(`Activity.${xaxis}`);
+    attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
   }
 
   // Handle yaxis
@@ -455,8 +568,11 @@ async function generateActivityPerformanceData(
       "yValue",
     ]);
   } else {
-    // For other yaxis values, assume they're column names that need to be summed
-    attributes.push([Sequelize.fn("SUM", Sequelize.col(yaxis)), "yValue"]);
+    // For other yaxis values, explicitly specify the Activity table
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)),
+      "yValue",
+    ]);
   }
 
   // Get total count for pagination
@@ -511,39 +627,143 @@ async function generateActivityPerformanceData(
 }
 
 // Helper function to convert operator strings to Sequelize operators
-function getConditionObject(column, operator, value) {
+// Enhanced helper function to handle related table conditions
+function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
+  // Check if column contains a dot (indicating a related table field)
+  const hasRelation = column.includes(".");
+  let tableAlias = "Activity";
+  let fieldName = column;
+
+  if (hasRelation) {
+    [tableAlias, fieldName] = column.split(".");
+  }
+
   // Handle different data types
-  if (column === "isDone") {
+  if (fieldName === "isDone") {
     conditionValue = value === "true" || value === true;
-  } else if (column.includes("Date") || column.includes("Time")) {
+  } else if (fieldName.includes("Date") || fieldName.includes("Time")) {
     conditionValue = new Date(value);
-  } else if (!isNaN(value) && value !== "") {
+  } else if (!isNaN(value) && value !== "" && typeof value === "string") {
     conditionValue = parseFloat(value);
   }
 
+  // Handle related table joins
+  if (hasRelation) {
+    let modelConfig;
+
+    switch (tableAlias) {
+      case "Deal":
+        modelConfig = {
+          model: Deal,
+          as: "Deal",
+          required: false, // Use false to avoid INNER JOIN issues
+          attributes: [],
+        };
+        break;
+      case "Lead":
+        modelConfig = {
+          model: Lead,
+          as: "Lead",
+          required: false,
+          attributes: [],
+        };
+        break;
+      case "Organization":
+        modelConfig = {
+          model: Organization,
+          as: "Organization",
+          required: false,
+          attributes: [],
+        };
+        break;
+      case "Person":
+        modelConfig = {
+          model: Person,
+          as: "Person",
+          required: false,
+          attributes: [],
+        };
+        break;
+      default:
+        // If it's not a recognized table, treat it as Activity column
+        return getOperatorCondition(column, operator, conditionValue);
+    }
+
+    // Check if this include already exists to avoid duplicates
+    const existingInclude = includeModels.find(
+      (inc) => inc.as === modelConfig.as
+    );
+    if (!existingInclude) {
+      includeModels.push(modelConfig);
+    }
+
+    // Return the condition with proper table reference
+    return Sequelize.where(
+      Sequelize.col(`${modelConfig.as}.${fieldName}`),
+      getSequelizeOperator(operator),
+      conditionValue
+    );
+  } else {
+    // Regular activity table column
+    return getOperatorCondition(column, operator, conditionValue);
+  }
+}
+
+// Helper function to convert operator strings to Sequelize operators
+function getSequelizeOperator(operator) {
   switch (operator) {
     case ">":
-      return { [column]: { [Op.gt]: conditionValue } };
+      return Op.gt;
     case "<":
-      return { [column]: { [Op.lt]: conditionValue } };
+      return Op.lt;
     case "=":
-      return { [column]: { [Op.eq]: conditionValue } };
+      return Op.eq;
     case "≠":
-      return { [column]: { [Op.ne]: conditionValue } };
+      return Op.ne;
     case "contains":
-      return { [column]: { [Op.like]: `%${conditionValue}%` } };
+      return Op.like;
     case "startsWith":
-      return { [column]: { [Op.like]: `${conditionValue}%` } };
+      return Op.like;
     case "endsWith":
-      return { [column]: { [Op.like]: `%${conditionValue}` } };
+      return Op.like;
     case "isEmpty":
-      return { [column]: { [Op.or]: [{ [Op.is]: null }, { [Op.eq]: "" }] } };
+      return Op.or;
     case "isNotEmpty":
-      return { [column]: { [Op.and]: [{ [Op.not]: null }, { [Op.ne]: "" }] } };
+      return Op.and;
     default:
-      return { [column]: { [Op.eq]: conditionValue } };
+      return Op.eq;
+  }
+}
+
+// Helper function for operator conditions
+function getOperatorCondition(column, operator, value) {
+  const op = getSequelizeOperator(operator);
+
+  switch (operator) {
+    case "contains":
+      return { [column]: { [op]: `%${value}%` } };
+    case "startsWith":
+      return { [column]: { [op]: `${value}%` } };
+    case "endsWith":
+      return { [column]: { [op]: `%${value}` } };
+    case "isEmpty":
+      return {
+        [Op.or]: [
+          { [column]: { [Op.is]: null } },
+          { [column]: { [Op.eq]: "" } },
+        ],
+      };
+    case "isNotEmpty":
+      return {
+        [Op.and]: [
+          { [column]: { [Op.not]: null } },
+          { [column]: { [Op.ne]: "" } },
+        ],
+      };
+    default:
+      return { [column]: { [op]: value } };
   }
 }
 
@@ -588,20 +808,21 @@ exports.saveActivityReport = async (req, res) => {
       where: {
         ownerId,
         entity,
-        type
-      }
+        type,
+      },
     });
 
     // Find report with matching xaxis and yaxis in config
-    const existingReport = allReports.find(report => {
+    const existingReport = allReports.find((report) => {
       try {
-        const config = typeof report.config === 'string' 
-          ? JSON.parse(report.config) 
-          : report.config;
-        
+        const config =
+          typeof report.config === "string"
+            ? JSON.parse(report.config)
+            : report.config;
+
         return config.xaxis === xaxis && config.yaxis === yaxis;
       } catch (error) {
-        console.error('Error parsing config:', error);
+        console.error("Error parsing config:", error);
         return false;
       }
     });
@@ -631,14 +852,14 @@ exports.saveActivityReport = async (req, res) => {
       };
 
       await Report.update(updateData, {
-        where: { reportId: existingReport.reportId }
+        where: { reportId: existingReport.reportId },
       });
 
       report = await Report.findByPk(existingReport.reportId);
     } else {
       // Create new report
       const reportName = description || `${entity} ${type}`;
-      
+
       // Get next position for dashboard
       let nextPosition = 0;
       if (dashboardId) {
@@ -646,7 +867,7 @@ exports.saveActivityReport = async (req, res) => {
           where: { dashboardId },
           order: [["position", "DESC"]],
         });
-        nextPosition = lastReport ? (lastReport.position || 0) : 0;
+        nextPosition = lastReport ? lastReport.position || 0 : 0;
       }
 
       report = await Report.create({
@@ -664,14 +885,15 @@ exports.saveActivityReport = async (req, res) => {
 
     res.status(existingReport ? 200 : 201).json({
       success: true,
-      message: existingReport ? "Report updated successfully" : "Report created successfully",
+      message: existingReport
+        ? "Report updated successfully"
+        : "Report created successfully",
       data: {
         ...report.toJSON(),
         config: report.config,
         reportData,
-      }
+      },
     });
-
   } catch (error) {
     console.error("Error saving report:", error);
     res.status(500).json({
@@ -681,7 +903,6 @@ exports.saveActivityReport = async (req, res) => {
     });
   }
 };
-
 
 exports.updateActivityReport = async (req, res) => {
   try {
@@ -1032,8 +1253,8 @@ exports.getActivityReportSummary = async (req, res) => {
           minValue: minValue,
         };
       }
-    } else if(!xaxis && !yaxis && reportId){
-        const existingReports = await Report.findOne({
+    } else if (!xaxis && !yaxis && reportId) {
+      const existingReports = await Report.findOne({
         where: { reportId },
       });
 
@@ -1045,7 +1266,11 @@ exports.getActivityReportSummary = async (req, res) => {
 
       // Parse the config JSON string
       const config = JSON.parse(configString);
-      const { xaxis: existingxaxis, yaxis: existingyaxis, filters: existingfilters } = config;
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        filters: existingfilters,
+      } = config;
 
       const reportResult = await generateActivityPerformanceData(
         ownerId,
@@ -1077,7 +1302,6 @@ exports.getActivityReportSummary = async (req, res) => {
           minValue: minValue,
         };
       }
-
     }
 
     // Format activities for response

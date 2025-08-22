@@ -4,6 +4,8 @@ const sequelize = require("../../config/db");
 const Lead = require("../../models/leads/leadsModel");
 const Deal = require("../../models/deals/dealsModels");
 const Person = require("../../models/leads/leadPersonModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
 
 const Activity = sequelize.define(
   "Activity",
@@ -130,26 +132,28 @@ Activity.associate = (models) => {
     as: "assignedUser", // Use consistent alias
   });
   
-  Activity.belongsTo(models.Deal, { 
-    foreignKey: "dealId", 
-    as: "deal" 
-  });
-  
-  Activity.belongsTo(models.Lead, { 
-    foreignKey: "leadId", 
-    as: "lead" 
-  });
-  
-  Activity.belongsTo(models.Person, { 
-    foreignKey: "personId", 
-    as: "person" 
-  });
-  
-  Activity.belongsTo(models.LeadOrganization, { 
-    foreignKey: "leadOrganizationId", 
-    as: "organization" 
-  });
 };
+
+// Activity.belongsTo(MasterUser, {
+//   foreignKey: "assignedTo",
+//   as: "assignedUser", 
+//   });
+Activity.belongsTo(Deal, { 
+  foreignKey: 'dealId', 
+  as: 'Deal' 
+});
+Activity.belongsTo(Lead, { 
+  foreignKey: 'leadId', 
+  as: 'Lead' 
+});
+Activity.belongsTo(Organization,{ 
+  foreignKey: 'leadOrganizationId', 
+  as: 'Organization' 
+});
+Activity.belongsTo(Person, {
+  foreignKey: 'personId', 
+  as: 'Person' 
+});
 
 
 module.exports = Activity;

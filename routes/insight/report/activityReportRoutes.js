@@ -17,4 +17,5 @@ router.patch("/update-activityreport/:reportId", verifyToken, activityReportCont
 
 router.delete("/delete-activityreport/:reportId", verifyToken, activityReportController.deleteActivityReport);
 
+
 module.exports = router;

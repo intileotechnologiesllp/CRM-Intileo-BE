@@ -30,10 +30,10 @@ const Report = sequelize.define(
     folderId: { 
       type: DataTypes.INTEGER, 
       allowNull: true,
-      // references: {
-      //   model: "ReportFolders", // Reference the correct table
-      //   key: "reportFolderId"
-      // }
+      references: {
+        model: "ReportFolders", 
+        key: "reportFolderId"
+      }
     },
     ownerId: { type: DataTypes.INTEGER, allowNull: false },
   },
