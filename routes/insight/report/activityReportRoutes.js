@@ -11,7 +11,9 @@ router.post("/create-activityreport", verifyToken, activityReportController.crea
 
 router.post("/get-summaryactivityreport", verifyToken, activityReportController.getActivityReportSummary);
 
-router.patch("/save-activityreport/:reportId", verifyToken, activityReportController.saveActivityReport);
+router.post("/save-activityreport", verifyToken, activityReportController.saveActivityReport);
+
+router.patch("/update-activityreport/:reportId", verifyToken, activityReportController.updateActivityReport);
 
 router.delete("/delete-activityreport/:reportId", verifyToken, activityReportController.deleteActivityReport);
 
