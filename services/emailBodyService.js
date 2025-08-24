@@ -1,6 +1,11 @@
 const Email = require('../models/email/emailModel');
 const UserCredential = require('../models/email/userCredentialModel'); // ✅ FIXED: Correct path
 const Imap = require('imap-simple'); // ✅ FIX: Use same import as fetchInboxEmails
+const NodeImap = require('imap'); // For direct node-imap access (working method)
+const { simpleParser } = require('mailparser'); // For email parsing
+
+// � Simple email body fetching service - no race conditions
+// Removed race condition protection for simplicity
 
 // 🔧 DEBUG: Log what was imported
 console.log('🌟🌟🌟 EMAIL BODY SERVICE MAIN FILE LOADED 🌟🌟🌟');
@@ -156,434 +161,703 @@ const connectToIMAP = async (masterUserID, provider) => {
 
 // Fetch email body using BODY.PEEK[] method (works with restrictive IMAP servers)
 const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider) => {
-    console.log(provider,"email provider");
-    
-  console.log(`🔍 my check Fetching body for email ID ${emailId}`);
-  console.log(`🔧 ENHANCED SERVICE: This is the NEW EmailBodyService with enhanced debugging!`);
-  console.log(`🎯 UNIQUE MARKER: EmailBodyService-v2.0-ENHANCED-2025-08-22`);
-  console.log(`🚨 CRITICAL DEBUG: fetchEmailBodyOnDemand called with emailId=${emailId}, masterUserID=${masterUserID}, provider=${provider}`);
-  console.log(`🚨 CRITICAL DEBUG: If you see this message, the NEW service is working!`);
-
+  const startTime = Date.now();
+  
   try {
-    console.log(`🔧 ENHANCED DEBUG: About to fetch email from database with emailID=${emailId}`);
-    const email = await Email.findOne({ where: { emailID: emailId } });
+    console.log(`\n� WORKING: Starting email body fetch for emailID: ${emailId}, userID: ${masterUserID}`);
+    console.log(`🎯 USING PROVEN WORKING METHOD: Direct node-imap with empty bodies parameter`);
+    
+    // Get email info
+    const email = await Email.findOne({
+      where: { emailID: emailId },
+      attributes: ['emailID', 'uid', 'subject', 'body', 'body_fetch_status']
+    });
+
     if (!email) {
-      console.log(`❌ ENHANCED DEBUG: No email found with emailID=${emailId}`);
-      throw new Error(`Email ${emailId} not found`);
+      console.log(`❌ Email with ID ${emailId} not found`);
+      return { success: false, error: 'Email not found' };
     }
 
-    console.log(`✅ ENHANCED DEBUG: Email found - UID: ${email.uid}, Subject: ${email.subject}`);
-
+    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
+    
     // If body already exists, return it
     if (email.body_fetch_status === 'fetched' && email.body) {
-      console.log(`✅ ON-DEMAND: Body already cached for ${email.messageId}`);
-      return email;
+      console.log(`✅ Body already cached for email ${emailId}`);
+      return {
+        success: true,
+        emailID: emailId,
+        uid: email.uid,
+        subject: email.subject,
+        bodyText: email.body,
+        bodyHtml: '',
+        cached: true
+      };
     }
-
-    console.log(`🔧 ENHANCED DEBUG: Email body not cached, proceeding with IMAP fetch`);
 
     // Mark as fetching to prevent duplicate requests
     await Email.update(
       { body_fetch_status: 'fetching' },
       { where: { emailID: emailId } }
     );
-
-    console.log(`🔧 ENHANCED DEBUG: About to fetch UserCredential for masterUserID=${masterUserID}`);
     
-    // Get user credentials properly
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID: masterUserID }
+    // Get user credentials
+    const credentials = await UserCredential.findOne({
+      where: { masterUserID },
+      attributes: ['email', 'appPassword', 'provider']
     });
 
-    if (!userCredential) {
-      console.log(`❌ ENHANCED DEBUG: No UserCredential found for masterUserID=${masterUserID}`);
-      throw new Error(`No credentials found for user ${masterUserID}`);
+    if (!credentials) {
+      console.log(`❌ User credentials not found for userID: ${masterUserID}`);
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: emailId } }
+      );
+      return { success: false, error: 'User credentials not found' };
     }
 
-    console.log(`✅ ENHANCED DEBUG: UserCredential found - Provider: ${userCredential.provider}, Email: ${userCredential.email}`);
-    console.log(`🔧 ENHANCED DEBUG: Password length: ${userCredential.appPassword ? userCredential.appPassword.length : 0} chars`);
+    console.log(`✅ Using credentials for: ${credentials.email} (provider: ${credentials.provider})`);
 
-    // Connect to IMAP and fetch body
-    console.log(`🚀 ENHANCED SERVICE: About to call connectToIMAP with masterUserID=${masterUserID}, provider=${userCredential.provider}`);
-    const connection = await connectToIMAP(masterUserID, userCredential.provider);
-    console.log(`✅ ENHANCED DEBUG: connectToIMAP successful, opening INBOX`);
+    // Use direct node-imap for Yandex compatibility - THIS IS THE WORKING METHOD!
+    const NodeImap = require('imap');
+    const { simpleParser } = require('mailparser');
     
-    await connection.openBox('INBOX');
-    console.log(`✅ ENHANCED DEBUG: INBOX opened, calling fetchSingleEmailBodyWithBodyPeek`);
+    const imapConfig = {
+      user: credentials.email,
+      password: credentials.appPassword,
+      host: credentials.provider === 'yandex' ? 'imap.yandex.com' : 'imap.gmail.com',
+      port: 993,
+      tls: true,
+      authTimeout: 10000,
+      connTimeout: 10000,
+      tlsOptions: {
+        rejectUnauthorized: false
+      }
+    };
 
-    const updatedEmail = await fetchSingleEmailBodyWithBodyPeek(connection, email);
-    
-    await connection.end();
-    console.log(`✅ ENHANCED DEBUG: IMAP connection closed`);
+    console.log(`🔌 Connecting to ${credentials.provider} IMAP using direct node-imap...`);
 
-    console.log(`✅ ON-DEMAND: Successfully fetched body for ${email.messageId}`);
-    return updatedEmail;
+    return new Promise((resolve, reject) => {
+      const imap = new NodeImap(imapConfig);
+      let emailBody = null;
+
+      imap.once('ready', () => {
+        console.log('✅ IMAP connected and ready');
+        
+        imap.openBox('INBOX', true, (err, box) => {
+          if (err) {
+            console.log(`❌ Error opening INBOX: ${err.message}`);
+            imap.end();
+            return reject(err);
+          }
+          
+          console.log('✅ INBOX opened successfully');
+          console.log(`🔍 Searching for UID: ${email.uid}`);
+
+          // Search for the specific UID
+          imap.search([['UID', email.uid.toString()]], (err, results) => {
+            if (err) {
+              console.log(`❌ Search error: ${err.message}`);
+              imap.end();
+              return reject(err);
+            }
+
+            if (!results || results.length === 0) {
+              console.log('❌ No messages found with UID search');
+              imap.end();
+              return reject(new Error('No messages found with specified UID'));
+            }
+
+            console.log(`✅ Found message with UID: ${email.uid}`);
+            console.log('🔧 Fetching email body using WORKING METHOD (empty bodies parameter)...');
+
+            // 🎯 THIS IS THE WORKING METHOD: fetch with empty bodies parameter
+            const f = imap.fetch(results, { bodies: '', struct: true });
+            
+            f.on('message', (msg, seqno) => {
+              console.log(`📧 Processing message ${seqno}`);
+              
+              msg.on('body', (stream, info) => {
+                console.log('📄 Receiving body stream, size:', info.size || 'unknown');
+                let buffer = '';
+                
+                stream.on('data', (chunk) => {
+                  buffer += chunk.toString('utf8');
+                });
+                
+                stream.once('end', () => {
+                  console.log(`✅ Body received: ${buffer.length} chars`);
+                  emailBody = buffer;
+                });
+              });
+
+              msg.once('attributes', (attrs) => {
+                console.log(`📋 Message attributes: UID=${attrs.uid}, Date=${attrs.date}`);
+              });
+
+              msg.once('end', () => {
+                console.log('📬 Fetch completed');
+              });
+            });
+
+            f.once('error', (err) => {
+              console.log(`❌ Fetch error: ${err.message}`);
+              imap.end();
+              reject(err);
+            });
+
+            f.once('end', async () => {
+              console.log('✅ All messages fetched');
+              imap.end();
+
+              if (!emailBody) {
+                console.log('❌ No email body content retrieved');
+                await Email.update(
+                  { body_fetch_status: 'failed' },
+                  { where: { emailID: emailId } }
+                );
+                return resolve({
+                  success: false,
+                  error: 'No body content found'
+                });
+              }
+
+              // Parse the email content with mailparser
+              console.log('🔧 Parsing email with mailparser...');
+              try {
+                const parsedEmail = await simpleParser(emailBody);
+                console.log('✅ Parsing successful:');
+                console.log(`   📄 Text: ${parsedEmail.text ? parsedEmail.text.length : 0} chars`);
+                console.log(`   🌐 HTML: ${parsedEmail.html ? parsedEmail.html.length : 0} chars`);
+                console.log(`   📧 Subject: ${parsedEmail.subject || 'No subject'}`);
+
+                // Update email in database with fetched body
+                await Email.update(
+                  { 
+                    body: parsedEmail.text || emailBody,
+                    body_fetch_status: 'fetched'
+                  },
+                  { where: { emailID: emailId } }
+                );
+
+                const executionTime = Date.now() - startTime;
+                console.log(`🎯 SUCCESS! Email body fetched and cached in ${executionTime}ms`);
+                
+                resolve({
+                  success: true,
+                  emailID: emailId,
+                  uid: email.uid,
+                  subject: parsedEmail.subject || email.subject,
+                  bodyText: parsedEmail.text || '',
+                  bodyHtml: parsedEmail.html || '',
+                  from: parsedEmail.from,
+                  date: parsedEmail.date,
+                  rawBodySize: emailBody.length,
+                  method: 'direct-node-imap-empty-bodies',
+                  executionTime
+                });
+
+              } catch (parseError) {
+                console.log(`⚠️ Parsing failed: ${parseError.message}, saving raw content`);
+                
+                // Update email in database with raw body
+                await Email.update(
+                  { 
+                    body: emailBody,
+                    body_fetch_status: 'fetched'
+                  },
+                  { where: { emailID: emailId } }
+                );
+                
+                const executionTime = Date.now() - startTime;
+                
+                resolve({
+                  success: true,
+                  emailID: emailId,
+                  uid: email.uid,
+                  subject: email.subject,
+                  bodyText: emailBody,
+                  bodyHtml: '',
+                  from: null,
+                  date: null,
+                  rawBodySize: emailBody.length,
+                  method: 'direct-node-imap-raw',
+                  executionTime
+                });
+              }
+            });
+          });
+        });
+      });
+
+      imap.once('error', (err) => {
+        console.log(`❌ IMAP connection error: ${err.message}`);
+        reject(err);
+      });
+
+      imap.once('end', () => {
+        console.log('🔌 IMAP connection ended');
+      });
+
+      // Connect to IMAP
+      imap.connect();
+    });
 
   } catch (error) {
-    console.error(`❌ ENHANCED DEBUG: Error in fetchEmailBodyOnDemand:`, error.message);
-    console.error(`❌ ENHANCED DEBUG: Error stack:`, error.stack);
-    console.error(`❌ ON-DEMAND FETCH ERROR for email ${emailId}:`, error.message);
+    const executionTime = Date.now() - startTime;
+    console.error(`❌ Error in fetchEmailBodyOnDemand:`, error);
     
     // Mark as failed
     await Email.update(
       { body_fetch_status: 'failed' },
       { where: { emailID: emailId } }
     );
+    
+    return {
+      success: false,
+      error: error.message,
+      emailID: emailId,
+      executionTime
+    };
+  }
+};
 
+// 🔧 Helper function for actual IMAP fetch (separated for race condition handling)
+const performActualFetch = async (emailId, email, masterUserID, provider, startTime) => {
+  try {
+    console.log(`🚀 PERFORMING ACTUAL FETCH: Email ${emailId}`);
+    
+    // Get user credentials
+    const credentials = await UserCredential.findOne({
+      where: { masterUserID },
+      attributes: ['email', 'appPassword', 'provider']
+    });
+
+    if (!credentials) {
+      console.log(`❌ User credentials not found for userID: ${masterUserID}`);
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: emailId } }
+      );
+      return { success: false, error: 'User credentials not found' };
+    }
+
+    console.log(`✅ Using credentials for: ${credentials.email} (provider: ${credentials.provider})`);
+
+    // Use direct node-imap for Yandex compatibility - THIS IS THE WORKING METHOD!
+    const imapConfig = {
+      user: credentials.email,
+      password: credentials.appPassword,
+      host: credentials.provider === 'yandex' ? 'imap.yandex.com' : 'imap.gmail.com',
+      port: 993,
+      tls: true,
+      authTimeout: 10000,
+      connTimeout: 10000,
+      tlsOptions: {
+        rejectUnauthorized: false
+      }
+    };
+
+    console.log(`🔌 Connecting to ${credentials.provider} IMAP using direct node-imap...`);
+
+    return new Promise((resolve, reject) => {
+      const imap = new NodeImap(imapConfig);
+      let emailBody = null;
+
+      imap.once('ready', () => {
+        console.log('✅ IMAP connected and ready');
+        
+        imap.openBox('INBOX', true, (err, box) => {
+          if (err) {
+            console.log(`❌ Error opening INBOX: ${err.message}`);
+            imap.end();
+            return reject(err);
+          }
+          
+          console.log('✅ INBOX opened successfully');
+          console.log(`🔍 Searching for UID: ${email.uid}`);
+
+          // Search for the specific UID
+          imap.search([['UID', email.uid.toString()]], (err, results) => {
+            if (err) {
+              console.log(`❌ Search error: ${err.message}`);
+              imap.end();
+              return reject(err);
+            }
+
+            if (!results || results.length === 0) {
+              console.log('❌ No messages found with UID search');
+              imap.end();
+              return reject(new Error('No messages found with specified UID'));
+            }
+
+            console.log(`✅ Found message with UID: ${email.uid}`);
+            console.log('🔧 Fetching email body using WORKING METHOD (empty bodies parameter)...');
+
+            // 🎯 THIS IS THE WORKING METHOD: fetch with empty bodies parameter
+            const f = imap.fetch(results, { bodies: '', struct: true });
+            
+            f.on('message', (msg, seqno) => {
+              console.log(`📧 Processing message ${seqno}`);
+              
+              msg.on('body', (stream, info) => {
+                console.log('📄 Receiving body stream, size:', info.size || 'unknown');
+                let buffer = '';
+                
+                stream.on('data', (chunk) => {
+                  buffer += chunk.toString('utf8');
+                });
+                
+                stream.once('end', () => {
+                  console.log(`✅ Body received: ${buffer.length} chars`);
+                  emailBody = buffer;
+                });
+              });
+
+              msg.once('attributes', (attrs) => {
+                console.log(`📋 Message attributes: UID=${attrs.uid}, Date=${attrs.date}`);
+              });
+
+              msg.once('end', () => {
+                console.log('📬 Fetch completed');
+              });
+            });
+
+            f.once('error', (err) => {
+              console.log(`❌ Fetch error: ${err.message}`);
+              imap.end();
+              reject(err);
+            });
+
+            f.once('end', async () => {
+              console.log('✅ All messages fetched');
+              imap.end();
+
+              if (!emailBody) {
+                console.log('❌ No email body content retrieved');
+                await Email.update(
+                  { body_fetch_status: 'failed' },
+                  { where: { emailID: emailId } }
+                );
+                return resolve({
+                  success: false,
+                  error: 'No body content found'
+                });
+              }
+
+              // Parse the email content with mailparser
+              console.log('🔧 Parsing email with mailparser...');
+              try {
+                const parsedEmail = await simpleParser(emailBody);
+                console.log('✅ Parsing successful:');
+                console.log(`   📄 Text: ${parsedEmail.text ? parsedEmail.text.length : 0} chars`);
+                console.log(`   🌐 HTML: ${parsedEmail.html ? parsedEmail.html.length : 0} chars`);
+                console.log(`   📧 Subject: ${parsedEmail.subject || 'No subject'}`);
+
+                // Update email in database with fetched body
+                await Email.update(
+                  { 
+                    body: parsedEmail.text || emailBody,
+                    body_fetch_status: 'fetched'
+                  },
+                  { where: { emailID: emailId } }
+                );
+
+                const executionTime = Date.now() - startTime;
+                console.log(`🎯 SUCCESS! Email body fetched and cached in ${executionTime}ms`);
+                
+                resolve({
+                  success: true,
+                  emailID: emailId,
+                  uid: email.uid,
+                  subject: parsedEmail.subject || email.subject,
+                  bodyText: parsedEmail.text || '',
+                  bodyHtml: parsedEmail.html || '',
+                  from: parsedEmail.from,
+                  date: parsedEmail.date,
+                  rawBodySize: emailBody.length,
+                  method: 'direct-node-imap-empty-bodies',
+                  executionTime
+                });
+
+              } catch (parseError) {
+                console.log(`⚠️ Parsing failed: ${parseError.message}, saving raw content`);
+                
+                // Update email in database with raw body
+                await Email.update(
+                  { 
+                    body: emailBody,
+                    body_fetch_status: 'fetched'
+                  },
+                  { where: { emailID: emailId } }
+                );
+                
+                const executionTime = Date.now() - startTime;
+                
+                resolve({
+                  success: true,
+                  emailID: emailId,
+                  uid: email.uid,
+                  subject: email.subject,
+                  bodyText: emailBody,
+                  bodyHtml: '',
+                  from: null,
+                  date: null,
+                  rawBodySize: emailBody.length,
+                  method: 'direct-node-imap-raw',
+                  executionTime
+                });
+              }
+            });
+          });
+        });
+      });
+
+      imap.once('error', (err) => {
+        console.log(`❌ IMAP connection error: ${err.message}`);
+        reject(err);
+      });
+
+      imap.once('end', () => {
+        console.log('🔌 IMAP connection ended');
+      });
+
+      // Connect to IMAP
+      imap.connect();
+    });
+
+  } catch (error) {
+    console.error(`❌ Error in performActualFetch:`, error);
+    
+    // Mark as failed
+    await Email.update(
+      { body_fetch_status: 'failed' },
+      { where: { emailID: emailId } }
+    );
+    
     throw error;
   }
 };
+
 const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
-  console.log(`🔍 FETCHING EMAIL BODY with imap-simple for UID: ${email.uid}`);
+  console.log(`🔍 FETCHING EMAIL BODY using your WORKING METHOD for UID: ${email.uid}`);
+  
   if (!email.uid) {
     console.log(`⚠️ No UID available for email ${email.emailID}, cannot fetch body`);
     return email;
   }
+
   const { uid } = email;
-  const searchCriteria = [['UID', uid]];
-  
-  // First try to get message structure to understand the email format
-  console.log(`🔧 First getting message structure for UID: ${uid}`);
-  let structResults = null;
-  try {
-    structResults = await connection.search(searchCriteria, { struct: true });
-    if (structResults && structResults.length > 0) {
-      console.log(`🔧 Message structure:`, JSON.stringify(structResults[0], null, 2));
-    }
-  } catch (structError) {
-    console.log(`⚠️ Could not get message structure: ${structError.message}`);
-  }
-  
-  // Extract text parts from message structure for targeted fetching (handle nested structures)
-  let textParts = [];
-  let htmlParts = [];
-  
-  const parseStructureParts = (struct, depth = 0) => {
-    console.log(`🔧 Parsing structure at depth ${depth}, parts: ${struct.length}`);
-    
-    for (let i = 1; i < struct.length; i++) {
-      if (Array.isArray(struct[i])) {
-        if (struct[i].length > 0) {
-          const part = struct[i][0];
-          
-          // Check if this is a container with nested parts
-          if (part && !part.partID && part.type) {
-            console.log(`🔧 Found container part: ${part.type}, recursing...`);
-            // This is a container, recurse into it
-            parseStructureParts(struct[i], depth + 1);
-          } else if (part && part.partID && part.type === 'text') {
-            // This is an actual text part
-            const partInfo = {
-              partID: part.partID,
-              subtype: part.subtype,
-              encoding: part.encoding,
-              charset: part.params?.charset || 'UTF-8',
-              size: part.size
-            };
-            
-            if (part.subtype === 'plain') {
-              textParts.push(partInfo);
-              console.log(`🔧 Found text/plain part: ${part.partID}, encoding: ${part.encoding}, size: ${part.size}`);
-            } else if (part.subtype === 'html') {
-              htmlParts.push(partInfo);
-              console.log(`🔧 Found text/html part: ${part.partID}, encoding: ${part.encoding}, size: ${part.size}`);
-            }
-          }
-        }
-      }
-    }
-  };
   
   try {
-    if (structResults && structResults.length > 0) {
-      const struct = structResults[0].attributes?.struct;
-      if (struct && struct.length >= 2) {
-        console.log(`🔧 Parsing message structure with ${struct.length} parts`);
-        parseStructureParts(struct);
-      }
-    }
-  } catch (parseError) {
-    console.log(`⚠️ Could not parse message structure: ${parseError.message}`);
-  }
-  
-  console.log(`🔧 Discovered ${textParts.length} text/plain parts and ${htmlParts.length} text/html parts`);
-  
-  // Choose preferred part (HTML first, then plain text)
-  let chosenPart = null;
-  if (htmlParts.length > 0) {
-    chosenPart = htmlParts[0];
-    console.log(`🎯 Choosing HTML part: ${chosenPart.partID} (size: ${chosenPart.size}, encoding: ${chosenPart.encoding})`);
-  } else if (textParts.length > 0) {
-    chosenPart = textParts[0];
-    console.log(`🎯 Choosing plain text part: ${chosenPart.partID} (size: ${chosenPart.size}, encoding: ${chosenPart.encoding})`);
-  }
-  
-  // Try to fetch the chosen part using targeted partID
-  if (chosenPart) {
-    // Try different formats for imap-simple compatibility
-    const partFetchOptions = [
-      `BODY.PEEK[${chosenPart.partID}]`,
-      `BODY[${chosenPart.partID}]`,
-      `${chosenPart.partID}.MIME`,
-      `${chosenPart.partID}.TEXT`
-    ];
+    console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
     
-    for (const fetchCmd of partFetchOptions) {
-      console.log(`🔧 Attempting targeted fetch with: ${fetchCmd}`);
-      try {
-        // Try with proper imap-simple syntax
-        const fetchOptions = { 
-          bodies: fetchCmd,  // Try string instead of array
-          struct: false 
-        };
-        console.log(`🔧 Using fetchOptions:`, fetchOptions);
-        
-        const results = await connection.search(searchCriteria, fetchOptions);
-        if (!results || results.length === 0) {
-          console.log(`⚠️ No results for ${fetchCmd}`);
-          continue;
-        }
-        
-        const message = results[0];
-        const bodyKeys = Object.keys(message.bodies || {});
-        console.log(`🔧 Available body keys for ${fetchCmd}:`, bodyKeys);
-        
-        if (bodyKeys.length === 0) {
-          console.log(`⚠️ No bodies returned for ${fetchCmd}`);
-          continue;
-        }
-        
-        const key = bodyKeys[0];
-        let rawMessage = message.bodies[key];
-        
-        if (!rawMessage || rawMessage.length === 0) {
-          console.log(`⚠️ Body key ${key} is empty for ${fetchCmd}`);
-          continue;
-        }
-        
-        console.log(`✅ Successfully fetched part ${chosenPart.partID} with ${fetchCmd}, raw length: ${rawMessage.length} chars`);
-        
-        // Decode quoted-printable content if needed
-        if (chosenPart.encoding && chosenPart.encoding.toLowerCase() === 'quoted-printable') {
-          console.log(`🔧 Decoding quoted-printable content...`);
-          try {
-            const quotedPrintable = require('quoted-printable');
-            const utf8 = require('utf8');
-            
-            // Decode quoted-printable
-            let decoded = quotedPrintable.decode(rawMessage);
-            
-            // Handle charset conversion if needed
-            if (chosenPart.charset && chosenPart.charset.toLowerCase() !== 'utf-8') {
-              console.log(`🔧 Converting from ${chosenPart.charset} to UTF-8`);
-              // For most common charsets, utf8 decode should work
-              try {
-                decoded = utf8.decode(decoded);
-              } catch (charsetError) {
-                console.log(`⚠️ Charset conversion failed, using as-is: ${charsetError.message}`);
-              }
-            }
-            
-            rawMessage = decoded;
-            console.log(`✅ Decoded content, new length: ${rawMessage.length} chars`);
-          } catch (decodeError) {
-            console.error(`❌ Quoted-printable decode failed: ${decodeError.message}`);
-            console.log(`🔧 Using raw content without decoding`);
-          }
-        }
-        
-        // Additional parsing with mailparser for best results
-        let parsedBody = '';
-        try {
-          const { simpleParser } = require('mailparser');
-          const parsed = await simpleParser(rawMessage);
-          parsedBody = parsed.text || parsed.html || rawMessage;
-          console.log(`✅ Mailparser processed body: ${parsedBody.length} chars`);
-        } catch (parseError) {
-          console.error(`❌ Mailparser error: ${parseError.message}`);
-          parsedBody = rawMessage;
-        }
-        
-        const cleanedBody = cleanEmailBody(parsedBody || rawMessage);
-        await Email.update({
-          body: cleanedBody,
-          body_fetch_status: "fetched"
-        }, { where: { emailID: email.emailID } });
-        console.log(`✅ TARGETED FETCH SUCCESS: Updated email with ${cleanedBody.length} chars using part ${chosenPart.partID}`);
-        return { ...email, body: cleanedBody };
-        
-      } catch (error) {
-        console.error(`❌ TARGETED FETCH ERROR for ${fetchCmd}:`, error.message);
-        if (error.message && error.message.toLowerCase().includes('command syntax error')) {
-          continue;
-        } else {
-          break;
-        }
-      }
+    // Fetch the email using the EXACT working method from fetchRecentEmail
+    const searchCriteria = [['UID', uid]];
+    const fetchOptions = { bodies: "", struct: true }; // YOUR WORKING METHOD
+    
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    
+    if (!messages || messages.length === 0) {
+      console.log(`❌ No messages found for UID ${uid}`);
+      return email;
     }
+    
+    console.log(`✅ Found ${messages.length} message(s) for UID ${uid}`);
+    
+    // Extract raw body using YOUR EXACT METHOD
+    const message = messages[0];
+    const rawBodyPart = message.parts.find((part) => part.which === ""); // YOUR EXACT METHOD
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+    
+    if (!rawBody) {
+      console.log(`❌ No raw body found in message parts for UID ${uid}`);
+      console.log(`🔍 Available parts:`, message.parts.map(p => ({ which: p.which, size: p.body ? p.body.length : 0 })));
+      return email;
+    }
+    
+    console.log(`✅ Raw body found for UID ${uid}, length: ${rawBody.length}`);
+    
+    // Parse using simpleParser (YOUR EXACT METHOD)
+    const parsedEmail = await simpleParser(rawBody);
+    
+    console.log(`✅ Email parsed successfully for UID ${uid}`);
+    console.log(`📝 Parsed text length: ${parsedEmail.text ? parsedEmail.text.length : 0}`);
+    console.log(`🌐 Parsed HTML length: ${parsedEmail.html ? parsedEmail.html.length : 0}`);
+    
+    // Update email object with parsed content
+    const finalBody = parsedEmail.html || parsedEmail.text || '';
+    email.body = finalBody;
+    email.textBody = parsedEmail.text || '';
+    email.htmlBody = parsedEmail.html || '';
+    
+    // Update in database
+    await Email.update(
+      { 
+        body: finalBody,
+        body_fetch_status: 'fetched'
+      },
+      { where: { emailID: email.emailID } }
+    );
+    
+    console.log(`✅ Email ${email.emailID} body updated in database, length: ${finalBody.length}`);
+    
+    return email;
+    
+  } catch (error) {
+    console.error(`❌ Error fetching body for UID ${uid}:`, error.message);
+    
+    // Mark as failed in database
+    await Email.update(
+      { body_fetch_status: 'failed' },
+      { where: { emailID: email.emailID } }
+    );
+    
+    return email;
   }
+    });
+
+    if (!email) {
+      console.log(`❌ Email with ID ${emailId} not found`);
+      return { success: false, error: 'Email not found' };
+    }
+
+    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
+    
+    // Check if body already exists
+    if (email.body && email.body.trim()) {
+      console.log(`✅ Body already exists for email ${emailId}`);
+      return {
+        success: true,
+        emailID: emailId,
+        uid: email.uid,
+        subject: email.subject,
+        bodyText: email.body,
+        bodyHtml: '',
+        cached: true
+      };
+    }
+
+    console.log(`� No body found, fetching from IMAP...`);
+    
+    // Connect to IMAP and fetch body
+    const connection = await connectToIMAP(masterUserID, provider);
+    await connection.openBox('INBOX');
+    
+    const updatedEmail = await fetchSingleEmailBodyWithBodyPeek(connection, email);
+    await connection.end();
+    
+    const executionTime = Date.now() - startTime;
+    console.log(`✅ Simple fetch completed in ${executionTime}ms`);
+    
+    return {
+      success: true,
+      emailID: emailId,
+      uid: updatedEmail.uid,
+      subject: updatedEmail.subject,
+      bodyText: updatedEmail.body || '',
+      bodyHtml: '',
+      executionTime
+    };
+
+  } catch (error) {
+    const executionTime = Date.now() - startTime;
+    console.error(`❌ Error in fetchEmailBodyOnDemand:`, error);
+    
+};
+
+const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
+  console.log(`🔍 FETCHING EMAIL BODY using your WORKING METHOD for UID: ${email.uid}`);
   
-  // Fallback: If targeted approach failed, try RFC822 first, then generic methods
-  console.log(`⚠️ FALLBACK: Targeted part fetching failed, trying RFC822 full email fetch`);
+  if (!email.uid) {
+    console.log(`⚠️ No UID available for email ${email.emailID}, cannot fetch body`);
+    return email;
+  }
+
+  const { uid } = email;
   
-  // Try RFC822 first for full raw email
   try {
-    console.log(`🔧 Attempting RFC822 full email fetch for UID: ${uid}`);
-    // Try different RFC822 formats for imap-simple
-    const rfc822Formats = ['RFC822', 'BODY[]', 'BODY.PEEK[]'];
+    console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
     
-    for (const rfc822Format of rfc822Formats) {
-      try {
-        console.log(`🔧 Trying RFC822 format: ${rfc822Format}`);
-        const rfc822Results = await connection.search(searchCriteria, { 
-          bodies: rfc822Format,  // Try string format
-          struct: false 
-        });
-        
-        if (rfc822Results && rfc822Results.length > 0) {
-          const message = rfc822Results[0];
-          const bodyKeys = Object.keys(message.bodies || {});
-          console.log(`🔧 RFC822 (${rfc822Format}) available body keys:`, bodyKeys);
-          
-          if (bodyKeys.length > 0) {
-            const key = bodyKeys[0];
-            const rawEmail = message.bodies[key];
-            
-            if (rawEmail && rawEmail.length > 0) {
-              console.log(`✅ RFC822 SUCCESS with ${rfc822Format}: Retrieved full raw email, length: ${rawEmail.length} chars`);
-              
-              // Parse the full email with mailparser to extract text/html parts
-              try {
-                const { simpleParser } = require('mailparser');
-                console.log(`🔧 Parsing RFC822 email with simpleParser...`);
-                const parsed = await simpleParser(rawEmail);
-                
-                let extractedBody = '';
-                let contentType = '';
-                
-                // Prefer HTML, fallback to text
-                if (parsed.html && parsed.html.length > 0) {
-                  extractedBody = parsed.html;
-                  contentType = 'text/html';
-                  console.log(`✅ simpleParser extracted HTML content: ${extractedBody.length} chars`);
-                } else if (parsed.text && parsed.text.length > 0) {
-                  extractedBody = parsed.text;
-                  contentType = 'text/plain';
-                  console.log(`✅ simpleParser extracted plain text content: ${extractedBody.length} chars`);
-                } else {
-                  // Fallback to raw if no text/html found
-                  extractedBody = rawEmail;
-                  contentType = 'raw';
-                  console.log(`⚠️ simpleParser found no text/html, using raw email: ${extractedBody.length} chars`);
-                }
-                
-                const cleanedBody = cleanEmailBody(extractedBody);
-                await Email.update({
-                  body: cleanedBody,
-                  body_fetch_status: "fetched"
-                }, { where: { emailID: email.emailID } });
-                console.log(`✅ RFC822 PARSE SUCCESS: Updated email with ${cleanedBody.length} chars from ${contentType} using ${rfc822Format}`);
-                return { ...email, body: cleanedBody };
-                
-              } catch (parseError) {
-                console.error(`❌ RFC822 simpleParser error: ${parseError.message}`);
-                console.log(`🔧 Falling back to raw RFC822 content without parsing`);
-                
-                const cleanedBody = cleanEmailBody(rawEmail);
-                await Email.update({
-                  body: cleanedBody,
-                  body_fetch_status: "fetched"
-                }, { where: { emailID: email.emailID } });
-                console.log(`✅ RFC822 RAW SUCCESS: Updated email with ${cleanedBody.length} chars (unparsed) using ${rfc822Format}`);
-                return { ...email, body: cleanedBody };
-              }
-            } else {
-              console.log(`⚠️ RFC822 ${rfc822Format} returned empty body`);
-            }
-          } else {
-            console.log(`⚠️ RFC822 ${rfc822Format} returned no body keys`);
-          }
-        } else {
-          console.log(`⚠️ RFC822 ${rfc822Format} fetch returned no results`);
-        }
-      } catch (formatError) {
-        console.error(`❌ RFC822 ${rfc822Format} ERROR: ${formatError.message}`);
-        continue;
-      }
+    // Use your EXACT working method from fetchRecentEmail
+    const messages = await connection.search(
+      [["UID", uid]], 
+      { bodies: "", struct: true }  // Your exact working method!
+    );
+    
+    if (!messages || messages.length === 0) {
+      console.log(`❌ No messages found for UID ${uid}`);
+      const fallbackMessage = "Email not found";
+      await Email.update({
+        body: fallbackMessage,
+        body_fetch_status: 'failed'
+      }, { where: { emailID: email.emailID } });
+      return { ...email, body: fallbackMessage };
     }
-  } catch (rfc822Error) {
-    console.error(`❌ RFC822 FETCH ERROR: ${rfc822Error.message}`);
-    console.log(`🔧 RFC822 failed, continuing to generic fallback methods`);
-  }
-  
-  // Final fallback: generic methods if RFC822 also failed
-  console.log(`⚠️ FINAL FALLBACK: RFC822 failed, trying remaining generic methods`);
-  const fallbackBodies = [
-    "BODY.PEEK[TEXT]", "BODY.PEEK[1]", "BODY.PEEK[]",
-    "BODY[TEXT]", "BODY[1]", "BODY[]",
-    "TEXT", "HEADER"
-  ];
-  
-  for (const bodyType of fallbackBodies) {
-    const fetchOptions = { bodies: [bodyType], struct: false };
-    console.log(`🔧 Fallback trying: [${bodyType}]`);
+    
+    console.log(`✅ Found message for UID ${uid}`);
+    const message = messages[0];
+    
+    // Use your EXACT body extraction method
+    const rawBodyPart = message.parts.find((part) => part.which === "");
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+    
+    if (!rawBody) {
+      console.log(`❌ No raw body found for UID ${uid}`);
+      const fallbackMessage = "Body not available";
+      await Email.update({
+        body: fallbackMessage,
+        body_fetch_status: 'failed'
+      }, { where: { emailID: email.emailID } });
+      return { ...email, body: fallbackMessage };
+    }
+    
+    console.log(`🎉 Raw body found: ${rawBody.length} characters`);
+    
+    // Parse using simpleParser (your exact method)
     try {
-      const results = await connection.search(searchCriteria, fetchOptions);
-      if (!results || results.length === 0) {
-        console.log(`⚠️ No messages found for UID ${uid} with ${bodyType}`);
-        continue;
-      }
-      const message = results[0];
-      const bodyKeys = Object.keys(message.bodies || {});
-      console.log(`🔧 Available body keys for ${bodyType}:`, bodyKeys);
-      if (bodyKeys.length === 0) {
-        console.log(`⚠️ No bodies returned for ${bodyType}`);
-        continue;
-      }
-      const key = bodyKeys[0];
-      const rawMessage = message.bodies[key];
-      if (!rawMessage || rawMessage.length === 0) {
-        console.log(`⚠️ Body key ${key} is empty for ${bodyType}`);
-        continue;
-      }
-      console.log(`✅ Fallback success with: ${bodyType}, key: ${key}, length: ${rawMessage.length} chars`);
+      const { simpleParser } = require('mailparser');
+      const parsedEmail = await simpleParser(rawBody);
       
-      // Parse with mailparser for best results
-      let parsedBody = '';
-      try {
-        const { simpleParser } = require('mailparser');
-        const parsed = await simpleParser(rawMessage);
-        parsedBody = parsed.text || parsed.html || rawMessage;
-        console.log(`✅ Parsed body (${bodyType}): ${parsedBody.length} chars`);
-      } catch (parseError) {
-        console.error(`❌ Mailparser error for ${bodyType}:`, parseError.message);
-        parsedBody = rawMessage;
-      }
-      const cleanedBody = cleanEmailBody(parsedBody || rawMessage);
+      console.log(`✅ Email parsed successfully for UID ${uid}`);
+      console.log(`📝 Text: ${parsedEmail.text?.length || 0} chars, HTML: ${parsedEmail.html?.length || 0} chars`);
+      
+      // Use your exact preference: HTML first, then text
+      const extractedBody = parsedEmail.html || parsedEmail.text || rawBody;
+      const cleanedBody = cleanEmailBody(extractedBody);
+      
       await Email.update({
         body: cleanedBody,
         body_fetch_status: "fetched"
       }, { where: { emailID: email.emailID } });
-      console.log(`✅ FALLBACK SUCCESS: Updated email with ${cleanedBody.length} chars using ${bodyType}`);
+      
+      console.log(`🎉 SUCCESS: Updated email with ${cleanedBody.length} chars using WORKING METHOD`);
       return { ...email, body: cleanedBody };
-    } catch (error) {
-      console.error(`❌ FALLBACK ERROR for ${bodyType}:`, error.message);
-      if (error.message && error.message.toLowerCase().includes('command syntax error')) {
-        continue;
-      } else {
-        break;
-      }
+      
+    } catch (parseError) {
+      console.log(`⚠️ Parse failed for UID ${uid}, using raw content:`, parseError.message);
+      
+      // Return raw body if parsing fails
+      const cleanedBody = cleanEmailBody(rawBody);
+      await Email.update({
+        body: cleanedBody,
+        body_fetch_status: "fetched"
+      }, { where: { emailID: email.emailID } });
+      
+      console.log(`✅ Updated email with raw content: ${cleanedBody.length} chars`);
+      return { ...email, body: cleanedBody };
     }
+    
+  } catch (error) {
+    console.error(`❌ Working method failed for UID ${uid}:`, error.message);
+    
+    const fallbackMessage = "Body fetch failed due to IMAP error";
+    await Email.update({
+      body: fallbackMessage,
+      body_fetch_status: 'failed'
+    }, { where: { emailID: email.emailID } });
+    
+    return { ...email, body: fallbackMessage };
   }
-  
-  // If all attempts fail
-  console.log(`❌ All body fetch attempts failed for UID ${email.uid}`);
-  const fallbackMessage = "Body not available";
-  await Email.update({
-    body: fallbackMessage,
-    body_fetch_status: 'failed'
-  }, { where: { emailID: email.emailID } });
-  return { ...email, body: fallbackMessage };
 };
 
 // ✅ FIXED: Fetch email body using imap-simple syntax
@@ -837,7 +1111,7 @@ const getBodyFetchStats = async (masterUserID) => {
 
 module.exports = {
   connectToIMAP,
-  fetchEmailBodyOnDemand,
+  fetchEmailBodyOnDemand, // � Simple version only
   fetchSingleEmailBodyWithBodyPeek,
   parseRFC822Message,
   createInformativeMessage,

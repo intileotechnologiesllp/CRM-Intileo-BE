@@ -1,0 +1,222 @@
+const Imap = require('imap-simple');
+const { simpleParser } = require('mailparser');
+const { Email } = require('../models/index');
+const UserCredential = require('../models/email/userCredentialModel');
+
+// Provider configurations
+const PROVIDER_CONFIG = {
+  gmail: {
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
+  },
+  yandex: {
+    host: "imap.yandex.com",
+    port: 993,
+    tls: true,
+  },
+  outlook: {
+    host: "outlook.office365.com",
+    port: 993,
+    tls: true,
+  }
+};
+
+/**
+ * Connect to IMAP server for a specific user
+ */
+const connectToIMAP = async (masterUserID, provider = 'gmail') => {
+  try {
+    console.log(`🔌 Connecting to IMAP for user ${masterUserID}, provider: ${provider}`);
+    
+    // Get user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+    
+    if (!userCredential) {
+      throw new Error(`No credentials found for user ${masterUserID}`);
+    }
+    
+    // Build IMAP config
+    let imapConfig;
+    const actualProvider = userCredential.provider || provider;
+    
+    if (actualProvider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        throw new Error("Custom IMAP settings are missing in user credentials");
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[actualProvider];
+      if (!providerConfig) {
+        throw new Error(`Unsupported provider: ${actualProvider}`);
+      }
+      
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+    
+    const connection = await Imap.connect(imapConfig);
+    console.log(`✅ IMAP connected successfully for ${userCredential.email}`);
+    return connection;
+    
+  } catch (error) {
+    console.error(`❌ IMAP connection failed:`, error.message);
+    throw error;
+  }
+};
+
+/**
+ * Fetch email body on demand using the EXACT working method from fetchRecentEmail
+ */
+const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail') => {
+  let connection = null;
+  
+  try {
+    console.log(`\n🔍 Starting email body fetch for emailID: ${emailId}, userID: ${masterUserID}`);
+    
+    // Get email from database
+    const email = await Email.findOne({
+      where: { emailID: emailId },
+      attributes: ['emailID', 'uid', 'subject', 'body', 'body_fetch_status']
+    });
+
+    if (!email) {
+      console.log(`❌ Email with ID ${emailId} not found`);
+      return { success: false, error: 'Email not found' };
+    }
+
+    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
+    
+    // Check if body already exists
+    if (email.body && email.body.trim()) {
+      console.log(`✅ Body already exists for email ${emailId}`);
+      return {
+        success: true,
+        emailID: emailId,
+        uid: email.uid,
+        subject: email.subject,
+        bodyText: email.body,
+        bodyHtml: '',
+        source: 'database'
+      };
+    }
+
+    if (!email.uid) {
+      console.log(`❌ Email ${emailId} has no UID`);
+      return { success: false, error: 'Email has no UID' };
+    }
+
+    console.log(`🔍 No body found, fetching from IMAP using WORKING METHOD...`);
+    
+    // Connect to IMAP
+    connection = await connectToIMAP(masterUserID, provider);
+    await connection.openBox('INBOX');
+    
+    // Use the EXACT working method from fetchRecentEmail
+    console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
+    
+    const searchCriteria = [['UID', email.uid]];
+    const fetchOptions = { bodies: "", struct: true }; // YOUR WORKING METHOD
+    
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    
+    if (!messages || messages.length === 0) {
+      console.log(`❌ No messages found for UID ${email.uid}`);
+      return { success: false, error: 'No messages found for UID' };
+    }
+    
+    console.log(`✅ Found ${messages.length} message(s) for UID ${email.uid}`);
+    
+    // Extract raw body using YOUR EXACT METHOD
+    const message = messages[0];
+    const rawBodyPart = message.parts.find((part) => part.which === ""); // YOUR EXACT METHOD
+    const rawBody = rawBodyPart ? rawBodyPart.body : null;
+    
+    if (!rawBody) {
+      console.log(`❌ No raw body found in message parts for UID ${email.uid}`);
+      console.log(`🔍 Available parts:`, message.parts.map(p => ({ which: p.which, size: p.body ? p.body.length : 0 })));
+      return { success: false, error: 'No raw body found in message' };
+    }
+    
+    console.log(`✅ Raw body found for UID ${email.uid}, length: ${rawBody.length}`);
+    
+    // Parse using simpleParser (YOUR EXACT METHOD)
+    const parsedEmail = await simpleParser(rawBody);
+    
+    console.log(`✅ Email parsed successfully for UID ${email.uid}`);
+    console.log(`📝 Parsed text length: ${parsedEmail.text ? parsedEmail.text.length : 0}`);
+    console.log(`🌐 Parsed HTML length: ${parsedEmail.html ? parsedEmail.html.length : 0}`);
+    
+    // Update email in database
+    const bodyText = parsedEmail.text || '';
+    const bodyHtml = parsedEmail.html || '';
+    const finalBody = bodyHtml || bodyText || '';
+    
+    if (finalBody) {
+      await Email.update(
+        { 
+          body: finalBody,
+          body_fetch_status: 'fetched'
+        },
+        { where: { emailID: emailId } }
+      );
+      
+      console.log(`✅ Email ${emailId} body updated in database, length: ${finalBody.length}`);
+    }
+    
+    return {
+      success: true,
+      emailID: emailId,
+      uid: email.uid,
+      subject: email.subject,
+      bodyText: bodyText,
+      bodyHtml: bodyHtml,
+      source: 'imap'
+    };
+    
+  } catch (error) {
+    console.error(`❌ Error in fetchEmailBodyOnDemand:`, error.message);
+    
+    return {
+      success: false,
+      error: error.message,
+      emailID: emailId,
+      source: 'error'
+    };
+  } finally {
+    if (connection) {
+      try {
+        connection.end();
+        console.log(`🔌 IMAP connection closed`);
+      } catch (closeError) {
+        console.error(`❌ Error closing connection:`, closeError.message);
+      }
+    }
+  }
+};
+
+module.exports = {
+  connectToIMAP,
+  fetchEmailBodyOnDemand
+};

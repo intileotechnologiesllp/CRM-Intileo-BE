@@ -294,12 +294,16 @@ const imapConfig = {
 //   return cleanBody;
 // };
 const cleanEmailBody = (body) => {
+  if (!body) return "";
+  
   // Remove quoted replies (e.g., lines starting with ">")
-  return body
+  const cleaned = body
     .split("\n")
     .filter((line) => !line.startsWith(">"))
     .join("\n")
     .trim();
+    
+  return cleaned;
 };
 
 // Helper function to create email body preview
@@ -4676,8 +4680,10 @@ exports.getOneEmail = async (req, res) => {
       console.log(`[Phase 2] 🔍 ON-DEMAND: Email ${emailId} body missing or pending, fetching now...`);
       
       try {
-        const emailBodyService = require('../../services/emailBodyService');
+        const emailBodyService = require('../../services/emailBodyServiceSimple');
+        const emailBodyServiceRaceSafe = require('../../services/emailBodyServiceRaceSafe');
         console.log(`🔍 CONTROLLER DEBUG: EmailBodyService loaded, functions available:`, Object.keys(emailBodyService));
+        console.log(`🛡️ CONTROLLER DEBUG: Race-safe service loaded, functions available:`, Object.keys(emailBodyServiceRaceSafe));
         
         // 🔧 ENHANCED DEBUG: Get and analyze user credentials
         console.log(`🔍 API DEBUG: Looking for credentials for masterUserID ${masterUserID}`);
@@ -4703,27 +4709,48 @@ exports.getOneEmail = async (req, res) => {
             console.log(`🔑 API DEBUG: App Password preview: ${userCredential.appPassword ? userCredential.appPassword.substring(0, 4) + '************' : 'None'}`);
           }
           
-          console.log(`🚀 API DEBUG: Calling fetchEmailBodyOnDemand with:`);
+          console.log(`🚀 API DEBUG: Calling fetchEmailBodyOnDemand (SIMPLE VERSION) with:`);
           console.log(`   - emailID: ${mainEmail.emailID}`);
           console.log(`   - masterUserID: ${masterUserID}`);
           console.log(`   - provider: ${userCredential.provider || 'gmail'}`);
           
-          // Use the EmailBodyService for smart on-demand fetching
+          // � USE SIMPLE VERSION: No race condition protection, proven working method
           const updatedEmail = await emailBodyService.fetchEmailBodyOnDemand(
             mainEmail.emailID, // 🔧 FIX: Use emailID instead of id
             masterUserID, 
-            userCredential.provider || 'yandex'
+            userCredential.provider || 'gmail'
           );
           
+          console.log(`🔧 API DEBUG: fetchEmailBodyOnDemand result:`, {
+            success: updatedEmail.success,
+            hasBodyText: !!updatedEmail.bodyText,
+            hasBodyHtml: !!updatedEmail.bodyHtml,
+            bodyTextLength: updatedEmail.bodyText ? updatedEmail.bodyText.length : 0,
+            bodyHtmlLength: updatedEmail.bodyHtml ? updatedEmail.bodyHtml.length : 0
+          });
+          
           // Update the main email object with fetched body
-          if (updatedEmail && updatedEmail.body) {
-            mainEmail.body = updatedEmail.body;
-            mainEmail.textBody = updatedEmail.textBody;
-            mainEmail.htmlBody = updatedEmail.htmlBody;
+          if (updatedEmail && updatedEmail.success && (updatedEmail.bodyText || updatedEmail.bodyHtml)) {
+            // Use bodyText first, fallback to bodyHtml
+            mainEmail.body = updatedEmail.bodyText || updatedEmail.bodyHtml || '';
+            mainEmail.textBody = updatedEmail.bodyText || '';
+            mainEmail.htmlBody = updatedEmail.bodyHtml || '';
             mainEmail.body_fetch_status = 'fetched';
-            console.log(`[Phase 2] ✅ ON-DEMAND: Email ${emailId} body fetched successfully - Body length: ${updatedEmail.body.length}`);
+            
+            // Also update the database record
+            await Email.update(
+              { 
+                body: mainEmail.body,
+                body_fetch_status: 'fetched' 
+              },
+              { where: { emailID: mainEmail.emailID } }
+            );
+            
+            console.log(`[Phase 2] ✅ ON-DEMAND: Email ${emailId} body fetched successfully - Body length: ${mainEmail.body.length}`);
           } else {
-            console.log(`[Phase 2] ⚠️ ON-DEMAND: Email ${emailId} body fetch returned null or empty result`);
+            console.log(`[Phase 2] ⚠️ ON-DEMAND: Email ${emailId} body fetch failed or returned empty result`);
+            console.log(`   - Success: ${updatedEmail ? updatedEmail.success : 'N/A'}`);
+            console.log(`   - Error: ${updatedEmail ? updatedEmail.error : 'N/A'}`);
           }
         } else {
           console.log(`❌ API DEBUG: No credentials found for masterUserID ${masterUserID}`);
@@ -4742,7 +4769,10 @@ exports.getOneEmail = async (req, res) => {
     }
 
     // Clean the body of the main email
-    mainEmail.body = cleanEmailBody(mainEmail.body);
+    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    mainEmail.body = cleanEmailBody(mainEmail.body || '');
+    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
 
     // Handle attachments appropriately based on type (user-uploaded vs fetched)
     mainEmail.attachments = mainEmail.attachments.map((attachment) => {
@@ -4882,8 +4912,22 @@ exports.getOneEmail = async (req, res) => {
       });
     });
 
-    const sortedMainEmail = conversation[0];
+    const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];
     const sortedRelatedEmails = conversation.slice(1);
+
+    // 🔧 ENSURE: Main email has the latest body content
+    if (sortedMainEmail.emailID === mainEmail.emailID) {
+      sortedMainEmail.body = mainEmail.body;
+      sortedMainEmail.textBody = mainEmail.textBody;
+      sortedMainEmail.htmlBody = mainEmail.htmlBody;
+      sortedMainEmail.body_fetch_status = mainEmail.body_fetch_status;
+    }
+
+    console.log(`[getOneEmail] 🔍 FINAL CHECK: Email ${emailId} body in response:`, {
+      hasBody: !!sortedMainEmail.body,
+      bodyLength: sortedMainEmail.body ? sortedMainEmail.body.length : 0,
+      bodyPreview: sortedMainEmail.body ? sortedMainEmail.body.substring(0, 100) + '...' : 'No body'
+    });
 
     // Fetch linked entities from ALL emails in the conversation thread
     const linkedEntities = await getAggregatedLinkedEntities(conversation);
