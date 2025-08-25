@@ -713,57 +713,61 @@ const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
     );
     
     return email;
+  
   }
-    });
 
-    if (!email) {
-      console.log(`❌ Email with ID ${emailId} not found`);
-      return { success: false, error: 'Email not found' };
-    }
-
-    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
-    
-    // Check if body already exists
-    if (email.body && email.body.trim()) {
-      console.log(`✅ Body already exists for email ${emailId}`);
-      return {
-        success: true,
-        emailID: emailId,
-        uid: email.uid,
-        subject: email.subject,
-        bodyText: email.body,
-        bodyHtml: '',
-        cached: true
-      };
-    }
-
-    console.log(`� No body found, fetching from IMAP...`);
-    
-    // Connect to IMAP and fetch body
-    const connection = await connectToIMAP(masterUserID, provider);
-    await connection.openBox('INBOX');
-    
-    const updatedEmail = await fetchSingleEmailBodyWithBodyPeek(connection, email);
-    await connection.end();
-    
-    const executionTime = Date.now() - startTime;
-    console.log(`✅ Simple fetch completed in ${executionTime}ms`);
-    
-    return {
-      success: true,
-      emailID: emailId,
-      uid: updatedEmail.uid,
-      subject: updatedEmail.subject,
-      bodyText: updatedEmail.body || '',
-      bodyHtml: '',
-      executionTime
     };
 
-  } catch (error) {
-    const executionTime = Date.now() - startTime;
-    console.error(`❌ Error in fetchEmailBodyOnDemand:`, error);
+//     if (!email) {
+//       console.log(`❌ Email with ID ${emailId} not found`);
+//       return { success: false, error: 'Email not found' };
+//     }
+
+//     console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
     
-};
+//     // Check if body already exists
+//     if (email.body && email.body.trim()) {
+//       console.log(`✅ Body already exists for email ${emailId}`);
+//       return {
+//         success: true,
+//         emailID: emailId,
+//         uid: email.uid,
+//         subject: email.subject,
+//         bodyText: email.body,
+//         bodyHtml: '',
+//         cached: true
+//       };
+//     }
+
+//     console.log(`� No body found, fetching from IMAP...`);
+    
+//     // Connect to IMAP and fetch body
+//     const connection = await connectToIMAP(masterUserID, provider);
+//     await connection.openBox('INBOX');
+    
+//     const updatedEmail = await fetchSingleEmailBodyWithBodyPeek(connection, email);
+//     await connection.end();
+    
+//     const executionTime = Date.now() - startTime;
+//     console.log(`✅ Simple fetch completed in ${executionTime}ms`);
+    
+//     return {
+//       success: true,
+//       emailID: emailId,
+//       uid: updatedEmail.uid,
+//       subject: updatedEmail.subject,
+//       bodyText: updatedEmail.body || '',
+//       bodyHtml: '',
+//       executionTime
+//     };
+  
+
+//   } catch (error) {
+//     const executionTime = Date.now() - startTime;
+//     console.error(`❌ Error in fetchEmailBodyOnDemand:`, error);
+    
+// };
+
 
 const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
   console.log(`🔍 FETCHING EMAIL BODY using your WORKING METHOD for UID: ${email.uid}`);
