@@ -109,6 +109,13 @@ Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
 Email.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
 Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
 
+// Ensure Deal has the inverse belongsTo associations so includes work correctly
+// (some associations were defined only on the hasMany side previously)
+Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
+Deal.belongsTo(Person, { foreignKey: "personId", as: "Person" });
+Deal.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "Organization" });
+Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
+
 // Pipeline associations
 Pipeline.hasMany(PipelineStage, {
   foreignKey: "pipelineId",
