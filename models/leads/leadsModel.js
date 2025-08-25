@@ -2,9 +2,10 @@
 // const sequelize = require("../../config/db");
 // const LeadDetails = require("./leadDetailsModel"); // Import the LeadDetails model
 // const { number } = require("joi");
-const leadOrganization = require("../../models/leads/leadOrganizationModel");
+const Organization = require("../../models/leads/leadOrganizationModel");
 const Person = require("../../models/leads/leadPersonModel"); // Import the Person model
-
+const Deal = require("../../models/deals/dealsModels");
+const MasterUser = require("../../models/deals/dealsModels");
 //.........................new changes original.....................................
 
 const { DataTypes } = require("sequelize");
@@ -121,6 +122,7 @@ const Lead = sequelize.define("Lead", {
   masterUserID: {
     type: DataTypes.INTEGER,
     allowNull: false, // User ID of the creator (e.g., admin)
+    // references: { model: "masterusers", key: "masterUserID" },
   },
   isArchived: {
     type: DataTypes.BOOLEAN,
@@ -180,6 +182,7 @@ const Lead = sequelize.define("Lead", {
     type: DataTypes.INTEGER,
     allowNull: true,
     comment: "Reference to associated deal when lead is converted",
+    // references: { model: "deals", key: "dealId" },
   },
 
   // Lead-specific tracking fields
@@ -244,5 +247,6 @@ const Lead = sequelize.define("Lead", {
     comment: "Reference to the owner's visibility group",
   },
 });
+
 
 module.exports = Lead;
