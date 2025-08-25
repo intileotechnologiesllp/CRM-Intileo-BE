@@ -6,12 +6,13 @@ const Organization = require("../../../models/leads/leadOrganizationModel");
 const Person = require("../../../models/leads/leadPersonModel");
 const MasterUser = require("../../../models/master/masterUserModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
-const { Op, Sequelize, DataTypes } = require("sequelize");
+const { Op, Sequelize } = require("sequelize");
 
 exports.createLeadPerformReport = async (req, res) => {
   try {
+    console.log(req.body)
     const {
-      reportId,
+      // reportId,
       entity,
       type,
       xaxis,
@@ -124,7 +125,7 @@ exports.createLeadPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type && !reportId) {
+    if (entity && type) {
       if (entity === "Lead" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -165,67 +166,68 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
-      const existingReports = await Report.findOne({
-        where: { reportId },
-      });
+    } 
+    // else if (reportId) {
+    //   const existingReports = await Report.findOne({
+    //     where: { reportId },
+    //   });
 
-      const {
-        entity: existingentity,
-        type: existingtype,
-        config: configString,
-      } = existingReports.dataValues;
+    //   const {
+    //     entity: existingentity,
+    //     type: existingtype,
+    //     config: configString,
+    //   } = existingReports.dataValues;
 
-      // Parse the config JSON string
-      const config = JSON.parse(configString);
-      const {
-        xaxis: existingxaxis,
-        yaxis: existingyaxis,
-        filters: existingfilters,
-      } = config;
+    //   // Parse the config JSON string
+    //   const config = JSON.parse(configString);
+    //   const {
+    //     xaxis: existingxaxis,
+    //     yaxis: existingyaxis,
+    //     filters: existingfilters,
+    //   } = config;
 
-      if (existingentity === "Lead" && existingtype === "Performance") {
-        // Validate required fields for performance reports
-        if (!existingxaxis || !existingyaxis) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "X-axis and Y-axis are required for Lead Performance reports",
-          });
-        }
+    //   if (existingentity === "Lead" && existingtype === "Performance") {
+    //     // Validate required fields for performance reports
+    //     if (!existingxaxis || !existingyaxis) {
+    //       return res.status(400).json({
+    //         success: false,
+    //         message:
+    //           "X-axis and Y-axis are required for Lead Performance reports",
+    //       });
+    //     }
 
-        try {
-          // Generate data with pagination
-          const result = await generateExistingActivityPerformanceData(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingfilters,
-            page,
-            limit
-          );
-          reportData = result.data;
-          paginationInfo = result.pagination;
+    //     try {
+    //       // Generate data with pagination
+    //       const result = await generateExistingActivityPerformanceData(
+    //         ownerId,
+    //         role,
+    //         existingxaxis,
+    //         existingyaxis,
+    //         existingfilters,
+    //         page,
+    //         limit
+    //       );
+    //       reportData = result.data;
+    //       paginationInfo = result.pagination;
 
-          reportConfig = {
-            reportId,
-            entity: existingentity,
-            type: existingtype,
-            xaxis: existingxaxis,
-            yaxis: existingyaxis,
-            filters: existingfilters || {},
-          };
-        } catch (error) {
-          console.error("Error generating lead performance data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate lead performance data",
-            error: error.message,
-          });
-        }
-      }
-    }
+    //       reportConfig = {
+    //         reportId,
+    //         entity: existingentity,
+    //         type: existingtype,
+    //         xaxis: existingxaxis,
+    //         yaxis: existingyaxis,
+    //         filters: existingfilters || {},
+    //       };
+    //     } catch (error) {
+    //       console.error("Error generating lead performance data:", error);
+    //       return res.status(500).json({
+    //         success: false,
+    //         message: "Failed to generate lead performance data",
+    //         error: error.message,
+    //       });
+    //     }
+    //   }
+    // }
 
     return res.status(200).json({
       success: true,
@@ -240,13 +242,13 @@ exports.createLeadPerformReport = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error creating reports:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create reports",
-      error: error.message,
-    });
-  }
+      console.error("Error creating reports:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to create reports",
+        error: error.message,
+      });
+    }
 };
 
 async function generateExistingActivityPerformanceData(
@@ -348,8 +350,8 @@ async function generateExistingActivityPerformanceData(
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
+    groupBy.push(`Lead.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
@@ -366,7 +368,7 @@ async function generateExistingActivityPerformanceData(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -501,7 +503,7 @@ async function generateActivityPerformanceData(
   let groupBy = [];
   let attributes = [];
 
-  if (existingxaxis === "creator") {
+  if (xaxis === "creator") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -510,7 +512,7 @@ async function generateActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (existingxaxis === "creatorstatus") {
+  } else if (xaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
@@ -527,12 +529,12 @@ async function generateActivityPerformanceData(
   }
 
   // Handle existingyaxis
-  if (existingyaxis === "no of leads") {
+  if (yaxis === "no of leads") {
     attributes.push([
       Sequelize.fn("COUNT", Sequelize.col("leadId")),
       "yValue",
     ]);
-  } else if (existingyaxis === "proposalValue") {
+  } else if (yaxis === "proposalValue") {
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col("proposalValue")),
       "yValue",
