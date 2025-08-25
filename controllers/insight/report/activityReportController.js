@@ -359,8 +359,8 @@ async function generateExistingActivityPerformanceData(
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Activity.${xaxis}`);
-    attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
+    groupBy.push(`Activity.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Activity.${existingxaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
@@ -386,7 +386,7 @@ async function generateExistingActivityPerformanceData(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`Activity.${existingyaxis}`)),
       "yValue",
     ]);
   }
