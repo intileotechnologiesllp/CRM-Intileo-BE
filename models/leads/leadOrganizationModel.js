@@ -4,7 +4,7 @@ const sequelize = require("../../config/db");
 const LeadOrganization = sequelize.define("LeadOrganization", {
   leadOrganizationId: {
     type: DataTypes.INTEGER,
-    primaryKey: true,
+    primaryKey: true, 
     autoIncrement: true,
   },
   organization: {

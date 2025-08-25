@@ -326,12 +326,10 @@ const Deal = sequelize.define(
 );
 
 // Associations (optional)
-Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
-Deal.belongsTo(Person, { foreignKey: "personId", as: "Person" });
-Deal.belongsTo(Organization, {
-  foreignKey: "leadOrganizationId",
-  as: "Organization",
-});
-Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
+// Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
+// Deal.belongsTo(Person, { foreignKey: "personId", as: "Person" });
+// Deal.belongsTo(Organization, {foreignKey: "leadOrganizationId", as: "Organization"});
+// Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
+
 
 module.exports = Deal;
