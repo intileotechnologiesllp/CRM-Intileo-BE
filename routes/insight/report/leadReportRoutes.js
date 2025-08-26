@@ -17,5 +17,6 @@ router.patch("/update-leadperformreport/:reportId", verifyToken, leadReportContr
 
 router.delete("/delete-leadperformreport/:reportId", verifyToken, leadReportController.deleteLeadPerformReport);
 
+router.post("/create-leadconversionreport", verifyToken, leadReportController.createLeadConversionReport);
 
 module.exports = router;

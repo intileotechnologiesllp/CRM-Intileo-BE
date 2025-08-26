@@ -56,7 +56,14 @@ Activity.belongsTo(Organization, {
   foreignKey: "leadOrganizationId",
   as: "ActivityOrganization",
 });
-
+Activity.belongsTo(Lead, { 
+  foreignKey: 'leadId', 
+  as: 'ActivityLead' 
+});
+Activity.belongsTo(Deal, { 
+  foreignKey: 'dealId', 
+  as: 'ActivityDeal' 
+});
 // PersonNote associations
 Person.hasMany(PersonNote, { foreignKey: "personId", as: "personNotes" });
 PersonNote.belongsTo(Person, { foreignKey: "personId", as: "person" });
@@ -142,6 +149,7 @@ Organization.hasMany(Deal, {
 });
 
 // Lead-Deal associations (belongsTo is already defined in dealsModels.js)
+// Lead.belongsTo(Deal, { foreignKey: "dealId", as: "DealLeads" });
 Lead.hasMany(Deal, { foreignKey: "leadId", as: "LeadDeals" });
 
 // Dashboard-Report-Goal associations
