@@ -10,9 +10,8 @@ const { Op, Sequelize } = require("sequelize");
 
 exports.createLeadPerformReport = async (req, res) => {
   try {
-    console.log(req.body)
     const {
-      // reportId,
+      reportId,
       entity,
       type,
       xaxis,
@@ -50,7 +49,7 @@ exports.createLeadPerformReport = async (req, res) => {
       "creatorstatus"
     ];
 
-    const yaxisArray = ["no of leads", "proposalValue"];
+    const yaxisArray = ["no of leads", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = [
@@ -76,50 +75,19 @@ exports.createLeadPerformReport = async (req, res) => {
       "createdAt",
       "updatedAt",
 
-      // Deal table columns (prefix with Deal.)
-      "Deal.title",
-      "Deal.value",
-      "Deal.currency",
-      "Deal.pipeline",
-      "Deal.pipelineStage",
-      "Deal.label",
-      "Deal.expectedCloseDate",
-      "Deal.sourceChannel",
-      "Deal.serviceType",
-      "Deal.proposalValue",
-      "Deal.proposalCurrency",
-      "Deal.esplProposalNo",
-      "Deal.projectLocation",
-      "Deal.organizationCountry",
-      "Deal.proposalSentDate",
-      "Deal.sourceRequired",
-      "Deal.questionerShared",
-      "Deal.sectorialSector",
-      "Deal.sbuClass",
-      "Deal.phone",
-      "Deal.email",
-      "Deal.sourceOrgin",
-      "Deal.status",
-      "Deal.productName",
-      "Deal.weightedValue",
-      "Deal.probability",
-      "Deal.stage",
-      "Deal.lostReason",
-      "Deal.archiveStatus",
-
       // Organization table columns (prefix with Organization.)
-      "Organization.organization",
-      "Organization.organizationLabels",
-      "Organization.address",
+      "LeadOrganization.organization",
+      "LeadOrganization.organizationLabels",
+      "LeadOrganization.address",
 
       // Person table columns (prefix with Person.)
-      "Person.contactPerson",
-      "Person.postalAddress",
-      "Person.email",
-      "Person.phone",
-      "Person.jobTitle",
-      "Person.personLabels",
-      "Person.organization",
+      "LeadPerson.contactPerson",
+      "LeadPerson.postalAddress",
+      "LeadPerson.email",
+      "LeadPerson.phone",
+      "LeadPerson.jobTitle",
+      "LeadPerson.personLabels",
+      "LeadPerson.organization",
     ];
 
     // For Activity Performance reports, generate the data
@@ -145,7 +113,8 @@ exports.createLeadPerformReport = async (req, res) => {
             yaxis,
             filters,
             page,
-            limit
+            limit,
+            type
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -167,67 +136,68 @@ exports.createLeadPerformReport = async (req, res) => {
         }
       }
     } 
-    // else if (reportId) {
-    //   const existingReports = await Report.findOne({
-    //     where: { reportId },
-    //   });
+    else if (reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
 
-    //   const {
-    //     entity: existingentity,
-    //     type: existingtype,
-    //     config: configString,
-    //   } = existingReports.dataValues;
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+      } = existingReports.dataValues;
 
-    //   // Parse the config JSON string
-    //   const config = JSON.parse(configString);
-    //   const {
-    //     xaxis: existingxaxis,
-    //     yaxis: existingyaxis,
-    //     filters: existingfilters,
-    //   } = config;
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        filters: existingfilters,
+      } = config;
 
-    //   if (existingentity === "Lead" && existingtype === "Performance") {
-    //     // Validate required fields for performance reports
-    //     if (!existingxaxis || !existingyaxis) {
-    //       return res.status(400).json({
-    //         success: false,
-    //         message:
-    //           "X-axis and Y-axis are required for Lead Performance reports",
-    //       });
-    //     }
+      if (existingentity === "Lead" && existingtype === "Performance") {
+        // Validate required fields for performance reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Lead Performance reports",
+          });
+        }
 
-    //     try {
-    //       // Generate data with pagination
-    //       const result = await generateExistingActivityPerformanceData(
-    //         ownerId,
-    //         role,
-    //         existingxaxis,
-    //         existingyaxis,
-    //         existingfilters,
-    //         page,
-    //         limit
-    //       );
-    //       reportData = result.data;
-    //       paginationInfo = result.pagination;
+        try {
+          // Generate data with pagination
+          const result = await generateExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingfilters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
 
-    //       reportConfig = {
-    //         reportId,
-    //         entity: existingentity,
-    //         type: existingtype,
-    //         xaxis: existingxaxis,
-    //         yaxis: existingyaxis,
-    //         filters: existingfilters || {},
-    //       };
-    //     } catch (error) {
-    //       console.error("Error generating lead performance data:", error);
-    //       return res.status(500).json({
-    //         success: false,
-    //         message: "Failed to generate lead performance data",
-    //         error: error.message,
-    //       });
-    //     }
-    //   }
-    // }
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            filters: existingfilters || {},
+          };
+        } catch (error) {
+          console.error("Error generating lead performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate lead performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -258,7 +228,8 @@ async function generateExistingActivityPerformanceData(
   existingyaxis,
   filters,
   page = 1,
-  limit = 6
+  limit = 6,
+  type
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -365,6 +336,11 @@ async function generateExistingActivityPerformanceData(
       Sequelize.fn("SUM", Sequelize.col("proposalValue")),
       "yValue",
     ]);
+  } else if (existingyaxis === "value") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("value")),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
@@ -407,7 +383,9 @@ async function generateExistingActivityPerformanceData(
   // Format the results for the frontend
   const formattedResults = results.map((item) => ({
     label: item.xValue || "Unknown",
-    value: item.yValue || 0,
+    value: type === "conversion" 
+    ? parseFloat(item.yValue || 0) 
+    : item.yValue || 0,
   }));
 
   // Return data with pagination info
@@ -432,7 +410,8 @@ async function generateActivityPerformanceData(
   yaxis,
   filters,
   page = 1,
-  limit = 6
+  limit = 6,
+  type
 ) {
   let includeModels = [];
 
@@ -581,7 +560,9 @@ async function generateActivityPerformanceData(
   // Format the results for the frontend
   const formattedResults = results.map((item) => ({
     label: item.xValue || "Unknown",
-    value: item.yValue || 0,
+    value: type === "conversion" 
+    ? parseFloat(item.yValue || 0) 
+    : item.yValue || 0,
   }));
 
   // Return data with pagination info
@@ -626,26 +607,26 @@ function getConditionObject(column, operator, value, includeModels = []) {
     let modelConfig;
 
     switch (tableAlias) {
-      case "Deal":
+      case "DealLeads":
         modelConfig = {
           model: Deal,
-          as: "Deal",
+          as: "DealLeads",
           required: false, // Use false to avoid INNER JOIN issues
           attributes: [],
         };
         break;
-      case "Organization":
+      case "LeadOrganization":
         modelConfig = {
           model: Organization,
-          as: "Organization",
+          as: "LeadOrganization",
           required: false,
           attributes: [],
         };
         break;
-      case "Person":
+      case "LeadPerson":
         modelConfig = {
           model: Person,
-          as: "Person",
+          as: "LeadPerson",
           required: false,
           attributes: [],
         };
@@ -734,7 +715,7 @@ function getOperatorCondition(column, operator, value) {
 exports.saveLeadPerformReport = async (req, res) => {
   try {
     const {
-      dashboardId,
+      dashboardIds,
       folderId,
       name,
       entity,
@@ -747,22 +728,25 @@ exports.saveLeadPerformReport = async (req, res) => {
     const ownerId = req.adminId;
 
     // Validate required fields
-    if (!entity || !type || !xaxis || !yaxis || !dashboardId || !folderId) {
+    if (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId) {
       return res.status(400).json({
         success: false,
         message: "Entity, type, xaxis, and yaxis are required",
       });
     }
 
+    // Ensure dashboardIds is an array
+    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+
     // Verify dashboard ownership if dashboardId is provided
-    if (dashboardId) {
+    for (const dashboardId of dashboardIdsArray) {
       const dashboard = await DASHBOARD.findOne({
         where: { dashboardId, ownerId },
       });
       if (!dashboard) {
         return res.status(404).json({
           success: false,
-          message: "Dashboard not found or access denied",
+          message: `Dashboard ${dashboardId} not found or access denied`,
         });
       }
     }
@@ -792,7 +776,7 @@ exports.saveLeadPerformReport = async (req, res) => {
     });
 
     let reportData = null;
-    let report;
+    let reports = [];
 
     // Generate report data (you can add your data generation logic here)
     // For example: reportData = await generateReportData(xaxis, yaxis, filters);
@@ -808,7 +792,6 @@ exports.saveLeadPerformReport = async (req, res) => {
     if (existingReport) {
       // Update existing report
       const updateData = {
-        ...(dashboardId !== undefined && { dashboardId }),
         ...(folderId !== undefined && { folderId }),
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
@@ -819,43 +802,47 @@ exports.saveLeadPerformReport = async (req, res) => {
         where: { reportId: existingReport.reportId },
       });
 
-      report = await Report.findByPk(existingReport.reportId);
+      const updatedReport = await Report.findByPk(existingReport.reportId);
+      reports.push(updatedReport);
     } else {
       // Create new report
       const reportName = description || `${entity} ${type}`;
 
-      // Get next position for dashboard
-      let nextPosition = 0;
-      if (dashboardId) {
+      for (const dashboardId of dashboardIdsArray) {
+        // Get next position for each dashboard
         const lastReport = await Report.findOne({
           where: { dashboardId },
           order: [["position", "DESC"]],
         });
-        nextPosition = lastReport ? lastReport.position || 0 : 0;
-      }
+        const nextPosition = lastReport ? (lastReport.position || 0) : 0;
 
-      report = await Report.create({
-        dashboardId: dashboardId || null,
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-      });
+        const report = await Report.create({
+          dashboardId,
+          folderId: folderId || null,
+          entity,
+          type,
+          description: reportName,
+          name: name || reportName,
+          position: nextPosition,
+          config: configObj,
+          ownerId,
+        });
+        
+        reports.push(report);
+      }
     }
 
     res.status(existingReport ? 200 : 201).json({
       success: true,
       message: existingReport
         ? "Report updated successfully"
-        : "Report created successfully",
+        : "Reports created successfully",
       data: {
-        ...report.toJSON(),
-        config: report.config,
-        reportData,
+        reports: reports.map(report => ({
+          ...report.toJSON(),
+          config: report.config,
+          reportData,
+        })),
       },
     });
   } catch (error) {
@@ -1081,11 +1068,10 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     // Handle search
     if (search) {
       baseWhere[Op.or] = [
-        { subject: { [Op.like]: `%${search}%` } },
-        { type: { [Op.like]: `%${search}%` } },
-        { priority: { [Op.like]: `%${search}%` } },
-        { status: { [Op.like]: `%${search}%` } },
-        { "$assignedUser.name$": { [Op.like]: `%${search}%` } },
+        { title: { [Op.like]: `%${search}%` } },
+        { value: { [Op.like]: `%${search}%` } },
+        { ownerName: { [Op.like]: `%${search}%` } },
+        { sourceOrigin: { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -1132,9 +1118,9 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 
     // Build order clause
     const order = [];
-    if (sortBy === "assignedUser") {
+    if (sortBy === "Owner") {
       order.push([
-        { model: MasterUser, as: "assignedUser" },
+        { model: MasterUser, as: "Owner" },
         "name",
         sortOrder,
       ]);
@@ -1150,7 +1136,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     const include = [
       {
         model: MasterUser,
-        as: "assignedUser",
+        as: "Owner",
         attributes: ["masterUserID", "name", "email"],
         required: false,
       },
@@ -1163,7 +1149,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     });
 
     // Get paginated results
-    const activities = await Lead.findAll({
+    const leads = await Lead.findAll({
       where: baseWhere,
       include: include,
       order: order,
@@ -1172,7 +1158,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       attributes: [
         "leadId",
         "title",
-        "proposalValue",
+        "value",
         "ownerName",
         "status",
         "createdAt",
@@ -1266,20 +1252,18 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     }
 
     // Format activities for response
-    const formattedActivities = activities.map((activity) => ({
-      id: activity.activityId,
-      subject: activity.subject,
-      type: activity.type,
-      priority: activity.priority,
-      status: activity.status,
-      startDateTime: activity.startDateTime,
-      endDateTime: activity.endDateTime,
-      createdAt: activity.createdAt,
-      assignedTo: activity.assignedUser
+    const formattedActivities = leads.map((lead) => ({
+      id: lead.leadId,
+      title: lead.title,
+      value: lead.value,
+      ownerName: lead.ownerName,
+      status: lead.status,
+      createdAt: lead.createdAt,
+      assignedTo: lead.Owner
         ? {
-            id: activity.assignedUser.masterUserID,
-            name: activity.assignedUser.name,
-            email: activity.assignedUser.email,
+            id: lead.Owner.masterUserID,
+            name: lead.Owner.name,
+            email: lead.Owner.email,
           }
         : null,
     }));
@@ -1311,4 +1295,218 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+
+exports.createLeadConversionReport = async (req, res) => {
+  try {
+    const {
+      reportId,
+      entity,
+      type,
+      xaxis,
+      yaxis,
+      filters,
+      page = 1,
+      limit = 6,
+    } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Define available options for xaxis and yaxis
+    const xaxisArray = [
+      "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "proposalSentDate",
+      "ownerName",
+      "SBUClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "sourceOriginID",
+      "contactPerson",
+      "organization",
+      "proposalValueCurrency",
+      "conversionDate",
+      "createdAt",
+      "updatedAt",
+      "creator",
+      "creatorstatus"
+    ];
+
+    const yaxisArray = ["no of leads", "proposalValue", "value"];
+
+    // Add this to your createActivityReport function or make it available globally
+    const availableFilterColumns = [
+      // Lead table columns
+      "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "proposalSentDate",
+      "ownerName",
+      "SBUClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "sourceOriginID",
+      "contactPerson",
+      "organization",
+      "proposalValueCurrency",
+      "conversionDate",
+      "createdAt",
+      "updatedAt",
+
+      // Organization table columns (prefix with Organization.)
+      "LeadOrganization.organization",
+      "LeadOrganization.organizationLabels",
+      "LeadOrganization.address",
+
+      // Person table columns (prefix with Person.)
+      "LeadPerson.contactPerson",
+      "LeadPerson.postalAddress",
+      "LeadPerson.email",
+      "LeadPerson.phone",
+      "LeadPerson.jobTitle",
+      "LeadPerson.personLabels",
+      "LeadPerson.organization",
+    ];
+
+    // For Activity Conversion reports, generate the data
+    let reportData = null;
+    let paginationInfo = null;
+    if (entity && type) {
+      if (entity === "Lead" && type === "Conversion") {
+        // Validate required fields for Conversion reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Lead Conversion reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            filters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            filters: filters || {},
+          };
+        } catch (error) {
+          console.error("Error generating lead Conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate lead Conversion data",
+            error: error.message,
+          });
+        }
+      }
+    } 
+    else if (reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+      } = existingReports.dataValues;
+
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Lead" && existingtype === "Conversion") {
+        // Validate required fields for Conversion reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Lead Conversion reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingfilters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            filters: existingfilters || {},
+          };
+        } catch (error) {
+          console.error("Error generating lead Conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate lead Conversion data",
+            error: error.message,
+          });
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: reportData,
+      pagination: paginationInfo,
+      config: reportConfig,
+      availableOptions: {
+        xaxis: xaxisArray,
+        yaxis: yaxisArray,
+        filters: availableFilterColumns
+      },
+    });
+  } catch (error) {
+      console.error("Error creating reports:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to create reports",
+        error: error.message,
+      });
+    }
 };

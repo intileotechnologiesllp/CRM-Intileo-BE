@@ -125,35 +125,5 @@ const Activity = sequelize.define(
   }
 );
 
-Activity.associate = (models) => {
-  // Correct association with MasterUser for assignedTo field
-  Activity.belongsTo(models.MasterUser, {
-    foreignKey: "assignedTo",
-    as: "assignedUser", // Use consistent alias
-  });
-  
-};
-
-// Activity.belongsTo(MasterUser, {
-//   foreignKey: "assignedTo",
-//   as: "assignedUser", 
-//   });
-Activity.belongsTo(Deal, { 
-  foreignKey: 'dealId', 
-  as: 'Deal' 
-});
-Activity.belongsTo(Lead, { 
-  foreignKey: 'leadId', 
-  as: 'Lead' 
-});
-Activity.belongsTo(Organization,{ 
-  foreignKey: 'leadOrganizationId', 
-  as: 'Organization' 
-});
-Activity.belongsTo(Person, {
-  foreignKey: 'personId', 
-  as: 'Person' 
-});
-
 
 module.exports = Activity;
