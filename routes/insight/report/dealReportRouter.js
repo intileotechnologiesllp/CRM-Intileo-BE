@@ -13,5 +13,10 @@ router.post("/get-summarydealperformreport", verifyToken, dealReportController.g
 
 router.post("/save-dealperformreport", verifyToken, dealReportController.saveDealPerformReport);
 
+router.post("/create-dealconversionreport", verifyToken, dealReportController.createDealConversionReport);
+
+router.post("/get-summarydealconversionreport", verifyToken, dealReportController.getDealConversionReportSummary);
+
+router.post("/save-dealconversionreport", verifyToken, dealReportController.saveDealConversionReport);
 
 module.exports = router;

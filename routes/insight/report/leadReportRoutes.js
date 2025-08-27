@@ -19,4 +19,8 @@ router.delete("/delete-leadperformreport/:reportId", verifyToken, leadReportCont
 
 router.post("/create-leadconversionreport", verifyToken, leadReportController.createLeadConversionReport);
 
+router.post("/get-summaryleadconversionreport", verifyToken, leadReportController.getLeadConversionReportSummary);
+
+router.post("/save-leadconversionreport", verifyToken, leadReportController.saveLeadConversionReport);
+
 module.exports = router;
