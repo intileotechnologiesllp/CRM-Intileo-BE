@@ -19,4 +19,11 @@ router.post("/get-summarydealconversionreport", verifyToken, dealReportControlle
 
 router.post("/save-dealconversionreport", verifyToken, dealReportController.saveDealConversionReport);
 
+router.post("/create-dealprogressreport", verifyToken, dealReportController.createDealProgressReport);
+
+router.post("/get-summarydealprogressreport", verifyToken, dealReportController.getDealProgressReportSummary);
+
+router.post("/save-dealprogressreport", verifyToken, dealReportController.saveDealProgressReport);
+
+
 module.exports = router;
