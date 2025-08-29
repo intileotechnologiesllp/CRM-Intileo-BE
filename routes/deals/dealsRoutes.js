@@ -26,7 +26,8 @@ router.get(
   verifyToken,
   dealsController.getDealDetail
 );
-router.get("/delete-deal/:dealId", verifyToken, dealsController.deleteDeal);
+// router.get("/delete-deal/:dealId", verifyToken, dealsController.deleteDeal);
+router.delete("/delete-deal/:dealId", verifyToken, dealsController.deleteDeal);
 router.post(
   "/link-participant/:dealId",
   verifyToken,

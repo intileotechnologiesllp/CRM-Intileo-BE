@@ -717,12 +717,21 @@ exports.updatePerson = async (req, res) => {
 exports.deletePerson = async (req, res) => {
   const { personId } = req.params;
   const masterUserID = req.adminId;
+  const role = req.role;
   const entityType = "person";
 
   try {
+    // Build the where condition based on role
+    const whereCondition = { personId };
+    
+    // Only include masterUserID if role is not admin
+    if (role !== 'admin') {
+      whereCondition.masterUserID = masterUserID;
+    }
+
     // Check if person exists
     const person = await LeadPerson.findOne({
-      where: { personId, masterUserID },
+      where: whereCondition,
     });
 
     if (!person) {
@@ -735,13 +744,20 @@ exports.deletePerson = async (req, res) => {
     const transaction = await sequelize.transaction();
 
     try {
+      // Build where condition for custom field values deletion
+      const customFieldWhereCondition = {
+        entityId: personId.toString(),
+        entityType,
+      };
+      
+      // Only include masterUserID if role is not admin
+      if (role !== 'admin') {
+        customFieldWhereCondition.masterUserID = masterUserID;
+      }
+
       // Delete all custom field values
       await CustomFieldValue.destroy({
-        where: {
-          entityId: personId.toString(),
-          entityType,
-          masterUserID,
-        },
+        where: customFieldWhereCondition,
         transaction,
       });
 
@@ -778,4 +794,70 @@ exports.deletePerson = async (req, res) => {
     });
   }
 };
+// exports.deletePerson = async (req, res) => {
+//   const { personId } = req.params;
+//   const masterUserID = req.adminId;
+//   const role = req.role;
+//   const entityType = "person";
+
+//   try {
+//     // Check if person exists
+//     const person = await LeadPerson.findOne({
+//       where: { personId, masterUserID },
+//     });
+
+//     if (!person) {
+//       return res.status(404).json({
+//         message: "Person not found.",
+//       });
+//     }
+
+//     // Start a transaction
+//     const transaction = await sequelize.transaction();
+
+//     try {
+//       // Delete all custom field values
+//       await CustomFieldValue.destroy({
+//         where: {
+//           entityId: personId.toString(),
+//           entityType,
+//           masterUserID,
+//         },
+//         transaction,
+//       });
+
+//       // Delete the person
+//       await person.destroy({ transaction });
+
+//       // Commit the transaction
+//       await transaction.commit();
+
+//       // Log the deletion
+//       await historyLogger(
+//         PROGRAMS.LEAD_MANAGEMENT,
+//         "PERSON_DELETION",
+//         masterUserID,
+//         personId,
+//         null,
+//         `Person deleted`,
+//         null
+//       );
+
+//       res.status(200).json({
+//         message: "Person deleted successfully.",
+//         personId: personId,
+//       });
+//     } catch (error) {
+//       await transaction.rollback();
+//       throw error;
+//     }
+//   } catch (error) {
+//     console.error("Error deleting person:", error);
+//     res.status(500).json({
+//       message: "Failed to delete person.",
+//       error: error.message,
+//     });
+//   }
+// };
+
 
