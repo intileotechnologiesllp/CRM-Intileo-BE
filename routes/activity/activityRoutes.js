@@ -6,6 +6,7 @@ const activityController = require("../../controllers/activity/activityControlle
 
 router.post("/create-activity", verifyToken, activityController.createActivity);
 router.get("/get-activities", verifyToken, activityController.getActivities);
+router.delete("/delete-activity/:activityId", verifyToken, activityController.deleteActivity);
 router.get(
   "/mark-as-done/:activityId",
   verifyToken,
