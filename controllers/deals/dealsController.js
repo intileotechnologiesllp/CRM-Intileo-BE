@@ -21,7 +21,7 @@ const DealColumnPreference = require("../../models/deals/dealColumnModel"); // A
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const { sendEmail } = require("../../utils/emailSend"); // Add email service import
-
+const sequelize = require("../../config/db");
 const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
 // Create a new deal with validation
@@ -3128,24 +3128,122 @@ exports.getDealDetail = async (req, res) => {
   }
 };
 
-exports.deleteDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
+// exports.deleteDeal = async (req, res) => {
+//   try {
+//     const { dealId } = req.params;
+//     const deal = await Deal.findByPk(dealId);
 
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
+//     if (!deal) {
+//       return res.status(404).json({ message: "Deal not found." });
+//     }
+
+//     await deal.destroy();
+
+//     res.status(200).json({ message: "Deal deleted successfully." });
+//   } catch (error) {
+//     console.log(error);
+
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+exports.deleteDeal = async (req, res) => {
+  const { dealId } = req.params;
+  const masterUserID = req.adminId;
+  const role = req.role;
+  const entityType = "deal";
+
+  try {
+    // Build the where condition based on role
+    const whereCondition = { dealId };
+    
+    // Only include masterUserID if role is not admin
+    if (role !== 'admin') {
+      whereCondition.masterUserID = masterUserID;
     }
 
-    await deal.destroy();
+    // Check if deal exists
+    const deal = await Deal.findOne({
+      where: whereCondition,
+    });
 
-    res.status(200).json({ message: "Deal deleted successfully." });
+    if (!deal) {
+      return res.status(404).json({
+        message: "Deal not found.",
+      });
+    }
+
+    // Start a transaction
+    const transaction = await sequelize.transaction();
+
+    try {
+      // Build where condition for custom field values deletion
+      const customFieldWhereCondition = {
+        entityId: dealId.toString(),
+        entityType,
+      };
+      
+      // Only include masterUserID if role is not admin
+      if (role !== 'admin') {
+        customFieldWhereCondition.masterUserID = masterUserID;
+      }
+
+      // Delete all custom field values
+      await CustomFieldValue.destroy({
+        where: customFieldWhereCondition,
+        transaction,
+      });
+
+      // Delete deal stage histories
+      const dealStageHistoryWhereCondition = { dealId };
+      
+      await DealStageHistory.destroy({
+        where: dealStageHistoryWhereCondition,
+        transaction,
+      });
+
+       // Delete deal details
+      const dealDetailsWhereCondition = { dealId };
+      
+      await DealDetails.destroy({
+        where: dealDetailsWhereCondition,
+        transaction,
+      });
+
+      await DealNote.destroy({
+         where: { dealId },
+        transaction,
+      });
+
+      await DealParticipant.destroy({
+         where: { dealId },
+        transaction,
+      });
+
+      // Delete the deal
+      await deal.destroy({ transaction });
+
+      // Commit the transaction
+      await transaction.commit();
+
+
+      res.status(200).json({
+        message: "Deal deleted successfully.",
+        dealId: dealId,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
   } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error deleting deal:", error);
+    res.status(500).json({
+      message: "Failed to delete deal.",
+      error: error.message,
+    });
   }
 };
+
 exports.linkParticipant = async (req, res) => {
   try {
     const { dealId } = req.params;

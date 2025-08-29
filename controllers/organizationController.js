@@ -545,12 +545,21 @@ exports.updateOrganization = async (req, res) => {
 exports.deleteOrganization = async (req, res) => {
   const { organizationId } = req.params;
   const masterUserID = req.adminId;
+  const role = req.role;
   const entityType = "organization";
 
   try {
+    // Build the where condition based on role
+    const whereCondition = { leadOrganizationId : organizationId };
+    
+    // Only include masterUserID if role is not admin
+    if (role !== 'admin') {
+      whereCondition.masterUserID = masterUserID;
+    }
+
     // Check if organization exists
     const organization = await LeadOrganization.findOne({
-      where: { leadOrganizationId: organizationId, masterUserID },
+      where: whereCondition,
     });
 
     if (!organization) {
@@ -563,13 +572,20 @@ exports.deleteOrganization = async (req, res) => {
     const transaction = await sequelize.transaction();
 
     try {
+      // Build where condition for custom field values deletion
+      const customFieldWhereCondition = {
+        entityId: organizationId.toString(),
+        entityType,
+      };
+      
+      // Only include masterUserID if role is not admin
+      if (role !== 'admin') {
+        customFieldWhereCondition.masterUserID = masterUserID;
+      }
+
       // Delete all custom field values
       await CustomFieldValue.destroy({
-        where: {
-          entityId: organizationId.toString(),
-          entityType,
-          masterUserID,
-        },
+        where: customFieldWhereCondition,
         transaction,
       });
 
@@ -592,7 +608,7 @@ exports.deleteOrganization = async (req, res) => {
 
       res.status(200).json({
         message: "Organization deleted successfully.",
-        organizationId: organizationId,
+        leadOrganizationId: organizationId,
       });
     } catch (error) {
       await transaction.rollback();
@@ -606,3 +622,67 @@ exports.deleteOrganization = async (req, res) => {
     });
   }
 };
+// exports.deleteOrganization = async (req, res) => {
+//   const { organizationId } = req.params;
+//   const masterUserID = req.adminId;
+//   const entityType = "organization";
+
+//   try {
+//     // Check if organization exists
+//     const organization = await LeadOrganization.findOne({
+//       where: { leadOrganizationId: organizationId, masterUserID },
+//     });
+
+//     if (!organization) {
+//       return res.status(404).json({
+//         message: "Organization not found.",
+//       });
+//     }
+
+//     // Start a transaction
+//     const transaction = await sequelize.transaction();
+
+//     try {
+//       // Delete all custom field values
+//       await CustomFieldValue.destroy({
+//         where: {
+//           entityId: organizationId.toString(),
+//           entityType,
+//           masterUserID,
+//         },
+//         transaction,
+//       });
+
+//       // Delete the organization
+//       await organization.destroy({ transaction });
+
+//       // Commit the transaction
+//       await transaction.commit();
+
+//       // Log the deletion
+//       await historyLogger(
+//         PROGRAMS.LEAD_MANAGEMENT,
+//         "ORGANIZATION_DELETION",
+//         masterUserID,
+//         organizationId,
+//         null,
+//         `Organization deleted`,
+//         null
+//       );
+
+//       res.status(200).json({
+//         message: "Organization deleted successfully.",
+//         organizationId: organizationId,
+//       });
+//     } catch (error) {
+//       await transaction.rollback();
+//       throw error;
+//     }
+//   } catch (error) {
+//     console.error("Error deleting organization:", error);
+//     res.status(500).json({
+//       message: "Failed to delete organization.",
+//       error: error.message,
+//     });
+//   }
+// };
