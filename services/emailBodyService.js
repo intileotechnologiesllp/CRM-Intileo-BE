@@ -685,10 +685,20 @@ const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
     console.log(`🌐 Parsed HTML length: ${parsedEmail.html ? parsedEmail.html.length : 0}`);
     
     // Update email object with parsed content
-    const finalBody = parsedEmail.html || parsedEmail.text || '';
+    const bodyText = parsedEmail.text || '';
+    const bodyHtml = parsedEmail.html || '';
+
+    // Return only HTML content if available, otherwise use text content
+    let finalBody = '';
+    if (bodyHtml) {
+      // HTML content available - use it
+      finalBody = bodyHtml;
+    } else if (bodyText) {
+      // Only text available - use it
+      finalBody = bodyText;
+    }
+
     email.body = finalBody;
-    email.textBody = parsedEmail.text || '';
-    email.htmlBody = parsedEmail.html || '';
     
     // Update in database
     await Email.update(
@@ -715,154 +725,10 @@ const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
     return email;
   
   }
-
-    };
-
-//     if (!email) {
-//       console.log(`❌ Email with ID ${emailId} not found`);
-//       return { success: false, error: 'Email not found' };
-//     }
-
-//     console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
-    
-//     // Check if body already exists
-//     if (email.body && email.body.trim()) {
-//       console.log(`✅ Body already exists for email ${emailId}`);
-//       return {
-//         success: true,
-//         emailID: emailId,
-//         uid: email.uid,
-//         subject: email.subject,
-//         bodyText: email.body,
-//         bodyHtml: '',
-//         cached: true
-//       };
-//     }
-
-//     console.log(`� No body found, fetching from IMAP...`);
-    
-//     // Connect to IMAP and fetch body
-//     const connection = await connectToIMAP(masterUserID, provider);
-//     await connection.openBox('INBOX');
-    
-//     const updatedEmail = await fetchSingleEmailBodyWithBodyPeek(connection, email);
-//     await connection.end();
-    
-//     const executionTime = Date.now() - startTime;
-//     console.log(`✅ Simple fetch completed in ${executionTime}ms`);
-    
-//     return {
-//       success: true,
-//       emailID: emailId,
-//       uid: updatedEmail.uid,
-//       subject: updatedEmail.subject,
-//       bodyText: updatedEmail.body || '',
-//       bodyHtml: '',
-//       executionTime
-//     };
-  
-
-//   } catch (error) {
-//     const executionTime = Date.now() - startTime;
-//     console.error(`❌ Error in fetchEmailBodyOnDemand:`, error);
-    
-// };
-
-
-const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
-  console.log(`🔍 FETCHING EMAIL BODY using your WORKING METHOD for UID: ${email.uid}`);
-  
-  if (!email.uid) {
-    console.log(`⚠️ No UID available for email ${email.emailID}, cannot fetch body`);
-    return email;
-  }
-
-  const { uid } = email;
-  
-  try {
-    console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
-    
-    // Use your EXACT working method from fetchRecentEmail
-    const messages = await connection.search(
-      [["UID", uid]], 
-      { bodies: "", struct: true }  // Your exact working method!
-    );
-    
-    if (!messages || messages.length === 0) {
-      console.log(`❌ No messages found for UID ${uid}`);
-      const fallbackMessage = "Email not found";
-      await Email.update({
-        body: fallbackMessage,
-        body_fetch_status: 'failed'
-      }, { where: { emailID: email.emailID } });
-      return { ...email, body: fallbackMessage };
-    }
-    
-    console.log(`✅ Found message for UID ${uid}`);
-    const message = messages[0];
-    
-    // Use your EXACT body extraction method
-    const rawBodyPart = message.parts.find((part) => part.which === "");
-    const rawBody = rawBodyPart ? rawBodyPart.body : null;
-    
-    if (!rawBody) {
-      console.log(`❌ No raw body found for UID ${uid}`);
-      const fallbackMessage = "Body not available";
-      await Email.update({
-        body: fallbackMessage,
-        body_fetch_status: 'failed'
-      }, { where: { emailID: email.emailID } });
-      return { ...email, body: fallbackMessage };
-    }
-    
-    console.log(`🎉 Raw body found: ${rawBody.length} characters`);
-    
-    // Parse using simpleParser (your exact method)
-    try {
-      const { simpleParser } = require('mailparser');
-      const parsedEmail = await simpleParser(rawBody);
-      
-      console.log(`✅ Email parsed successfully for UID ${uid}`);
-      console.log(`📝 Text: ${parsedEmail.text?.length || 0} chars, HTML: ${parsedEmail.html?.length || 0} chars`);
-      
-      // Use your exact preference: HTML first, then text
-      const extractedBody = parsedEmail.html || parsedEmail.text || rawBody;
-      const cleanedBody = cleanEmailBody(extractedBody);
-      
-      await Email.update({
-        body: cleanedBody,
-        body_fetch_status: "fetched"
-      }, { where: { emailID: email.emailID } });
-      
-      console.log(`🎉 SUCCESS: Updated email with ${cleanedBody.length} chars using WORKING METHOD`);
-      return { ...email, body: cleanedBody };
-      
-    } catch (parseError) {
-      console.log(`⚠️ Parse failed for UID ${uid}, using raw content:`, parseError.message);
-      
-      // Return raw body if parsing fails
-      const cleanedBody = cleanEmailBody(rawBody);
-      await Email.update({
-        body: cleanedBody,
-        body_fetch_status: "fetched"
-      }, { where: { emailID: email.emailID } });
-      
-      console.log(`✅ Updated email with raw content: ${cleanedBody.length} chars`);
-      return { ...email, body: cleanedBody };
-    }
-    
-  } catch (error) {
-    console.error(`❌ Working method failed for UID ${uid}:`, error.message);
-    
-    const fallbackMessage = "Body fetch failed due to IMAP error";
-    await Email.update({
-      body: fallbackMessage,
-      body_fetch_status: 'failed'
-    }, { where: { emailID: email.emailID } });
-    
-    return { ...email, body: fallbackMessage };
-  }
 };
+
+
+
 
 // ✅ FIXED: Fetch email body using imap-simple syntax
 // const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
@@ -979,8 +845,6 @@ const fetchSingleEmailBodyWithBodyPeek = async (connection, email) => {
 //     console.log(`✅ CREATED FALLBACK MESSAGE for email ${email.emailID} after error`);
 //     return { ...email, body: informativeMessage };
 //   }
-// };
-
 // Parse RFC822 message using mailparser and manual parsing with DOUBLE FALLBACK approach
 const parseRFC822Message = async (rawMessage) => {
   console.log(`🔍 PARSING RFC822 MESSAGE: ${rawMessage.length} chars`);
@@ -993,24 +857,40 @@ const parseRFC822Message = async (rawMessage) => {
     console.log(`📧 FIRST PARSE - Text: ${parsed.text ? parsed.text.length : 0} chars, HTML: ${parsed.html ? parsed.html.length : 0} chars`);
     console.log(`📧 FIRST PARSE - Subject: ${parsed.subject}, From: ${parsed.from ? parsed.from.text : 'none'}`);
     
-    // Extract body content using your suggested approach
-    let bodyContent = parsed.html || parsed.text || "";
-    
+    // Extract body content using combined HTML and text approach
+    const bodyText = parsed.text || "";
+    const bodyHtml = parsed.html || "";
+
+    let bodyContent = "";
+    if (bodyHtml) {
+      // HTML content available - use it
+      bodyContent = bodyHtml;
+    } else if (bodyText) {
+      // Only text available - use it
+      bodyContent = bodyText;
+    }
+
     // FALLBACK 1: If body is empty, try re-parsing the raw message (YOUR SUGGESTED APPROACH)
     if (!bodyContent && rawMessage) {
       console.log(`🔄 APPLYING YOUR FALLBACK: Re-parsing raw message due to empty body`);
       const reParsed = await simpleParser(rawMessage);
-      bodyContent = reParsed.html || reParsed.text || "";
+      const reParsedText = reParsed.text || "";
+      const reParsedHtml = reParsed.html || "";
+
+      if (reParsedHtml) {
+        bodyContent = reParsedHtml;
+      } else if (reParsedText) {
+        bodyContent = reParsedText;
+      }
+
       console.log(`🔄 YOUR FALLBACK RESULT: ${bodyContent.length} chars extracted`);
-      console.log(`🔄 Re-parsed - Text: ${reParsed.text ? reParsed.text.length : 0} chars, HTML: ${reParsed.html ? reParsed.html.length : 0} chars`);
+      console.log(`🔄 Re-parsed - Text: ${reParsedText.length} chars, HTML: ${reParsedHtml.length} chars`);
     }
     
     if (bodyContent && bodyContent.length > 10) {
       console.log(`✅ BODY CONTENT EXTRACTED: ${bodyContent.substring(0, 100)}...`);
       return {
-        fullBody: bodyContent,
-        textBody: parsed.text || "",
-        htmlBody: parsed.html || ""
+        fullBody: bodyContent
       };
     }
   } catch (parseError) {
@@ -1061,16 +941,14 @@ const parseRFC822Message = async (rawMessage) => {
       if (textContent.trim() || htmlContent.trim()) {
         console.log(`✅ MANUAL PARSE SUCCESS: Text: ${textContent.trim().length} chars, HTML: ${htmlContent.trim().length} chars`);
         return {
-          fullBody: htmlContent || textContent || '',
-          textBody: textContent.trim(),
-          htmlBody: htmlContent.trim()
+          fullBody: htmlContent || textContent || ''
         };
       }
     } catch (manualParseError) {
       console.log(`⚠️ Manual parsing failed: ${manualParseError.message}`);
     }
 
-    return { fullBody: '', textBody: '', htmlBody: '' };
+    return { fullBody: '' };
   };
 
 // Create informative message when email content can't be fetched

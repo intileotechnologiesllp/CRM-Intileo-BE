@@ -3,6 +3,8 @@ const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 
 const dealsController = require("../../controllers/deals/dealsController");
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
 
 router.post("/create-deal", verifyToken, dealsController.createDeal);
 router.get("/get-deals", verifyToken, dealsController.getDeals);
@@ -65,5 +67,8 @@ router.get(
   verifyToken,
   dealsController.markDealAsOpen
 );
+// router.post("/import-deals", verifyToken,upload.single('file'), dealsController.bulkImportDeals);
+// router.post("/import-deals-without-linking", verifyToken, upload.single('file'), dealsController.bulkImportDealsNoCrosslink);
 
 module.exports = router;
+

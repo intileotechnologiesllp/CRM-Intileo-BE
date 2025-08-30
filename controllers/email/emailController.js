@@ -764,7 +764,7 @@ const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, 
     })
   );
   
-  // Wait for all saves to complete
+  // Wait for all saves to complete 
   await Promise.all(savePromises);
   
   const totalTime = (Date.now() - startTime) / 1000;
@@ -2235,7 +2235,13 @@ const processEmailsLightweight = async (emails, userID, provider, strategy = 'NO
               
               // Threading
               inReplyTo: parsed.inReplyTo || parsed.headers?.get('in-reply-to'),
-              references: parsed.references || parsed.headers?.get('references')
+              references: (() => {
+                const refs = parsed.references || parsed.headers?.get('references');
+                if (Array.isArray(refs)) {
+                  return refs.join(' ');
+                }
+                return refs || null;
+              })()
             };
             
             console.log('✅ PARSED HEADERS:', {
@@ -2276,7 +2282,17 @@ const processEmailsLightweight = async (emails, userID, provider, strategy = 'NO
             if (currentHeader && currentValue) {
               parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
             }
-            
+
+            // 🔧 FIX: Ensure references field is properly handled
+            if (parsedHeaders['references']) {
+              // References can be multi-line or array, ensure it's properly formatted
+              if (Array.isArray(parsedHeaders['references'])) {
+                parsedHeaders['references'] = parsedHeaders['references'].join(' ').trim();
+              } else {
+                parsedHeaders['references'] = parsedHeaders['references'].trim();
+              }
+            }
+
             console.log('📋 Manual parsed headers:', Object.keys(parsedHeaders));
           }
         } else {
@@ -2393,11 +2409,17 @@ const processEmailsLightweight = async (emails, userID, provider, strategy = 'NO
                   email.envelope?.inReplyTo || 
                   email.inReplyTo || null,
                   
-        references: parsedHeaders.references || 
-                   parsedHeaders['references'] ||
-                   email.attributes?.envelope?.references ||
-                   email.envelope?.references || 
-                   email.references || null,
+        references: (() => {
+          const refs = parsedHeaders.references || 
+                      parsedHeaders['references'] ||
+                      email.attributes?.envelope?.references ||
+                      email.envelope?.references || 
+                      email.references;
+          if (Array.isArray(refs)) {
+            return refs.join(' ');
+          }
+          return refs || null;
+        })(),
         
         // Date handling with multiple fallbacks and validation
         createdAt: (() => {
@@ -2793,6 +2815,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
         // threadId,
         createdAt: parsedEmail.date || new Date(),
         isRead: isRead, // Save read/unread status
+        uid: recentUID, // Store the IMAP UID for future body fetching
       };
 
       console.log(`Processing recent email: ${emailData.messageId}`);
@@ -4643,6 +4666,85 @@ const getAggregatedLinkedEntities = async (emails) => {
   }
 };
 
+// Helper function to fetch body for a single email on-demand
+const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
+  try {
+    // Check if body needs fetching
+    if ((email.body && email.body.trim() !== '') &&
+        email.body_fetch_status !== 'pending') {
+      console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Email ${email.emailID} already has body`);
+      return email;
+    }
+
+    console.log(`[fetchEmailBodyOnDemandForEmail] 🔍 Fetching body for related email ${email.emailID}...`);
+
+    const emailBodyService = require('../../services/emailBodyServiceSimple');
+
+    // Get user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+
+    if (!userCredential) {
+      console.log(`[fetchEmailBodyOnDemandForEmail] ❌ No credentials found for masterUserID ${masterUserID}`);
+      return email;
+    }
+
+    // Fetch the body
+    const updatedEmail = await emailBodyService.fetchEmailBodyOnDemand(
+      email.emailID,
+      masterUserID,
+      userCredential.provider || 'gmail'
+    );
+
+    if (updatedEmail && updatedEmail.success && (updatedEmail.bodyText || updatedEmail.bodyHtml)) {
+      // Determine final body content
+      let finalBody = '';
+      if (updatedEmail.bodyHtml) {
+        finalBody = updatedEmail.bodyHtml;
+      } else if (updatedEmail.bodyText) {
+        finalBody = updatedEmail.bodyText;
+      }
+
+      // Update the email object
+      email.body = finalBody;
+      email.body_fetch_status = 'fetched';
+
+      // Update the database record
+      await Email.update(
+        {
+          body: email.body || '',
+          body_fetch_status: 'fetched'
+        },
+        { where: { emailID: email.emailID } }
+      );
+
+      console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Successfully fetched body for email ${email.emailID} - Body length: ${email.body.length}`);
+    } else {
+      console.log(`[fetchEmailBodyOnDemandForEmail] ⚠️ Failed to fetch body for email ${email.emailID}`);
+      // Mark as failed in database
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: email.emailID } }
+      );
+    }
+
+    return email;
+  } catch (error) {
+    console.error(`[fetchEmailBodyOnDemandForEmail] ❌ Error fetching body for email ${email.emailID}:`, error.message);
+    // Mark as failed in database
+    try {
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: email.emailID } }
+      );
+    } catch (dbError) {
+      console.error(`[fetchEmailBodyOnDemandForEmail] ❌ Error updating database:`, dbError.message);
+    }
+    return email;
+  }
+};
+
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
@@ -4731,21 +4833,28 @@ exports.getOneEmail = async (req, res) => {
           
           // Update the main email object with fetched body
           if (updatedEmail && updatedEmail.success && (updatedEmail.bodyText || updatedEmail.bodyHtml)) {
-            // Use bodyText first, fallback to bodyHtml
-            mainEmail.body = updatedEmail.bodyText || updatedEmail.bodyHtml || '';
-            mainEmail.textBody = updatedEmail.bodyText || '';
-            mainEmail.htmlBody = updatedEmail.bodyHtml || '';
+            // Return only HTML content if available, otherwise use text content
+            let finalBody = '';
+            if (updatedEmail.bodyHtml) {
+              // HTML content available - use it
+              finalBody = updatedEmail.bodyHtml;
+            } else if (updatedEmail.bodyText) {
+              // Only text available - use it
+              finalBody = updatedEmail.bodyText;
+            }
+
+            mainEmail.body = finalBody;
             mainEmail.body_fetch_status = 'fetched';
-            
+
             // Also update the database record
             await Email.update(
-              { 
-                body: mainEmail.body,
-                body_fetch_status: 'fetched' 
+              {
+                body: mainEmail.body || '',
+                body_fetch_status: 'fetched'
               },
               { where: { emailID: mainEmail.emailID } }
             );
-            
+
             console.log(`[Phase 2] ✅ ON-DEMAND: Email ${emailId} body fetched successfully - Body length: ${mainEmail.body.length}`);
           } else {
             console.log(`[Phase 2] ⚠️ ON-DEMAND: Email ${emailId} body fetch failed or returned empty result`);
@@ -4843,13 +4952,76 @@ exports.getOneEmail = async (req, res) => {
       ],
       order: [["createdAt", "ASC"]],
     });
+
+    // Remove the main email from relatedEmails (by messageId) BEFORE checking for enhanced threading
+    relatedEmails = relatedEmails.filter(
+      (email) => email.messageId !== mainEmail.messageId
+    );
+
+    // 🚀 ENHANCED THREADING: If no related emails found via standard threading,
+    // try subject-based and participant-based matching
+    if (relatedEmails.length === 0 && mainEmail.subject) {
+      console.log(`[getOneEmail] 🔍 No standard thread matches found for email ${emailId}, trying enhanced threading...`);
+
+      // Extract base subject (remove Re:, Fwd:, etc.)
+      const baseSubject = mainEmail.subject
+        .replace(/^(Re|Fwd|Fw):\s*/i, '')
+        .trim();
+
+      // Get participants from main email
+      const participants = [
+        mainEmail.sender,
+        mainEmail.recipient,
+        ...(mainEmail.cc ? mainEmail.cc.split(',').map(cc => cc.trim()) : []),
+        ...(mainEmail.bcc ? mainEmail.bcc.split(',').map(bcc => bcc.trim()) : [])
+      ].filter(Boolean);
+
+      // Find emails with similar subjects and overlapping participants
+      const subjectBasedEmails = await Email.findAll({
+        where: {
+          [Sequelize.Op.and]: [
+            {
+              [Sequelize.Op.or]: [
+                { subject: { [Sequelize.Op.like]: `%${baseSubject}%` } },
+                { subject: { [Sequelize.Op.like]: `%Re: ${baseSubject}%` } },
+                { subject: { [Sequelize.Op.like]: `%Fwd: ${baseSubject}%` } },
+                { subject: { [Sequelize.Op.like]: `%Fw: ${baseSubject}%` } }
+              ]
+            },
+            {
+              [Sequelize.Op.or]: [
+                { sender: { [Sequelize.Op.in]: participants } },
+                { recipient: { [Sequelize.Op.in]: participants } },
+                { cc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } },
+                { bcc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } }
+              ]
+            }
+          ],
+          folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
+          messageId: { [Sequelize.Op.ne]: mainEmail.messageId } // Exclude main email
+        },
+        include: [
+          {
+            model: Attachment,
+            as: "attachments",
+          },
+        ],
+        order: [["createdAt", "ASC"]],
+        limit: 20 // Limit to prevent too many false matches
+      });
+
+      if (subjectBasedEmails.length > 0) {
+        console.log(`[getOneEmail] ✅ Found ${subjectBasedEmails.length} emails via enhanced threading for subject: "${baseSubject}"`);
+        relatedEmails = subjectBasedEmails;
+      }
+    }
     // Remove the main email from relatedEmails
     //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
     // Remove the main email from relatedEmails (by messageId)
 
-    relatedEmails = relatedEmails.filter(
-      (email) => email.messageId !== mainEmail.messageId
-    );
+    // relatedEmails = relatedEmails.filter(
+    //   (email) => email.messageId !== mainEmail.messageId
+    // );
 
     // Deduplicate relatedEmails by messageId (keep the first occurrence)
     // const seen = new Set();
@@ -4896,6 +5068,36 @@ exports.getOneEmail = async (req, res) => {
     // const sortedRelatedEmails = conversation.slice(1);
 
     // Handle attachments appropriately for related emails
+    // 🚀 PHASE 2: Fetch bodies for related emails on-demand
+    console.log(`[getOneEmail] 🔍 Processing ${relatedEmails.length} related emails for body fetching...`);
+
+    for (let i = 0; i < relatedEmails.length; i++) {
+      const relatedEmail = relatedEmails[i];
+
+      // Check if body needs fetching (similar to main email logic)
+      if ((!relatedEmail.body || relatedEmail.body === null || relatedEmail.body.trim() === '') ||
+          (relatedEmail.body_fetch_status === 'pending' && (!relatedEmail.body || relatedEmail.body === null))) {
+
+        console.log(`[getOneEmail] 🔍 ON-DEMAND: Related email ${relatedEmail.emailID} body missing or pending, fetching now...`);
+
+        try {
+          // Use the helper function to fetch body for this related email
+          const updatedEmail = await fetchEmailBodyOnDemandForEmail(relatedEmail, masterUserID);
+
+          // Update the email in the array with the fetched body
+          relatedEmails[i] = updatedEmail;
+
+          console.log(`[getOneEmail] ✅ ON-DEMAND: Related email ${relatedEmail.emailID} body fetched successfully`);
+        } catch (bodyFetchError) {
+          console.log(`[getOneEmail] ❌ ON-DEMAND: Failed to fetch body for related email ${relatedEmail.emailID}:`, bodyFetchError.message);
+          // Continue with existing data - conversation still works!
+        }
+      } else {
+        console.log(`[getOneEmail] ✅ BODY EXISTS: Related email ${relatedEmail.emailID} already has body (length: ${relatedEmail.body ? relatedEmail.body.length : 0})`);
+      }
+    }
+
+    // Now clean the bodies (whether fetched or existing)
     relatedEmails.forEach((email) => {
       email.body = cleanEmailBody(email.body);
       email.attachments = email.attachments.map((attachment) => {
@@ -4918,8 +5120,6 @@ exports.getOneEmail = async (req, res) => {
     // 🔧 ENSURE: Main email has the latest body content
     if (sortedMainEmail.emailID === mainEmail.emailID) {
       sortedMainEmail.body = mainEmail.body;
-      sortedMainEmail.textBody = mainEmail.textBody;
-      sortedMainEmail.htmlBody = mainEmail.htmlBody;
       sortedMainEmail.body_fetch_status = mainEmail.body_fetch_status;
     }
 

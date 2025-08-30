@@ -118,6 +118,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
         subject: email.subject,
         bodyText: email.body,
         bodyHtml: '',
+        body: email.body, // Add the combined body for controller use
         source: 'database'
       };
     }
@@ -171,17 +172,26 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
     // Update email in database
     const bodyText = parsedEmail.text || '';
     const bodyHtml = parsedEmail.html || '';
-    const finalBody = bodyHtml || bodyText || '';
-    
+
+    // Return only HTML content if available, otherwise use text content
+    let finalBody = '';
+    if (bodyHtml) {
+      // HTML content available - use it
+      finalBody = bodyHtml;
+    } else if (bodyText) {
+      // Only text available - use it
+      finalBody = bodyText;
+    }
+
     if (finalBody) {
       await Email.update(
-        { 
+        {
           body: finalBody,
           body_fetch_status: 'fetched'
         },
         { where: { emailID: emailId } }
       );
-      
+
       console.log(`✅ Email ${emailId} body updated in database, length: ${finalBody.length}`);
     }
     
@@ -192,6 +202,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
       subject: email.subject,
       bodyText: bodyText,
       bodyHtml: bodyHtml,
+      body: finalBody, // Return the final body (HTML preferred)
       source: 'imap'
     };
     

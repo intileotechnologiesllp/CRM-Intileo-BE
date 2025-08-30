@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const leadController = require("../../controllers/leads/leadController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
 
 // Create a lead (Admin only)
 router.post("/create", verifyToken, leadController.createLead);
@@ -61,5 +63,6 @@ router.post("/bulk-edit", verifyToken, leadController.bulkEditLeads);
 router.post("/bulk-delete", verifyToken, leadController.bulkDeleteLeads);
 router.post("/bulk-archive", verifyToken, leadController.bulkArchiveLeads);
 router.post("/bulk-unarchive", verifyToken, leadController.bulkUnarchiveLeads);
+// router.post('/bulk-import', verifyToken,upload.single('file'), leadController.bulkImportLeads);
 
 module.exports = router;
