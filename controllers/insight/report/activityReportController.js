@@ -60,76 +60,76 @@ exports.createActivityReport = async (req, res) => {
       "createdAt",
 
       // Deal table columns (prefix with Deal.)
-      "Deal.title",
-      "Deal.value",
-      "Deal.currency",
-      "Deal.pipeline",
-      "Deal.pipelineStage",
-      "Deal.label",
-      "Deal.expectedCloseDate",
-      "Deal.sourceChannel",
-      "Deal.serviceType",
-      "Deal.proposalValue",
-      "Deal.proposalCurrency",
-      "Deal.esplProposalNo",
-      "Deal.projectLocation",
-      "Deal.organizationCountry",
-      "Deal.proposalSentDate",
-      "Deal.sourceRequired",
-      "Deal.questionerShared",
-      "Deal.sectorialSector",
-      "Deal.sbuClass",
-      "Deal.phone",
-      "Deal.email",
-      "Deal.sourceOrgin",
-      "Deal.status",
-      "Deal.productName",
-      "Deal.weightedValue",
-      "Deal.probability",
-      "Deal.stage",
-      "Deal.lostReason",
-      "Deal.archiveStatus",
+      "ActivityDeal.title",
+      "ActivityDeal.value",
+      "ActivityDeal.currency",
+      "ActivityDeal.pipeline",
+      "ActivityDeal.pipelineStage",
+      "ActivityDeal.label",
+      "ActivityDeal.expectedCloseDate",
+      "ActivityDeal.sourceChannel",
+      "ActivityDeal.serviceType",
+      "ActivityDeal.proposalValue",
+      "ActivityDeal.proposalCurrency",
+      "ActivityDeal.esplProposalNo",
+      "ActivityDeal.projectLocation",
+      "ActivityDeal.organizationCountry",
+      "ActivityDeal.proposalSentDate",
+      "ActivityDeal.sourceRequired",
+      "ActivityDeal.questionerShared",
+      "ActivityDeal.sectorialSector",
+      "ActivityDeal.sbuClass",
+      "ActivityDeal.phone",
+      "ActivityDeal.email",
+      "ActivityDeal.sourceOrgin",
+      "ActivityDeal.status",
+      "ActivityDeal.productName",
+      "ActivityDeal.weightedValue",
+      "ActivityDeal.probability",
+      "ActivityDeal.stage",
+      "ActivityDeal.lostReason",
+      "ActivityDeal.archiveStatus",
 
       // Lead table columns (prefix with Lead.)
-      "Lead.contactPerson",
-      "Lead.organization",
-      "Lead.title",
-      "Lead.valueLabels",
-      "Lead.expectedCloseDate",
-      "Lead.sourceChannel",
-      "Lead.sourceChannelID",
-      "Lead.serviceType",
-      "Lead.scopeOfServiceType",
-      "Lead.phone",
-      "Lead.email",
-      "Lead.company",
-      "Lead.proposalValue",
-      "Lead.esplProposalNo",
-      "Lead.projectLocation",
-      "Lead.organizationCountry",
-      "Lead.proposalSentDate",
-      "Lead.status",
-      "Lead.SBUClass",
-      "Lead.sectoralSector",
-      "Lead.sourceOrigin",
-      "Lead.leadQuality",
-      "Lead.value",
-      "Lead.proposalValueCurrency",
-      "Lead.valueCurrency",
+      "ActivityLead.contactPerson",
+      "ActivityLead.organization",
+      "ActivityLead.title",
+      "ActivityLead.valueLabels",
+      "ActivityLead.expectedCloseDate",
+      "ActivityLead.sourceChannel",
+      "ActivityLead.sourceChannelID",
+      "ActivityLead.serviceType",
+      "ActivityLead.scopeOfServiceType",
+      "ActivityLead.phone",
+      "ActivityLead.email",
+      "ActivityLead.company",
+      "ActivityLead.proposalValue",
+      "ActivityLead.esplProposalNo",
+      "ActivityLead.projectLocation",
+      "ActivityLead.organizationCountry",
+      "ActivityLead.proposalSentDate",
+      "ActivityLead.status",
+      "ActivityLead.SBUClass",
+      "ActivityLead.sectoralSector",
+      "ActivityLead.sourceOrigin",
+      "ActivityLead.leadQuality",
+      "ActivityLead.value",
+      "ActivityLead.proposalValueCurrency",
+      "ActivityLead.valueCurrency",
 
       // Organization table columns (prefix with Organization.)
-      "Organization.organization",
-      "Organization.organizationLabels",
-      "Organization.address",
+      "ActivityOrganization.organization",
+      "ActivityOrganization.organizationLabels",
+      "ActivityOrganization.address",
 
       // Person table columns (prefix with Person.)
-      "Person.contactPerson",
-      "Person.postalAddress",
-      "Person.email",
-      "Person.phone",
-      "Person.jobTitle",
-      "Person.personLabels",
-      "Person.organization",
+      "ActivityPerson.contactPerson",
+      "ActivityPerson.postalAddress",
+      "ActivityPerson.email",
+      "ActivityPerson.phone",
+      "ActivityPerson.jobTitle",
+      "ActivityPerson.personLabels",
+      "ActivityPerson.organization",
     ];
 
     // For Activity Performance reports, generate the data
@@ -359,8 +359,8 @@ async function generateExistingActivityPerformanceData(
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Activity.${xaxis}`);
-    attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
+    groupBy.push(`Activity.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Activity.${existingxaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
@@ -386,7 +386,7 @@ async function generateExistingActivityPerformanceData(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`Activity.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -654,34 +654,34 @@ function getConditionObject(column, operator, value, includeModels = []) {
     let modelConfig;
 
     switch (tableAlias) {
-      case "Deal":
+      case "ActivityDeal":
         modelConfig = {
           model: Deal,
-          as: "Deal",
+          as: "ActivityDeal",
           required: false, // Use false to avoid INNER JOIN issues
           attributes: [],
         };
         break;
-      case "Lead":
+      case "ActivityLead":
         modelConfig = {
           model: Lead,
-          as: "Lead",
+          as: "ActivityLead",
           required: false,
           attributes: [],
         };
         break;
-      case "Organization":
+      case "ActivityOrganization":
         modelConfig = {
           model: Organization,
-          as: "Organization",
+          as: "ActivityOrganization",
           required: false,
           attributes: [],
         };
         break;
-      case "Person":
+      case "ActivityPerson":
         modelConfig = {
           model: Person,
-          as: "Person",
+          as: "ActivityPerson",
           required: false,
           attributes: [],
         };

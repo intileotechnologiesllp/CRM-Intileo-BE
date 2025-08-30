@@ -5,10 +5,11 @@ const Lead = require("../../../models/leads/leadsModel");
 const Organization = require("../../../models/leads/leadOrganizationModel");
 const Person = require("../../../models/leads/leadPersonModel");
 const MasterUser = require("../../../models/master/masterUserModel");
+const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 
-exports.createLeadPerformReport = async (req, res) => {
+exports.createPersonReport = async (req, res) => {
   try {
     const {
       reportId,
@@ -25,82 +26,50 @@ exports.createLeadPerformReport = async (req, res) => {
 
     // Define available options for xaxis and yaxis
     const xaxisArray = [
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
       "contactPerson",
       "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-      "creator",
-      "creatorstatus"
+      "email",
+      "phone",
+      "notes",
+      "postalAddress",
+      "jobTitle",
+      "personLabels",
+      "organiztion",
     ];
 
-    const yaxisArray = ["no of leads", "proposalValue", "value"];
+    const yaxisArray = ["no of people"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
       "contactPerson",
       "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
+      "email",
+      "phone",
+      "notes",
+      "postalAddress",
+      "jobTitle",
+      "personLabels",
+      "organiztion",
+
 
       // Organization table columns (prefix with Organization.)
       "LeadOrganization.organization",
       "LeadOrganization.organizationLabels",
       "LeadOrganization.address",
 
-      // Person table columns (prefix with Person.)
-      "LeadPerson.contactPerson",
-      "LeadPerson.postalAddress",
-      "LeadPerson.email",
-      "LeadPerson.phone",
-      "LeadPerson.jobTitle",
-      "LeadPerson.personLabels",
-      "LeadPerson.organization",
     ];
 
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type) {
-      if (entity === "Lead" && type === "Performance") {
+    if (entity && type && !reportId) {
+      if (entity === "Contact" && type === "Person") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Lead Performance reports",
+              "X-axis and Y-axis are required for Contact Person reports",
           });
         }
 
@@ -113,8 +82,7 @@ exports.createLeadPerformReport = async (req, res) => {
             yaxis,
             filters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -127,16 +95,15 @@ exports.createLeadPerformReport = async (req, res) => {
             filters: filters || {},
           };
         } catch (error) {
-          console.error("Error generating lead performance data:", error);
+          console.error("Error generating Contact Person data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate lead performance data",
+            message: "Failed to generate Contact Person data",
             error: error.message,
           });
         }
       }
-    } 
-    else if (reportId) {
+    } else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -155,13 +122,13 @@ exports.createLeadPerformReport = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      if (existingentity === "Lead" && existingtype === "Performance") {
-        // Validate required fields for performance reports
+      if (existingentity === "Contact" && existingtype === "Person") {
+        // Validate required fields for Person reports
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Lead Performance reports",
+              "X-axis and Y-axis are required for Contact Person reports",
           });
         }
 
@@ -174,8 +141,7 @@ exports.createLeadPerformReport = async (req, res) => {
             existingyaxis,
             existingfilters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -189,10 +155,10 @@ exports.createLeadPerformReport = async (req, res) => {
             filters: existingfilters || {},
           };
         } catch (error) {
-          console.error("Error generating lead performance data:", error);
+          console.error("Error generating Contact Person data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate lead performance data",
+            message: "Failed to generate Contact Person data",
             error: error.message,
           });
         }
@@ -212,13 +178,13 @@ exports.createLeadPerformReport = async (req, res) => {
       },
     });
   } catch (error) {
-      console.error("Error creating reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to create reports",
-        error: error.message,
-      });
-    }
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
 };
 
 async function generateExistingActivityPerformanceData(
@@ -228,8 +194,7 @@ async function generateExistingActivityPerformanceData(
   existingyaxis,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -300,7 +265,7 @@ async function generateExistingActivityPerformanceData(
   let attributes = [];
 
   // Handle existingxaxis special cases
-  if (existingxaxis === "creator") {
+  if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -309,48 +274,38 @@ async function generateExistingActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (existingxaxis === "creatorstatus") {
+  } else if (existingxaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
+      attributes: ["masterUserID", "team"],
       required: true,
     });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    groupBy.push("assignedUser.team");
+    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
+    groupBy.push(`LeadPerson.${existingxaxis}`);
+    attributes.push([Sequelize.col(`LeadPerson.${existingxaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
-  if (existingyaxis === "no of leads") {
+  if (existingyaxis === "no of people") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("leadId")),
-      "yValue",
-    ]);
-  } else if (existingyaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
-      "yValue",
-    ]);
-  } else if (existingyaxis === "value") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("value")),
+      Sequelize.fn("COUNT", Sequelize.col("personId")),
       "yValue",
     ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${existingyaxis}`)),
       "yValue",
     ]);
   }
 
   // Get total count for pagination
-  const totalCountResult = await Lead.findAll({
+  const totalCountResult = await Person.findAll({
     where: baseWhere,
     attributes: [
       [
@@ -369,7 +324,7 @@ async function generateExistingActivityPerformanceData(
   const totalPages = Math.ceil(totalCount / limit);
 
   // Execute query with pagination
-  const results = await Lead.findAll({
+  const results = await Person.findAll({
     where: baseWhere,
     attributes: attributes,
     include: includeModels,
@@ -398,7 +353,7 @@ async function generateExistingActivityPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-}
+};
 
 // Helper function to generate activity performance data with pagination
 async function generateActivityPerformanceData(
@@ -408,8 +363,7 @@ async function generateActivityPerformanceData(
   yaxis,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
 
@@ -480,7 +434,8 @@ async function generateActivityPerformanceData(
   let groupBy = [];
   let attributes = [];
 
-  if (xaxis === "creator") {
+  // Handle xaxis special cases
+  if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -489,43 +444,52 @@ async function generateActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "creatorstatus") {
+  } else if (xaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
+      attributes: ["masterUserID", "team"],
       required: true,
     });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    groupBy.push("assignedUser.team");
+    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
+    // For regular columns, explicitly specify the LeadPeople table
+    groupBy.push(`LeadPerson.${xaxis}`);
+    attributes.push([Sequelize.col(`LeadPerson.${xaxis}`), "xValue"]);
   }
 
-  // Handle existingyaxis
-  if (yaxis === "no of leads") {
+  // Handle yaxis
+  if (yaxis === "no of people") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("leadId")),
+      Sequelize.fn("COUNT", Sequelize.col("personId")),
       "yValue",
     ]);
-  } else if (yaxis === "proposalValue") {
+  } else if (yaxis === "duration") {
+    // Calculate average duration in hours
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      Sequelize.fn(
+        "AVG",
+        Sequelize.fn(
+          "TIMESTAMPDIFF",
+          Sequelize.literal("HOUR"),
+          Sequelize.col("startDateTime"),
+          Sequelize.col("endDateTime")
+        )
+      ),
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
+    // For other yaxis values, explicitly specify the LeadPeople table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${yaxis}`)),
       "yValue",
     ]);
   }
 
   // Get total count for pagination
-  const totalCountResult = await Lead.findAll({
+  const totalCountResult = await Person.findAll({
     where: baseWhere,
     attributes: [
       [
@@ -544,7 +508,7 @@ async function generateActivityPerformanceData(
   const totalPages = Math.ceil(totalCount / limit);
 
   // Execute query with pagination
-  const results = await Lead.findAll({
+  const results = await Person.findAll({
     where: baseWhere,
     attributes: attributes,
     include: includeModels,
@@ -573,16 +537,15 @@ async function generateActivityPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-}
+};
 
 // Helper function to convert operator strings to Sequelize operators
-// Enhanced helper function to handle related table conditions
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
   const hasRelation = column.includes(".");
-  let tableAlias = "Lead";
+  let tableAlias = "LeadPerson";
   let fieldName = column;
 
   if (hasRelation) {
@@ -603,26 +566,10 @@ function getConditionObject(column, operator, value, includeModels = []) {
     let modelConfig;
 
     switch (tableAlias) {
-      case "DealLeads":
-        modelConfig = {
-          model: Deal,
-          as: "DealLeads",
-          required: false, // Use false to avoid INNER JOIN issues
-          attributes: [],
-        };
-        break;
       case "LeadOrganization":
         modelConfig = {
           model: Organization,
           as: "LeadOrganization",
-          required: false,
-          attributes: [],
-        };
-        break;
-      case "LeadPerson":
-        modelConfig = {
-          model: Person,
-          as: "LeadPerson",
           required: false,
           attributes: [],
         };
@@ -650,7 +597,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     // Regular activity table column
     return getOperatorCondition(column, operator, conditionValue);
   }
-}
+};
 
 // Helper function to convert operator strings to Sequelize operators
 function getSequelizeOperator(operator) {
@@ -676,7 +623,7 @@ function getSequelizeOperator(operator) {
     default:
       return Op.eq;
   }
-}
+};
 
 // Helper function for operator conditions
 function getOperatorCondition(column, operator, value) {
@@ -706,12 +653,12 @@ function getOperatorCondition(column, operator, value) {
     default:
       return { [column]: { [op]: value } };
   }
-}
+};
 
-exports.saveLeadPerformReport = async (req, res) => {
+exports.savePersonReport = async (req, res) => {
   try {
     const {
-      dashboardIds,
+      dashboardIds, // Now expecting an array
       folderId,
       name,
       entity,
@@ -727,14 +674,14 @@ exports.saveLeadPerformReport = async (req, res) => {
     if (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId) {
       return res.status(400).json({
         success: false,
-        message: "Entity, type, xaxis, and yaxis are required",
+        message: "Entity, type, xaxis, yaxis, dashboardIds, and folderId are required",
       });
     }
 
     // Ensure dashboardIds is an array
     const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
 
-    // Verify dashboard ownership if dashboardId is provided
+    // Verify dashboard ownership for all provided dashboard IDs
     for (const dashboardId of dashboardIdsArray) {
       const dashboard = await DASHBOARD.findOne({
         where: { dashboardId, ownerId },
@@ -786,7 +733,7 @@ exports.saveLeadPerformReport = async (req, res) => {
     };
 
     if (existingReport) {
-      // Update existing report
+      // Update existing report for each dashboard
       const updateData = {
         ...(folderId !== undefined && { folderId }),
         ...(name !== undefined && { name }),
@@ -801,7 +748,7 @@ exports.saveLeadPerformReport = async (req, res) => {
       const updatedReport = await Report.findByPk(existingReport.reportId);
       reports.push(updatedReport);
     } else {
-      // Create new report
+      // Create new report for each dashboard
       const reportName = description || `${entity} ${type}`;
 
       for (const dashboardId of dashboardIdsArray) {
@@ -851,179 +798,7 @@ exports.saveLeadPerformReport = async (req, res) => {
   }
 };
 
-exports.updateLeadPerformReport = async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const { dashboardId, folderId } = req.body;
-    const ownerId = req.adminId;
-
-    // Validate that reportId is provided
-    if (!reportId) {
-      return res.status(400).json({
-        success: false,
-        message: "Report ID is required",
-      });
-    }
-
-    // Validate that at least one field is provided
-    if (dashboardId === undefined && folderId === undefined) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one of dashboardId or folderId is required",
-      });
-    }
-
-    // Find the report and verify ownership
-    const report = await Report.findOne({
-      where: {
-        reportId,
-        ownerId, // Ensure user can only update their own reports
-      },
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or access denied",
-      });
-    }
-
-    // Verify dashboard ownership if dashboardId is provided and changing
-    if (dashboardId !== undefined && dashboardId !== report.dashboardId) {
-      const dashboard = await DASHBOARD.findOne({
-        where: {
-          dashboardId,
-          ownerId,
-        },
-      });
-
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: "Dashboard not found or access denied",
-        });
-      }
-    }
-
-    // Verify folder ownership if folderId is provided and changing
-    if (folderId !== undefined && folderId !== report.folderId) {
-      const folder = await ReportFolder.findOne({
-        where: {
-          reportFolderId: folderId,
-          ownerId,
-        },
-      });
-
-      if (!folder) {
-        return res.status(404).json({
-          success: false,
-          message: "Folder not found or access denied",
-        });
-      }
-    }
-
-    // Prepare update data - only dashboardId and folderId
-    const updateData = {};
-    if (dashboardId !== undefined) updateData.dashboardId = dashboardId;
-    if (folderId !== undefined) updateData.folderId = folderId;
-
-    // Update the report
-    const [updatedCount] = await Report.update(updateData, {
-      where: {
-        reportId,
-        ownerId, // Ensure only the owner can update
-      },
-    });
-
-    if (updatedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or no changes made",
-      });
-    }
-
-    // Get the updated report
-    const updatedReport = await Report.findOne({
-      where: { reportId },
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Report updated successfully",
-      data: updatedReport,
-    });
-  } catch (error) {
-    console.error("Error updating report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update report",
-      error: error.message,
-    });
-  }
-};
-
-exports.deleteLeadPerformReport = async (req, res) => {
-  try {
-    const { reportId } = req.params;
-    const ownerId = req.adminId;
-
-    // Validate that reportId is provided
-    if (!reportId) {
-      return res.status(400).json({
-        success: false,
-        message: "Report ID is required",
-      });
-    }
-
-    // Find the report and verify ownership
-    const report = await Report.findOne({
-      where: {
-        reportId,
-        ownerId, // Ensure user can only delete their own reports
-      },
-    });
-
-    if (!report) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or access denied",
-      });
-    }
-
-    // Delete the report
-    const deletedCount = await Report.destroy({
-      where: {
-        reportId,
-        ownerId, // Ensure only the owner can delete
-      },
-    });
-
-    if (deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Report not found or already deleted",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Report deleted successfully",
-      data: {
-        reportId: parseInt(reportId),
-        deleted: true,
-      },
-    });
-  } catch (error) {
-    console.error("Error deleting report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete report",
-      error: error.message,
-    });
-  }
-};
-
-exports.getLeadPerformReportSummary = async (req, res) => {
+exports.getPersonReportSummary = async (req, res) => {
   try {
     const {
       reportId,
@@ -1042,14 +817,6 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Validate required fields
-    // if (!entity || !type) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Entity and type are required",
-    //   });
-    // }
-
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -1064,10 +831,10 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     // Handle search
     if (search) {
       baseWhere[Op.or] = [
-        { title: { [Op.like]: `%${search}%` } },
-        { value: { [Op.like]: `%${search}%` } },
-        { ownerName: { [Op.like]: `%${search}%` } },
-        { sourceOrigin: { [Op.like]: `%${search}%` } },
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { organization: { [Op.like]: `%${search}%` } },
+        { jobTitle: { [Op.like]: `%${search}%` } },
+        { postalAddress: { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -1113,53 +880,50 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     }
 
     // Build order clause
-    const order = [];
-    if (sortBy === "Owner") {
-      order.push([
-        { model: MasterUser, as: "Owner" },
-        "name",
-        sortOrder,
-      ]);
-    } else if (sortBy === "dueDate") {
-      order.push(["endDateTime", sortOrder]);
-    } else if (sortBy === "createdAt") {
-      order.push(["createdAt", sortOrder]);
-    } else {
-      order.push([sortBy, sortOrder]);
-    }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
+    const order = [[sortBy, sortOrder]];
 
     // Get total count
-    const totalCount = await Lead.count({
+    const totalCount = await Person.count({
       where: baseWhere,
-      include: include,
     });
 
     // Get paginated results
-    const leads = await Lead.findAll({
+    const persons = await Person.findAll({
       where: baseWhere,
-      include: include,
       order: order,
       limit: parseInt(limit),
       offset: offset,
       attributes: [
-        "leadId",
-        "title",
-        "value",
-        "ownerName",
-        "status",
+        "personId",
+        "contactPerson",
+        "organization",
         "createdAt",
+        "updatedAt",
+        "masterUserID" // Include masterUserID if you need it
       ],
     });
+
+    // If you need user information, you'll need to fetch it separately
+    // since there's no association between Person and MasterUser
+    let userMap = {};
+    if (persons.length > 0) {
+      // Get all unique user IDs from persons
+      const userIds = [...new Set(persons.map(person => person.masterUserID))];
+      
+      // Fetch users in bulk
+      const users = await MasterUser.findAll({
+        where: {
+          masterUserID: userIds
+        },
+        attributes: ["masterUserID", "name", "email"]
+      });
+      
+      // Create a map for easy lookup
+      userMap = users.reduce((map, user) => {
+        map[user.masterUserID] = user;
+        return map;
+      }, {});
+    }
 
     // Generate report data (like your existing performance report)
     let reportData = [];
@@ -1247,30 +1011,31 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       }
     }
 
-    // Format activities for response
-    const formattedActivities = leads.map((lead) => ({
-      id: lead.leadId,
-      title: lead.title,
-      value: lead.value,
-      ownerName: lead.ownerName,
-      status: lead.status,
-      createdAt: lead.createdAt,
-      assignedTo: lead.Owner
-        ? {
-            id: lead.Owner.masterUserID,
-            name: lead.Owner.name,
-            email: lead.Owner.email,
-          }
-        : null,
-    }));
+    // Format persons for response
+    const formattedPersons = persons.map((person) => {
+      const user = userMap[person.masterUserID];
+      
+      return {
+        id: person.personId,
+        contactPerson: person.contactPerson,
+        organization: person.organization,
+        updatedAt: person.updatedAt,
+        createdAt: person.createdAt,
+        assignedTo: user ? {
+          id: user.masterUserID,
+          name: user.name,
+          email: user.email,
+        } : null,
+      };
+    });
 
     const totalPages = Math.ceil(totalCount / limit);
 
     res.status(200).json({
       success: true,
-      message: "Leads data retrieved successfully",
+      message: "Persons data retrieved successfully",
       data: {
-        activities: formattedActivities,
+        activities: formattedPersons,
         reportData: reportData,
         summary: summary,
       },
@@ -1284,17 +1049,285 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving leads data:", error);
+    console.error("Error retrieving Persons data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve leads data",
+      message: "Failed to retrieve Persons data",
       error: error.message,
     });
   }
 };
+// exports.getPersonReportSummary = async (req, res) => {
+//   try {
+//     const {
+//       reportId,
+//       entity,
+//       type,
+//       xaxis,
+//       yaxis,
+//       filters,
+//       page = 1,
+//       limit = 200,
+//       search = "",
+//       sortBy = "createdAt",
+//       sortOrder = "DESC",
+//     } = req.body;
+
+//     const ownerId = req.adminId;
+//     const role = req.role;
+
+//     // Validate required fields
+//     // if (!entity || !type) {
+//     //   return res.status(400).json({
+//     //     success: false,
+//     //     message: "Entity and type are required",
+//     //   });
+//     // }
+
+//     // Calculate offset for pagination
+//     const offset = (page - 1) * limit;
+
+//     // Base where condition
+//     const baseWhere = {};
+
+//     // If user is not admin, filter by ownerId
+//     if (role !== "admin") {
+//       baseWhere.masterUserID = ownerId;
+//     }
+
+//     // Handle search
+//     if (search) {
+//       baseWhere[Op.or] = [
+//         { contactPerson: { [Op.like]: `%${search}%` } },
+//         { organization: { [Op.like]: `%${search}%` } },
+//         { jobTitle: { [Op.like]: `%${search}%` } },
+//         { postalAddress: { [Op.like]: `%${search}%` } },
+//         // { "$assignedUser.name$": { [Op.like]: `%${search}%` } },
+//       ];
+//     }
+
+//     // Handle filters if provided
+//     if (filters && filters.conditions) {
+//       const validConditions = filters.conditions.filter(
+//         (cond) => cond.value !== undefined && cond.value !== ""
+//       );
+
+//       if (validConditions.length > 0) {
+//         // Start with the first condition
+//         let combinedCondition = getConditionObject(
+//           validConditions[0].column,
+//           validConditions[0].operator,
+//           validConditions[0].value
+//         );
+
+//         // Add remaining conditions with their logical operators
+//         for (let i = 1; i < validConditions.length; i++) {
+//           const currentCondition = getConditionObject(
+//             validConditions[i].column,
+//             validConditions[i].operator,
+//             validConditions[i].value
+//           );
+
+//           const logicalOp = (
+//             filters.logicalOperators[i - 1] || "AND"
+//           ).toUpperCase();
+
+//           if (logicalOp === "AND") {
+//             combinedCondition = {
+//               [Op.and]: [combinedCondition, currentCondition],
+//             };
+//           } else {
+//             combinedCondition = {
+//               [Op.or]: [combinedCondition, currentCondition],
+//             };
+//           }
+//         }
+
+//         Object.assign(baseWhere, combinedCondition);
+//       }
+//     }
+
+//     // Build order clause
+//     const order = [];
+//     if (sortBy === "assignedUser") {
+//       order.push([
+//         { model: MasterUser, as: "assignedUser" },
+//         "name",
+//         sortOrder,
+//       ]);
+//     } else if (sortBy === "dueDate") {
+//       order.push(["endDateTime", sortOrder]);
+//     } else if (sortBy === "createdAt") {
+//       order.push(["createdAt", sortOrder]);
+//     } else {
+//       order.push([sortBy, sortOrder]);
+//     }
+
+//     // Include assigned user
+//     const include = [
+//       {
+//         model: MasterUser,
+//         as: "assignedUser",
+//         attributes: ["masterUserID", "name", "email"],
+//         required: false,
+//       },
+//     ];
+
+//     // Get total count
+//     const totalCount = await Person.count({
+//       where: baseWhere,
+//       include: include,
+//     });
+
+//     // Get paginated results
+//     const persons = await Person.findAll({
+//       where: baseWhere,
+//       include: include,
+//       order: order,
+//       limit: parseInt(limit),
+//       offset: offset,
+//       attributes: [
+//         "personId",
+//         "contactPerson",
+//         "organization",
+//         "createdAt",
+//         "updatedAt",
+//       ],
+//     });
+
+//     // Generate report data (like your existing performance report)
+//     let reportData = [];
+//     let summary = {};
+
+//     if (xaxis && yaxis && !reportId) {
+//       const reportResult = await generateActivityPerformanceData(
+//         ownerId,
+//         role,
+//         xaxis,
+//         yaxis,
+//         filters,
+//         page,
+//         limit
+//       );
+//       reportData = reportResult.data;
+
+//       // Calculate summary statistics
+//       if (reportData.length > 0) {
+//         const totalValue = reportData.reduce(
+//           (sum, item) => sum + (item.value || 0),
+//           0
+//         );
+//         const avgValue = totalValue / reportData.length;
+//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
+//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
+
+//         summary = {
+//           totalRecords: totalCount,
+//           totalCategories: reportData.length,
+//           totalValue: totalValue,
+//           avgValue: parseFloat(avgValue.toFixed(2)),
+//           maxValue: maxValue,
+//           minValue: minValue,
+//         };
+//       }
+//     } else if (!xaxis && !yaxis && reportId) {
+//       const existingReports = await Report.findOne({
+//         where: { reportId },
+//       });
+
+//       const {
+//         entity: existingentity,
+//         type: existingtype,
+//         config: configString,
+//       } = existingReports.dataValues;
+
+//       // Parse the config JSON string
+//       const config = JSON.parse(configString);
+//       const {
+//         xaxis: existingxaxis,
+//         yaxis: existingyaxis,
+//         filters: existingfilters,
+//       } = config;
+
+//       const reportResult = await generateActivityPerformanceData(
+//         ownerId,
+//         role,
+//         existingxaxis,
+//         existingyaxis,
+//         existingfilters,
+//         page,
+//         limit
+//       );
+//       reportData = reportResult.data;
+
+//       // Calculate summary statistics
+//       if (reportData.length > 0) {
+//         const totalValue = reportData.reduce(
+//           (sum, item) => sum + (item.value || 0),
+//           0
+//         );
+//         const avgValue = totalValue / reportData.length;
+//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
+//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
+
+//         summary = {
+//           totalRecords: totalCount,
+//           totalCategories: reportData.length,
+//           totalValue: totalValue,
+//           avgValue: parseFloat(avgValue.toFixed(2)),
+//           maxValue: maxValue,
+//           minValue: minValue,
+//         };
+//       }
+//     }
+
+//     // Format activities for response
+//     const formattedPersons = persons.map((person) => ({
+//       id: person.personId,
+//       contactPerson: person.contactPerson,
+//       organization: person.organization,
+//       updatedAt: person.updatedAt,
+//       createdAt: person.createdAt,
+//       assignedTo: person.assignedUser
+//         ? {
+//             id: person.assignedUser.masterUserID,
+//             name: person.assignedUser.name,
+//             email: person.assignedUser.email,
+//           }
+//         : null,
+//     }));
+
+//     const totalPages = Math.ceil(totalCount / limit);
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Persons data retrieved successfully",
+//       data: {
+//         activities: formattedPersons,
+//         reportData: reportData,
+//         summary: summary,
+//       },
+//       pagination: {
+//         currentPage: parseInt(page),
+//         totalPages: totalPages,
+//         totalItems: totalCount,
+//         itemsPerPage: parseInt(limit),
+//         hasNextPage: page < totalPages,
+//         hasPrevPage: page > 1,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error retrieving Persons data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to retrieve Persons data",
+//       error: error.message,
+//     });
+//   }
+// };
 
 
-exports.createLeadConversionReport = async (req, res) => {
+exports.createOrganizationReport = async (req, res) => {
   try {
     const {
       reportId,
@@ -1311,96 +1344,47 @@ exports.createLeadConversionReport = async (req, res) => {
 
     // Define available options for xaxis and yaxis
     const xaxisArray = [
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
       "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-      "creator",
-      "creatorstatus"
+      "organizationLabels",
+      "address",
     ];
 
-    const yaxisArray = ["no of leads", "proposalValue", "value"];
+    const yaxisArray = ["no of organizations"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
 
       // Organization table columns (prefix with Organization.)
-      "LeadOrganization.organization",
-      "LeadOrganization.organizationLabels",
-      "LeadOrganization.address",
+      "organization",
+      "organizationLabels",
+      "address",
 
-      // Person table columns (prefix with Person.)
-      "LeadPerson.contactPerson",
-      "LeadPerson.postalAddress",
-      "LeadPerson.email",
-      "LeadPerson.phone",
-      "LeadPerson.jobTitle",
-      "LeadPerson.personLabels",
-      "LeadPerson.organization",
     ];
 
-    // For Activity Conversion reports, generate the data
+    // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type) {
-      if (entity === "Lead" && type === "Conversion") {
-        // Validate required fields for Conversion reports
+    if (entity && type && !reportId) {
+      if (entity === "Contact" && type === "Organization") {
+        // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Lead Conversion reports",
+              "X-axis and Y-axis are required for Contact Organization reports",
           });
         }
 
         try {
           // Generate data with pagination
-          const result = await generateConversionActivityPerformanceData(
+          const result = await generateOrganizationPerformanceData(
             ownerId,
             role,
             xaxis,
             yaxis,
             filters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1413,16 +1397,15 @@ exports.createLeadConversionReport = async (req, res) => {
             filters: filters || {},
           };
         } catch (error) {
-          console.error("Error generating lead Conversion data:", error);
+          console.error("Error generating Contact Organization data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate lead Conversion data",
+            message: "Failed to generate Contact Organization data",
             error: error.message,
           });
         }
       }
-    } 
-    else if (reportId) {
+    } else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -1441,27 +1424,26 @@ exports.createLeadConversionReport = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      if (existingentity === "Lead" && existingtype === "Conversion") {
-        // Validate required fields for Conversion reports
+      if (existingentity === "Contact" && existingtype === "Organization") {
+        // Validate required fields for Organization reports
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Lead Conversion reports",
+              "X-axis and Y-axis are required for Contact Organization reports",
           });
         }
 
         try {
           // Generate data with pagination
-          const result = await generateConversionExistingActivityPerformanceData(
+          const result = await generateExistingOrganizationPerformanceData(
             ownerId,
             role,
             existingxaxis,
             existingyaxis,
             existingfilters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1475,10 +1457,10 @@ exports.createLeadConversionReport = async (req, res) => {
             filters: existingfilters || {},
           };
         } catch (error) {
-          console.error("Error generating lead Conversion data:", error);
+          console.error("Error generating Contact Organization data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate lead Conversion data",
+            message: "Failed to generate Contact Organization data",
             error: error.message,
           });
         }
@@ -1498,25 +1480,23 @@ exports.createLeadConversionReport = async (req, res) => {
       },
     });
   } catch (error) {
-      console.error("Error creating reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to create reports",
-        error: error.message,
-      });
-    }
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
 };
 
-
-async function generateConversionExistingActivityPerformanceData(
+async function generateExistingOrganizationPerformanceData(
   ownerId,
   role,
   existingxaxis,
   existingyaxis,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -1587,7 +1567,7 @@ async function generateConversionExistingActivityPerformanceData(
   let attributes = [];
 
   // Handle existingxaxis special cases
-  if (existingxaxis === "creator") {
+  if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -1596,51 +1576,38 @@ async function generateConversionExistingActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (existingxaxis === "creatorstatus") {
+  } else if (existingxaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
+      attributes: ["masterUserID", "team"],
       required: true,
     });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    groupBy.push("assignedUser.team");
+    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
+    groupBy.push(`LeadOrganization.${existingxaxis}`);
+    attributes.push([Sequelize.col(`LeadOrganization.${existingxaxis}`), "xValue"]);
   }
 
   // Handle existingyaxis
-  if (existingyaxis === "no of leads") {
-     attributes.push([
-    Sequelize.literal(`(
-      COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
-      COUNT(*)
-    )`),
-    "yValue",
-  ]);
-  } else if (existingyaxis === "proposalValue") {
+  if (existingyaxis === "no of organizations") {
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`),
-    "yValue",
-  ]);
-  } else if (existingyaxis === "value") {
-    attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`),
-    "yValue",
-  ]);
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${existingyaxis}`)),
       "yValue",
     ]);
   }
 
   // Get total count for pagination
-  const totalCountResult = await Lead.findAll({
+  const totalCountResult = await Organization.findAll({
     where: baseWhere,
     attributes: [
       [
@@ -1659,7 +1626,7 @@ async function generateConversionExistingActivityPerformanceData(
   const totalPages = Math.ceil(totalCount / limit);
 
   // Execute query with pagination
-  const results = await Lead.findAll({
+  const results = await Organization.findAll({
     where: baseWhere,
     attributes: attributes,
     include: includeModels,
@@ -1669,14 +1636,12 @@ async function generateConversionExistingActivityPerformanceData(
     limit: limit,
     offset: offset,
   });
-// console.log(results)
+
   // Format the results for the frontend
-const formattedResults = results.map((item) => ({
-  label: item.xValue || "Unknown",
-  value: (existingyaxis === "no of leads" || existingyaxis === "proposalValue" || existingyaxis === "value") 
-    ? parseFloat(item.yValue || 0) 
-    : item.yValue || 0,
-}));
+  const formattedResults = results.map((item) => ({
+    label: item.xValue || "Unknown",
+    value: item.yValue || 0,
+  }));
 
   // Return data with pagination info
   return {
@@ -1690,18 +1655,17 @@ const formattedResults = results.map((item) => ({
       hasPrevPage: page > 1,
     },
   };
-}
+};
 
 // Helper function to generate activity performance data with pagination
-async function generateConversionActivityPerformanceData(
+async function generateOrganizationPerformanceData(
   ownerId,
   role,
   xaxis,
   yaxis,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
 
@@ -1772,7 +1736,8 @@ async function generateConversionActivityPerformanceData(
   let groupBy = [];
   let attributes = [];
 
-  if (xaxis === "creator") {
+  // Handle xaxis special cases
+  if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -1781,51 +1746,52 @@ async function generateConversionActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "creatorstatus") {
+  } else if (xaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
+      attributes: ["masterUserID", "team"],
       required: true,
     });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    groupBy.push("assignedUser.team");
+    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the lead table
-    groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
+    // For regular columns, explicitly specify the LeadPeople table
+    groupBy.push(`LeadOrganization.${xaxis}`);
+    attributes.push([Sequelize.col(`LeadOrganization.${xaxis}`), "xValue"]);
   }
 
-  // Handle existingyaxis
-  if (yaxis === "no of leads") {
+  // Handle yaxis
+  if (yaxis === "no of organizations") {
     attributes.push([
-    Sequelize.literal(`(
-      COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
-      COUNT(*)
-    )`),
-    "yValue",
-  ]);
-  } else if (yaxis === "proposalValue") {
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
+      "yValue",
+    ]);
+  } else if (yaxis === "duration") {
+    // Calculate average duration in hours
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`),
-    "yValue",
-  ]);
-  } else if (yaxis === "value") {
-    attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`),
-    "yValue",
-  ]);
+      Sequelize.fn(
+        "AVG",
+        Sequelize.fn(
+          "TIMESTAMPDIFF",
+          Sequelize.literal("HOUR"),
+          Sequelize.col("startDateTime"),
+          Sequelize.col("endDateTime")
+        )
+      ),
+      "yValue",
+    ]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
-   attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`),
-    "yValue",
-  ]);
+    // For other yaxis values, explicitly specify the LeadPeople table
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)),
+      "yValue",
+    ]);
   }
 
   // Get total count for pagination
-  const totalCountResult = await Lead.findAll({
+  const totalCountResult = await Organization.findAll({
     where: baseWhere,
     attributes: [
       [
@@ -1844,7 +1810,7 @@ async function generateConversionActivityPerformanceData(
   const totalPages = Math.ceil(totalCount / limit);
 
   // Execute query with pagination
-  const results = await Lead.findAll({
+  const results = await Organization.findAll({
     where: baseWhere,
     attributes: attributes,
     include: includeModels,
@@ -1857,11 +1823,9 @@ async function generateConversionActivityPerformanceData(
 
   // Format the results for the frontend
   const formattedResults = results.map((item) => ({
-  label: item.xValue || "Unknown",
-  value: (yaxis === "no of leads" || yaxis === "proposalValue" || yaxis === "value") 
-    ? parseFloat(item.yValue || 0) 
-    : item.yValue || 0,
-}));
+    label: item.xValue || "Unknown",
+    value: item.yValue || 0,
+  }));
 
   // Return data with pagination info
   return {
@@ -1875,13 +1839,128 @@ async function generateConversionActivityPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-}
+};
 
+// Helper function to convert operator strings to Sequelize operators
+function getConditionObject(column, operator, value, includeModels = []) {
+  let conditionValue = value;
 
-exports.saveLeadConversionReport = async (req, res) => {
+  // Check if column contains a dot (indicating a related table field)
+  const hasRelation = column.includes(".");
+  let tableAlias = "LeadOrganization";
+  let fieldName = column;
+
+  if (hasRelation) {
+    [tableAlias, fieldName] = column.split(".");
+  }
+
+  // Handle different data types
+  if (fieldName === "isDone") {
+    conditionValue = value === "true" || value === true;
+  } else if (fieldName.includes("Date") || fieldName.includes("Time")) {
+    conditionValue = new Date(value);
+  } else if (!isNaN(value) && value !== "" && typeof value === "string") {
+    conditionValue = parseFloat(value);
+  }
+
+  // Handle related table joins
+if (hasRelation) {
+    let modelConfig;
+
+    switch (tableAlias) {
+      case "LeadOrganization":
+        modelConfig = {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+          attributes: [],
+        };
+        break;
+      default:
+        // If it's not a recognized table, treat it as Activity column
+        return getOperatorCondition(column, operator, conditionValue);
+    }
+
+    // Check if this include already exists to avoid duplicates
+    const existingInclude = includeModels.find(
+      (inc) => inc.as === modelConfig.as
+    );
+    if (!existingInclude) {
+      includeModels.push(modelConfig);
+    }
+
+    // Return the condition with proper table reference
+    return Sequelize.where(
+      Sequelize.col(`${modelConfig.as}.${fieldName}`),
+      getSequelizeOperator(operator),
+      conditionValue
+    );
+  } else {
+    // Regular activity table column
+    return getOperatorCondition(column, operator, conditionValue);
+  }
+};
+
+// Helper function to convert operator strings to Sequelize operators
+function getSequelizeOperator(operator) {
+  switch (operator) {
+    case ">":
+      return Op.gt;
+    case "<":
+      return Op.lt;
+    case "=":
+      return Op.eq;
+    case "≠":
+      return Op.ne;
+    case "contains":
+      return Op.like;
+    case "startsWith":
+      return Op.like;
+    case "endsWith":
+      return Op.like;
+    case "isEmpty":
+      return Op.or;
+    case "isNotEmpty":
+      return Op.and;
+    default:
+      return Op.eq;
+  }
+};
+
+// Helper function for operator conditions
+function getOperatorCondition(column, operator, value) {
+  const op = getSequelizeOperator(operator);
+
+  switch (operator) {
+    case "contains":
+      return { [column]: { [op]: `%${value}%` } };
+    case "startsWith":
+      return { [column]: { [op]: `${value}%` } };
+    case "endsWith":
+      return { [column]: { [op]: `%${value}` } };
+    case "isEmpty":
+      return {
+        [Op.or]: [
+          { [column]: { [Op.is]: null } },
+          { [column]: { [Op.eq]: "" } },
+        ],
+      };
+    case "isNotEmpty":
+      return {
+        [Op.and]: [
+          { [column]: { [Op.not]: null } },
+          { [column]: { [Op.ne]: "" } },
+        ],
+      };
+    default:
+      return { [column]: { [op]: value } };
+  }
+};
+
+exports.saveOrganizationReport = async (req, res) => {
   try {
     const {
-      dashboardIds,
+      dashboardIds, // Now expecting an array
       folderId,
       name,
       entity,
@@ -1897,14 +1976,14 @@ exports.saveLeadConversionReport = async (req, res) => {
     if (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId) {
       return res.status(400).json({
         success: false,
-        message: "Entity, type, xaxis, and yaxis are required",
+        message: "Entity, type, xaxis, yaxis, dashboardIds, and folderId are required",
       });
     }
 
     // Ensure dashboardIds is an array
     const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
 
-    // Verify dashboard ownership if dashboardId is provided
+    // Verify dashboard ownership for all provided dashboard IDs
     for (const dashboardId of dashboardIdsArray) {
       const dashboard = await DASHBOARD.findOne({
         where: { dashboardId, ownerId },
@@ -1956,7 +2035,7 @@ exports.saveLeadConversionReport = async (req, res) => {
     };
 
     if (existingReport) {
-      // Update existing report
+      // Update existing report for each dashboard
       const updateData = {
         ...(folderId !== undefined && { folderId }),
         ...(name !== undefined && { name }),
@@ -1971,7 +2050,7 @@ exports.saveLeadConversionReport = async (req, res) => {
       const updatedReport = await Report.findByPk(existingReport.reportId);
       reports.push(updatedReport);
     } else {
-      // Create new report
+      // Create new report for each dashboard
       const reportName = description || `${entity} ${type}`;
 
       for (const dashboardId of dashboardIdsArray) {
@@ -2021,7 +2100,7 @@ exports.saveLeadConversionReport = async (req, res) => {
   }
 };
 
-exports.getLeadConversionReportSummary = async (req, res) => {
+exports.getOrganizationReportSummary = async (req, res) => {
   try {
     const {
       reportId,
@@ -2040,14 +2119,6 @@ exports.getLeadConversionReportSummary = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Validate required fields
-    // if (!entity || !type) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Entity and type are required",
-    //   });
-    // }
-
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -2062,10 +2133,8 @@ exports.getLeadConversionReportSummary = async (req, res) => {
     // Handle search
     if (search) {
       baseWhere[Op.or] = [
-        { title: { [Op.like]: `%${search}%` } },
-        { value: { [Op.like]: `%${search}%` } },
-        { ownerName: { [Op.like]: `%${search}%` } },
-        { sourceOrigin: { [Op.like]: `%${search}%` } },
+        { organization: { [Op.like]: `%${search}%` } },
+        { address: { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -2111,60 +2180,56 @@ exports.getLeadConversionReportSummary = async (req, res) => {
     }
 
     // Build order clause
-    const order = [];
-    if (sortBy === "Owner") {
-      order.push([
-        { model: MasterUser, as: "Owner" },
-        "name",
-        sortOrder,
-      ]);
-    } else if (sortBy === "dueDate") {
-      order.push(["endDateTime", sortOrder]);
-    } else if (sortBy === "createdAt") {
-      order.push(["createdAt", sortOrder]);
-    } else {
-      order.push([sortBy, sortOrder]);
-    }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
+    const order = [[sortBy, sortOrder]];
 
     // Get total count
-    const totalCount = await Lead.count({
+    const totalCount = await Organization.count({
       where: baseWhere,
-      include: include,
     });
 
     // Get paginated results
-    const leads = await Lead.findAll({
+    const organizations = await Organization.findAll({
       where: baseWhere,
-      include: include,
       order: order,
       limit: parseInt(limit),
       offset: offset,
       attributes: [
-        "leadId",
-        "title",
-        "value",
-        "ownerName",
-        "status",
+        "leadOrganizationId",
+        "organization",
         "createdAt",
+        "updatedAt",
+        "masterUserID" // Include masterUserID if you need it
       ],
     });
+
+    // If you need user information, you'll need to fetch it separately
+    // since there's no association between Person and MasterUser
+    let userMap = {};
+    if (organizations.length > 0) {
+      // Get all unique user IDs from persons
+      const userIds = [...new Set(organizations.map(person => person.masterUserID))];
+      
+      // Fetch users in bulk
+      const users = await MasterUser.findAll({
+        where: {
+          masterUserID: userIds
+        },
+        attributes: ["masterUserID", "name", "email"]
+      });
+      
+      // Create a map for easy lookup
+      userMap = users.reduce((map, user) => {
+        map[user.masterUserID] = user;
+        return map;
+      }, {});
+    }
 
     // Generate report data (like your existing performance report)
     let reportData = [];
     let summary = {};
 
     if (xaxis && yaxis && !reportId) {
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateOrganizationPerformanceData(
         ownerId,
         role,
         xaxis,
@@ -2213,7 +2278,7 @@ exports.getLeadConversionReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateOrganizationPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -2245,30 +2310,31 @@ exports.getLeadConversionReportSummary = async (req, res) => {
       }
     }
 
-    // Format activities for response
-    const formattedActivities = leads.map((lead) => ({
-      id: lead.leadId,
-      title: lead.title,
-      value: lead.value,
-      ownerName: lead.ownerName,
-      status: lead.status,
-      createdAt: lead.createdAt,
-      assignedTo: lead.Owner
-        ? {
-            id: lead.Owner.masterUserID,
-            name: lead.Owner.name,
-            email: lead.Owner.email,
-          }
-        : null,
-    }));
+    // Format persons for response
+    const formattedPersons = organizations.map((person) => {
+      const user = userMap[person.masterUserID];
+      
+      return {
+        id: person.personId,
+        contactPerson: person.contactPerson,
+        organization: person.organization,
+        updatedAt: person.updatedAt,
+        createdAt: person.createdAt,
+        assignedTo: user ? {
+          id: user.masterUserID,
+          name: user.name,
+          email: user.email,
+        } : null,
+      };
+    });
 
     const totalPages = Math.ceil(totalCount / limit);
 
     res.status(200).json({
       success: true,
-      message: "Leads data retrieved successfully",
+      message: "Persons data retrieved successfully",
       data: {
-        activities: formattedActivities,
+        activities: formattedPersons,
         reportData: reportData,
         summary: summary,
       },
@@ -2282,10 +2348,10 @@ exports.getLeadConversionReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving leads data:", error);
+    console.error("Error retrieving Persons data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve leads data",
+      message: "Failed to retrieve Persons data",
       error: error.message,
     });
   }

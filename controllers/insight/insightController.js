@@ -6171,12 +6171,12 @@ exports.bulkDeleteReports = async (req, res) => {
     const role = req.role;
 
     // Validate that reportIds is provided and is an array
-    if (!reportIds || !Array.isArray(reportIds) || reportIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Report IDs array is required and must not be empty",
-      });
-    }
+    // if (!reportIds || !Array.isArray(reportIds) || reportIds.length === 0) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Report IDs array is required and must not be empty",
+    //   });
+    // }
 
     // Build where condition based on user role
     const whereCondition = {
@@ -6230,12 +6230,12 @@ exports.bulkDeleteReports = async (req, res) => {
       where: whereConditionFolder,
     });
 
-    if (deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No reports found or already deleted",
-      });
-    }
+    // if (deletedCount === 0) {
+    //   return res.status(404).json({
+    //     success: false,
+    //     message: "No reports found or already deleted",
+    //   });
+    // }
 
     res.status(200).json({
       success: true,
@@ -6243,7 +6243,6 @@ exports.bulkDeleteReports = async (req, res) => {
       data: {
         deletedCount,
         deletedfolderCount,
-        deletedFolderIds: folderIds,
         deletedReportIds: foundReportIds,
         notFoundReportIds: notFoundReportIds.length > 0 ? notFoundReportIds : undefined
       },
@@ -6257,6 +6256,87 @@ exports.bulkDeleteReports = async (req, res) => {
     });
   }
 };
+
+// exports.bulkDeleteReports = async (req, res) => {
+//   try {
+//     const { reportIds } = req.body; // Array of report IDs to delete
+//     const ownerId = req.adminId;
+//     const role = req.role;
+    
+//     // Validate that reportIds is provided and is an array
+//     if (!reportIds || !Array.isArray(reportIds)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Report IDs array is required and must not be empty",
+//       });
+//     }
+
+//     // Build where condition based on user role
+//     const whereCondition = {
+//       reportId: {
+//         [Op.in]: reportIds
+//       },
+//     };
+
+//     // If user is not admin, only allow deletion of their own reports
+//     if (role !== "admin") {
+//       whereCondition.ownerId = ownerId;
+//     }
+
+
+//     // First, find all reports to verify existence and permissions
+//     const reports = await Report.findAll({
+//       where: whereCondition,
+//       attributes: ['reportId', 'ownerId', 'name']
+//     });
+
+//     // Check if all requested reports were found
+//     const foundReportIds = reports.map(report => report.reportId);
+//     const notFoundReportIds = reportIds.filter(id => !foundReportIds.includes(id));
+
+//     if (notFoundReportIds.length > 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Some reports not found or access denied",
+//         details: {
+//           notFoundReportIds,
+//           foundReportIds
+//         }
+//       });
+//     }
+
+//     // Delete the reports
+//     const deletedCount = await Report.destroy({
+//       where: whereCondition
+//     });
+
+
+//     if (deletedCount === 0) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "No reports found or already deleted",
+//       });
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: `Successfully deleted ${deletedCount} report(s)`,
+//       data: {
+//         deletedCount,
+//         deletedReportIds: foundReportIds,
+//         notFoundReportIds: notFoundReportIds.length > 0 ? notFoundReportIds : undefined
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error deleting reports:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to delete reports",
+//       error: error.message,
+//     });
+//   }
+// };
+
 
 exports.GetAllReports = async (req, res) => {
   try {
