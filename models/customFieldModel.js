@@ -36,7 +36,13 @@ const CustomField = sequelize.define(
         "file",
         "currency",
         "organization",
-        "person"
+        "person",
+        "address",
+        "timerange",
+        "daterange",
+        "time",
+        "largetext",
+        "autocomplete"
       ),
       allowNull: false,
       defaultValue: "text",

@@ -521,7 +521,13 @@ const validateFieldAndEntityTypes = (fieldType, entityType) => {
     "file",
     "currency",
     "organization",
-    "person",
+    "person", 
+    "address",
+    "timerange",
+    "daterange",
+    "time",
+    "largetext",
+    "autocomplete"
   ];
 
   const allowedEntityTypes = [
