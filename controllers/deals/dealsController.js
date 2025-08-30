@@ -1717,6 +1717,95 @@ function buildCondition(cond) {
     },
   };
 }
+
+exports.changeDealOwner = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { newOwnerId } = req.body;
+
+    // Validate input
+    if (!newOwnerId) {
+      return res.status(400).json({
+        message: "newOwnerId is required in the request body",
+      });
+    }
+
+    // Check if new owner exists
+    const newOwner = await MasterUser.findByPk(newOwnerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        message: "New owner not found",
+      });
+    }
+
+    // Find the deal
+    const deal = await Deal.findByPk(dealId);
+    if (!deal) {
+      return res.status(404).json({
+        message: "Deal not found",
+      });
+    }
+
+    // Check permissions - only admin or current owner can change ownership
+    const isAdmin = req.role === 'admin';
+    const isCurrentOwner = deal.ownerId === req.adminId;
+    
+    if (!isAdmin && !isCurrentOwner) {
+      return res.status(403).json({
+        message: "You don't have permission to change ownership of this deal",
+      });
+    }
+
+    // Store old owner ID for logging
+    const oldOwnerId = deal.ownerId;
+
+    // Update the deal owner
+    await deal.update({ ownerId: newOwnerId });
+
+    // Log the ownership change
+    await historyLogger(
+      getProgramId("DEALS"),
+      "DEAL_OWNER_CHANGE",
+      req.adminId,
+      dealId,
+      null,
+      `Deal ownership changed from ${oldOwnerId} to ${newOwnerId} by ${req.role}`,
+      {
+        oldOwnerId,
+        newOwnerId,
+        changedBy: req.adminId
+      }
+    );
+
+    res.status(200).json({
+      message: "Deal owner updated successfully",
+      data: {
+        dealId: parseInt(dealId),
+        oldOwnerId: oldOwnerId,
+        newOwnerId: parseInt(newOwnerId),
+        changedBy: req.adminId
+      }
+    });
+
+  } catch (error) {
+    console.error("Error changing deal owner:", error);
+    
+    // Log the error
+    await logAuditTrail(
+      getProgramId("DEALS"),
+      "DEAL_OWNER_CHANGE_ERROR",
+      req.role,
+      `Error changing deal owner: ${error.message}`,
+      req.adminId
+    );
+
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
 exports.updateDeal = async (req, res) => {
   try {
     const { dealId } = req.params;
@@ -2526,6 +2615,11 @@ exports.getDealDetail = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
+    const ownerId = deal.ownerId;
+    const owner = await MasterUser.findOne({ 
+       where: { masterUserID: ownerId } 
+    });
+
     // Enhanced Pipeline Stage Processing like Pipedrive
     const stageHistory = await DealStageHistory.findAll({
       where: { dealId },
@@ -2752,6 +2846,7 @@ exports.getDealDetail = async (req, res) => {
       title: deal.title,
       value: deal.value,
       pipeline: deal.pipeline,
+      ownerId: deal.ownerId,
       pipelineStage: deal.pipelineStage,
       status: deal.status || "open",
       createdAt: deal.createdAt,
@@ -3127,6 +3222,10 @@ exports.getDealDetail = async (req, res) => {
         pipelineInsights: pipelineInsights, // Pipeline analytics
         stageTimeline: pipelineInsights.stageTimeline, // Stage completion timeline
       },
+      owner : {
+        ownerName : owner.name,
+        ownerId : owner.masterUserID
+      }
     });
   } catch (error) {
     console.log(error);
