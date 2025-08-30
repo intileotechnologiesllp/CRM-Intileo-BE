@@ -2941,6 +2941,10 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     const personOffset = (personPage - 1) * personLimit;
     const personSearch = req.query.personSearch || "";
 
+     // Get sort parameters
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder || 'DESC';
+
     // Pagination and search for organizations
     const orgPage = parseInt(req.query.orgPage) || 1;
     const orgLimit = parseInt(req.query.orgLimit) || 20;
@@ -3979,6 +3983,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     if (req.role === "admin" && !req.query.masterUserID) {
       persons = await Person.findAll({
         where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
         raw: true,
       });
     } else if (req.query.masterUserID) {
@@ -3986,6 +3991,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       finalPersonWhere.masterUserID = req.query.masterUserID;
       persons = await Person.findAll({
         where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
         raw: true,
       });
     } else {
@@ -4007,6 +4013,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
       persons = await Person.findAll({
         where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
         raw: true,
       });
     }
