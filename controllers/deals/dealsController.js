@@ -28,6 +28,8 @@ const PipelineStage = require("../../models/deals/pipelineStageModel");
 exports.createDeal = async (req, res) => {
   try {
     const dealProgramId = getProgramId("DEALS");
+    // Declare leadId at the very top before any usage
+  // (Already declared at the top)
     const {
       contactPerson,
       organization,
@@ -56,14 +58,6 @@ exports.createDeal = async (req, res) => {
       source,
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
-
-     if (leadId === '') {
-      leadId = null;
-    }
-
-    // Validate required fields here...
-    let ownerId = req.user?.id || req.adminId || req.body.ownerId;
-
     // --- Enhanced validation similar to createLead ---
     // Validate required fields
     if (!contactPerson || !organization || !title || !email) {
