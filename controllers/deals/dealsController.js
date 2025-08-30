@@ -27,9 +27,9 @@ const PipelineStage = require("../../models/deals/pipelineStageModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
-    const dealProgramId = getProgramId("DEALS");
-    // Declare leadId at the very top before any usage
-  // (Already declared at the top)
+  const dealProgramId = getProgramId("DEALS");
+  // Declare ownerId at the top before any usage
+  let ownerId = req.user?.id || req.adminId || req.body.ownerId;
     const {
       contactPerson,
       organization,
