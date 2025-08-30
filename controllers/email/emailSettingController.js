@@ -1133,32 +1133,62 @@ exports.getEmailAutocomplete = async (req, res) => {
   const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    const where = search ? { recipient: { [Op.like]: `%${search}%` } } : {};
-
-    // Find distinct emails for auto-complete
-    const { rows, count } = await Email.findAndCountAll({
-      attributes: [
-        [
-          Email.sequelize.fn("DISTINCT", Email.sequelize.col("recipient")),
-          "email",
-        ],
-      ],
-      where,
-      limit: parseInt(limit),
-      offset,
-      order: [["recipient", "ASC"]],
+    // Get all email records
+    const emails = await Email.findAll({
+      attributes: ['recipient'],
+      raw: true,
+      where: {
+        recipient: {
+          [Op.ne]: null, // Exclude null values
+          [Op.ne]: '',   // Exclude empty strings
+        }
+      }
     });
 
-    // Map to just email strings
-    const emails = rows.map((row) => row.get("email"));
+    // Process all recipient strings into individual emails
+    const allEmails = emails.flatMap(email => {
+      try {
+        // Additional safety check
+        if (!email || !email.recipient || typeof email.recipient !== 'string') {
+          return [];
+        }
+        
+        return email.recipient
+          .split(',')
+          .map(e => e.trim())
+          .filter(e => e && e !== '' && e.includes('@')); // Basic email validation
+      } catch (error) {
+        console.warn('Error processing recipient:', email, error);
+        return [];
+      }
+    });
+
+    // Remove duplicates
+    const uniqueEmails = [...new Set(allEmails)];
+    
+    // Filter emails that start with the search term (case insensitive)
+    let filteredEmails = uniqueEmails;
+    if (search) {
+      const searchLower = search.toLowerCase();
+      filteredEmails = uniqueEmails.filter(email => 
+        email.toLowerCase().startsWith(searchLower)
+      );
+    }
+
+    // Sort alphabetically
+    filteredEmails.sort();
+
+    // Apply pagination
+    const paginatedEmails = filteredEmails.slice(offset, offset + parseInt(limit));
 
     res.status(200).json({
-      emails,
-      total: count,
+      emails: paginatedEmails,
+      total: filteredEmails.length,
       page: parseInt(page),
       limit: parseInt(limit),
     });
   } catch (error) {
+    console.error("Error fetching emails:", error);
     res
       .status(500)
       .json({ message: "Failed to fetch emails.", error: error.message });

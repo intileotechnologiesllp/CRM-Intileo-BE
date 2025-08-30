@@ -9,6 +9,7 @@ const upload = multer({ dest: 'uploads/' });
 router.post("/create-deal", verifyToken, dealsController.createDeal);
 router.get("/get-deals", verifyToken, dealsController.getDeals);
 router.post("/update-deal/:dealId", verifyToken, dealsController.updateDeal);
+router.put("/change-owner/:dealId", verifyToken, dealsController.changeDealOwner);
 router.post("/bulk-edit-deals", verifyToken, dealsController.bulkEditDeals);
 router.get(
   "/get-deal-summary-by-currency",
