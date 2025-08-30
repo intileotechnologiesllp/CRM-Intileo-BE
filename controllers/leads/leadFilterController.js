@@ -6,6 +6,7 @@ const PROGRAMS = require("../../utils/programConstants"); // Import program cons
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import your LeadDetails model
+const { Person } = require("../../models");
 exports.saveLeadFilter = async (req, res) => {
   const {
     filterName,
@@ -354,9 +355,9 @@ exports.getAllLeadContactPersons = async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     // Build search condition for contactPerson
-    const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
+    const where = search ? { contactPerson: { [Op.like]: `${search}%` } } : {};
 
-    const { rows, count } = await Lead.findAndCountAll({
+    const { rows, count } = await Person.findAndCountAll({
       where,
       attributes: ["contactPerson"],
       limit: parseInt(limit),
