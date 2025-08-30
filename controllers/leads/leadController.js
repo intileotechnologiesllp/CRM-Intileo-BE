@@ -1,140 +1,3 @@
-const XLSX = require('xlsx');
-// BULK LEAD IMPORT FROM EXCEL
-exports.bulkImportLeads = async (req, res) => {
-  try {
-    if (!req.file || !req.file.path) {
-      return res.status(400).json({ message: 'No file uploaded.' });
-    }
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    let successCount = 0;
-    let errorRows = [];
-    for (const row of rows) {
-      // Sanitize integer fields: convert empty string to null
-      const sanitizeInt = (val) => (val === '' || val === undefined ? null : val);
-            const sanitizeDate = (val) => {
-        if (!val) return null;
-        const d = new Date(val);
-        return isNaN(d.getTime()) ? null : d;
-      };
-      // const mapped = {
-      //   // Lead fields
-      //   contactPerson: row['contactPerson'],
-      //   email: row['email'],
-      //   createdAt: row['createdAt'],
-      //   organization: row['organization'],
-      //   title: row['title'],
-      //   updatedAt: row['updatedAt'],
-      //   valueLabels: row['valueLabels'],
-      //   sourceOrigin: row['sourceOrigin'],
-      //   value: row['value'],
-      //   sourceChannel: row['sourceChannel'],
-      //   sourceChannelID: sanitizeInt(row['sourceChannelID']),
-      //   sourceOriginID: sanitizeInt(row['sourceOriginID']),
-      //   // Custom fields from Excel
-      //   customFields: {
-      //     service_type: row['service_type'],
-      //     scope_of_service_type: row['scope_of_service_type'],
-      //     proposal_value: row['proposal_value'],
-      //     espl_proposal_no: row['espl_proposal_no'],
-      //     project_location: row['project_location'],
-      //     proposal_sent_date: row['proposal_sent_date'],
-      //     source: row['source'],
-      //     sectoral_sector: row['sectoral_sector'],
-      //     sbu_class: row['sbu_class'],
-      //     no_of_reports_prepared_for_the_project: row['no_of_reports_prepared_for_the_project'],
-      //   },
-      // };
-
-            const mapped = {
-        contactPerson: row['contactPerson'],
-        email: row['email'],
-        createdAt: row['createdAt'],
-        organization: row['organization'],
-        title: row['title'],
-        updatedAt: row['updatedAt'],
-        valueLabels: row['valueLabels'],
-        value: row['value'],
-        currency: row['currency'],
-        pipeline: row['pipeline'],
-        pipelineStage: row['pipelineStage'] || 'Lead', // Fallback for missing pipelineStage
-        expectedCloseDate: sanitizeDate(row['expectedCloseDate']),
-        sourceChannel: row['sourceChannel'],
-        sourceChannelId: row['sourceChannelId'],
-        serviceType: row['serviceType'],
-        proposalValue: row['proposalValue'],
-        proposalCurrency: row['proposalCurrency'],
-        esplProposalNo: row['esplProposalNo'],
-        projectLocation: row['projectLocation'],
-        organizationCountry: row['organizationCountry'],
-        proposalSentDate: sanitizeDate(row['proposalSentDate']),
-        sourceRequired: row['sourceRequired'],
-        questionerShared: row['questionerShared'],
-        sectorialSector: row['sectorialSector'],
-        sbuClass: row['sbuClass'],
-        phone: row['phone'],
-        email: row['email'] || null, // Allow null email instead of undefined
-        // sourceOrgin: 2, // Always set to 2 for leadId processing
-        source: row['source'],
-        // leadId: row['leadId'],
-        // Custom fields from Excel
-        customFields: {
-          service_type: row['service_type'],
-          scope_of_service_type: row['scope_of_service_type'],
-          proposal_value: row['proposal_value'],
-          espl_proposal_no: row['espl_proposal_no'],
-          project_location: row['project_location'],
-          proposal_sent_date: row['proposal_sent_date'],
-          source: row['source'],
-          sectoral_sector: row['sectoral_sector'],
-          sbu_class: row['sbu_class'],
-          no_of_reports_prepared_for_the_project: row['no_of_reports_prepared_for_the_project'],
-        },
-      };
-
-
-
-      // Check for Creator Lead - Creator column and set masterUserID if found
-      let masterUserIdToSet = null;
-      const creatorValue = row['Deal - Creator']
-      if (creatorValue) {
-        // Try to find user by name only
-        const user = await MasterUser.findOne({
-          where: { name: creatorValue }
-        });
-        if (user) {
-          masterUserIdToSet = user.masterUserID;
-        }
-      }
-
-      // Merge with req.body defaults (e.g. req.adminId, role, etc.)
-      const payload = {
-        ...req.body,
-        ...mapped,
-        ...(masterUserIdToSet ? { masterUserID: masterUserIdToSet } : {}),
-      };
-      // Debug: Log the payload for each row, especially masterUserID
-      console.log('DEBUG bulkImportLeads payload.masterUserID:', payload.masterUserID, 'creatorValue:', creatorValue);
-      // Simulate req/res for createLead
-      const fakeReq = { ...req, body: payload };
-      let fakeRes = {
-        status: (code) => ({ json: (obj) => ({ code, ...obj }) }),
-      };
-      try {
-        // Call createLead logic directly
-        await exports.createLead(fakeReq, fakeRes);
-        successCount++;
-      } catch (err) {
-        errorRows.push({ row, error: err.message });
-      }
-    }
-    res.json({ message: `Bulk import complete. Success: ${successCount}, Errors: ${errorRows.length}`, errors: errorRows });
-  } catch (error) {
-    console.error('Bulk import failed:', error);
-    res.status(500).json({ message: 'Bulk import failed', error: error.message });
-  }
-};
 // const Lead = require("../../models/leads/leadsModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 //const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
@@ -251,86 +114,12 @@ async function getUserLeadVisibilityPermissions(userId, userRole) {
 }
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
-  // Debug: Log the incoming masterUserID for troubleshooting
-  console.log('DEBUG createLead req.body.masterUserID:', req.body.masterUserID);
   // Only use these fields as standard fields for root-level custom field extraction
   const standardFields = [
-    // Lead fields
-    "contactPerson",
-    "email",
-    "createdAt",
-    "organization",
     "title",
-    "updatedAt",
-    "valueLabels",
-    "sourceOrigin",
-    "value",
+    "ownerId",
     "sourceChannel",
     "sourceChannelID",
-    "sourceOriginID",
-    "expectedCloseDate",
-    "serviceType",
-    "scopeOfServiceType",
-    "phone",
-    "company",
-    "proposalValue",
-    "esplProposalNo",
-    "projectLocation",
-    "organizationCountry",
-    "proposalSentDate",
-    "status",
-    "sourceOrgin",
-    "SBUClass",
-    "numberOfReportsPrepared",
-    "emailID",
-    "value",
-    "pipeline",
-    "stage",
-    "productName",
-    "sourceOriginID",
-    // Deal fields
-    "dealTitle",
-    "dealValue",
-    "dealStatus",
-    "dealOwner",
-    // Additional columns from deals model
-    "currency",
-    "pipelineStage",
-    "pipelineId",
-    "stageId",
-    "label",
-    "sourceRequired",
-    "source",
-    "weightedValue",
-    "lastStageChange",
-    "nextActivityDate",
-    "lastActivityDate",
-    "wonTime",
-    "lastEmailReceived",
-    "lastEmailSent",
-    "lostTime",
-    "dealClosedOn",
-    "totalActivities",
-    "doneActivities",
-    "activitiesToDo",
-    "emailMessagesCount",
-    "productQuantity",
-    "productAmount",
-    "MRR",
-    "ARR",
-    "ACV",
-    "lostReason",
-    "archiveStatus",
-    "probability",
-    // Other system fields
-    "customFields",
-    "masterUserID",
-    "ownerId",
-    "ownerName",
-    "visibilityLevel",
-    "visibilityGroupId",
-    "valueCurrency",
-    "proposalValueCurrency"
   ];
 
   // Extract standard fields
@@ -381,7 +170,51 @@ exports.createLead = async (req, res) => {
     console.log("Request body email ID:", req.body.emailID);
   }
 
-  // --- Validation removed for bulk import: all rows will be imported even if missing required fields, duplicates, or invalid data. ---
+  // --- Add validation here ---
+  if (!contactPerson || !organization || !title || !email) {
+    return res.status(400).json({
+      message: "contactPerson, organization, title, and email are required.",
+    });
+  }
+
+  // Validate emailID is required when sourceOrgin is 0 (email-created lead)
+  if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
+    return res.status(400).json({
+      message:
+        "emailID is required when sourceOrgin is 0 (email-created lead).",
+    });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Invalid email format." });
+  }
+  if (proposalValue && proposalValue < 0) {
+    return res
+      .status(400)
+      .json({ message: "Proposal value must be positive." });
+  }
+
+  // Note: Removed email uniqueness check to allow multiple leads per contact person
+  // Each contact can have multiple projects/leads with different titles
+
+  // Check for duplicate combination of contactPerson, organization, AND title (allow multiple projects per contact)
+  const existingContactOrgTitleLead = await Lead.findOne({
+    where: {
+      contactPerson: contactPerson,
+      organization: organization,
+      title: title,
+    },
+  });
+  if (existingContactOrgTitleLead) {
+    return res.status(409).json({
+      message:
+        "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
+      existingLeadId: existingContactOrgTitleLead.leadId,
+      existingLeadTitle: existingContactOrgTitleLead.title,
+      existingContactPerson: existingContactOrgTitleLead.contactPerson,
+      existingOrganization: existingContactOrgTitleLead.organization,
+    });
+  }
+  // --- End validation ---
 
   console.log(req.role, "role of the user............");
 
@@ -453,7 +286,7 @@ exports.createLead = async (req, res) => {
     if (!orgRecord) {
       orgRecord = await Organization.create({
         organization,
-        masterUserID: req.body.masterUserID ? req.body.masterUserID : req.adminId,
+        masterUserID: req.adminId,
       });
     }
     console.log(
@@ -469,17 +302,14 @@ exports.createLead = async (req, res) => {
         .json({ message: "Failed to create/find organization." });
     }
     // 2. Find or create Person (linked to organization)
-    let personRecord = null;
-    if (email) {
-      personRecord = await Person.findOne({ where: { email } });
-    }
+    let personRecord = await Person.findOne({ where: { email } });
     if (!personRecord) {
       personRecord = await Person.create({
         contactPerson,
-        email: email || null,  // Explicitly handle null email
+        email,
         phone,
         leadOrganizationId: orgRecord.leadOrganizationId,
-        masterUserID: req.body.masterUserID ? req.body.masterUserID : req.adminId,
+        masterUserID: req.adminId,
       });
     }
     //     const duplicateLead = await Lead.findOne({
@@ -511,11 +341,6 @@ exports.createLead = async (req, res) => {
       visibilityLevel = "item_owners_visibility_group"; // Default fallback
     }
 
-    // Bypass isEmail validation: if email is empty or invalid, set to null
-    let safeEmail = email;
-    if (!safeEmail || typeof safeEmail !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) {
-      safeEmail = null;
-    }
     const lead = await Lead.create({
       personId: personRecord.personId, // <-- Add this
       leadOrganizationId: orgRecord.leadOrganizationId,
@@ -529,7 +354,7 @@ exports.createLead = async (req, res) => {
       serviceType,
       // scopeOfServiceType,
       phone,
-      email: safeEmail,
+      email,
       company,
       proposalValue,
       esplProposalNo,
@@ -537,7 +362,7 @@ exports.createLead = async (req, res) => {
       organizationCountry,
       proposalSentDate,
       status,
-      masterUserID: req.body.masterUserID ? req.body.masterUserID : req.adminId, // Fallback to req.adminId if not present
+      masterUserID: req.adminId,
       ownerId: req.adminId, // Associate the lead with the authenticated user
       ownerName, // Store the role of the user as ownerName,
       sourceOrgin, // Indicate that the lead was created manually
@@ -553,37 +378,7 @@ exports.createLead = async (req, res) => {
       visibilityLevel,
       visibilityGroupId: userGroup ? userGroup.groupId : null,
       valueCurrency: req.body.valueCurrency || "INR",
-      proposalValueCurrency: req.body.proposalValueCurrency || "INR",
-
-      // Additional columns from deals model
-      currency: req.body.currency,
-      pipelineStage: req.body.pipelineStage,
-      pipelineId: req.body.pipelineId,
-      stageId: req.body.stageId,
-      label: req.body.label,
-      sourceRequired: req.body.sourceRequired,
-      source: req.body.source,
-      weightedValue: req.body.weightedValue,
-      lastStageChange: req.body.lastStageChange,
-      nextActivityDate: req.body.nextActivityDate,
-      lastActivityDate: req.body.lastActivityDate,
-      wonTime: req.body.wonTime,
-      lastEmailReceived: req.body.lastEmailReceived,
-      lastEmailSent: req.body.lastEmailSent,
-      lostTime: req.body.lostTime,
-      dealClosedOn: req.body.dealClosedOn,
-      totalActivities: req.body.totalActivities || 0,
-      doneActivities: req.body.doneActivities || 0,
-      activitiesToDo: req.body.activitiesToDo || 0,
-      emailMessagesCount: req.body.emailMessagesCount || 0,
-      productQuantity: req.body.productQuantity,
-      productAmount: req.body.productAmount,
-      MRR: req.body.MRR,
-      ARR: req.body.ARR,
-      ACV: req.body.ACV,
-      lostReason: req.body.lostReason,
-      archiveStatus: req.body.archiveStatus,
-      probability: req.body.probability || 0
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR"
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
@@ -637,7 +432,7 @@ exports.createLead = async (req, res) => {
               entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
               isActive: true,
               [Op.or]: [
-                { masterUserID: req.body.masterUserID ? req.body.masterUserID : req.adminId },
+                { masterUserID: req.adminId },
                 { fieldSource: "default" },
                 { fieldSource: "system" },
               ],
@@ -671,7 +466,7 @@ exports.createLead = async (req, res) => {
               entityId: lead.leadId,
               entityType: "lead",
               value: value,
-              masterUserID: req.body.masterUserID ? req.body.masterUserID : req.adminId,
+              masterUserID: req.adminId,
             });
 
             // Store the saved custom field for response using fieldName as key
@@ -818,7 +613,7 @@ exports.getLeads = async (req, res) => {
     isArchived,
     search,
     page = 1,
-    limit = 600,
+    limit = 20,
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,

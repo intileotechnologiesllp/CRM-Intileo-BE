@@ -1,327 +1,3 @@
-// // BULK DEAL IMPORT FROM EXCEL (NO CROSS-LINKING)
-
-const XLSX = require('xlsx');
-exports.bulkImportDealsNoCrosslink = async (req, res) => {
-  try {
-    if (!req.file || !req.file.path) {
-      return res.status(400).json({ message: 'No file uploaded.' });
-    }
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    let successCount = 0;
-    let errorRows = [];
-    
-    // Track used titles to handle duplicates
-    const usedTitles = new Set();
-    for (const row of rows) {
-      // Map Excel columns to API fields (direct mapping, as column names now match API fields)
-      const sanitizeInt = (val) => (val === '' || val === undefined ? null : val);
-      // Date sanitization helper
-      const sanitizeDate = (val) => {
-        if (!val) return null;
-        const d = new Date(val);
-        return isNaN(d.getTime()) ? null : d;
-      };
-      const mapped = {
-        contactPerson: row['contactPerson'] || 'TBD - Contact Required', // Fallback for missing contactPerson
-        organization: row['organization'],
-        title: (() => {
-          let baseTitle = row['title'] || 'Untitled Deal';
-          let finalTitle = baseTitle;
-          let counter = 1;
-          
-          // Ensure title uniqueness
-          while (usedTitles.has(finalTitle)) {
-            finalTitle = `${baseTitle} (${counter})`;
-            counter++;
-          }
-          
-          usedTitles.add(finalTitle);
-          return finalTitle;
-        })(), // Fallback for missing title with uniqueness handling
-        value: row['value'],
-        currency: row['currency'],
-        pipeline: row['pipeline'],
-        pipelineStage: row['pipelineStage'] || 'Lead', // Fallback for missing pipelineStage
-        expectedCloseDate: sanitizeDate(row['expectedCloseDate']),
-        sourceChannel: row['sourceChannel'],
-        sourceChannelId: row['sourceChannelId'],
-        serviceType: row['serviceType'],
-        proposalValue: row['proposalValue'],
-        proposalCurrency: row['proposalCurrency'],
-        esplProposalNo: row['esplProposalNo'],
-        projectLocation: row['projectLocation'],
-        organizationCountry: row['organizationCountry'],
-        proposalSentDate: sanitizeDate(row['proposalSentDate']),
-        sourceRequired: row['sourceRequired'],
-        questionerShared: row['questionerShared'],
-        sectorialSector: row['sectorialSector'],
-        sbuClass: row['sbuClass'],
-        phone: row['phone'],
-        email: row['email'] || null, // Allow null email instead of undefined
-        // sourceOrgin: 2, // Always set to 2 for leadId processing
-        // source: row['source'],
-        leadId: row['leadId'],
-      };
-      // Custom fields from Excel
-      const customFields = {
-        service_type: row['service_type'],
-        scope_of_service_type: row['scope_of_service_type'],
-        proposal_value: row['proposal_value'],
-        espl_proposal_no: row['espl_proposal_no'],
-        project_location: row['project_location'],
-        proposal_sent_date: row['proposal_sent_date'],
-        source: row['source'],
-        sectoral_sector: row['sectoral_sector'],
-        sbu_class: row['sbu_class'],
-        no_of_reports_prepared_for_the_project: row['no_of_reports_prepared_for_the_project'],
-      };
-
-      // Log fallback values used for debugging
-      const fallbackUsed = {};
-      if (!row['contactPerson']) fallbackUsed.contactPerson = 'TBD - Contact Required';
-      if (!row['title']) fallbackUsed.title = 'Untitled Deal';
-      if (!row['pipelineStage']) fallbackUsed.pipelineStage = 'Lead';
-      
-      // Check if title was modified for uniqueness
-      const originalTitle = row['title'] || 'Untitled Deal';
-      if (mapped.title !== originalTitle) {
-        fallbackUsed.titleModified = `Made unique: "${originalTitle}" → "${mapped.title}"`;
-      }
-
-      if (Object.keys(fallbackUsed).length > 0) {
-        console.log('FALLBACK VALUES USED for row:', {
-          title: mapped.title,
-          organization: mapped.organization,
-          fallbacks: fallbackUsed
-        });
-      }
-      const payload = {
-        ...mapped,
-        // Only include specific fields from req.body, not all of them
-        masterUserID: req.body.masterUserID || req.adminId || 1,
-        ownerId: req.body.ownerId || req.adminId || 1,
-        // Add actual custom fields as individual properties, not as a nested object
-        ...customFields,
-      };
-      // Simulate req/res for createDeal
-      const fakeReq = { ...req, body: payload };
-      let fakeRes = {
-        status: (code) => ({
-          json: (obj) => {
-            // If it's an error response (4xx or 5xx), throw an exception
-            if (code >= 400) {
-              const error = new Error(obj.message || 'Deal creation failed');
-              error.statusCode = code;
-              error.responseData = obj;
-              throw error;
-            }
-            // For success responses, just return the object
-            return { code, ...obj };
-          }
-        }),
-      };
-      try {
-        // Call createDeal logic directly
-        const result = await exports.createDeal(fakeReq, fakeRes);
-        successCount++;
-      } catch (err) {
-        // Enhanced error logging with fallback information
-        const fallbackInfo = {};
-        if (!row['contactPerson']) fallbackInfo.contactPerson = 'TBD - Contact Required';
-        if (!row['title']) fallbackInfo.title = 'Untitled Deal';
-        if (!row['pipelineStage']) fallbackInfo.pipelineStage = 'Lead';
-
-        console.error('BULK IMPORT ERROR for row:', {
-          title: mapped.title,
-          contactPerson: mapped.contactPerson,
-          organization: mapped.organization,
-          error: err.message,
-          statusCode: err.statusCode,
-          responseData: err.responseData,
-          fallbacksUsed: Object.keys(fallbackInfo).length > 0 ? fallbackInfo : 'None',
-          row: row
-        });
-        errorRows.push({
-          row,
-          error: err.message,
-          statusCode: err.statusCode,
-          details: err.responseData,
-          fallbacksUsed: fallbackInfo
-        });
-      }
-    }
-    res.json({ message: `Bulk deal import (no cross-linking) complete. Success: ${successCount}, Errors: ${errorRows.length}`, errors: errorRows });
-  } catch (error) {
-    console.error('Bulk deal import (no cross-linking) failed:', error);
-    res.status(500).json({ message: 'Bulk deal import (no cross-linking) failed', error: error.message });
-  }
-};
-// BULK DEAL IMPORT FROM EXCEL
-// const XLSX = require('xlsx');
-
-
-
-
-exports.bulkImportDeals = async (req, res) => {
-  try {
-    if (!req.file || !req.file.path) {
-      return res.status(400).json({ message: 'No file uploaded.' });
-    }
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    let successCount = 0;
-    let errorRows = [];
-    for (const row of rows) {
-      // Map Excel columns to API fields (direct mapping, as column names now match API fields)
-      const sanitizeInt = (val) => (val === '' || val === undefined ? null : val);
-      // Date sanitization helper
-      const sanitizeDate = (val) => {
-        if (!val) return null;
-        const d = new Date(val);
-        return isNaN(d.getTime()) ? null : d;
-      };
-      // Clean email: only use the first valid email if multiple are present
-      let cleanedEmail = row['email'];
-      if (typeof cleanedEmail === 'string' && cleanedEmail.includes('@')) {
-        // Split by common delimiters (comma, semicolon, newline)
-        const emailParts = cleanedEmail.split(/[,;\r\n]+/).map(e => e.trim()).filter(Boolean);
-        cleanedEmail = emailParts.length > 0 ? emailParts[0] : '';
-      }
-      const mapped = {
-        contactPerson: row['contactPerson'],
-        organization: row['organization'],
-        title: row['title'],
-        value: row['value'],
-        currency: row['currency'],
-        pipeline: row['pipeline'],
-        pipelineStage: row['pipelineStage'],
-        expectedCloseDate: sanitizeDate(row['expectedCloseDate']),
-        sourceChannel: row['sourceChannel'],
-        sourceChannelId: row['sourceChannelId'],
-        serviceType: row['serviceType'],
-        proposalValue: row['proposalValue'],
-        proposalCurrency: row['proposalCurrency'],
-        esplProposalNo: row['esplProposalNo'],
-        projectLocation: row['projectLocation'],
-        organizationCountry: row['organizationCountry'],
-        proposalSentDate: sanitizeDate(row['proposalSentDate']),
-        sourceRequired: row['sourceRequired'],
-        questionerShared: row['questionerShared'],
-        sectorialSector: row['sectorialSector'],
-        sbuClass: row['sbuClass'],
-        phone: row['phone'],
-        email: cleanedEmail,
-        sourceOrgin: row['sourceOrgin'],
-        source: row['source'],
-      };
-      // Custom fields from Excel
-      const customFields = {
-        service_type: row['service_type'],
-        scope_of_service_type: row['scope_of_service_type'],
-        proposal_value: row['proposal_value'],
-        espl_proposal_no: row['espl_proposal_no'],
-        project_location: row['project_location'],
-        proposal_sent_date: row['proposal_sent_date'],
-        source: row['source'],
-        sectoral_sector: row['sectoral_sector'],
-        sbu_class: row['sbu_class'],
-        no_of_reports_prepared_for_the_project: row['no_of_reports_prepared_for_the_project'],
-      };
-
-      // --- Find masterUserID by matching 'Deal - Creator' column to MasterUser.name ---
-      let masterUserID = null;
-      const dealCreatorName = row['masterUserID']
-      if (dealCreatorName) {
-        const matchedUser = await MasterUser.findOne({ where: { name: dealCreatorName } });
-        if (matchedUser) {
-          masterUserID = matchedUser.masterUserID;
-        }
-      }
-
-      // Cross-link: find lead by title, contactPerson, and organization
-      let leadId = null;
-      if (mapped.title && mapped.contactPerson && mapped.organization) {
-        const matchedLead = await Lead.findOne({
-          where: {
-            title: mapped.title,
-            contactPerson: mapped.contactPerson,
-            organization: mapped.organization,
-          },
-        });
-        if (matchedLead) {
-          leadId = matchedLead.leadId;
-        }
-      }
-      // Add leadId to mapped if found
-      if (leadId) mapped.leadId = leadId;
-
-      // Merge with req.body defaults (e.g. req.adminId, role, etc.)
-      const payload = {
-        ...req.body,
-        ...mapped,
-        customFields,
-        masterUserID: masterUserID || req.body.masterUserID || req.adminId, // Prefer Excel match, fallback to req
-      };
-      // Debug: Log the payload for each row, especially masterUserID
-      console.log('DEBUG bulkImportDeals payload.masterUserID:', payload.masterUserID, 'title:', mapped.title, 'contactPerson:', mapped.contactPerson, 'organization:', mapped.organization, 'Deal - Creator:', dealCreatorName);
-      // Simulate req/res for createDeal
-      const fakeReq = { ...req, body: payload };
-      let fakeRes = {
-        status: (code) => ({ json: (obj) => ({ code, ...obj }) }),
-      };
-      try {
-        // Call createDeal logic directly
-        const result = await exports.createDeal(fakeReq, fakeRes);
-        successCount++;
-        // After deal creation, update the matched lead's dealId
-        if (leadId && result && result.deal && result.deal.dealId) {
-          await Lead.update({ dealId: result.deal.dealId }, { where: { leadId } });
-        }
-      } catch (err) {
-        errorRows.push({ row, error: err.message });
-        // Log the failed row and error for debugging
-        const errorLog = {
-          title: mapped.title,
-          contactPerson: mapped.contactPerson,
-          organization: mapped.organization,
-          error: err.message,
-          row,
-        };
-        console.error('BULK IMPORT ERROR:', errorLog);
-        // Append error to a file for later review
-        const fs = require('fs');
-        // If file does not exist or is empty, write instructions at the top
-        const logFile = 'bulk_import_errors.log';
-        let writeInstructions = false;
-        try {
-          const stats = fs.statSync(logFile);
-          if (stats.size === 0) writeInstructions = true;
-        } catch (e) {
-          writeInstructions = true;
-        }
-        if (writeInstructions) {
-          fs.appendFileSync(
-            logFile,
-            'INSTRUCTIONS: Open this file in VS Code or any text editor. Each line is a failed record in JSON format. Review the error field for the reason. If you need help, copy a line and ask your developer or Copilot for help.\n\n',
-            { encoding: 'utf8' }
-          );
-        }
-        fs.appendFileSync(
-          logFile,
-          JSON.stringify(errorLog) + '\n',
-          { encoding: 'utf8' }
-        );
-      }
-    }
-    res.json({ message: `Bulk deal import complete. Success: ${successCount}, Errors: ${errorRows.length}`, errors: errorRows });
-  } catch (error) {
-    console.error('Bulk deal import failed:', error);
-    res.status(500).json({ message: 'Bulk deal import failed', error: error.message });
-  }
-};
 const Deal = require("../../models/deals/dealsModels");
 const Lead = require("../../models/leads/leadsModel");
 const Person = require("../../models/leads/leadPersonModel");
@@ -351,29 +27,7 @@ const PipelineStage = require("../../models/deals/pipelineStageModel");
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
-    // Add validation for required request properties
-    if (!req.adminId) {
-      console.error("[RELAXED] Missing req.adminId");
-      return res.status(400).json({ message: "Missing adminId" });
-    }
-
     const dealProgramId = getProgramId("DEALS");
-    if (!dealProgramId) {
-      console.error("[RELAXED] Failed to get program ID for DEALS");
-      return res.status(500).json({ message: "Failed to get program ID" });
-    }
-
-    // Log input data for debugging failed deals
-    console.log("[DEBUG] createDeal called with:", {
-      adminId: req.adminId,
-      role: req.role,
-      bodyKeys: Object.keys(req.body),
-      title: req.body.title,
-      contactPerson: req.body.contactPerson,
-      organization: req.body.organization,
-      sourceOrgin: req.body.sourceOrgin,
-      leadId: req.body.leadId
-    });
     const {
       contactPerson,
       organization,
@@ -403,302 +57,356 @@ exports.createDeal = async (req, res) => {
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
 
+     if (leadId === '') {
+      leadId = null;
+    }
+
     // Validate required fields here...
     let ownerId = req.user?.id || req.adminId || req.body.ownerId;
 
-  // Removed required field validations for contactPerson, organization, title, and email
+    // --- Enhanced validation similar to createLead ---
+    // Validate required fields
+    if (!contactPerson || !organization || !title || !email) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: contactPerson, organization, title, and email are required.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "contactPerson, organization, title, and email are required.",
+      });
+    }
+
+    // Validate contactPerson
+    if (typeof contactPerson !== "string" || !contactPerson.trim()) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: contactPerson must be a non-empty string.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "contactPerson must be a non-empty string.",
+      });
+    }
+
+    // Validate organization
+    if (typeof organization !== "string" || !organization.trim()) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: organization must be a non-empty string.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "organization must be a non-empty string.",
+      });
+    }
+
+    // Validate title
+    if (typeof title !== "string" || !title.trim()) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: title must be a non-empty string.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "title must be a non-empty string.",
+      });
+    }
+
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Invalid email format.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Invalid email format.",
+      });
+    }
+
+    // Validate phone if provided
+    if (phone && !/^\+?\d{7,15}$/.test(phone)) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Invalid phone number format.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Invalid phone number format.",
+      });
+    }
+
+    // Validate proposalValue if provided
+    if (proposalValue && proposalValue < 0) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Proposal value must be positive.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Proposal value must be positive.",
+      });
+    }
+
+    // Validate value if provided
+    if (value && value < 0) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: Deal value must be positive.`,
+        req.adminId
+      );
+      return res.status(400).json({
+        message: "Deal value must be positive.",
+      });
+    }
     // Find or create Person and Organization here...
-  // Removed duplicate check for contactPerson, organization, and title
+    // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
+    const existingContactOrgTitleDeal = await Deal.findOne({
+      where: {
+        contactPerson: contactPerson,
+        organization: organization,
+        title: title,
+      },
+    });
+    if (existingContactOrgTitleDeal) {
+      await logAuditTrail(
+        dealProgramId,
+        "DEAL_CREATION",
+        req.role,
+        `Deal creation failed: A deal with this exact combination of contact person, organization, and title already exists.`,
+        req.adminId
+      );
+      return res.status(409).json({
+        message:
+          "A deal with this exact combination of contact person, organization, and title already exists. Please use a different title for a new deal with the same contact.",
+        existingDealId: existingContactOrgTitleDeal.dealId,
+        existingDealTitle: existingContactOrgTitleDeal.title,
+      });
+    }
     // 1. Set masterUserID at the top, before using it anywhere
     const masterUserID = req.adminId;
     // 1. Check if a matching lead exists
 
     let existingLead = null;
 
-    // 2. If sourceOrgin is '2', try to use leadId, but do not block if missing/invalid
+    // 2. If sourceOrgin is '2', require and use leadId
     let leadId = req.body.leadId;
+    if (leadId === '') {
+      leadId = null;
+    }
     if (sourceOrgin === "2" || sourceOrgin === 2) {
       if (!leadId) {
-        console.warn("[RELAXED] leadId is missing for sourceOrgin=2. Proceeding without lead linkage.");
-        try {
-          await logAuditTrail(
-            dealProgramId,
-            "DEAL_CREATION",
-            req.role,
-            "Warning: leadId is missing for sourceOrgin=2. Proceeding without lead linkage.",
-            req.adminId
-          );
-        } catch (auditErr) {
-          console.warn("[RELAXED] Audit trail logging failed:", auditErr.message);
-        }
-      } else {
-        existingLead = await Lead.findByPk(leadId);
-        if (!existingLead) {
-          console.warn("[RELAXED] Lead with leadId " + leadId + " not found. Proceeding without lead linkage.");
-          try {
-            await logAuditTrail(
-              dealProgramId,
-              "DEAL_CREATION",
-              req.role,
-              "Warning: Lead with leadId " + leadId + " not found. Proceeding without lead linkage.",
-              req.adminId
-            );
-          } catch (auditErr) {
-            console.warn("[RELAXED] Audit trail logging failed:", auditErr.message);
-          }
-        } else if (existingLead.dealId) {
-          console.warn("[RELAXED] Lead " + leadId + " already converted to a deal. Proceeding to create new deal anyway.");
-          try {
-            await logAuditTrail(
-              dealProgramId,
-              "DEAL_CREATION",
-              req.role,
-              "Warning: Lead " + leadId + " already converted to a deal. Proceeding to create new deal anyway.",
-              req.adminId
-            );
-          } catch (auditErr) {
-            console.warn("[RELAXED] Audit trail logging failed:", auditErr.message);
-          }
-          ownerId = existingLead.ownerId;
-          leadId = existingLead.leadId;
-        } else {
-          ownerId = existingLead.ownerId;
-          leadId = existingLead.leadId;
-        }
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "leadId is required when sourceOrgin is 2." });
       }
+      existingLead = await Lead.findByPk(leadId);
+      if (!existingLead) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Lead with leadId ${leadId} not found.`,
+          req.adminId
+        );
+        return res.status(404).json({ message: "Lead not found." });
+      }
+      ownerId = existingLead.ownerId; // assign, don't redeclare
+      leadId = existingLead.leadId; // assign, don't redeclare
+      // Optionally, update the lead after deal creation
     }
     // 1. Find or create Organization
     let org = null;
-    try {
-      if (organization) {
-        org = await Organization.findOne({ where: { organization } });
-        if (!org) {
-          org = await Organization.create({
-            organization,
-            masterUserID, // make sure this is set
-          });
-        }
+    if (organization) {
+      org = await Organization.findOne({ where: { organization } });
+      if (!org) {
+        org = await Organization.create({
+          organization,
+          masterUserID, // make sure this is set
+        });
       }
-    } catch (orgErr) {
-      console.warn("[RELAXED] Organization create/find failed:", orgErr.message);
-      org = null;
     }
     // 2. Find or create Person
     let person = null;
-    try {
-      if (contactPerson && email) {
-        const masterUserID = req.adminId;
+    if (contactPerson) {
+      const masterUserID = req.adminId;
 
-        person = await Person.findOne({ where: { email } });
-        if (!person) {
-          person = await Person.create({
-            contactPerson,
-            email,
-            phone,
-            leadOrganizationId: org ? org.leadOrganizationId : null,
-            masterUserID,
-          });
-        }
-      } else if (contactPerson && !email) {
-        // Create person without email if email is not provided
-        console.warn("[RELAXED] Creating person without email for contact:", contactPerson);
+      person = await Person.findOne({ where: { email } });
+      if (!person) {
         person = await Person.create({
           contactPerson,
-          email: null, // Explicitly set to null
+          email,
           phone,
           leadOrganizationId: org ? org.leadOrganizationId : null,
-          masterUserID: req.adminId,
+          masterUserID,
         });
       }
-    } catch (personErr) {
-      console.warn("[RELAXED] Person create/find failed:", personErr.message);
-      person = null;
     }
     // Create the lead
-    if (person && person.personId) {
-      console.log(person.personId, " before deal creation");
+    console.log(person.personId, " before deal creation");
+    // Before saving to DB
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      if (!leadId) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "leadId is required when sourceOrgin is 2." });
+      }
+      existingLead = await Lead.findByPk(leadId);
+      if (!existingLead) {
+        return res.status(404).json({ message: "Lead not found." });
+      }
+      // Prevent conversion if already converted to a deal
+      if (existingLead.dealId) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: This lead is already converted to a deal.`,
+          req.adminId
+        );
+        return res
+          .status(400)
+          .json({ message: "This lead is already converted to a deal." });
+      }
+      ownerId = existingLead.ownerId;
+      leadId = existingLead.leadId;
     }
-
-    // Final validation and fallback for required fields before Deal creation
-    const finalContactPerson = person ? person.contactPerson : (contactPerson || 'TBD - Contact Required');
-    const finalTitle = title || 'Untitled Deal';
-    const finalMasterUserID = req.adminId || masterUserID || 1;
-    const finalOwnerId = ownerId || req.adminId || 1;
-
-    // Log if we're using fallback values
-    if (finalContactPerson !== contactPerson || finalTitle !== title ||
-        finalMasterUserID !== req.adminId || finalOwnerId !== ownerId) {
-      console.log("[FALLBACK] Using fallback values in createDeal:", {
-        originalContactPerson: contactPerson,
-        finalContactPerson: finalContactPerson,
-        originalTitle: title,
-        finalTitle: finalTitle,
-        originalMasterUserID: req.adminId,
-        finalMasterUserID: finalMasterUserID,
-        originalOwnerId: ownerId,
-        finalOwnerId: finalOwnerId
+    const deal = await Deal.create({
+      // contactPerson: person ? person.contactPerson : null,
+      contactPerson: person ? person.contactPerson : contactPerson,
+      organization: org ? org.organization : null,
+      personId: person ? person.personId : null,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
+      //       personId: person.personId,
+      // leadOrganizationId: org.leadOrganizationId,
+      leadId, // link to the lead if found
+      title,
+      value,
+      currency,
+      pipeline,
+      pipelineStage,
+      expectedCloseDate,
+      sourceChannel,
+      sourceChannelId,
+      serviceType,
+      proposalValue,
+      proposalCurrency,
+      esplProposalNo,
+      projectLocation,
+      organizationCountry,
+      proposalSentDate,
+      sourceRequired,
+      questionerShared,
+      sectorialSector,
+      sbuClass,
+      phone,
+      email,
+      sourceOrgin,
+      masterUserID: req.adminId, // Ensure masterUserID is set from the request
+      ownerId,
+      status: "open", // Default status
+      source,
+      // Add personId, organizationId, etc. as needed
+    });
+    let responsiblePerson = null;
+    if (sourceOrgin === "2" || sourceOrgin === 2) {
+      // Use ownerId for responsible person
+      const owner = await MasterUser.findOne({
+        where: { masterUserID: ownerId },
       });
+      responsiblePerson = owner ? owner.name : null;
+    } else {
+      // Use masterUserID for responsible person
+      const user = await MasterUser.findOne({
+        where: { masterUserID: req.adminId },
+      });
+      responsiblePerson = user ? user.name : null;
     }
 
-    let deal;
-    try {
-      deal = await Deal.create({
-        contactPerson: finalContactPerson,
-        organization: org ? org.organization : null,
+    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
+      await Email.update(
+        { dealId: deal.dealId },
+        { where: { emailID: req.body.emailID } }
+      );
+    }
+    await DealDetails.create({
+      dealId: deal.dealId, // or deal.id depending on your PK
+      responsiblePerson,
+      ownerName: responsiblePerson, // or any other field you want to set
+      // ...other dealDetails fields if needed
+    });
+    // Optionally, update the lead with the new dealId
+    await DealStageHistory.create({
+      dealId: deal.dealId,
+      stageName: deal.pipelineStage,
+      enteredAt: deal.createdAt, // or new Date()
+    });
+    if (person || org) {
+      await DealParticipant.create({
+        dealId: deal.dealId,
         personId: person ? person.personId : null,
         leadOrganizationId: org ? org.leadOrganizationId : null,
-        leadId, // link to the lead if found
-        title: finalTitle,
-        value,
-        currency,
-        pipeline,
-        pipelineStage,
-        expectedCloseDate,
-        sourceChannel,
-        sourceChannelId,
-        serviceType,
-        proposalValue,
-        proposalCurrency,
-        esplProposalNo,
-        projectLocation,
-        organizationCountry,
-        proposalSentDate,
-        sourceRequired,
-        questionerShared,
-        sectorialSector,
-        sbuClass,
-        phone,
-        email,
-        sourceOrgin,
-        masterUserID: finalMasterUserID,
-        ownerId: finalOwnerId,
-        status: "open", // Default status
-        source,
       });
-    } catch (dealErr) {
-      console.error("[RELAXED] Deal.create failed:", dealErr.message);
-      return res.status(500).json({ message: "Deal creation failed", error: dealErr.message });
-    }
-    let responsiblePerson = null;
-    try {
-      if (sourceOrgin === "2" || sourceOrgin === 2) {
-        // Use ownerId for responsible person
-        const owner = await MasterUser.findOne({
-          where: { masterUserID: ownerId },
-        });
-        responsiblePerson = owner ? owner.name : null;
-      } else {
-        // Use masterUserID for responsible person
-        const user = await MasterUser.findOne({
-          where: { masterUserID: req.adminId },
-        });
-        responsiblePerson = user ? user.name : null;
-      }
-    } catch (respErr) {
-      console.warn("[RELAXED] Responsible person lookup failed:", respErr.message);
-      responsiblePerson = null;
     }
 
-    try {
-      if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
-        await Email.update(
-          { dealId: deal.dealId },
-          { where: { emailID: req.body.emailID } }
-        );
+    if (existingLead) {
+      await existingLead.update({ dealId: deal.dealId });
+    } else if (leadId) {
+      // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
+      const leadToUpdate = await Lead.findByPk(leadId);
+      if (leadToUpdate) {
+        await leadToUpdate.update({ dealId: deal.dealId });
       }
-    } catch (emailUpdateErr) {
-      console.warn("[RELAXED] Email update failed:", emailUpdateErr.message);
-    }
-    try {
-      await DealDetails.create({
-        dealId: deal.dealId, // or deal.id depending on your PK
-        responsiblePerson,
-        ownerName: responsiblePerson, // or any other field you want to set
-        // ...other dealDetails fields if needed
-      });
-    } catch (detailsErr) {
-      console.warn("[RELAXED] DealDetails.create failed:", detailsErr.message);
-    }
-    // Optionally, update the lead with the new dealId
-    // Only create DealStageHistory if stageName is present
-    try {
-      if (deal.pipelineStage) {
-        await DealStageHistory.create({
-          dealId: deal.dealId,
-          stageName: deal.pipelineStage,
-          enteredAt: deal.createdAt, // or new Date()
-        });
-      } else {
-        console.warn("DealStageHistory not created: pipelineStage is null for dealId " + deal.dealId);
-      }
-    } catch (stageErr) {
-      console.warn("[RELAXED] DealStageHistory.create failed:", stageErr.message);
-    }
-    try {
-      if (person || org) {
-        await DealParticipant.create({
-          dealId: deal.dealId,
-          personId: person ? person.personId : null,
-          leadOrganizationId: org ? org.leadOrganizationId : null,
-        });
-      }
-    } catch (partErr) {
-      console.warn("[RELAXED] DealParticipant.create failed:", partErr.message);
-    }
-    // Always update the lead's dealId if a valid leadId is provided
-    try {
-      if (leadId) {
-        const leadToUpdate = await Lead.findByPk(leadId);
-        if (leadToUpdate) {
-          await leadToUpdate.update({ dealId: deal.dealId });
-        }
-      }
-    } catch (leadUpdateErr) {
-      console.warn("[RELAXED] Lead update failed:", leadUpdateErr.message);
     }
 
     // Handle custom fields - extract from req.body directly
     const savedCustomFields = {};
 
     // Define standard Deal model fields that should not be treated as custom fields
+    // const standardDealFields = [
+    //   'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline',
+    //   'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'sourceChannelId',
+    //   'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo',
+    //   'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired',
+    //   'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email',
+    //   'sourceOrgin', 'source', 'leadId', 'ownerId', 'emailID'
+    // ];
     const standardDealFields = [
       "title",
       "ownerId",
       "sourceChannel",
-      "sourceChannelId",
-      "contactPerson",
-      "organization",
-      "value",
-      "currency",
-      "pipeline",
-      "pipelineStage",
-      "expectedCloseDate",
-      "serviceType",
-      "proposalValue",
-      "proposalCurrency",
-      "esplProposalNo",
-      "projectLocation",
-      "organizationCountry",
-      "proposalSentDate",
-      "sourceRequired",
-      "questionerShared",
-      "sectorialSector",
-      "sbuClass",
-      "phone",
-      "email",
-      "sourceOrgin",
-      "source",
-      "leadId",
-      "masterUserID",
-      "emailID",
-      "customFields",
-      "isArchived",
-      "questionShared",
-      "createdAt",
-      "updatedAt",
-      "seen",
-      "isQualified",
-      "visibilityLevel"
+      "sourceChannelID",
     ];
 
     // Extract potential custom fields from req.body
@@ -708,13 +416,7 @@ exports.createDeal = async (req, res) => {
         !standardDealFields.includes(key) &&
         value !== null &&
         value !== undefined &&
-        value !== "" &&
-        // Skip obvious non-custom field patterns
-        !key.includes('Id') &&
-        !key.includes('ID') &&
-        key !== 'customFields' &&
-        key !== 'sourceOrgin' &&
-        key !== 'leadId'
+        value !== ""
       ) {
         potentialCustomFields[key] = value;
       }
@@ -738,134 +440,134 @@ exports.createDeal = async (req, res) => {
         );
 
         for (const [fieldKey, value] of Object.entries(potentialCustomFields)) {
-          try {
-            console.log("\n--- Processing field: " + fieldKey + " = " + value + " ---");
-            let customField;
+          console.log(`\n--- Processing field: ${fieldKey} = ${value} ---`);
+          let customField;
 
-            // Check if it's a fieldId (numeric) or fieldName (string)
-            if (isNaN(fieldKey)) {
-              // It's a fieldName - search by fieldName
-              console.log("Searching by fieldName:", fieldKey);
-              customField = await CustomField.findOne({
-                where: {
-                  fieldName: fieldKey,
-                  entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                  isActive: true,
-                  // [Op.or]: [
-                  //   { masterUserID: req.adminId },
-                  //   { fieldSource: "default" },
-                  //   { fieldSource: "system" },
-                  // ],
-                },
-              });
-            } else {
-              // It's a fieldId - search by fieldId
-              console.log("Searching by fieldId:", parseInt(fieldKey));
-              customField = await CustomField.findOne({
-                where: {
-                  fieldId: parseInt(fieldKey),
-                  entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                  isActive: true,
-                  // [Op.or]: [
-                  //   { masterUserID: req.adminId },
-                  //   { fieldSource: "default" },
-                  //   { fieldSource: "system" },
-                  // ],
-                },
-              });
-            }
+          // Check if it's a fieldId (numeric) or fieldName (string)
+          if (isNaN(fieldKey)) {
+            // It's a fieldName - search by fieldName
+            console.log("Searching by fieldName:", fieldKey);
+            customField = await CustomField.findOne({
+              where: {
+                fieldName: fieldKey,
+                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
+                isActive: true,
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
+              },
+            });
+          } else {
+            // It's a fieldId - search by fieldId
+            console.log("Searching by fieldId:", parseInt(fieldKey));
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: parseInt(fieldKey),
+                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
+                isActive: true,
+                // [Op.or]: [
+                //   { masterUserID: req.adminId },
+                //   { fieldSource: "default" },
+                //   { fieldSource: "system" },
+                // ],
+              },
+            });
+          }
 
-            console.log(
-              "CustomField found:",
-              customField
-                ? {
-                    fieldId: customField.fieldId,
-                    fieldName: customField.fieldName,
-                    fieldType: customField.fieldType,
-                    entityType: customField.entityType,
-                    isActive: customField.isActive,
-                    masterUserID: customField.masterUserID,
-                    fieldSource: customField.fieldSource,
-                  }
-                : "NOT FOUND"
-            );
+          console.log(
+            "CustomField found:",
+            customField
+              ? {
+                  fieldId: customField.fieldId,
+                  fieldName: customField.fieldName,
+                  fieldType: customField.fieldType,
+                  entityType: customField.entityType,
+                  isActive: customField.isActive,
+                  masterUserID: customField.masterUserID,
+                  fieldSource: customField.fieldSource,
+                }
+              : "NOT FOUND"
+          );
+
+          if (
+            customField &&
+            value !== null &&
+            value !== undefined &&
+            value !== ""
+          ) {
+            // Validate value based on field type
+            let processedValue = value;
 
             if (
-              customField &&
+              customField.fieldType === "number" &&
               value !== null &&
-              value !== undefined &&
               value !== ""
             ) {
-              // Validate value based on field type
-              let processedValue = value;
-
-              if (
-                customField.fieldType === "number" &&
-                value !== null &&
-                value !== ""
-              ) {
-                processedValue = parseFloat(value);
-                if (isNaN(processedValue)) {
-                  console.warn(
-                    "Invalid number value for field \"" + customField.fieldLabel + "\""
-                  );
-                  continue;
-                }
+              processedValue = parseFloat(value);
+              if (isNaN(processedValue)) {
+                console.warn(
+                  `Invalid number value for field "${customField.fieldLabel}"`
+                );
+                continue;
               }
-
-              if (customField.fieldType === "email" && value) {
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!emailRegex.test(value)) {
-                  console.warn(
-                    "Invalid email format for field \"" + customField.fieldLabel + "\""
-                  );
-                  continue;
-                }
-              }
-
-              console.log("Creating CustomFieldValue:", {
-                fieldId: customField.fieldId,
-                entityId: deal.dealId,
-                entityType: "deal",
-                value:
-                  typeof processedValue === "object"
-                    ? JSON.stringify(processedValue)
-                    : String(processedValue),
-                masterUserID: req.adminId,
-              });
-
-              await CustomFieldValue.create({
-                fieldId: customField.fieldId,
-                entityId: deal.dealId,
-                entityType: "deal",
-                value:
-                  typeof processedValue === "object"
-                    ? JSON.stringify(processedValue)
-                    : String(processedValue),
-                masterUserID: req.adminId,
-              });
-
-              // Store the saved custom field for response using fieldName as key
-              savedCustomFields[customField.fieldName] = {
-                fieldName: customField.fieldName,
-                fieldType: customField.fieldType,
-                value: processedValue,
-              };
-
-              console.log(
-                "✅ Custom field saved successfully:",
-                customField.fieldName
-              );
-            } else if (!customField) {
-              console.warn("❌ Custom field not found for key: " + fieldKey);
-            } else {
-              console.warn("❌ Invalid value for field " + fieldKey + ":", value);
             }
-          } catch (cfvErr) {
-            console.warn("[RELAXED] CustomFieldValue create failed for key " + fieldKey + ": " + cfvErr.message);
+
+            if (customField.fieldType === "email" && value) {
+              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+              if (!emailRegex.test(value)) {
+                console.warn(
+                  `Invalid email format for field "${customField.fieldLabel}"`
+                );
+                continue;
+              }
+            }
+
+            console.log("Creating CustomFieldValue:", {
+              fieldId: customField.fieldId,
+              entityId: deal.dealId,
+              entityType: "deal",
+              value:
+                typeof processedValue === "object"
+                  ? JSON.stringify(processedValue)
+                  : String(processedValue),
+              masterUserID: req.adminId,
+            });
+
+            await CustomFieldValue.create({
+              fieldId: customField.fieldId,
+              entityId: deal.dealId,
+              entityType: "deal",
+              value:
+                typeof processedValue === "object"
+                  ? JSON.stringify(processedValue)
+                  : String(processedValue),
+              masterUserID: req.adminId,
+            });
+
+            // Store the saved custom field for response using fieldName as key
+            savedCustomFields[customField.fieldName] = {
+              fieldName: customField.fieldName,
+              fieldType: customField.fieldType,
+              value: processedValue,
+            };
+
+            console.log(
+              "✅ Custom field saved successfully:",
+              customField.fieldName
+            );
+          } else if (!customField) {
+            console.warn(`❌ Custom field not found for key: ${fieldKey}`);
+          } else {
+            console.warn(`❌ Invalid value for field ${fieldKey}:`, value);
           }
         }
-        console.log("🎉 Saved " + Object.keys(savedCustomFields).length + " custom field values for deal " + deal.dealId);
+        console.log(
+          `🎉 Saved ${
+            Object.keys(savedCustomFields).length
+          } custom field values for deal ${deal.dealId}`
+        );
       } catch (customFieldError) {
         console.error("❌ Error saving custom fields:", customFieldError);
         // Don't fail the deal creation, just log the error
@@ -874,19 +576,15 @@ exports.createDeal = async (req, res) => {
       console.log("❌ No potential custom fields found in request body");
     }
 
-    try {
-      await historyLogger(
-        dealProgramId,
-        "DEAL_CREATION",
-        deal.masterUserID,
-        deal.dealId,
-        null,
-        "Deal is created by " + req.role,
-        null
-      );
-    } catch (historyErr) {
-      console.warn("[RELAXED] History logging failed:", historyErr.message);
-    }
+    await historyLogger(
+      dealProgramId,
+      "DEAL_CREATION",
+      deal.masterUserID,
+      deal.dealId,
+      null,
+      `Deal is created by ${req.role}`,
+      null
+    );
 
     // Prepare response with both default and custom fields
     const dealResponse = {
@@ -900,8 +598,7 @@ exports.createDeal = async (req, res) => {
       customFieldsSaved: Object.keys(savedCustomFields).length,
     });
   } catch (error) {
-    console.error("Error creating deal:", error);
-    console.error("Error stack:", error.stack);
+    console.log("Error creating deal:", error);
 
     res.status(500).json({ message: "Internal server error" });
   }
