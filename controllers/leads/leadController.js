@@ -613,7 +613,7 @@ exports.getLeads = async (req, res) => {
     isArchived,
     search,
     page = 1,
-    limit = 20,
+    limit = 500,
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
@@ -3096,7 +3096,7 @@ exports.getAllLeadDetails = async (req, res) => {
   const { leadId } = req.params;
 
   // Add pagination parameters for emails
-  const { emailPage = 1, emailLimit = 25 } = req.query;
+  const { emailPage = 1, emailLimit = 50 } = req.query;
   const emailOffset = (emailPage - 1) * emailLimit;
 
   if (!leadId) {
@@ -3328,6 +3328,7 @@ exports.getAllLeadDetails = async (req, res) => {
       "birthday",
       "organization",
       "address",
+      "title"
     ];
     const filteredLead = {};
     if (lead) {
