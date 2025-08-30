@@ -1,3 +1,76 @@
+const XLSX = require('xlsx');
+// BULK LEAD IMPORT FROM EXCEL
+exports.bulkImportLeads = async (req, res) => {
+  try {
+    if (!req.file || !req.file.path) {
+      return res.status(400).json({ message: 'No file uploaded.' });
+    }
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    let successCount = 0;
+    let errorRows = [];
+    for (const row of rows) {
+      // Map Excel columns to API fields (direct mapping, as column names now match API fields)
+        // Sanitize integer fields: convert empty string to null
+        const sanitizeInt = (val) => (val === '' || val === undefined ? null : val);
+        const mapped = {
+          // Lead fields
+          contactPerson: row['contactPerson'],
+          email: row['email'],
+          createdAt: row['createdAt'],
+          organization: row['organization'],
+          title: row['title'],
+          updatedAt: row['updatedAt'],
+          valueLabels: row['valueLabels'],
+          sourceOrigin: row['sourceOrigin'],
+          value: row['value'],
+          sourceChannel: row['sourceChannel'],
+          sourceChannelID: sanitizeInt(row['sourceChannelID']),
+          sourceOriginID: sanitizeInt(row['sourceOriginID']),
+          // Custom fields from Excel
+          customFields: {
+            service_type: row['service_type'],
+            scope_of_service_type: row['scope_of_service_type'],
+            proposal_value: row['proposal_value'],
+            espl_proposal_no: row['espl_proposal_no'],
+            project_location: row['project_location'],
+            proposal_sent_date: row['proposal_sent_date'],
+            source: row['source'],
+            sectoral_sector: row['sectoral_sector'],
+            sbu_class: row['sbu_class'],
+            no_of_reports_prepared_for_the_project: row['no_of_reports_prepared_for_the_project'],
+          },
+          // // Deal fields (direct mapping)
+          // dealTitle: row['dealTitle'],
+          // dealValue: row['dealValue'],
+          // dealStatus: row['dealStatus'],
+          // dealOwner: row['dealOwner'],
+        };
+      // Merge with req.body defaults (e.g. req.adminId, role, etc.)
+      const payload = {
+        ...req.body,
+        ...mapped,
+      };
+      // Simulate req/res for createLead
+      const fakeReq = { ...req, body: payload };
+      let fakeRes = {
+        status: (code) => ({ json: (obj) => ({ code, ...obj }) }),
+      };
+      try {
+        // Call createLead logic directly
+        await exports.createLead(fakeReq, fakeRes);
+        successCount++;
+      } catch (err) {
+        errorRows.push({ row, error: err.message });
+      }
+    }
+    res.json({ message: `Bulk import complete. Success: ${successCount}, Errors: ${errorRows.length}`, errors: errorRows });
+  } catch (error) {
+    console.error('Bulk import failed:', error);
+    res.status(500).json({ message: 'Bulk import failed', error: error.message });
+  }
+};
 // const Lead = require("../../models/leads/leadsModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 //const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
@@ -116,10 +189,53 @@ async function getUserLeadVisibilityPermissions(userId, userRole) {
 exports.createLead = async (req, res) => {
   // Only use these fields as standard fields for root-level custom field extraction
   const standardFields = [
+    // Lead fields
+    "contactPerson",
+    "email",
+    "createdAt",
+    "organization",
     "title",
-    "ownerId",
+    "updatedAt",
+    "valueLabels",
+    "sourceOrigin",
+    "value",
     "sourceChannel",
     "sourceChannelID",
+    "sourceOriginID",
+    "expectedCloseDate",
+    "serviceType",
+    "scopeOfServiceType",
+    "phone",
+    "company",
+    "proposalValue",
+    "esplProposalNo",
+    "projectLocation",
+    "organizationCountry",
+    "proposalSentDate",
+    "status",
+    "sourceOrgin",
+    "SBUClass",
+    "numberOfReportsPrepared",
+    "emailID",
+    "value",
+    "pipeline",
+    "stage",
+    "productName",
+    "sourceOriginID",
+    // Deal fields
+    "dealTitle",
+    "dealValue",
+    "dealStatus",
+    "dealOwner",
+    // Other system fields
+    "customFields",
+    "masterUserID",
+    "ownerId",
+    "ownerName",
+    "visibilityLevel",
+    "visibilityGroupId",
+    "valueCurrency",
+    "proposalValueCurrency"
   ];
 
   // Extract standard fields
@@ -613,7 +729,7 @@ exports.getLeads = async (req, res) => {
     isArchived,
     search,
     page = 1,
-    limit = 20,
+    limit = 300,
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
@@ -3275,6 +3391,7 @@ exports.getAllLeadDetails = async (req, res) => {
         "isRequired",
         "entityType",
         "fieldLabel",
+        "options"
       ],
       order: [["sortOrder", "ASC"]],
     });
@@ -3302,6 +3419,7 @@ exports.getAllLeadDetails = async (req, res) => {
         fieldLabel: field.fieldLabel,
         fieldType: field.fieldType,
         isRequired: field.isRequired,
+        options: field.options,
         value:
           valueMap[field.fieldId] !== undefined
             ? valueMap[field.fieldId]
