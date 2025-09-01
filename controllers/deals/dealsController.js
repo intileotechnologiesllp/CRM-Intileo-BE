@@ -24,6 +24,7 @@ const { sendEmail } = require("../../utils/emailSend"); // Add email service imp
 const sequelize = require("../../config/db");
 const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
+const Currency = require("../../models/admin/masters/currencyModel")
 // Create a new deal with validation
 exports.createDeal = async (req, res) => {
   try {
@@ -2839,6 +2840,7 @@ exports.getDealDetail = async (req, res) => {
       dealId: deal.dealId,
       title: deal.title,
       value: deal.value,
+      valueCurrency: deal.currency,
       pipeline: deal.pipeline,
       ownerId: deal.ownerId,
       pipelineStage: deal.pipelineStage,
@@ -2847,6 +2849,7 @@ exports.getDealDetail = async (req, res) => {
       expectedCloseDate: deal.expectedCloseDate,
       serviceType: deal.serviceType,
       proposalValue: deal.proposalValue,
+      proposalValueCurrency: deal.proposalCurrency,
       esplProposalNo: deal.esplProposalNo,
       projectLocation: deal.projectLocation,
       organizationCountry: deal.organizationCountry,
@@ -2862,6 +2865,24 @@ exports.getDealDetail = async (req, res) => {
       lostReason: deal.details?.lostReason,
       // ...other deal fields
     };
+
+        // FETCH CURRENCY DETAILS
+        let valueCurrencyDetails = null;
+        let proposalValueCurrencyDetails = null;
+    
+        if (dealObj.valueCurrency) {
+          valueCurrencyDetails = await Currency.findOne({
+            where: { currencyId: dealObj.valueCurrency },
+            attributes: ['currencyId', 'currency_desc']
+          });
+        }
+    
+        if (dealObj.proposalValueCurrency) {
+          proposalValueCurrencyDetails = await Currency.findOne({
+            where: { currencyId: dealObj.proposalValueCurrency },
+            attributes: ['currencyId', 'currency_desc']
+          });
+        }
 
     // Fetch participants for this deal
     const participants = await DealParticipant.findAll({
@@ -3178,6 +3199,16 @@ exports.getDealDetail = async (req, res) => {
 
     res.status(200).json({
       deal: dealObj,
+      currencyDetails: {
+        valueCurrency: valueCurrencyDetails ? {
+          currencyId: valueCurrencyDetails.currencyId,
+          currency_desc: valueCurrencyDetails.currency_desc
+        } : null,
+        proposalValueCurrency: proposalValueCurrencyDetails ? {
+          currencyId: proposalValueCurrencyDetails.currencyId,
+          currency_desc: proposalValueCurrencyDetails.currency_desc
+        } : null
+      },
       person: personArr,
       organization: orgArr,
       pipelineStages: pipelineStagesUnique, // Enhanced pipeline stages like Pipedrive (but maintains frontend compatibility)

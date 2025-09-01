@@ -43,7 +43,7 @@ router.get(
    validatePrivilege(2, "view"),
   leadController.getNonAdminMasterUserNames
 );
-router.post("/by-master-user", leadController.getLeadsByMasterUser);
+router.post("/by-master-user", verifyToken, leadController.getLeadsByMasterUser);
 router.get(
   "/get-All-lead-details/:leadId",
   verifyToken,

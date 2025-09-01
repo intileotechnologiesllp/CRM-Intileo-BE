@@ -12,10 +12,10 @@ router.get(
   validatePrivilege(4, "view"),
   emailController.fetchRecentEmail
 );
-router.get("/fetch-drafts", validatePrivilege(4, "view"), emailController.fetchDraftEmails);
-router.get("/fetch-archive", validatePrivilege(4, "view"), emailController.fetchArchiveEmails);
+router.get("/fetch-drafts", verifyToken, validatePrivilege(4, "view"), emailController.fetchDraftEmails);
+router.get("/fetch-archive", verifyToken, validatePrivilege(4, "view"), emailController.fetchArchiveEmails);
 router.get("/get-emails", verifyToken, validatePrivilege(4, "view"), emailController.getEmails);
-router.get("/fetch-sent", validatePrivilege(4, "view"), emailController.fetchSentEmails);
+router.get("/fetch-sent", verifyToken, validatePrivilege(4, "view"), emailController.fetchSentEmails);
 router.get("/getoneEmail/:emailId", verifyToken, validatePrivilege(4, "view"), emailController.getOneEmail);
 router.post("/compose", verifyToken, validatePrivilege(4, "view"), emailController.composeEmail);
 router.post("/create-template", verifyToken, validatePrivilege(4, "view"), emailController.createTemplate);

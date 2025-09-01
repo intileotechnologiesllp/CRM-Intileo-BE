@@ -12,6 +12,7 @@ const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // I
 //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
 const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const Activity = require("../../models/activity/activityModel"); // Only import Activity where needed
+const Currency = require("../../models/admin/masters/currencyModel")
 const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
@@ -3112,7 +3113,7 @@ exports.getAllLeadDetails = async (req, res) => {
   }
 
   try {
-    // Get the user's email address from credentials
+    // Get the lead details
     const lead = await Lead.findByPk(leadId);
     if (!lead || !lead.email) {
       await logAuditTrail(
@@ -3124,15 +3125,12 @@ exports.getAllLeadDetails = async (req, res) => {
       );
       return res.status(404).json({ message: "Lead or lead email not found." });
     }
-    //     const deal = await Deal.findByPk(dealId);
-    // if (!deal || !deal.email) {
-    //   return res.status(404).json({ message: "Lead or lead email not found." });
-    // }
+
     const clientEmail = lead.email;
 
     // Optimize email fetching with pagination and size limits
-    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50); // Cap at 50 emails max
-    const maxBodyLength = 1000; // Truncate email bodies to prevent large responses
+    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
+    const maxBodyLength = 1000;
 
     let emails = await Email.findAll({
       where: {
@@ -3151,27 +3149,24 @@ exports.getAllLeadDetails = async (req, res) => {
         "subject",
         "createdAt",
         "folder",
-        // Truncate body to prevent large responses
         [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
       ],
       include: [
         {
           model: Attachment,
           as: "attachments",
-          attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
+          attributes: ["attachmentID", "filename", "size", "contentType"],
         },
       ],
-      order: [["createdAt", "DESC"]], // Get most recent first
+      order: [["createdAt", "DESC"]],
       limit: maxEmailLimit,
       offset: emailOffset,
     });
 
     // Filter out emails with "RE:" in subject and no inReplyTo or references
     emails = emails.filter((email) => {
-      const hasRE =
-        email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread =
-        (!email.inReplyTo || email.inReplyTo === "") &&
+      const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
+      const noThread = (!email.inReplyTo || email.inReplyTo === "") &&
         (!email.references || email.references === "");
       return !(hasRE && noThread);
     });
@@ -3181,7 +3176,7 @@ exports.getAllLeadDetails = async (req, res) => {
       emails = [];
     }
 
-    // Simplified thread handling - only get direct replies to prevent exponential growth
+    // Simplified thread handling
     const threadIds = [];
     emails.forEach((email) => {
       if (email.messageId) threadIds.push(email.messageId);
@@ -3192,7 +3187,6 @@ exports.getAllLeadDetails = async (req, res) => {
     // Fetch related emails with stricter limits
     let relatedEmails = [];
     if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
-      // Prevent too many thread lookups
       relatedEmails = await Email.findAll({
         where: {
           [Op.or]: [
@@ -3219,7 +3213,7 @@ exports.getAllLeadDetails = async (req, res) => {
           },
         ],
         order: [["createdAt", "DESC"]],
-        limit: maxEmailLimit, // Use the same limit
+        limit: maxEmailLimit,
       });
 
       // Remove duplicates by messageId
@@ -3230,13 +3224,14 @@ exports.getAllLeadDetails = async (req, res) => {
         return true;
       });
     } else {
-      // If too many threads, just use the original emails
       relatedEmails = emails;
     }
+
     const notes = await LeadNote.findAll({
       where: { leadId },
       order: [["createdAt", "DESC"]],
     });
+
     // Get all unique creator IDs from notes
     const creatorIds = [...new Set(notes.map((note) => note.createdBy))];
 
@@ -3256,13 +3251,14 @@ exports.getAllLeadDetails = async (req, res) => {
       noteObj.creatorName = creatorMap[note.createdBy] || null;
       return noteObj;
     });
+
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
     const activities = await Activity.findAll({
       where: { leadId },
       order: [["startDateTime", "DESC"]],
     });
 
-    // Fetch all active custom fields for leads (for all users, not just current admin)
+    // Fetch all active custom fields for leads
     const allCustomFields = await CustomField.findAll({
       where: {
         isActive: true,
@@ -3294,7 +3290,7 @@ exports.getAllLeadDetails = async (req, res) => {
       valueMap[cfv.fieldId] = cfv.value;
     });
 
-    // Merge all custom fields with values (value: null if not present)
+    // Merge all custom fields with values
     const customFields = {};
     allCustomFields.forEach((field) => {
       customFields[field.fieldName] = {
@@ -3304,16 +3300,32 @@ exports.getAllLeadDetails = async (req, res) => {
         fieldType: field.fieldType,
         isRequired: field.isRequired,
         options: field.options,
-        value:
-          valueMap[field.fieldId] !== undefined
-            ? valueMap[field.fieldId]
-            : null,
+        value: valueMap[field.fieldId] !== undefined ? valueMap[field.fieldId] : null,
       };
     });
 
-    // Only include specified fields in the lead object
+    // FETCH CURRENCY DETAILS
+    let valueCurrencyDetails = null;
+    let proposalValueCurrencyDetails = null;
+
+    if (lead.valueCurrency) {
+      valueCurrencyDetails = await Currency.findOne({
+        where: { currencyId: lead.valueCurrency },
+        attributes: ['currencyId', 'currency_desc']
+      });
+    }
+
+    if (lead.proposalValueCurrency) {
+      proposalValueCurrencyDetails = await Currency.findOne({
+        where: { currencyId: lead.proposalValueCurrency },
+        attributes: ['currencyId', 'currency_desc']
+      });
+    }
+
+    // Only include specified fields in the lead object - UPDATED to include currency fields
     const allowedFields = [
       "value",
+      "valueCurrency", // Added
       "expectedCloseDate",
       "sourceOrigin",
       "sourceChannel",
@@ -3328,8 +3340,11 @@ exports.getAllLeadDetails = async (req, res) => {
       "birthday",
       "organization",
       "address",
-      "title"
+      "title",
+      "proposalValue", // Added
+      "proposalValueCurrency" // Added
     ];
+    
     const filteredLead = {};
     if (lead) {
       allowedFields.forEach((field) => {
@@ -3345,9 +3360,18 @@ exports.getAllLeadDetails = async (req, res) => {
       leadDetails,
       customFields,
       notes: notesWithCreator,
-      emails: relatedEmails, // Restored as flat array for frontend compatibility
+      emails: relatedEmails,
       activities,
-      // Include metadata as separate fields for debugging and future use
+      currencyDetails: {
+        valueCurrency: valueCurrencyDetails ? {
+          currencyId: valueCurrencyDetails.currencyId,
+          currency_desc: valueCurrencyDetails.currency_desc
+        } : null,
+        proposalValueCurrency: proposalValueCurrencyDetails ? {
+          currencyId: proposalValueCurrencyDetails.currencyId,
+          currency_desc: proposalValueCurrencyDetails.currency_desc
+        } : null
+      },
       _emailMetadata: {
         count: relatedEmails.length,
         page: parseInt(emailPage),
@@ -3375,6 +3399,294 @@ exports.getAllLeadDetails = async (req, res) => {
     res.status(500).json({ message: "Internal server error." });
   }
 };
+
+// exports.getAllLeadDetails = async (req, res) => {
+//   const masterUserID = req.adminId;
+//   const { leadId } = req.params;
+
+//   // Add pagination parameters for emails
+//   const { emailPage = 1, emailLimit = 50 } = req.query;
+//   const emailOffset = (emailPage - 1) * emailLimit;
+
+//   if (!leadId) {
+//     await logAuditTrail(
+//       PROGRAMS.LEAD_MANAGEMENT,
+//       "LEAD_DETAILS_FETCH",
+//       masterUserID,
+//       "Lead details fetch failed: leadId is required",
+//       null
+//     );
+//     console.error("leadId is required in params.");
+//     return res.status(400).json({ message: "leadId is required in params." });
+//   }
+
+//   try {
+//     // Get the user's email address from credentials
+//     const lead = await Lead.findByPk(leadId);
+//     if (!lead || !lead.email) {
+//       await logAuditTrail(
+//         PROGRAMS.LEAD_MANAGEMENT,
+//         "LEAD_DETAILS_FETCH",
+//         masterUserID,
+//         "Lead details fetch failed: Lead or lead email not found.",
+//         null
+//       );
+//       return res.status(404).json({ message: "Lead or lead email not found." });
+//     }
+//     //     const deal = await Deal.findByPk(dealId);
+//     // if (!deal || !deal.email) {
+//     //   return res.status(404).json({ message: "Lead or lead email not found." });
+//     // }
+//     const clientEmail = lead.email;
+
+//     // Optimize email fetching with pagination and size limits
+//     const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50); // Cap at 50 emails max
+//     const maxBodyLength = 1000; // Truncate email bodies to prevent large responses
+
+//     let emails = await Email.findAll({
+//       where: {
+//         [Op.or]: [
+//           { sender: clientEmail },
+//           { recipient: { [Op.like]: `%${clientEmail}%` } },
+//         ],
+//       },
+//       attributes: [
+//         "emailID",
+//         "messageId",
+//         "inReplyTo",
+//         "references",
+//         "sender",
+//         "recipient",
+//         "subject",
+//         "createdAt",
+//         "folder",
+//         // Truncate body to prevent large responses
+//         [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+//       ],
+//       include: [
+//         {
+//           model: Attachment,
+//           as: "attachments",
+//           attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
+//         },
+//       ],
+//       order: [["createdAt", "DESC"]], // Get most recent first
+//       limit: maxEmailLimit,
+//       offset: emailOffset,
+//     });
+
+//     // Filter out emails with "RE:" in subject and no inReplyTo or references
+//     emails = emails.filter((email) => {
+//       const hasRE =
+//         email.subject && email.subject.toLowerCase().startsWith("re:");
+//       const noThread =
+//         (!email.inReplyTo || email.inReplyTo === "") &&
+//         (!email.references || email.references === "");
+//       return !(hasRE && noThread);
+//     });
+
+//     let emailsExist = emails.length > 0;
+//     if (!emailsExist) {
+//       emails = [];
+//     }
+
+//     // Simplified thread handling - only get direct replies to prevent exponential growth
+//     const threadIds = [];
+//     emails.forEach((email) => {
+//       if (email.messageId) threadIds.push(email.messageId);
+//       if (email.inReplyTo) threadIds.push(email.inReplyTo);
+//     });
+//     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+//     // Fetch related emails with stricter limits
+//     let relatedEmails = [];
+//     if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
+//       // Prevent too many thread lookups
+//       relatedEmails = await Email.findAll({
+//         where: {
+//           [Op.or]: [
+//             { messageId: { [Op.in]: uniqueThreadIds } },
+//             { inReplyTo: { [Op.in]: uniqueThreadIds } },
+//           ],
+//         },
+//         attributes: [
+//           "emailID",
+//           "messageId",
+//           "inReplyTo",
+//           "sender",
+//           "recipient",
+//           "subject",
+//           "createdAt",
+//           "folder",
+//           [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+//         ],
+//         include: [
+//           {
+//             model: Attachment,
+//             as: "attachments",
+//             attributes: ["attachmentID", "filename", "size", "contentType"],
+//           },
+//         ],
+//         order: [["createdAt", "DESC"]],
+//         limit: maxEmailLimit, // Use the same limit
+//       });
+
+//       // Remove duplicates by messageId
+//       const seen = new Set();
+//       relatedEmails = relatedEmails.filter((email) => {
+//         if (seen.has(email.messageId)) return false;
+//         seen.add(email.messageId);
+//         return true;
+//       });
+//     } else {
+//       // If too many threads, just use the original emails
+//       relatedEmails = emails;
+//     }
+//     const notes = await LeadNote.findAll({
+//       where: { leadId },
+//       order: [["createdAt", "DESC"]],
+//     });
+//     // Get all unique creator IDs from notes
+//     const creatorIds = [...new Set(notes.map((note) => note.createdBy))];
+
+//     // Fetch all creators in one query
+//     const creators = await MasterUser.findAll({
+//       where: { masterUserID: creatorIds },
+//       attributes: ["masterUserID", "name"],
+//     });
+//     const creatorMap = {};
+//     creators.forEach((user) => {
+//       creatorMap[user.masterUserID] = user.name;
+//     });
+
+//     // Attach creatorName to each note
+//     const notesWithCreator = notes.map((note) => {
+//       const noteObj = note.toJSON();
+//       noteObj.creatorName = creatorMap[note.createdBy] || null;
+//       return noteObj;
+//     });
+//     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
+//     const activities = await Activity.findAll({
+//       where: { leadId },
+//       order: [["startDateTime", "DESC"]],
+//     });
+
+//     // Fetch all active custom fields for leads (for all users, not just current admin)
+//     const allCustomFields = await CustomField.findAll({
+//       where: {
+//         isActive: true,
+//         entityType: { [Op.in]: ["lead", "both"] },
+//       },
+//       attributes: [
+//         "fieldId",
+//         "fieldName",
+//         "fieldType",
+//         "isRequired",
+//         "entityType",
+//         "fieldLabel",
+//         "options"
+//       ],
+//       order: [["sortOrder", "ASC"]],
+//     });
+
+//     // Fetch all custom field values for this lead
+//     const customFieldValues = await CustomFieldValue.findAll({
+//       where: {
+//         entityId: leadId,
+//         entityType: "lead",
+//       },
+//     });
+
+//     // Map values by fieldId
+//     const valueMap = {};
+//     customFieldValues.forEach((cfv) => {
+//       valueMap[cfv.fieldId] = cfv.value;
+//     });
+
+//     // Merge all custom fields with values (value: null if not present)
+//     const customFields = {};
+//     allCustomFields.forEach((field) => {
+//       customFields[field.fieldName] = {
+//         fieldId: field.fieldId,
+//         fieldName: field.fieldName,
+//         fieldLabel: field.fieldLabel,
+//         fieldType: field.fieldType,
+//         isRequired: field.isRequired,
+//         options: field.options,
+//         value:
+//           valueMap[field.fieldId] !== undefined
+//             ? valueMap[field.fieldId]
+//             : null,
+//       };
+//     });
+
+//     // Only include specified fields in the lead object
+//     const allowedFields = [
+//       "value",
+//       "valueCurrency",
+//       "expectedCloseDate",
+//       "sourceOrigin",
+//       "sourceChannel",
+//       "sourceChannelID",
+//       "ownerId",
+//       "ownerName",
+//       "email",
+//       "phone",
+//       "contactPerson",
+//       "notes",
+//       "jobTitle",
+//       "birthday",
+//       "organization",
+//       "address",
+//       "title",
+//       "proposalValue",
+//       "proposalValueCurrency"
+//     ];
+//     const filteredLead = {};
+//     if (lead) {
+//       allowedFields.forEach((field) => {
+//         if (lead[field] !== undefined) {
+//           filteredLead[field] = lead[field];
+//         }
+//       });
+//     }
+
+//     res.status(200).json({
+//       message: "Lead details fetched successfully.",
+//       lead: filteredLead,
+//       leadDetails,
+//       customFields,
+//       notes: notesWithCreator,
+//       emails: relatedEmails, // Restored as flat array for frontend compatibility
+//       activities,
+//       // Include metadata as separate fields for debugging and future use
+//       _emailMetadata: {
+//         count: relatedEmails.length,
+//         page: parseInt(emailPage),
+//         limit: maxEmailLimit,
+//         hasMore: relatedEmails.length === maxEmailLimit,
+//         bodyTruncated: true,
+//         bodyMaxLength: maxBodyLength,
+//         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+//       },
+//       _pagination: {
+//         emailPage: parseInt(emailPage),
+//         emailLimit: maxEmailLimit,
+//         emailOffset: emailOffset,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error fetching conversation:", error);
+//     await logAuditTrail(
+//       PROGRAMS.LEAD_MANAGEMENT,
+//       "LEAD_DETAILS_FETCH",
+//       masterUserID,
+//       `Lead details fetch failed: ${error.message}`,
+//       null
+//     );
+//     res.status(500).json({ message: "Internal server error." });
+//   }
+// };
 
 exports.addLeadNote = async (req, res) => {
   const { content } = req.body;
