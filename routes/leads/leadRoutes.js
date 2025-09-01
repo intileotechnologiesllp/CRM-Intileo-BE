@@ -4,65 +4,72 @@ const leadController = require("../../controllers/leads/leadController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
+const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 // Create a lead (Admin only)
-router.post("/create", verifyToken, leadController.createLead);
+router.post("/create", verifyToken, validatePrivilege(2, "create"), leadController.createLead);
 
 // Get visibility options for lead creation/editing
 router.get(
   "/visibility-options",
-  verifyToken,
+  verifyToken, 
+  validatePrivilege(2, "view"),
   leadController.getLeadVisibilityOptions
 );
 
 // Archive a lead
-router.post("/:leadId/archive", verifyToken, leadController.archiveLead);
+router.post("/:leadId/archive", verifyToken, validatePrivilege(2, "create"), leadController.archiveLead);
 
 // Unarchive a lead
-router.post("/:leadId/unarchive", verifyToken, leadController.unarchiveLead);
+router.post("/:leadId/unarchive", verifyToken, validatePrivilege(2, "create"), leadController.unarchiveLead);
 
 // Update a lead
-router.post("/edit/:leadId", verifyToken, leadController.updateLead);
+router.post("/edit/:leadId", verifyToken, validatePrivilege(2, "edit"), leadController.updateLead);
 
 // Delete a lead
-router.post("/delete/:leadId", verifyToken, leadController.deleteLead);
+router.post("/delete/:leadId", verifyToken, validatePrivilege(2, "delete"), leadController.deleteLead);
 
-router.get("/get", verifyToken, leadController.getLeads);
-router.post("/updateLables", verifyToken, leadController.updateAllLabels);
+router.get("/get", verifyToken,  validatePrivilege(2, "view"), leadController.getLeads);
+router.post("/updateLables", verifyToken,  validatePrivilege(2, "update"), leadController.updateAllLabels);
 router.put(
   "/update-custom-fields/:leadId",
   verifyToken,
+  validatePrivilege(2, "update"),
   leadController.updateLeadCustomFields
 );
 router.get(
   "/get-general-users",
   verifyToken,
+   validatePrivilege(2, "view"),
   leadController.getNonAdminMasterUserNames
 );
 router.post("/by-master-user", leadController.getLeadsByMasterUser);
 router.get(
   "/get-All-lead-details/:leadId",
   verifyToken,
+   validatePrivilege(2, "view"),
   leadController.getAllLeadDetails
 );
-router.post("/add-lead-note/:leadId", verifyToken, leadController.addLeadNote);
+router.post("/add-lead-note/:leadId", verifyToken,  validatePrivilege(2, "create"), leadController.addLeadNote);
 router.get(
   "/delete-lead-note/:noteId",
   verifyToken,
+  validatePrivilege(2, "delete"),
   leadController.deleteLeadNote
 );
 router.post(
   "/update-lead-note/:noteId",
   verifyToken,
+   validatePrivilege(2, "update"),
   leadController.updateLeadNote
 );
-router.get("/get-persons", verifyToken, leadController.getPersons);
+router.get("/get-persons", verifyToken,  validatePrivilege(2, "view"), leadController.getPersons);
 
 // Bulk operations
-router.post("/bulk-edit", verifyToken, leadController.bulkEditLeads);
-router.post("/bulk-delete", verifyToken, leadController.bulkDeleteLeads);
-router.post("/bulk-archive", verifyToken, leadController.bulkArchiveLeads);
-router.post("/bulk-unarchive", verifyToken, leadController.bulkUnarchiveLeads);
+router.post("/bulk-edit", verifyToken,  validatePrivilege(2, "edit"), leadController.bulkEditLeads);
+router.post("/bulk-delete", verifyToken,  validatePrivilege(2, "delete"), leadController.bulkDeleteLeads);
+router.post("/bulk-archive", verifyToken,  validatePrivilege(2, "create"), leadController.bulkArchiveLeads);
+router.post("/bulk-unarchive", verifyToken,  validatePrivilege(2, "create"), leadController.bulkUnarchiveLeads);
 // router.post('/bulk-import', verifyToken,upload.single('file'), leadController.bulkImportLeads);
 
 module.exports = router;

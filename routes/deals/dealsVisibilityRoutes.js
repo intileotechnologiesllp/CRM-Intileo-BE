@@ -9,7 +9,7 @@ const {
   getDealsByStage,
   getAllDeals,
 } = require("../../controllers/deals/dealVisibilityController");
-
+const validatePrivilege = require("../../middlewares/validatePrivilege");
 /**
  * Enhanced getDealsByStage with visibility groups support
  * GET /api/deals/stages/:pipelineId
@@ -17,6 +17,7 @@ const {
 router.get(
   "/stages/:pipelineId",
   verifyToken,
+  validatePrivilege(3, "view"),
   applyVisibilityFilter("deal"),
   checkItemPermission("canView"),
   getDealsByStage
@@ -29,6 +30,7 @@ router.get(
 router.get(
   "/getAll",
   verifyToken,
+  validatePrivilege(3, "view"),
   applyVisibilityFilter("deal"),
   checkItemPermission("canView"),
   getAllDeals
@@ -41,6 +43,7 @@ router.get(
 router.post(
   "/",
   verifyToken,
+  validatePrivilege(3, "create"),
   applyVisibilityFilter("deal"),
   checkItemPermission("canCreate"),
   async (req, res) => {
@@ -99,6 +102,7 @@ router.post(
 router.put(
   "/:id",
   verifyToken,
+  validatePrivilege(3, "edit"),
   applyVisibilityFilter("deal"),
   checkItemPermission("canEdit"),
   async (req, res) => {
