@@ -13,18 +13,18 @@ router.post(
 router.post("/create-person", verifyToken, validatePrivilege(5, "create"), leadContactsController.createPerson);
 router.get("/get-contact-timeline", validatePrivilege(5, "view"), leadContactsController.getContactTimeline);
 router.get(
-  "/get-person-timeline/:personId",
+  "/get-person-timeline/:personId", verifyToken,
   validatePrivilege(5, "view"),
   leadContactsController.getPersonTimeline
 );
 router.get(
-  "/get-organization-timeline/:organizationId",
+  "/get-organization-timeline/:organizationId", verifyToken,
   validatePrivilege(5, "view"),
   leadContactsController.getOrganizationTimeline
 );
 router.get("/get-person-fields", validatePrivilege(5, "view"), leadContactsController.getPersonFields);
 router.get(
-  "/get-organization-fields",
+  "/get-organization-fields", verifyToken,
   validatePrivilege(5, "view"),
   leadContactsController.getOrganizationFields
 );
@@ -100,9 +100,9 @@ router.delete(
   validatePrivilege(5, "delete"),
   leadContactsController.deleteOrganizationNote
 );
-router.get("/get-all-Persons", validatePrivilege(5, "view"), leadContactsController.getAllContactPersons);
+router.get("/get-all-Persons", verifyToken, validatePrivilege(5, "view"), leadContactsController.getAllContactPersons);
 router.get(
-  "/get-all-persons-by-organization/:leadOrganizationId",
+  "/get-all-persons-by-organization/:leadOrganizationId", verifyToken,
   validatePrivilege(5, "view"),
   leadContactsController.getPersonsByOrganization
 );

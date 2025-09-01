@@ -1,7 +1,7 @@
 const  MasterUserPrivileges  = require("../models/privileges/masterUserPrivilegesModel");
 
 const validatePrivilege = (programId, requestType) => async (req, res, next) => {
-  console.log(req)
+  console.log(req.adminId)
   try {
     const  masterUserID  = req.adminId || {}; // Adjust based on your auth middleware
 
