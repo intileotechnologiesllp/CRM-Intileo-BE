@@ -44,6 +44,7 @@ const reportFolderRoutes = require("./routes/insight/reportFolderRoutes.js")
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
+const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
 const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
@@ -110,6 +111,7 @@ app.use("/api/visibility-groups", visibilityGroupRoutes); // Register visibility
 app.use("/api/persons", personRoutes); // Register person routes
 app.use("/api/organizations-new", organizationRoutesNew); // Register new organization routes
 app.use("/api/global-search", globalSearchRoutes); // Register global search routes
+app.use("/api/groupvisibility", groupVisibilityRoutes);
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
