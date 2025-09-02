@@ -16,6 +16,22 @@ const OrganizationNote = require("./leads/organizationNoteModel");
 const Dashboard = require("./insight/dashboardModel");
 const Report = require("./insight/reportModel");
 const Goal = require("./insight/goalModel");
+const GroupVisibility = require("../models/admin/groupVisibilityModel")
+
+// GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
+// Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
+
+// GroupVisibility.belongsTo(Organization, { as: "GroupOrganization", foreignKey: "leadOrganizationId" });
+// Organization.hasMany(GroupVisibility, { foreignKey: "leadOrganizationId", as: "GroupVisibility" });
+
+// GroupVisibility.belongsTo(Lead, { as: "GroupLead", foreignKey: "leadId" });
+// Lead.hasMany(GroupVisibility, { foreignKey: "leadId", as: "GroupVisibility" });
+
+// GroupVisibility.belongsTo(Deal, { as: "GroupDeal", foreignKey: "dealId" });
+// Deal.hasMany(GroupVisibility, { foreignKey: "dealId", as: "GroupVisibility" });
+
+// GroupVisibility.belongsTo(Pipeline, { as: "GroupPipeline", foreignKey: "pipelineId" });
+// Pipeline.hasMany(GroupVisibility, { foreignKey: "pipelineId", as: "GroupVisibility" });
 
 // Associations
 Lead.hasOne(LeadDetails, {
