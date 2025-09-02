@@ -179,7 +179,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     sortOrder = "DESC",
-  } = req.body || {};
+  } = req.query || {}; // Changed from req.body to req.query
 
   try {
     // Validate the input
@@ -221,19 +221,15 @@ exports.getUsersWithPrivileges = async (req, res) => {
           model: MasterUserPrivileges,
           as: "privileges", // Use the alias defined in the association
           required: false, // Include users even if they don't have privileges
-          // include: [
-          //   {
-          //     model: Program, // Join with the Program model
-          //     as: "program", // Use the alias defined in the association
-          //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
-          //   },
-          // ],
+          // Add where clause to privileges if masterUserID is provided
+          ...(masterUserID && { where: { masterUserID } }),
         },
       ],
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [[sortBy, sortOrder.toUpperCase()]],
     });
+
     // Parse the permissions field if it is a JSON string
     const mappedUsers = users.rows.map((user) => {
       const privileges = user.privileges
@@ -265,6 +261,100 @@ exports.getUsersWithPrivileges = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+// exports.getUsersWithPrivileges = async (req, res) => {
+//   const {
+//     userType,
+//     masterUserID,
+//     page = 1,
+//     limit = 10,
+//     sortBy = "createdAt",
+//     sortOrder = "DESC",
+//   } = req.body || {};
+
+//   try {
+//     // Validate the input
+//     if (userType && !["admin", "general"].includes(userType)) {
+//       return res.status(400).json({
+//         message: "Invalid userType. Please provide 'admin' or 'general'.",
+//       });
+//     }
+
+//     // Build the where clause for filtering
+//     const whereClause = {};
+//     if (userType) {
+//       whereClause.userType = userType;
+//     }
+//     if (masterUserID) {
+//       whereClause.masterUserID = masterUserID;
+//     }
+
+//     // Calculate offset for pagination
+//     const offset = (page - 1) * limit;
+
+//     // Fetch data with pagination, sorting, and filtering
+//     const users = await MasterUser.findAndCountAll({
+//       where: whereClause,
+//       attributes: {
+//         exclude: [
+//           "resetToken",
+//           "resetTokenExpiry",
+//           "loginType",
+//           "otp",
+//           "otpExpiration",
+//           "createdAt",
+//           "updatedAt",
+//         ], // Exclude specific fields
+//       },
+
+//       include: [
+//         {
+//           model: MasterUserPrivileges,
+//           as: "privileges", // Use the alias defined in the association
+//           required: false, // Include users even if they don't have privileges
+//           // include: [
+//           //   {
+//           //     model: Program, // Join with the Program model
+//           //     as: "program", // Use the alias defined in the association
+//           //     attributes: ["programId", "program_desc"], // Fetch programId and program_desc
+//           //   },
+//           // ],
+//         },
+//       ],
+//       limit: parseInt(limit),
+//       offset: parseInt(offset),
+//       order: [[sortBy, sortOrder.toUpperCase()]],
+//     });
+//     // Parse the permissions field if it is a JSON string
+//     const mappedUsers = users.rows.map((user) => {
+//       const privileges = user.privileges
+//         ? {
+//             ...user.privileges.toJSON(),
+//             permissions:
+//               typeof user.privileges.permissions === "string"
+//                 ? JSON.parse(user.privileges.permissions) // Parse JSON string
+//                 : user.privileges.permissions, // Use as-is if already an object
+//           }
+//         : null; // If privileges is null, return null
+
+//       return {
+//         ...user.toJSON(),
+//         privileges,
+//       };
+//     });
+
+//     // Return paginated response
+//     res.status(200).json({
+//       message: "Users fetched successfully.",
+//       totalRecords: users.count,
+//       totalPages: Math.ceil(users.count / limit),
+//       currentPage: parseInt(page),
+//       users: mappedUsers,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching users:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 
 exports.deletePrivileges = async (req, res) => {
   const { masterUserID } = req.params;
