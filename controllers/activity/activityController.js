@@ -123,6 +123,8 @@ exports.getActivities = async (req, res) => {
       filterId,
       startDate,
       endDate,
+      priority,
+      status
     } = req.query;
 
     let { entityType } = req.query; // Extract entityType from query parameters
@@ -315,6 +317,8 @@ exports.getActivities = async (req, res) => {
       "type",
       "startDateTime",
       "endDateTime",
+      "priority",
+      "status"
     ];
     if (attributes) {
       alwaysInclude.forEach((field) => {
