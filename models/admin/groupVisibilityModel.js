@@ -1,7 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-const { pipeline } = require("nodemailer/lib/xoauth2");
-const { Organization } = require("..");
+const MasterUser = require("../../models/master/masterUserModel")
 
 const GroupVisibility = sequelize.define(
   "GroupVisibility",
@@ -48,8 +47,21 @@ const GroupVisibility = sequelize.define(
       allowNull: true,
     },
     group: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING, // Changed to STRING to store multiple group IDs like "2,4,5"
       allowNull: true,
+      get() {
+        const rawValue = this.getDataValue('group');
+        return rawValue ? rawValue.split(',').map(id => parseInt(id.trim())) : [];
+      },
+      set(value) {
+        if (Array.isArray(value)) {
+          this.setDataValue('group', value.join(','));
+        } else if (typeof value === 'string') {
+          this.setDataValue('group', value);
+        } else {
+          this.setDataValue('group', null);
+        }
+      }
     },
     createdBy: {
       type: DataTypes.INTEGER,
@@ -61,5 +73,10 @@ const GroupVisibility = sequelize.define(
     },
   },
 );
+
+GroupVisibility.belongsTo(MasterUser, {
+  foreignKey: 'createdBy',
+  as: 'creator'
+});
 
 module.exports = GroupVisibility;
