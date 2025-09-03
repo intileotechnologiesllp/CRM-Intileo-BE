@@ -58,6 +58,15 @@ const LeadPerson = sequelize.define("LeadPerson", {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
 },
+visibilityGroupId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "GroupVisibility",
+      key: "groupId",
+    },
+    comment: "Reference to the owner's visibility group",
+  },
   // Add more fields as needed
 });
 // Person.belongsTo(Organization, { foreignKey: "organizationId" });

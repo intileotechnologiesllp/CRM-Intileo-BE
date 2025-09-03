@@ -10,5 +10,7 @@ router.get("/get-groupvisibility/:groupId", verifyToken,  groupVisibilityControl
 router.post("/update-groupvisibility/:groupId", verifyToken, groupVisibilityController.updateVisibilityGroup);
 router.delete('/deletegroup/:groupId', verifyToken, groupVisibilityController.deleteGroup);
 router.delete('/softdeletegroup/:groupId', verifyToken, groupVisibilityController.softDeleteGroup);
+router.get('/mygroups', verifyToken, groupVisibilityController.getMyGroups);
+router.get('/getgroupsbyentity', verifyToken, groupVisibilityController.getGroupsByEntity);
 
 module.exports = router;

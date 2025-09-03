@@ -11,6 +11,138 @@ const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 const PROGRAMS = require("../../utils/programConstants");
 const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
+const GroupVisibility = require("../../models/admin/groupVisibilityModel.js")
+
+// exports.signIn = async (req, res) => {
+//   const { email, password, longitude, latitude, ipAddress } = req.body;
+
+//   try {
+//     // Check if the user exists
+//     const user = await MasterUser.findOne({ where: { email } });
+
+//     if (!user) {
+//       await logAuditTrail(
+//         PROGRAMS.AUTHENTICATION,
+//         "SIGN_IN",
+//         "Invalid email",
+//         null
+//       );
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     // Verify the password
+//     const isPasswordValid = await bcrypt.compare(password, user.password);
+//     if (!isPasswordValid) {
+//       await logAuditTrail(
+//         PROGRAMS.AUTHENTICATION,
+//         "SIGN_IN",
+//         user.loginType,
+//         "Invalid password",
+//         user.masterUserID
+//       );
+//       return res.status(401).json({ message: "Invalid password" });
+//     }
+
+//     // Generate JWT token
+//     const token = jwt.sign(
+//       {
+//         id: user.masterUserID,
+//         email: user.email,
+//         loginType: user.loginType,
+//       },
+//       process.env.JWT_SECRET,
+//       { expiresIn: "30d" }
+//     );
+
+//     // Get the current UTC time
+//     const loginTimeUTC = new Date();
+
+//     // Convert login time to IST
+//     const loginTimeIST = moment(loginTimeUTC)
+//       .tz("Asia/Kolkata")
+//       .format("YYYY-MM-DD HH:mm:ss");
+
+//     // Fetch the latest login history for the user
+//     const latestLoginHistory = await LoginHistory.findOne({
+//       where: { userId: user.masterUserID },
+//       order: [["loginTime", "DESC"]],
+//     });
+
+//     // Fetch the previous totalSessionDuration
+//     let previousTotalDurationInSeconds = 0;
+//     if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
+//       const [hours, minutes] = latestLoginHistory.totalSessionDuration
+//         .replace(" hours", "")
+//         .replace(" minutes", "")
+//         .split(" ")
+//         .map(Number);
+
+//       previousTotalDurationInSeconds =
+//         (hours || 0) * 3600 + (minutes || 0) * 60;
+//     }
+
+//     // Add the current session's duration (default to 0 for a new session)
+//     const currentSessionDurationInSeconds = 0; // No logout yet for the new session
+//     const totalSessionDurationInSeconds =
+//       previousTotalDurationInSeconds + currentSessionDurationInSeconds;
+
+//     // Convert total session duration to hours and minutes
+//     const totalHours = Math.floor(totalSessionDurationInSeconds / 3600);
+//     const totalMinutes = Math.floor(
+//       (totalSessionDurationInSeconds % 3600) / 60
+//     );
+//     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
+
+//     // Save the new login history
+//     await LoginHistory.create({
+//       userId: user.masterUserID,
+//       loginType: user.loginType,
+//       ipAddress: ipAddress || null,
+//       longitude: longitude || null,
+//       latitude: latitude || null,
+//       loginTime: loginTimeIST,
+//       username: user.name,
+//       totalSessionDuration, // Save updated totalSessionDuration
+//     });
+
+//     // Delete any existing records for the user in RecentLoginHistory
+//     await RecentLoginHistory.destroy({
+//       where: { userId: user.masterUserID },
+//     });
+
+//     // Add the most recent login data to RecentLoginHistory
+//     await RecentLoginHistory.create({
+//       userId: user.masterUserID,
+//       loginType: user.loginType,
+//       ipAddress: ipAddress || null,
+//       longitude: longitude || null,
+//       latitude: latitude || null,
+//       loginTime: loginTimeIST,
+//       username: user.name,
+//       totalSessionDuration, // Save updated totalSessionDuration
+//     });
+
+//     // Return the response with totalSessionDuration
+//     res.status(200).json({
+//       message: `${
+//         user.loginType === "admin" ? "Admin" : "General User"
+//       } sign-in successful`,
+//       token,
+//       totalSessionDuration,
+//     });
+//   } catch (error) {
+//     console.error("Error during sign-in:", error);
+
+//     await logAuditTrail(
+//       PROGRAMS.AUTHENTICATION,
+//       "SIGN_IN",
+//       "unknown",
+//       error.message || "Internal server error"
+//     );
+
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
 
 exports.signIn = async (req, res) => {
   const { email, password, longitude, latitude, ipAddress } = req.body;
@@ -121,13 +253,63 @@ exports.signIn = async (req, res) => {
       totalSessionDuration, // Save updated totalSessionDuration
     });
 
-    // Return the response with totalSessionDuration
+    // Fetch user's groups
+    const allGroups = await GroupVisibility.findAll({
+      where: { isActive: true },
+      include: [{
+        model: MasterUser,
+        as: 'creator',
+        attributes: ['masterUserID', 'name', 'email']
+      }]
+    });
+
+    // Filter groups where the user exists in the group's user list
+    const userGroups = allGroups.filter(group => {
+      const groupUserIds = group.group; // This uses the getter which returns an array
+      return groupUserIds.includes(parseInt(user.masterUserID));
+    });
+
+    // Format the groups
+    const formattedGroups = userGroups.map(group => ({
+      groupId: group.groupId,
+      groupName: group.groupName,
+      description: group.description,
+      isDefault: group.isDefault,
+      isActive: group.isActive,
+      pipeline: group.pipeline,
+      lead: group.lead,
+      deal: group.deal,
+      person: group.person,
+      Organization: group.Organization,
+      group: group.group, // Array of user IDs
+      createdBy: group.createdBy,
+      creator: group.creator ? {
+        masterUserID: group.creator.masterUserID,
+        firstName: group.creator.name,
+        email: group.creator.email
+      } : null,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
+    }));
+
+    // Extract just the group IDs for localStorage
+    const groupIds = formattedGroups.map(group => group.groupId);
+
+    // Return the response with totalSessionDuration and user groups
     res.status(200).json({
       message: `${
         user.loginType === "admin" ? "Admin" : "General User"
       } sign-in successful`,
       token,
       totalSessionDuration,
+      userGroups: formattedGroups, // Full group objects
+      groupIds: groupIds, // Just the IDs for localStorage
+      user: {
+        id: user.masterUserID,
+        email: user.email,
+        name: user.name,
+        loginType: user.loginType
+      }
     });
   } catch (error) {
     console.error("Error during sign-in:", error);
