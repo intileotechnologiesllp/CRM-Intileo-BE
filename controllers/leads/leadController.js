@@ -12,7 +12,7 @@ const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // I
 //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
 const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const Activity = require("../../models/activity/activityModel"); // Only import Activity where needed
-const Currency = require("../../models/admin/masters/currencyModel")
+const Currency = require("../../models/admin/masters/currencyModel");
 const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const Email = require("../../models/email/emailModel");
 const UserCredential = require("../../models/email/userCredentialModel");
@@ -156,7 +156,7 @@ exports.createLead = async (req, res) => {
   } = req.body;
 
   // Collect custom fields from root level (not in standardFields)
-  
+
   let customFields = { ...(customFieldsFromBody || {}) };
   for (const key in req.body) {
     if (!standardFields.includes(key)) {
@@ -379,7 +379,7 @@ exports.createLead = async (req, res) => {
       visibilityLevel,
       visibilityGroupId: userGroup ? userGroup.groupId : null,
       valueCurrency: req.body.valueCurrency || "INR",
-      proposalValueCurrency: req.body.proposalValueCurrency || "INR"
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR",
     });
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
@@ -1787,7 +1787,9 @@ exports.getLeads = async (req, res) => {
     const valueCurrencyIds = leads.rows
       .map((lead) => lead.valueCurrency)
       .filter(Boolean);
-    const allCurrencyIds = [...new Set([...proposalCurrencyIds, ...valueCurrencyIds])];
+    const allCurrencyIds = [
+      ...new Set([...proposalCurrencyIds, ...valueCurrencyIds]),
+    ];
 
     // Fetch currency data
     let currencies = {};
@@ -1796,7 +1798,7 @@ exports.getLeads = async (req, res) => {
         where: {
           currencyId: allCurrencyIds,
         },
-        attributes: ['currencyId', 'currency_desc'],
+        attributes: ["currencyId", "currency_desc"],
         raw: true,
       });
 
@@ -1846,22 +1848,26 @@ exports.getLeads = async (req, res) => {
       }
 
       // Add currency information
-      if (leadObj.proposalValueCurrency && currencies[leadObj.proposalValueCurrency]) {
-        leadObj.proposalValueCurrencyObject = {
-          currencyId: leadObj.proposalValueCurrency,
-          currency_desc: currencies[leadObj.proposalValueCurrency]
-        };
+      // For proposal value currency
+      if (
+        leadObj.proposalValueCurrency &&
+        currencies[leadObj.proposalValueCurrency]
+      ) {
+        leadObj.proposalValueCurrencyId = leadObj.proposalValueCurrency;
+        leadObj.proposalValueCurrency =
+          currencies[leadObj.proposalValueCurrency];
       } else {
-        leadObj.proposalValueCurrencyObject = null;
+        leadObj.proposalValueCurrencyId = null;
+        leadObj.proposalValueCurrency = null;
       }
 
+      // For value currency
       if (leadObj.valueCurrency && currencies[leadObj.valueCurrency]) {
-        leadObj.valueCurrencyObject = {
-          currencyId: leadObj.valueCurrency,
-          currency_desc: currencies[leadObj.valueCurrency]
-        };
+        leadObj.valueCurrencyId = leadObj.valueCurrency;
+        leadObj.valueCurrency = currencies[leadObj.valueCurrency];
       } else {
-        leadObj.valueCurrencyObject = null;
+        leadObj.valueCurrencyId = null;
+        leadObj.valueCurrency = null;
       }
 
       // Add custom fields directly to the lead object (not wrapped in customFields)
@@ -4124,8 +4130,13 @@ exports.updateLead = async (req, res) => {
 
             if (existingValue) {
               // Update existing value
-              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
-              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
+              const valueToSave =
+                typeof value === "object" ? JSON.stringify(value) : value;
+              if (
+                valueToSave !== null &&
+                valueToSave !== undefined &&
+                valueToSave !== ""
+              ) {
                 await existingValue.update({ value: valueToSave });
                 console.log(
                   `Updated custom field value for ${customField.fieldName}: ${valueToSave}`
@@ -4145,14 +4156,19 @@ exports.updateLead = async (req, res) => {
               }
             } else {
               // Create new value
-              const valueToSave = (typeof value === "object") ? JSON.stringify(value) : value;
-              if (valueToSave !== null && valueToSave !== undefined && valueToSave !== "") {
+              const valueToSave =
+                typeof value === "object" ? JSON.stringify(value) : value;
+              if (
+                valueToSave !== null &&
+                valueToSave !== undefined &&
+                valueToSave !== ""
+              ) {
                 await CustomFieldValue.create({
                   fieldId: customField.fieldId,
                   entityId: leadId,
                   entityType: "lead",
                   value: valueToSave,
-                   masterUserID: req.adminId // <-- add this line
+                  masterUserID: req.adminId, // <-- add this line
                 });
                 console.log(
                   `Created custom field value for ${customField.fieldName}: ${valueToSave}`
@@ -4582,8 +4598,10 @@ exports.getAllLeadDetails = async (req, res) => {
 
     // Filter out emails with "RE:" in subject and no inReplyTo or references
     emails = emails.filter((email) => {
-      const hasRE = email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread = (!email.inReplyTo || email.inReplyTo === "") &&
+      const hasRE =
+        email.subject && email.subject.toLowerCase().startsWith("re:");
+      const noThread =
+        (!email.inReplyTo || email.inReplyTo === "") &&
         (!email.references || email.references === "");
       return !(hasRE && noThread);
     });
@@ -4688,7 +4706,7 @@ exports.getAllLeadDetails = async (req, res) => {
         "isRequired",
         "entityType",
         "fieldLabel",
-        "options"
+        "options",
       ],
       order: [["sortOrder", "ASC"]],
     });
@@ -4717,7 +4735,10 @@ exports.getAllLeadDetails = async (req, res) => {
         fieldType: field.fieldType,
         isRequired: field.isRequired,
         options: field.options,
-        value: valueMap[field.fieldId] !== undefined ? valueMap[field.fieldId] : null,
+        value:
+          valueMap[field.fieldId] !== undefined
+            ? valueMap[field.fieldId]
+            : null,
       };
     });
 
@@ -4728,14 +4749,14 @@ exports.getAllLeadDetails = async (req, res) => {
     if (lead.valueCurrency) {
       valueCurrencyDetails = await Currency.findOne({
         where: { currencyId: lead.valueCurrency },
-        attributes: ['currencyId', 'currency_desc']
+        attributes: ["currencyId", "currency_desc"],
       });
     }
 
     if (lead.proposalValueCurrency) {
       proposalValueCurrencyDetails = await Currency.findOne({
         where: { currencyId: lead.proposalValueCurrency },
-        attributes: ['currencyId', 'currency_desc']
+        attributes: ["currencyId", "currency_desc"],
       });
     }
 
@@ -4759,9 +4780,9 @@ exports.getAllLeadDetails = async (req, res) => {
       "address",
       "title",
       "proposalValue", // Added
-      "proposalValueCurrency" // Added
+      "proposalValueCurrency", // Added
     ];
-    
+
     const filteredLead = {};
     if (lead) {
       allowedFields.forEach((field) => {
@@ -4780,14 +4801,18 @@ exports.getAllLeadDetails = async (req, res) => {
       emails: relatedEmails,
       activities,
       currencyDetails: {
-        valueCurrency: valueCurrencyDetails ? {
-          currencyId: valueCurrencyDetails.currencyId,
-          currency_desc: valueCurrencyDetails.currency_desc
-        } : null,
-        proposalValueCurrency: proposalValueCurrencyDetails ? {
-          currencyId: proposalValueCurrencyDetails.currencyId,
-          currency_desc: proposalValueCurrencyDetails.currency_desc
-        } : null
+        valueCurrency: valueCurrencyDetails
+          ? {
+              currencyId: valueCurrencyDetails.currencyId,
+              currency_desc: valueCurrencyDetails.currency_desc,
+            }
+          : null,
+        proposalValueCurrency: proposalValueCurrencyDetails
+          ? {
+              currencyId: proposalValueCurrencyDetails.currencyId,
+              currency_desc: proposalValueCurrencyDetails.currency_desc,
+            }
+          : null,
       },
       _emailMetadata: {
         count: relatedEmails.length,
