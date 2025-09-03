@@ -30,7 +30,16 @@ const LeadOrganization = sequelize.define("LeadOrganization", {
 ownerId:{
   type: DataTypes.INTEGER,
   allowNull: true, // Owner ID of the organization
-}
+},
+visibilityGroupId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "GroupVisibility",
+      key: "groupId",
+    },
+    comment: "Reference to the owner's visibility group",
+  },
   // Add more fields as needed
 }, {
   //tableName: "leadorganizations" // <-- Set your desired table name here

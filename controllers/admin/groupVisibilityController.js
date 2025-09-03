@@ -510,4 +510,163 @@ exports.softDeleteGroup = async (req, res) => {
   }
 };
 
+exports.getMyGroups = async (req, res) => {
+  try {
+    const masterUserId = req.adminId; // Assuming this is set from authentication middleware
+    
+    if (!masterUserId) {
+      return res.status(400).json({ message: "User ID is required" });
+    }
+
+    // Find all groups
+    const allGroups = await GroupVisibility.findAll({
+      where: { isActive: true },
+      include: [{
+        model: MasterUser,
+        as: 'creator',
+        attributes: ['masterUserID', 'name', 'email']
+      }]
+    });
+
+    // Filter groups where the user exists in the group's user list
+    const userGroups = allGroups.filter(group => {
+      const groupUserIds = group.group; // This uses the getter which returns an array
+      return groupUserIds.includes(parseInt(masterUserId));
+    });
+
+    // Format the response
+    const formattedGroups = userGroups.map(group => ({
+      groupId: group.groupId,
+      groupName: group.groupName,
+      description: group.description,
+      isDefault: group.isDefault,
+      isActive: group.isActive,
+      pipeline: group.pipeline,
+      lead: group.lead,
+      deal: group.deal,
+      person: group.person,
+      Organization: group.Organization,
+      group: group.group, // Array of user IDs
+      createdBy: group.createdBy,
+      creator: group.creator ? {
+        masterUserID: group.creator.masterUserID,
+        firstName: group.creator.name,
+        email: group.creator.email
+      } : null,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: "Groups fetched successfully",
+      data: formattedGroups,
+      totalCount: formattedGroups.length
+    });
+
+  } catch (error) {
+    console.error("Error fetching user groups:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+exports.getGroupsByEntity = async (req, res) => {
+  try {
+    const {
+      pipeline,
+      lead,
+      deal,
+      person,
+      organization,
+      isActive = 'true'
+    } = req.query;
+
+    // Build the where clause based on query parameters
+    const whereClause = {};
+
+    // Handle isActive filter
+    if (isActive !== 'all') {
+      whereClause.isActive = isActive === 'true';
+    }
+
+    // Add entity filters if provided and not 'all'
+    if (pipeline && pipeline !== 'all') {
+      whereClause.pipeline = pipeline === 'true';
+    }
+    if (lead && lead !== 'all') {
+      whereClause.lead = lead === 'true';
+    }
+    if (deal && deal !== 'all') {
+      whereClause.deal = deal === 'true';
+    }
+    if (person && person !== 'all') {
+      whereClause.person = person === 'true';
+    }
+    if (organization && organization !== 'all') {
+      whereClause.Organization = organization === 'true';
+    }
+
+    // Find groups based on the filters
+    const groups = await GroupVisibility.findAll({
+      where: whereClause,
+      include: [{
+        model: MasterUser,
+        as: 'creator',
+        attributes: ['masterUserID', 'name', 'email']
+      }],
+      order: [['groupName', 'ASC']]
+    });
+
+    // Format the response
+    const formattedGroups = groups.map(group => ({
+      groupId: group.groupId,
+      groupName: group.groupName,
+      description: group.description,
+      isDefault: group.isDefault,
+      isActive: group.isActive,
+      pipeline: group.pipeline,
+      lead: group.lead,
+      deal: group.deal,
+      person: group.person,
+      Organization: group.Organization,
+      group: group.group,
+      createdBy: group.createdBy,
+      creator: group.creator ? {
+        masterUserID: group.creator.masterUserID,
+        firstName: group.creator.name,
+        email: group.creator.email
+      } : null,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: "Groups filtered successfully",
+      data: formattedGroups,
+      totalCount: formattedGroups.length,
+      filters: {
+        pipeline: pipeline || 'all',
+        lead: lead || 'all',
+        deal: deal || 'all',
+        person: person || 'all',
+        organization: organization || 'all',
+        isActive: isActive === 'true'
+      }
+    });
+
+  } catch (error) {
+    console.error("Error filtering groups by entity:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;

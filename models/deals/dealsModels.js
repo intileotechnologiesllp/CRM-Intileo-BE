@@ -318,6 +318,15 @@ const Deal = sequelize.define(
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
     },
+    visibilityGroupId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "GroupVisibility",
+      key: "groupId",
+    },
+    comment: "Reference to the owner's visibility group",
+  },
   },
   {
     tableName: "Deals",
