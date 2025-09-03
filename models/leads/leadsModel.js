@@ -40,7 +40,7 @@ const Lead = sequelize.define("Lead", {
   // Contact Information
   contactPerson: {
     type: DataTypes.STRING,
-    allowNull: false, // Name of the contact person
+    allowNull: true, // Name of the contact person
   },
   organization: {
     type: DataTypes.STRING,

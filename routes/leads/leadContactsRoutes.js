@@ -115,4 +115,8 @@ router.get(
 router.get("/get-organization",verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationsAndPersons)
 router.post("/bulk-edit-persons", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdatePersons);
 router.post("/bulk-edit-organizations", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdateOrganizations);
+router.delete('/deleteorganization/:leadOrganizationId', verifyToken, leadContactsController.deleteOrganization);
+router.delete('/deleteperson/:personId', verifyToken, leadContactsController.deletePerson);
+
+
 module.exports = router
