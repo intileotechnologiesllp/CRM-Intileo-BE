@@ -39,7 +39,7 @@ const Deal = sequelize.define(
     },
     contactPerson: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
     },
     organization: {
       type: DataTypes.STRING,

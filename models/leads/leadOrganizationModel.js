@@ -31,6 +31,15 @@ ownerId:{
   type: DataTypes.INTEGER,
   allowNull: true, // Owner ID of the organization
 },
+// active:{
+//   type: DataTypes.INTEGER,
+//   allowNull: false,
+//   defaultValue: 1
+// },
+// deletedAt: {
+//     type: DataTypes.DATE,
+//     allowNull: true,
+// },
 // visibilityGroupId: {
 //     type: DataTypes.INTEGER,
 //     allowNull: true,

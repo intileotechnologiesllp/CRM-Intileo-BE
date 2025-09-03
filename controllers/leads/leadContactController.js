@@ -2747,7 +2747,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 //     res.status(500).json({ message: "Internal server error" });
 //   }
 // };
-const { Lead, LeadDetails, Person, Organization } = require("../../models");
+// const { Lead, LeadDetails, Person, Organization } = require("../../models");
 const { Op } = require("sequelize");
 const Sequelize = require("sequelize");
 const Email = require("../../models/email/emailModel");
@@ -2757,6 +2757,11 @@ const Attachment = require("../../models/email/attachmentModel");
 const OrganizationNote = require("../../models/leads/organizationNoteModel");
 const PersonNote = require("../../models/leads/personNoteModel");
 const Deal = require("../../models/deals/dealsModels");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const Lead = require("../../models/leads/leadsModel")
+const Activities = require("../../models/activity/activityModel")
+const sequelize = require("../../config/db");
 
 exports.createPerson = async (req, res) => {
   try {
@@ -5333,5 +5338,240 @@ exports.getPersonsAndOrganizations = async (req, res) => {
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// Alternative: Soft delete (if you have deletedAt column)
+// exports.softDeleteOrganization = async (req, res) => {
+//   try {
+//     const { leadOrganizationId } = req.params;
+//     const { adminId, role } = req; // Assuming these are set by your authentication middleware
+
+//     const organization = await Organization.findByPk(leadOrganizationId);
+    
+//     if (!organization) {
+//       return res.status(404).json({
+//         success: false,
+//         error: "Organization not found"
+//       });
+//     }
+
+//     // Check permissions
+//     if (role !== "admin" && organization.ownerId !== adminId) {
+//       return res.status(403).json({
+//         success: false,
+//         error: "Permission denied",
+//         message: "You don't have permission to delete this organization"
+//       });
+//     }
+
+//     // Check if already soft deleted
+//     if (organization.active === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Organization already deleted",
+//         message: "This organization has already been deleted"
+//       });
+//     }
+
+//     // Soft delete by updating isActive to false
+//     await organization.update({ 
+//       active: 0,
+//       // deletedAt: new Date() 
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Organization soft deleted successfully",
+//       data: {
+//         leadOrganizationId: organization.leadOrganizationId,
+//         organization: organization.organization,
+//         isActive: organization.isActive,
+//         // deletedAt: organization.deletedAt
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error soft deleting Organization:", error);
+//     return res.status(500).json({
+//       success: false,
+//       error: "Internal server error",
+//       message: error.message
+//     });
+//   }
+// };
+
+
+exports.deleteOrganization = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
+
+  try {
+    const { leadOrganizationId } = req.params;
+    const { adminId, role } = req; 
+
+    const organization = await Organization.findByPk(leadOrganizationId);
+    
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: "Organization not found"
+      });
+    }
+
+    // Check permissions
+    if (role !== "admin" && organization.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this organization"
+      });
+    }
+
+    // 1. Remove leadOrganizationId from LeadPerson records
+    await Person.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 2. Remove leadOrganizationId from Lead records
+    await Lead.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 3. Remove leadOrganizationId from Deal records
+    await Deal.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove leadOrganizationId from Activity records
+    await Activities.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the organization
+    await organization.destroy({ transaction: transaction });
+
+    // Commit the transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization deleted successfully and all references removed",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        organization: organization.organization,
+      }
+    });
+
+  } catch (error) {
+    // Rollback the transaction in case of error
+    await transaction.rollback();
+    
+    console.error("Error deleting Organization:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+exports.deletePerson = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
+
+  try {
+    const { personId } = req.params;
+    const { adminId, role } = req; 
+
+    const person = await Person.findByPk(personId);
+    
+    if (!person) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: "Person not found"
+      });
+    }
+
+    // Check permissions
+    if (role !== "admin" && person.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this Person"
+      });
+    }
+
+    // 2. Remove personId from Lead records
+    await Lead.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 3. Remove personId from Deal records
+    await Deal.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove personId from Activity records
+    await Activities.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the person
+    await person.destroy({ transaction: transaction });
+
+    // Commit the transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "person deleted successfully and all references removed",
+      data: {
+        personId: person.personId,
+        contactPerson: person.contactPerson,
+      }
+    });
+
+  } catch (error) {
+    // Rollback the transaction in case of error
+    await transaction.rollback();
+    
+    console.error("Error deleting person:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
   }
 };
