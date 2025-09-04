@@ -56,6 +56,7 @@ exports.getLeadColumnPreference = async (req, res) => {
               { masterUserID: req.adminId },
               { fieldSource: "default" },
               { fieldSource: "system" },
+              { fieldSource: "custom" }, // Include custom fields
             ],
           },
           attributes: [
@@ -78,6 +79,29 @@ exports.getLeadColumnPreference = async (req, res) => {
     } else {
       console.warn("No adminId found in request - skipping custom fields");
     }
+
+    // Create a map of available custom field names from CustomFields table
+    const availableCustomFieldNames = new Set(
+      customFields.map(field => field.fieldName)
+    );
+
+    // Filter out custom field columns that don't exist in CustomFields table
+    const validColumns = columns.filter(col => {
+      // Keep non-custom fields
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      
+      // For custom fields, only keep if they exist in CustomFields table
+      const isValid = availableCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    // Update the columns array with filtered results
+    columns = validColumns;
 
     // Format custom fields for column preferences
     const customFieldColumns = customFields.map((field) => ({
@@ -115,12 +139,28 @@ exports.getLeadColumnPreference = async (req, res) => {
       }
     });
 
+    // Save updated preferences if any invalid custom fields were removed
+    const originalColumnsCount = pref ? (typeof pref.columns === "string" ? JSON.parse(pref.columns).length : pref.columns.length) : 0;
+    const filteredColumnsCount = columns.length;
+    
+    if (pref && originalColumnsCount > filteredColumnsCount) {
+      try {
+        pref.columns = uniqueColumns;
+        await pref.save();
+        console.log(`Updated preferences: removed ${originalColumnsCount - filteredColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned preferences:", saveError);
+      }
+    }
+
     res.status(200).json({
       columns: uniqueColumns,
       customFieldsCount: customFields.length,
       message: "Column preferences with custom fields fetched successfully",
       hasCustomFields: customFields.length > 0,
       userAuthenticated: !!req.adminId,
+      cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
+      removedFieldsCount: originalColumnsCount - filteredColumnsCount,
     });
   } catch (error) {
     console.error("Error fetching column preferences:", error);
