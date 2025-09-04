@@ -3170,7 +3170,7 @@ exports.getLeads = async (req, res) => {
     console.log("==========================================");
 
     // Get custom field values for all leads (including default/system fields and unified fields)
-    // Only include custom fields where check is true
+    // Include all active custom fields (not just checked ones)
     const leadIds = leads.rows.map((lead) => lead.leadId);
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
@@ -3183,12 +3183,13 @@ exports.getLeads = async (req, res) => {
           as: "CustomField",
           where: {
             isActive: true,
-            check: true, // Only include custom fields where check is true
+            // Removed check: true constraint to show all custom fields
             entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
             [Op.or]: [
               { masterUserID: req.adminId },
               { fieldSource: "default" },
               { fieldSource: "system" },
+              { fieldSource: "custom" }, // Include custom fields
             ],
           },
           required: true,
