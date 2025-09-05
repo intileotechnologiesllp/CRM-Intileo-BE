@@ -4038,6 +4038,15 @@ exports.updateLead = async (req, res) => {
 
     // Update Lead
     if (Object.keys(leadData).length > 0) {
+      // Sanitize numeric fields - convert empty strings to null
+      const numericFields = ['proposalValue', 'valueCurrency', 'proposalValueCurrency'];
+      numericFields.forEach(field => {
+        if (leadData.hasOwnProperty(field) && leadData[field] === '') {
+          leadData[field] = null;
+        }
+      });
+      
+      console.log("Sanitized leadData:", leadData);
       await lead.update(leadData);
       console.log("Lead updated:", lead.toJSON());
     }
@@ -4064,6 +4073,27 @@ exports.updateLead = async (req, res) => {
       "Fetched leadDetails:",
       leadDetails ? leadDetails.toJSON() : null
     );
+    
+    // Sanitize LeadDetails data - ensure string fields are actually strings
+    if (Object.keys(leadDetailsData).length > 0) {
+      const stringFields = ['source', 'sourceOrgin', 'organizationName', 'personName', 'notes', 'postalAddress', 'jobTitle', 'address', 'statusSummary', 'responsiblePerson'];
+      stringFields.forEach(field => {
+        if (leadDetailsData.hasOwnProperty(field)) {
+          const value = leadDetailsData[field];
+          if (value !== null && value !== undefined) {
+            if (typeof value === 'object' || Array.isArray(value)) {
+              // Convert object/array to string or set to null
+              leadDetailsData[field] = JSON.stringify(value);
+            } else if (typeof value !== 'string') {
+              // Convert other types to string
+              leadDetailsData[field] = String(value);
+            }
+          }
+        }
+      });
+      console.log("Sanitized leadDetailsData:", leadDetailsData);
+    }
+    
     if (leadDetails) {
       if (Object.keys(leadDetailsData).length > 0) {
         await leadDetails.update(leadDetailsData);
