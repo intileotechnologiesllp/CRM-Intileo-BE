@@ -4112,6 +4112,24 @@ exports.updateLead = async (req, res) => {
         console.log("Processing custom fields for update:", customFields);
 
         for (const [fieldKey, value] of Object.entries(customFields)) {
+          // Extract the actual value from the custom field data
+          // Handle both direct value and object with metadata format
+          let actualValue = value;
+          let fieldIdFromValue = null;
+          
+          // Check if value is an object with custom field metadata
+          if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+            if (value.hasOwnProperty('value')) {
+              // Extract only the value from the metadata object
+              actualValue = value.value;
+              console.log(`Extracted value from metadata object for ${fieldKey}:`, actualValue);
+            }
+            // Also extract fieldId if provided in the object
+            if (value.hasOwnProperty('fieldId')) {
+              fieldIdFromValue = value.fieldId;
+            }
+          }
+
           // Try to find the custom field by fieldName first, then by fieldId
           let customField = null;
 
@@ -4129,7 +4147,18 @@ exports.updateLead = async (req, res) => {
             },
           });
 
-          // If not found by fieldName, try by fieldId
+          // If not found by fieldName, try by fieldId from the value object
+          if (!customField && fieldIdFromValue) {
+            customField = await CustomField.findOne({
+              where: {
+                fieldId: fieldIdFromValue,
+                entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+                isActive: true,
+              },
+            });
+          }
+
+          // If still not found, try by fieldId as key
           if (!customField) {
             customField = await CustomField.findOne({
               where: {
@@ -4160,9 +4189,11 @@ exports.updateLead = async (req, res) => {
             });
 
             if (existingValue) {
-              // Update existing value
+              // Update existing value - only store the actual value, not the metadata
               const valueToSave =
-                typeof value === "object" ? JSON.stringify(value) : value;
+                typeof actualValue === "object" && actualValue !== null 
+                  ? JSON.stringify(actualValue) 
+                  : actualValue;
               if (
                 valueToSave !== null &&
                 valueToSave !== undefined &&
@@ -4186,9 +4217,11 @@ exports.updateLead = async (req, res) => {
                 );
               }
             } else {
-              // Create new value
+              // Create new value - only store the actual value, not the metadata
               const valueToSave =
-                typeof value === "object" ? JSON.stringify(value) : value;
+                typeof actualValue === "object" && actualValue !== null 
+                  ? JSON.stringify(actualValue) 
+                  : actualValue;
               if (
                 valueToSave !== null &&
                 valueToSave !== undefined &&
