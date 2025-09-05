@@ -5168,6 +5168,20 @@ exports.addLeadNote = async (req, res) => {
       content,
       createdBy,
     });
+    
+    // Fetch user name from MasterUser table
+    const user = await MasterUser.findOne({
+      where: { masterUserID: req.adminId },
+      attributes: ['name', 'masterUserID']
+    });
+    
+    // Add user name to note object
+    const noteWithUserName = {
+      ...note.toJSON(),
+      creatorName: user ? user.name : null,
+      userMasterID: user ? user.masterUserID : null
+    };
+    
     await historyLogger(
       PROGRAMS.LEAD_MANAGEMENT,
       "LEAD_NOTE_ADD",
@@ -5177,7 +5191,10 @@ exports.addLeadNote = async (req, res) => {
       `Note added to lead with ID ${leadId} by user ${req.role}`,
       { content }
     );
-    res.status(201).json({ message: "Note added successfully", note });
+    res.status(201).json({ 
+      message: "Note added successfully", 
+      note: noteWithUserName 
+    });
   } catch (error) {
     console.error("Error adding note:", error);
     await logAuditTrail(
