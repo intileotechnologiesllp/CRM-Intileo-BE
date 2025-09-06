@@ -145,8 +145,11 @@ exports.createDeal = async (req, res) => {
       });
     }
 
-    // Validate proposalValue if provided
-    if (proposalValue && proposalValue < 0) {
+    // Validate and sanitize proposalValue
+    let sanitizedProposalValue = proposalValue;
+    if (proposalValue === '' || proposalValue === null || proposalValue === undefined) {
+      sanitizedProposalValue = null;
+    } else if (proposalValue && proposalValue < 0) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
@@ -159,8 +162,11 @@ exports.createDeal = async (req, res) => {
       });
     }
 
-    // Validate value if provided
-    if (value && value < 0) {
+    // Validate and sanitize value
+    let sanitizedValue = value;
+    if (value === '' || value === null || value === undefined) {
+      sanitizedValue = null;
+    } else if (value && value < 0) {
       await logAuditTrail(
         dealProgramId,
         "DEAL_CREATION",
@@ -171,6 +177,42 @@ exports.createDeal = async (req, res) => {
       return res.status(400).json({
         message: "Deal value must be positive.",
       });
+    }
+
+    // Sanitize other numeric fields
+    let sanitizedSourceChannelId = sourceChannelId;
+    if (sourceChannelId === '' || sourceChannelId === undefined) {
+      sanitizedSourceChannelId = null;
+    }
+
+    let sanitizedSourceOrgin = sourceOrgin;
+    if (sourceOrgin === '' || sourceOrgin === undefined) {
+      sanitizedSourceOrgin = null;
+    }
+
+    let sanitizedCurrency = currency;
+    if (currency === '' || currency === undefined) {
+      sanitizedCurrency = null;
+    }
+
+    let sanitizedProposalCurrency = proposalCurrency;
+    if (proposalCurrency === '' || proposalCurrency === undefined) {
+      sanitizedProposalCurrency = null;
+    }
+
+    // Sanitize date fields
+    let sanitizedExpectedCloseDate = expectedCloseDate;
+    if (expectedCloseDate === '' || expectedCloseDate === 'Invalid date' || expectedCloseDate === undefined || expectedCloseDate === null) {
+      sanitizedExpectedCloseDate = null;
+    } else if (expectedCloseDate && new Date(expectedCloseDate).toString() === 'Invalid Date') {
+      sanitizedExpectedCloseDate = null;
+    }
+
+    let sanitizedProposalSentDate = proposalSentDate;
+    if (proposalSentDate === '' || proposalSentDate === 'Invalid date' || proposalSentDate === undefined || proposalSentDate === null) {
+      sanitizedProposalSentDate = null;
+    } else if (proposalSentDate && new Date(proposalSentDate).toString() === 'Invalid Date') {
+      sanitizedProposalSentDate = null;
     }
     // Find or create Person and Organization here...
     // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
@@ -207,7 +249,7 @@ exports.createDeal = async (req, res) => {
     if (leadId === '') {
       leadId = null;
     }
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
+    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
       if (!leadId) {
         await logAuditTrail(
           dealProgramId,
@@ -265,7 +307,7 @@ exports.createDeal = async (req, res) => {
     // Create the lead
     console.log(person.personId, " before deal creation");
     // Before saving to DB
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
+    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
       if (!leadId) {
         await logAuditTrail(
           dealProgramId,
@@ -308,27 +350,27 @@ exports.createDeal = async (req, res) => {
       // leadOrganizationId: org.leadOrganizationId,
       leadId, // link to the lead if found
       title,
-      value,
-      currency,
+      value: sanitizedValue,
+      currency: sanitizedCurrency,
       pipeline,
       pipelineStage,
-      expectedCloseDate,
+      expectedCloseDate: sanitizedExpectedCloseDate,
       sourceChannel,
-      sourceChannelId,
+      sourceChannelId: sanitizedSourceChannelId,
       serviceType,
-      proposalValue,
-      proposalCurrency,
+      proposalValue: sanitizedProposalValue,
+      proposalCurrency: sanitizedProposalCurrency,
       esplProposalNo,
       projectLocation,
       organizationCountry,
-      proposalSentDate,
+      proposalSentDate: sanitizedProposalSentDate,
       sourceRequired,
       questionerShared,
       sectorialSector,
       sbuClass,
       phone,
       email,
-      sourceOrgin,
+      sourceOrgin: sanitizedSourceOrgin,
       masterUserID: req.adminId, // Ensure masterUserID is set from the request
       ownerId,
       status: "open", // Default status
@@ -336,7 +378,7 @@ exports.createDeal = async (req, res) => {
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
-    if (sourceOrgin === "2" || sourceOrgin === 2) {
+    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
       // Use ownerId for responsible person
       const owner = await MasterUser.findOne({
         where: { masterUserID: ownerId },
@@ -350,7 +392,7 @@ exports.createDeal = async (req, res) => {
       responsiblePerson = user ? user.name : null;
     }
 
-    if ((sourceOrgin === 0 || sourceOrgin === "0") && req.body.emailID) {
+    if ((sanitizedSourceOrgin === 0 || sanitizedSourceOrgin === "0") && req.body.emailID) {
       await Email.update(
         { dealId: deal.dealId },
         { where: { emailID: req.body.emailID } }
