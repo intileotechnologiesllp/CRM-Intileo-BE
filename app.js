@@ -170,7 +170,7 @@ sequelize
   try {
     await loadPrograms();
     // Start server after loading programs
-    const PORT = process.env.PORT || 3056;
+    const PORT = process.env.PORT || 3056 ;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     console.log("Program cache loaded.");
   } catch (err) {

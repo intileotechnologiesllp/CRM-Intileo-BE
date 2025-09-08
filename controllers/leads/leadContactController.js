@@ -2752,6 +2752,8 @@ const { Op } = require("sequelize");
 const Sequelize = require("sequelize");
 const Email = require("../../models/email/emailModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
+const DealNote = require("../../models/deals/delasNoteModel");
+// const PersonNote = require("../../models/leads/personNoteModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const Attachment = require("../../models/email/attachmentModel");
 const OrganizationNote = require("../../models/leads/organizationNoteModel");
@@ -3210,15 +3212,78 @@ exports.getPersonTimeline = async (req, res) => {
       });
     }
 
-    // Fetch related notes
-    const notes = await LeadNote.findAll({
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
       where: { leadId: leadIds },
-      limit: 20, // Limit notes to prevent large responses
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes
+    const personNotes = await PersonNote.findAll({
+      where: { personId: personId },
+      limit: 20,
       order: [["createdAt", "DESC"]],
     });
 
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities
+    const personActivities = await Activities.findAll({
+      where: { personId: personId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
     console.log(
-      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes`
+      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person)`
     );
 
     res.status(200).json({
@@ -3227,6 +3292,7 @@ exports.getPersonTimeline = async (req, res) => {
       deals,
       emails: optimizedEmails,
       notes,
+      activities,
       files,
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
@@ -3250,7 +3316,7 @@ exports.getOrganizationTimeline = async (req, res) => {
   const { organizationId } = req.params;
 
   // Email optimization parameters
-  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const { emailPage = 1, emailLimit = 50 } = req.query;
   const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
   const MAX_EMAIL_LIMIT = 50;
   const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
@@ -3444,15 +3510,94 @@ exports.getOrganizationTimeline = async (req, res) => {
       });
     }
 
-    // Fetch all notes linked to these leads with limit
-    const notes = await LeadNote.findAll({
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
       where: { leadId: leadIds },
-      limit: 20, // Limit notes to prevent large responses
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes for all persons in the organization
+    const personNotes = personIds.length > 0 ? await PersonNote.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization notes
+    const organizationNotes = await OrganizationNote.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
       order: [["createdAt", "DESC"]],
     });
 
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' })),
+      ...organizationNotes.map(note => ({ ...note.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities for all persons in the organization
+    const personActivities = personIds.length > 0 ? await Activities.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization activities
+    const organizationActivities = await Activities.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' })),
+      ...organizationActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
     console.log(
-      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes`
+      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person, ${organizationNotes.length} org), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person, ${organizationActivities.length} org)`
     );
 
     res.status(200).json({
@@ -3462,6 +3607,7 @@ exports.getOrganizationTimeline = async (req, res) => {
       deals,
       emails: optimizedEmails,
       notes,
+      activities,
       files, // Attachments with related email data
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
