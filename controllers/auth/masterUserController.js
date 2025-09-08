@@ -203,7 +203,7 @@ exports.createMasterUser = async (req, res) => {
 exports.getMasterUsers = async (req, res) => {
   const {
     page = 1,
-    limit = 10,
+    limit = 100,
     sortBy = "createdAt",
     sortOrder = "DESC",
     search = "",
