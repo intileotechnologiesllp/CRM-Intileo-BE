@@ -3233,6 +3233,29 @@ exports.updateDeal = async (req, res) => {
       availableCustomFields.map((f) => f.fieldName)
     );
 
+    // Debug: Check for the specific field you're trying to update
+    console.log("Looking for field: no._of_reports_prepared_for_the_project");
+    console.log("Request body keys:", Object.keys(req.body));
+    console.log("Field exists in request:", "no._of_reports_prepared_for_the_project" in req.body);
+    if ("no._of_reports_prepared_for_the_project" in req.body) {
+      console.log("Field value:", req.body["no._of_reports_prepared_for_the_project"]);
+    }
+
+    // Check if the field exists in available custom fields
+    const targetField = availableCustomFields.find(f => f.fieldName === "no._of_reports_prepared_for_the_project");
+    console.log("Field found in available custom fields:", !!targetField);
+    if (targetField) {
+      console.log("Target field details:", {
+        fieldId: targetField.fieldId,
+        fieldName: targetField.fieldName,
+        fieldType: targetField.fieldType,
+        entityType: targetField.entityType,
+        isActive: targetField.isActive,
+        masterUserID: targetField.masterUserID,
+        fieldSource: targetField.fieldSource,
+      });
+    }
+
     if (availableCustomFields.length > 0) {
       try {
         // Check each available custom field to see if it's in the request body
