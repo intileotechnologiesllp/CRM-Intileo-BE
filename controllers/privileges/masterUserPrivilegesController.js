@@ -176,7 +176,7 @@ exports.getUsersWithPrivileges = async (req, res) => {
     userType,
     masterUserID,
     page = 1,
-    limit = 10,
+    limit = 100,
     sortBy = "createdAt",
     sortOrder = "DESC",
   } = req.query || {}; // Changed from req.body to req.query

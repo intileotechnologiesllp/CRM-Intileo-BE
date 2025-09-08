@@ -2763,6 +2763,8 @@ const Organization = require("../../models/leads/leadOrganizationModel");
 const Person = require("../../models/leads/leadPersonModel");
 const Lead = require("../../models/leads/leadsModel")
 const Activities = require("../../models/activity/activityModel")
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
 const sequelize = require("../../config/db");
 
 exports.createPerson = async (req, res) => {
@@ -3282,8 +3284,44 @@ exports.getPersonTimeline = async (req, res) => {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 20);
 
+    // Fetch custom field values for the person
+    let personCustomFieldValues = [];
+    personCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: personId,
+        entityType: "person",
+      },
+      raw: true,
+    });
+
+    // Fetch all custom fields for person entity
+    const allPersonCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const personCustomFieldIdToName = {};
+    allPersonCustomFields.forEach((cf) => {
+      personCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const personCustomFields = {};
+    personCustomFieldValues.forEach((cfv) => {
+      const fieldName = personCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      personCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to person object
+    if (Object.keys(personCustomFields).length > 0) {
+      person.dataValues = { ...person.dataValues, ...personCustomFields };
+    }
+
     console.log(
-      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person)`
+      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person), ${Object.keys(personCustomFields).length} custom fields`
     );
 
     res.status(200).json({
