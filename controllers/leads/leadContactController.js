@@ -3634,8 +3634,44 @@ exports.getOrganizationTimeline = async (req, res) => {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 20);
 
+    // Fetch custom field values for the organization
+    let organizationCustomFieldValues = [];
+    organizationCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: organizationId,
+        entityType: "organization",
+      },
+      raw: true,
+    });
+
+    // Fetch all custom fields for organization entity
+    const allOrganizationCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const organizationCustomFieldIdToName = {};
+    allOrganizationCustomFields.forEach((cf) => {
+      organizationCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const organizationCustomFields = {};
+    organizationCustomFieldValues.forEach((cfv) => {
+      const fieldName = organizationCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      organizationCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to organization object
+    if (Object.keys(organizationCustomFields).length > 0) {
+      Object.assign(organization.dataValues, organizationCustomFields);
+    }
+
     console.log(
-      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person, ${organizationNotes.length} org), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person, ${organizationActivities.length} org)`
+      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person, ${organizationNotes.length} org), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person, ${organizationActivities.length} org), ${Object.keys(organizationCustomFields).length} custom fields`
     );
 
     res.status(200).json({
