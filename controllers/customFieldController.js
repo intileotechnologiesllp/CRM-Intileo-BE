@@ -336,6 +336,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:true
       },
       {
         fieldName: "email",
@@ -348,6 +349,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:true
       },
       {
         fieldName: "phone",
@@ -360,6 +362,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:true
       },
       {
         fieldName: "jobTitle",
@@ -372,6 +375,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:false
       },
       {
         fieldName: "organization",
@@ -384,6 +388,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:true
       },
       {
         fieldName: "postalAddress",
@@ -396,6 +401,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:false
       },
       {
         fieldName: "personLabels",
@@ -408,6 +414,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:false
       },
       {
         fieldName: "birthday",
@@ -420,6 +427,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        person:false
       },
       {
         fieldName: "notes",
@@ -432,6 +440,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        personView:false
       },
     ],
     organization: [
@@ -446,6 +455,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        organizationView:true
       },
       {
         fieldName: "ownerId",
@@ -458,6 +468,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        organizationView:true
       },
       {
         fieldName: "visibleTo",
@@ -470,6 +481,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        organizationView:false
       },
       {
         fieldName: "address",
@@ -482,6 +494,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        organizationView:true
       },
       {
         fieldName: "organizationLabels",
@@ -494,6 +507,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
+        organizationView:false
       },
     ],
   };
