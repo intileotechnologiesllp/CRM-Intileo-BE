@@ -902,6 +902,7 @@ const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider
       ], {
         bodies: "HEADER",
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       });
       
       const chunkTimeout = new Promise((_, reject) =>
@@ -1023,6 +1024,7 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       ], {
         bodies: "HEADER",
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       });
       
       const chunkTimeout = new Promise((_, reject) =>
@@ -1491,6 +1493,7 @@ exports.fetchInboxEmails = async (req, res) => {
               const testPromise = connection.search([["SINCE", testDate]], {
                 bodies: "HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES)",
                 struct: true,
+                envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
               });
               const timeoutPromise = new Promise((_, reject) =>
                 setTimeout(() => reject(new Error("Test timeout")), 3000) // Ultra-fast 3 second test
@@ -1509,7 +1512,8 @@ exports.fetchInboxEmails = async (req, res) => {
                   console.log(`[Batch ${page}] 📊 Getting total inbox count for user ${masterUserID}...`);
                   const totalPromise = connection.search(["ALL"], { 
                     bodies: "HEADER", 
-                    struct: true 
+                    struct: true,
+                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                   });
                   const totalTimeout = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Total count timeout")), 10000)
@@ -1600,6 +1604,7 @@ exports.fetchInboxEmails = async (req, res) => {
                     const fallbackPromise = connection.search(["ALL"], {
                       bodies: "HEADER", 
                       struct: true,
+                      envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                     });
                     const fallbackTimeoutPromise = new Promise((_, reject) =>
                       setTimeout(() => reject(new Error(`${provider || 'Email'} progressive fallback timeout`)), progressiveTimeout)
@@ -1620,6 +1625,7 @@ exports.fetchInboxEmails = async (req, res) => {
                   const searchPromise = connection.search(["ALL"], {
                     bodies: "HEADER", 
                     struct: true,
+                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                   });
                   const normalTimeout = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error(`${provider || 'Email'} search timeout`)), 15000)
@@ -1648,6 +1654,7 @@ exports.fetchInboxEmails = async (req, res) => {
             allMessages = await connection.search([["SINCE", sinceDate]], {
               bodies: "HEADER",
               struct: true,
+              envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
             });
           }
 
@@ -1768,7 +1775,8 @@ exports.fetchInboxEmails = async (req, res) => {
           // Fetch specific header fields for metadata without body content
           const fetchOptions = { 
             bodies: "HEADER", 
-            struct: true 
+            struct: true,
+            envelope: true  // 🔧 ADD ENVELOPE for proper email metadata (fixes sent folder fallback data)
           };
           messages = await connection.search(searchCriteria, fetchOptions);
         }
@@ -2713,6 +2721,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       const fetchOptions = {
         bodies: "HEADER", // Only fetch headers first for better performance
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       };
 
       console.log("Searching for recent emails (headers only)...");
