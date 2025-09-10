@@ -124,7 +124,8 @@ exports.getActivities = async (req, res) => {
       startDate,
       endDate,
       priority,
-      status
+      status,
+      masterUserID
     } = req.query;
 
     let { entityType } = req.query; // Extract entityType from query parameters
@@ -298,7 +299,12 @@ exports.getActivities = async (req, res) => {
     if (dealId) where.dealId = dealId;
     if (leadId) where.leadId = leadId;
 
-    if (req.role !== "admin") {
+    // Handle masterUserID filtering
+    if (masterUserID) {
+      // If a specific masterUserID is provided, filter by that user
+      where.masterUserID = masterUserID;
+    } else if (req.role !== "admin") {
+      // Only apply role-based restrictions if no specific masterUserID is requested
       where[Op.or] = [
         { masterUserID: req.adminId },
         { assignedTo: req.adminId },
