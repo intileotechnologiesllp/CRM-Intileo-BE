@@ -480,6 +480,14 @@ function findMatchingFolder(allFoldersArr, folderType) {
   }
   
   for (const pattern of patterns) {
+    // 🔧 GMAIL FIX: Use exact case matching for Gmail folders first
+    const exactFound = allFoldersArr.find(folder => folder === pattern);
+    if (exactFound) {
+      console.log(`✅ EXACT MATCH: Found '${exactFound}' for exact pattern '${pattern}'`);
+      return exactFound;
+    }
+    
+    // Fallback to case-insensitive matching for other providers
     const found = allFoldersArr.find(folder => 
       folder.toLowerCase() === pattern.toLowerCase() ||
       folder.toLowerCase().includes(pattern.toLowerCase())
@@ -1909,7 +1917,7 @@ exports.fetchInboxEmails = async (req, res) => {
     
     // Continue with main email processing
     const boxes = await connection.getBoxes();
-    const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
+    const allFoldersArr = flattenFolders(boxes); // 🔧 GMAIL FIX: Keep original case for proper folder matching
 
     console.log(
       `[Batch ${page}] Processing all folders for masterUserID: ${masterUserID}`
