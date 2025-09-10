@@ -10,6 +10,7 @@ const Lead = require("../../models/leads/leadsModel");
 const LeadDetails = require("../../models/leads/leadDetailsModel");
 const Deal = require("../../models/deals/dealsModels");
 const sequelize = require("../../config/db");
+const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
@@ -1470,40 +1471,81 @@ exports.updateActivityColumnChecks = async (req, res) => {
   }
 };
 
-exports.getActivityFields = (req, res) => {
-  const fields = [
-    // { key: "activityId", label: "Activity ID", check: false }, // removed
-    { key: "type", label: "Type", check: false },
-    { key: "subject", label: "Subject", check: false },
-    { key: "startDateTime", label: "Start Date & Time", check: false },
-    { key: "endDateTime", label: "End Date & Time", check: false },
-    { key: "priority", label: "Priority", check: false },
-    { key: "guests", label: "Guests", check: false },
-    { key: "location", label: "Location", check: false },
-    {
-      key: "videoCallIntegration",
-      label: "Video Call Integration",
-      check: false,
-    },
-    { key: "description", label: "Description", check: false },
-    { key: "status", label: "Status", check: false },
-    { key: "notes", label: "Notes", check: false },
-    { key: "assignedTo", label: "Assigned To", check: false }, // keep
-    // { key: "dealId", label: "Deal ID", check: false }, // removed
-    // { key: "leadId", label: "Lead ID", check: false }, // removed
-    // { key: "personId", label: "Person ID", check: false }, // removed
-    // { key: "leadOrganizationId", label: "Organization ID", check: false }, // removed
-    { key: "isDone", label: "Is Done", check: false },
-    // { key: "masterUserID", label: "Master User ID", check: false }, // removed
-    { key: "contactPerson", label: "Contact Person", check: false },
-    { key: "email", label: "Email", check: false },
-    { key: "organization", label: "Organization", check: false },
-    { key: "dueDate", label: "Due Date", check: false },
-    { key: "createdAt", label: "Created At", check: false },
-    { key: "updatedAt", label: "Updated At", check: false },
-  ];
+exports.getActivityFields = async (req, res) => {
+  try {
+    // Get activity column preferences
+    const pref = await ActivityColumnPreference.findOne({ where: {} });
 
-  res.status(200).json({ fields });
+    let columns = [];
+    if (pref) {
+      // Parse columns if it's a string
+      columns =
+        typeof pref.columns === "string"
+          ? JSON.parse(pref.columns)
+          : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig =
+          typeof col.filterConfig === "string"
+            ? JSON.parse(col.filterConfig)
+            : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for activities (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["activity", "both"] }, // Support activity fields
+            isActive: true,
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+        // Continue without custom fields if there's an error
+      }
+    }
+
+    // If no preferences found, return empty fields
+    if (!pref || !columns.length) {
+      return res.status(200).json({ 
+        fields: [],
+        customFields: customFields || [],
+        source: "preferences" 
+      });
+    }
+
+    res.status(200).json({ 
+      fields: columns,
+      customFields: customFields || [],
+      source: "preferences" 
+    });
+
+  } catch (error) {
+    console.error("Error fetching activity fields:", error);
+    res.status(500).json({ 
+      error: "Failed to fetch activity fields",
+      message: error.message 
+    });
+  }
 };
 
 exports.getAllLeadsAndDeals = async (req, res) => {
