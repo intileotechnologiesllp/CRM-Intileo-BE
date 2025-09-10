@@ -1070,6 +1070,8 @@ exports.getCustomFields = async (req, res) => {
           entityType: field.entityType || entityType,
           leadView: field.leadView || false,
           dealView: field.dealView || false,
+          personView: field.personView || false,
+          organizationView: field.organizationView || false,
         };
       }
 
