@@ -115,6 +115,12 @@ const Email = sequelize.define(
       allowNull: true,
       comment: 'IMAP UID for email body fetching'
     },
+    body_fetch_status: {
+      type: DataTypes.ENUM('pending', 'completed', 'failed'),
+      allowNull: true,
+      defaultValue: 'pending',
+      comment: 'Status of email body fetching for on-demand loading'
+    },
     leadId: {
       type: DataTypes.INTEGER,
       allowNull: true, // Allow NULL values for emails not linked to a lead

@@ -98,7 +98,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
     // Get email from database
     const email = await Email.findOne({
       where: { emailID: emailId },
-      attributes: ['emailID', 'uid', 'subject', 'body', 'body_fetch_status']
+      attributes: ['emailID', 'uid', 'subject', 'body', 'body_fetch_status', 'folder'] // 🔧 RE-ENABLED body_fetch_status
     });
 
     if (!email) {
@@ -106,7 +106,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
       return { success: false, error: 'Email not found' };
     }
 
-    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}`);
+    console.log(`✅ Email found: UID ${email.uid}, Subject: ${email.subject}, Folder: ${email.folder}`);
     
     // Check if body already exists
     if (email.body && email.body.trim()) {
@@ -130,9 +130,46 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
 
     console.log(`🔍 No body found, fetching from IMAP using WORKING METHOD...`);
     
+    // 🔧 FOLDER MAPPING: Map database folder to IMAP folder name
+    let imapFolderName = 'INBOX'; // Default fallback
+    
+    if (email.folder === 'sent') {
+      // Try to find the correct sent folder name for this provider
+      if (provider === 'gmail') {
+        imapFolderName = '[Gmail]/Sent Mail';
+      } else if (provider === 'yandex') {
+        imapFolderName = 'Sent'; // Yandex uses 'Sent'
+      } else {
+        imapFolderName = 'Sent'; // Generic sent folder
+      }
+    } else if (email.folder === 'drafts') {
+      if (provider === 'gmail') {
+        imapFolderName = '[Gmail]/Drafts';
+      } else {
+        imapFolderName = 'Drafts';
+      }
+    } else if (email.folder === 'trash') {
+      if (provider === 'gmail') {
+        imapFolderName = '[Gmail]/Trash';
+      } else {
+        imapFolderName = 'Trash';
+      }
+    } else if (email.folder === 'archive') {
+      if (provider === 'gmail') {
+        imapFolderName = '[Gmail]/All Mail';
+      } else {
+        imapFolderName = 'Archive';
+      }
+    } else {
+      // inbox or unknown - use INBOX
+      imapFolderName = 'INBOX';
+    }
+    
+    console.log(`📁 Opening folder: ${imapFolderName} (database folder: ${email.folder}, provider: ${provider})`);
+    
     // Connect to IMAP
     connection = await connectToIMAP(masterUserID, provider);
-    await connection.openBox('INBOX');
+    await connection.openBox(imapFolderName); // 🔧 OPEN CORRECT FOLDER
     
     // Use the EXACT working method from fetchRecentEmail
     console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
@@ -187,7 +224,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
       await Email.update(
         {
           body: finalBody,
-          body_fetch_status: 'fetched'
+          body_fetch_status: 'completed'  // 🔧 FIX: Use 'completed' instead of 'fetched'
         },
         { where: { emailID: emailId } }
       );
