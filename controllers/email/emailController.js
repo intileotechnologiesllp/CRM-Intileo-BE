@@ -33,12 +33,13 @@ const isIconAttachment = (attachment) => {
   const contentId = attachment.contentId || "";
   const contentDisposition = attachment.contentDisposition || "";
 
-  // Skip if it's an inline attachment (part of email body)
+  // DON'T skip inline attachments anymore - we need them for email body rendering
+  // Instead, we'll save them and mark them as inline for proper handling
   if (contentDisposition.toLowerCase().includes("inline")) {
     console.log(
-      `Filtering out inline attachment: ${filename} (${contentType})`
+      `Keeping inline attachment for email body: ${filename} (${contentType}) with contentId: ${contentId}`
     );
-    return true;
+    return false; // Changed from true to false - keep inline attachments
   }
 
   // Skip if it has a content ID (usually embedded images)
@@ -293,17 +294,46 @@ const imapConfig = {
 
 //   return cleanBody;
 // };
-const cleanEmailBody = (body) => {
+const cleanEmailBody = (body, attachments = [], emailId = null, baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
   if (!body) return "";
   
+  let cleanedBody = body;
+  
+  // Replace cid: references with our proxy endpoint URLs (only if emailId is available)
+  if (emailId) {
+    // Look for cid: references in the email body
+    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
+    
+    if (cidMatches) {
+      cidMatches.forEach(cidMatch => {
+        // Extract the content ID (remove 'cid:' prefix)
+        const contentId = cidMatch.replace(/^cid:/i, '').replace(/[<>]/g, '');
+        
+        // Create proxy URL for the inline image
+        const proxyUrl = `${baseURL}/api/email/inline-image/${emailId}/${encodeURIComponent(contentId)}`;
+        
+        // Replace the cid: reference with the proxy URL
+        cleanedBody = cleanedBody.replace(new RegExp(cidMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), proxyUrl);
+        
+        console.log(`[cleanEmailBody] 🔗 Replaced ${cidMatch} with ${proxyUrl}`);
+      });
+    }
+  } else {
+    // If no emailId, just log that we found CID references but can't replace them yet
+    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
+    if (cidMatches) {
+      console.log(`[cleanEmailBody] ⚠️ Found ${cidMatches.length} cid: references but no emailId available for replacement`);
+    }
+  }
+  
   // Remove quoted replies (e.g., lines starting with ">")
-  const cleaned = body
+  cleanedBody = cleanedBody
     .split("\n")
     .filter((line) => !line.startsWith(">"))
     .join("\n")
     .trim();
     
-  return cleaned;
+  return cleanedBody;
 };
 
 // Helper function to create email body preview
@@ -2872,11 +2902,10 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
           `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
         );
 
-        // Filter out icon/image attachments and inline (body/html) attachments
+        // Filter out icon attachments but KEEP inline attachments for email body rendering
         const filteredAttachments = parsedEmail.attachments.filter(
           (att) =>
             !isIconAttachment(att) &&
-            !att.contentDisposition?.toLowerCase().includes("inline") &&
             att.contentType !== "text/html" &&
             att.contentType !== "text/plain" &&
             att.size > 0 &&
@@ -4725,13 +4754,13 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
 
       // Update the email object
       email.body = finalBody;
-      email.body_fetch_status = 'fetched';
+      email.body_fetch_status = 'completed';
 
       // Update the database record
       await Email.update(
         {
           body: email.body || '',
-          body_fetch_status: 'fetched'
+          body_fetch_status: 'completed'
         },
         { where: { emailID: email.emailID } }
       );
@@ -4861,13 +4890,13 @@ exports.getOneEmail = async (req, res) => {
             }
 
             mainEmail.body = finalBody;
-            mainEmail.body_fetch_status = 'fetched';
+            mainEmail.body_fetch_status = 'completed';
 
             // Also update the database record
             await Email.update(
               {
                 body: mainEmail.body || '',
-                body_fetch_status: 'fetched'
+                body_fetch_status: 'completed'
               },
               { where: { emailID: mainEmail.emailID } }
             );
@@ -4894,12 +4923,6 @@ exports.getOneEmail = async (req, res) => {
       console.log(`[Phase 2] ✅ BODY EXISTS: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0})`);
     }
 
-    // Clean the body of the main email
-    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    mainEmail.body = cleanEmailBody(mainEmail.body || '');
-    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
-
     // Handle attachments appropriately based on type (user-uploaded vs fetched)
     mainEmail.attachments = mainEmail.attachments.map((attachment) => {
       const baseAttachment = { ...attachment };
@@ -4913,6 +4936,12 @@ exports.getOneEmail = async (req, res) => {
 
       return baseAttachment;
     });
+
+    // Clean the body of the main email AFTER processing attachments so we can replace cid: references
+    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments, emailId);
+    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
 
     // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
@@ -5116,7 +5145,7 @@ exports.getOneEmail = async (req, res) => {
 
     // Now clean the bodies (whether fetched or existing)
     relatedEmails.forEach((email) => {
-      email.body = cleanEmailBody(email.body);
+      // First process attachments to get the paths ready
       email.attachments = email.attachments.map((attachment) => {
         const baseAttachment = { ...attachment };
 
@@ -5125,10 +5154,12 @@ exports.getOneEmail = async (req, res) => {
         if (attachment.filePath) {
           baseAttachment.path = attachment.filePath; // User-uploaded files
         }
-        // For metadata-only attachments, we just return the basic info
-
+        
         return baseAttachment;
       });
+      
+      // Then clean the body with attachment info to replace cid: references
+      email.body = cleanEmailBody(email.body, email.attachments, email.emailID);
     });
 
     const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];
