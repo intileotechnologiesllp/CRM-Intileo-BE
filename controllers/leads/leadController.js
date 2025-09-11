@@ -3169,33 +3169,58 @@ exports.getLeads = async (req, res) => {
     }
     console.log("==========================================");
 
-    // Get custom field values for all leads (including default/system fields and unified fields)
-    // Include all active custom fields (not just checked ones)
+    // Get custom field values for leads (only for checked custom fields from column preferences)
     const leadIds = leads.rows.map((lead) => lead.leadId);
-    const customFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityId: leadIds,
-        entityType: "lead",
-      },
-      include: [
-        {
-          model: CustomField,
-          as: "CustomField",
-          where: {
-            isActive: true,
-            // Removed check: true constraint to show all custom fields
-            entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-              { fieldSource: "custom" }, // Include custom fields
-            ],
-          },
-          required: true,
+    
+    // Get checked custom field names from column preferences
+    let checkedCustomFieldNames = [];
+    if (pref && pref.columns) {
+      const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+      
+      // Get all checked column keys
+      const checkedColumnKeys = columns
+        .filter((col) => col.check === true)
+        .map((col) => col.key);
+      
+      // Filter out standard Lead and LeadDetails fields to get only custom field names
+      const leadFields = Object.keys(Lead.rawAttributes);
+      const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
+      const standardFields = [...leadFields, ...leadDetailsFields];
+      
+      checkedCustomFieldNames = checkedColumnKeys.filter(key => !standardFields.includes(key));
+      
+      console.log("Checked custom field names from preferences:", checkedCustomFieldNames);
+    }
+    
+    let customFieldValues = [];
+    if (checkedCustomFieldNames.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: leadIds,
+          entityType: "lead",
         },
-      ],
-    });
+        include: [
+          {
+            model: CustomField,
+            as: "CustomField",
+            where: {
+              isActive: true,
+              fieldName: { [Op.in]: checkedCustomFieldNames }, // Only include checked custom fields
+              entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" }, // Include custom fields
+              ],
+            },
+            required: true,
+          },
+        ],
+      });
+    } else {
+      console.log("No custom fields are checked in column preferences, skipping custom field query");
+    }
 
     // Group custom field values by leadId
     const customFieldsByLead = {};
