@@ -25,7 +25,6 @@ const historyRoutes = require("./routes/reports/historyRoutes"); // Import histo
 const privilegesRoutes = require("./routes/privileges/masterUserPrivilegesRoutes");
 const leadColumnRoutes = require("./routes/admin/masters/leadColumn/leadColumn.js"); // Import privileges routes
 const emailRoutes = require("./routes/email/emailRoutes.js"); // Import email routes
-const emailInlineImageRoutes = require("./routes/emailInlineImageRoute.js"); // Import email inline image routes
 const emailSettingController = require("./routes/email/emailSettingRoutes.js");
 const Email = require("./models/email/emailModel"); // Import Email model
 const leadFilterRoutes = require("./routes/leads/leadFilterRoutes"); // Import lead filter routes
@@ -91,7 +90,6 @@ app.use("/api/get-history", historyRoutes); // Register history routes
 app.use("/api/privileges", privilegesRoutes); // Register privileges routes
 app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
 app.use("/api/email", emailRoutes); // Register email routes
-app.use("/api/email", emailInlineImageRoutes); // Register email inline image routes
 app.use("/api/email-settings", emailSettingController); // Register email settings routes
 app.use("/api/lead-filters", leadFilterRoutes); // Register lead filter routes
 app.use("/api/lead-column", leadColumnController); // Register lead column controller routes
