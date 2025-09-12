@@ -936,7 +936,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
       baseWhere[Op.or] = [
         { title: { [Op.like]: `%${search}%` } },
         { value: { [Op.like]: `%${search}%` } },
-        { ownerName: { [Op.like]: `%${search}%` } },
+        // { ownerName: { [Op.like]: `%${search}%` } },
         { status: { [Op.like]: `%${search}%` } },
         { pipeline: { [Op.like]: `%${search}%` } },
       ];
@@ -1022,7 +1022,6 @@ exports.getDealPerformReportSummary = async (req, res) => {
         "dealId",
         "title",
         "value",
-        "ownerName",
         "status",
         "createdAt",
         "expectedCloseDate",
@@ -1120,23 +1119,20 @@ exports.getDealPerformReportSummary = async (req, res) => {
       id: lead.dealId,
       title: lead.title,
       value: lead.value,
-      ownerName: lead.ownerName,
       status: lead.status,
       createdAt: lead.createdAt,
-      expectedCloseDate: lead.expectedCloseDate
-        ? {
+      Owner: {
             id: lead.Owner.masterUserID,
             name: lead.Owner.name,
             email: lead.Owner.email,
           }
-        : null,
     }));
 
     const totalPages = Math.ceil(totalCount / limit);
 
     res.status(200).json({
       success: true,
-      message: "Leads data retrieved successfully",
+      message: "Deals data retrieved successfully",
       data: {
         activities: formattedActivities,
         reportData: reportData,
