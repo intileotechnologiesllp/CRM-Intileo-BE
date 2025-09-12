@@ -3397,9 +3397,97 @@ exports.getLeads = async (req, res) => {
     }));
     console.log(req.role, "role of the user............");
 
+    // Get total count of unconverted leads (leads without dealId)
+    let totalLeadCountWhere = { dealId: null };
+    
+    // Apply same visibility rules for total count as applied to the main query
+    if (req.role !== "admin") {
+      let visibilityConditions = [];
+
+      if (leadVisibilityRule) {
+        switch (leadVisibilityRule.defaultVisibility) {
+          case "owner_only":
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+            break;
+
+          case "group_only":
+            if (userGroup) {
+              visibilityConditions.push({
+                [Op.or]: [
+                  { visibilityGroupId: userGroup.groupId },
+                  { masterUserID: req.adminId },
+                  { ownerId: req.adminId },
+                ],
+              });
+            }
+            break;
+
+          case "item_owners_visibility_group":
+            if (userGroup) {
+              const groupMembers = await GroupMembership.findAll({
+                where: {
+                  groupId: userGroup.groupId,
+                  isActive: true,
+                },
+                attributes: ["userId"],
+              });
+
+              const memberIds = groupMembers.map((member) => member.userId);
+
+              visibilityConditions.push({
+                [Op.or]: [
+                  { masterUserID: { [Op.in]: memberIds } },
+                  { ownerId: { [Op.in]: memberIds } },
+                  {
+                    visibilityLevel: {
+                      [Op.in]: [
+                        "everyone",
+                        "group_only",
+                        "item_owners_visibility_group",
+                      ],
+                    },
+                    visibilityGroupId: userGroup.groupId,
+                  },
+                ],
+              });
+            }
+            break;
+
+          case "everyone":
+            break;
+
+          default:
+            visibilityConditions.push({
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId },
+              ],
+            });
+        }
+      } else {
+        visibilityConditions.push({
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        });
+      }
+
+      if (visibilityConditions.length > 0) {
+        totalLeadCountWhere[Op.and] = visibilityConditions;
+      }
+    }
+
+    const totalLeadCount = await Lead.count({
+      where: totalLeadCountWhere,
+    });
+
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,
+      totalLeadCount, // Total unconverted leads count
       totalPages: Math.ceil(leads.count / limit),
       currentPage: parseInt(page),
       // leads: leads.rows,
