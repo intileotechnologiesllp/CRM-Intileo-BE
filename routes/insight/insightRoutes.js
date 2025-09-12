@@ -115,6 +115,7 @@ router.post(
 
 router.post("/bulkdelete-report", verifyToken, insightController.bulkDeleteReports);
 router.get("/get-allreports", verifyToken, insightController.GetAllReports);
+router.get("/get-reportsdata-dashboardwise/:dashboardId", verifyToken, insightController.GetReportsDataDashboardWise);
 // router.post("/entity-columns", verifyToken, insightController.getEntityColumns);
 // router.post("/setColumnsVisibility", verifyToken, insightController.setColumnVisibility);
 // router.get("/getColumnsVisibility",verifyToken, insightController.getColumnVisibility);

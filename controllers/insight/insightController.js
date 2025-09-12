@@ -6433,3 +6433,59 @@ exports.GetAllReports = async (req, res) => {
     });
   }
 };
+
+
+exports.GetReportsDataDashboardWise = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Build where condition
+    const whereCondition = { dashboardId };
+    if (role !== "admin") {
+      whereCondition.ownerId = ownerId;
+    }
+
+    // Fetch reports for this dashboard
+    const reports = await Report.findAll({
+      where: whereCondition,
+      attributes: [
+        "reportId",
+        "ownerId",
+        "name",
+        "description",
+        "entity",
+        "type",
+        "config",
+        "graphtype",
+        "colors",
+        "createdAt"
+      ],
+      order: [["createdAt", "ASC"]],
+    });
+
+    // Parse JSON fields (config & colors)
+    const formattedReports = reports.map((r) => {
+      const data = r.toJSON();
+      return {
+        ...data,
+        config: data.config ? JSON.parse(data.config) : {},
+        colors: data.colors ? JSON.parse(data.colors) : {},
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched reports for dashboardId ${dashboardId}`,
+      data: formattedReports,
+    });
+  } catch (error) {
+    console.error("Error getting reports for dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get reports for dashboard",
+      error: error.message,
+    });
+  }
+};
