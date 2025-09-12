@@ -898,6 +898,13 @@ exports.getPersonReportSummary = async (req, res) => {
         "personId",
         "contactPerson",
         "organization",
+        "email",
+        "phone",
+        "notes",
+        "postalAddress",
+        "birthday",
+        "jobTitle",
+        "personLabels",
         "createdAt",
         "updatedAt",
         "masterUserID" // Include masterUserID if you need it
@@ -1022,6 +1029,13 @@ exports.getPersonReportSummary = async (req, res) => {
         organization: person.organization,
         updatedAt: person.updatedAt,
         createdAt: person.createdAt,
+        email: person.email,
+        phone: person.phone,
+        notes: person.notes,
+        postalAddress: person.postalAddress,
+        birthday: person.birthday,
+        jobTitle: person.jobTitle,
+        personLabels: person.personLabels,
         assignedTo: user ? {
           id: user.masterUserID,
           name: user.name,
@@ -2198,6 +2212,10 @@ exports.getOrganizationReportSummary = async (req, res) => {
       attributes: [
         "leadOrganizationId",
         "organization",
+        "organizationLabels",
+        "address",
+        "visibleTo",
+        "active",
         "createdAt",
         "updatedAt",
         "masterUserID" // Include masterUserID if you need it
@@ -2317,9 +2335,12 @@ exports.getOrganizationReportSummary = async (req, res) => {
       const user = userMap[person.masterUserID];
       
       return {
-        id: person.personId,
-        contactPerson: person.contactPerson,
+        id: person.leadOrganizationId,
         organization: person.organization,
+        organizationLabels: person.organizationLabels,
+        address: person.address,
+        visibleTo: person.visibleTo,
+        active: person.active == true? "Yes": "No",
         updatedAt: person.updatedAt,
         createdAt: person.createdAt,
         assignedTo: user ? {
@@ -2334,7 +2355,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Persons data retrieved successfully",
+      message: "Organization data retrieved successfully",
       data: {
         activities: formattedPersons,
         reportData: reportData,
@@ -2350,10 +2371,10 @@ exports.getOrganizationReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving Persons data:", error);
+    console.error("Error retrieving Organization data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve Persons data",
+      message: "Failed to retrieve Organization data",
       error: error.message,
     });
   }
