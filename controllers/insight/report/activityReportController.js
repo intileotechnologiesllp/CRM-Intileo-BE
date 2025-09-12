@@ -45,92 +45,93 @@ exports.createActivityReport = async (req, res) => {
     const yaxisArray = ["no of activities", "duration"];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Activity table columns
-      "subject",
-      "type",
-      "priority",
-      "status",
-      "location",
-      "contactPerson",
-      "organization",
-      "isDone",
-      "startDateTime",
-      "endDateTime",
-      "createdAt",
-
-      // Deal table columns (prefix with Deal.)
-      "ActivityDeal.title",
-      "ActivityDeal.value",
-      "ActivityDeal.currency",
-      "ActivityDeal.pipeline",
-      "ActivityDeal.pipelineStage",
-      "ActivityDeal.label",
-      "ActivityDeal.expectedCloseDate",
-      "ActivityDeal.sourceChannel",
-      "ActivityDeal.serviceType",
-      "ActivityDeal.proposalValue",
-      "ActivityDeal.proposalCurrency",
-      "ActivityDeal.esplProposalNo",
-      "ActivityDeal.projectLocation",
-      "ActivityDeal.organizationCountry",
-      "ActivityDeal.proposalSentDate",
-      "ActivityDeal.sourceRequired",
-      "ActivityDeal.questionerShared",
-      "ActivityDeal.sectorialSector",
-      "ActivityDeal.sbuClass",
-      "ActivityDeal.phone",
-      "ActivityDeal.email",
-      "ActivityDeal.sourceOrgin",
-      "ActivityDeal.status",
-      "ActivityDeal.productName",
-      "ActivityDeal.weightedValue",
-      "ActivityDeal.probability",
-      "ActivityDeal.stage",
-      "ActivityDeal.lostReason",
-      "ActivityDeal.archiveStatus",
-
-      // Lead table columns (prefix with Lead.)
-      "ActivityLead.contactPerson",
-      "ActivityLead.organization",
-      "ActivityLead.title",
-      "ActivityLead.valueLabels",
-      "ActivityLead.expectedCloseDate",
-      "ActivityLead.sourceChannel",
-      "ActivityLead.sourceChannelID",
-      "ActivityLead.serviceType",
-      "ActivityLead.scopeOfServiceType",
-      "ActivityLead.phone",
-      "ActivityLead.email",
-      "ActivityLead.company",
-      "ActivityLead.proposalValue",
-      "ActivityLead.esplProposalNo",
-      "ActivityLead.projectLocation",
-      "ActivityLead.organizationCountry",
-      "ActivityLead.proposalSentDate",
-      "ActivityLead.status",
-      "ActivityLead.SBUClass",
-      "ActivityLead.sectoralSector",
-      "ActivityLead.sourceOrigin",
-      "ActivityLead.leadQuality",
-      "ActivityLead.value",
-      "ActivityLead.proposalValueCurrency",
-      "ActivityLead.valueCurrency",
-
-      // Organization table columns (prefix with Organization.)
-      "ActivityOrganization.organization",
-      "ActivityOrganization.organizationLabels",
-      "ActivityOrganization.address",
-
-      // Person table columns (prefix with Person.)
-      "ActivityPerson.contactPerson",
-      "ActivityPerson.postalAddress",
-      "ActivityPerson.email",
-      "ActivityPerson.phone",
-      "ActivityPerson.jobTitle",
-      "ActivityPerson.personLabels",
-      "ActivityPerson.organization",
-    ];
+    const availableFilterColumns = {
+      Activity: [
+        { label: "Subject", value: "subject" },
+        { label: "Type", value: "type" },
+        { label: "Priority", value: "priority" },
+        { label: "Status", value: "status" },
+        { label: "Location", value: "location" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Is Done", value: "isDone" },
+        { label: "Start Date Time", value: "startDateTime" },
+        { label: "End Date Time", value: "endDateTime" },
+        { label: "Created At", value: "createdAt" }
+      ],
+      Deal: [
+        { label: "Title", value: "ActivityDeal.title" },
+        { label: "Value", value: "ActivityDeal.value" },
+        { label: "Currency", value: "ActivityDeal.currency" },
+        { label: "Pipeline", value: "ActivityDeal.pipeline" },
+        { label: "Pipeline Stage", value: "ActivityDeal.pipelineStage" },
+        { label: "Label", value: "ActivityDeal.label" },
+        { label: "Expected Close Date", value: "ActivityDeal.expectedCloseDate" },
+        { label: "Source Channel", value: "ActivityDeal.sourceChannel" },
+        { label: "Service Type", value: "ActivityDeal.serviceType" },
+        { label: "Proposal Value", value: "ActivityDeal.proposalValue" },
+        { label: "Proposal Currency", value: "ActivityDeal.proposalCurrency" },
+        { label: "ESPL Proposal No", value: "ActivityDeal.esplProposalNo" },
+        { label: "Project Location", value: "ActivityDeal.projectLocation" },
+        { label: "Organization Country", value: "ActivityDeal.organizationCountry" },
+        { label: "Proposal Sent Date", value: "ActivityDeal.proposalSentDate" },
+        { label: "Source Required", value: "ActivityDeal.sourceRequired" },
+        { label: "Questioner Shared", value: "ActivityDeal.questionerShared" },
+        { label: "Sectorial Sector", value: "ActivityDeal.sectorialSector" },
+        { label: "SBU Class", value: "ActivityDeal.sbuClass" },
+        { label: "Phone", value: "ActivityDeal.phone" },
+        { label: "Email", value: "ActivityDeal.email" },
+        { label: "Source Origin", value: "ActivityDeal.sourceOrgin" },
+        { label: "Status", value: "ActivityDeal.status" },
+        { label: "Product Name", value: "ActivityDeal.productName" },
+        { label: "Weighted Value", value: "ActivityDeal.weightedValue" },
+        { label: "Probability", value: "ActivityDeal.probability" },
+        { label: "Stage", value: "ActivityDeal.stage" },
+        { label: "Lost Reason", value: "ActivityDeal.lostReason" },
+        { label: "Archive Status", value: "ActivityDeal.archiveStatus" }
+      ],
+      Lead: [
+        { label: "Contact Person", value: "ActivityLead.contactPerson" },
+        { label: "Organization", value: "ActivityLead.organization" },
+        { label: "Title", value: "ActivityLead.title" },
+        { label: "Value Labels", value: "ActivityLead.valueLabels" },
+        { label: "Expected Close Date", value: "ActivityLead.expectedCloseDate" },
+        { label: "Source Channel", value: "ActivityLead.sourceChannel" },
+        { label: "Source Channel ID", value: "ActivityLead.sourceChannelID" },
+        { label: "Service Type", value: "ActivityLead.serviceType" },
+        { label: "Scope Of Service Type", value: "ActivityLead.scopeOfServiceType" },
+        { label: "Phone", value: "ActivityLead.phone" },
+        { label: "Email", value: "ActivityLead.email" },
+        { label: "Company", value: "ActivityLead.company" },
+        { label: "Proposal Value", value: "ActivityLead.proposalValue" },
+        { label: "ESPL Proposal No", value: "ActivityLead.esplProposalNo" },
+        { label: "Project Location", value: "ActivityLead.projectLocation" },
+        { label: "Organization Country", value: "ActivityLead.organizationCountry" },
+        { label: "Proposal Sent Date", value: "ActivityLead.proposalSentDate" },
+        { label: "Status", value: "ActivityLead.status" },
+        { label: "SBU Class", value: "ActivityLead.SBUClass" },
+        { label: "Sectoral Sector", value: "ActivityLead.sectoralSector" },
+        { label: "Source Origin", value: "ActivityLead.sourceOrigin" },
+        { label: "Lead Quality", value: "ActivityLead.leadQuality" },
+        { label: "Value", value: "ActivityLead.value" },
+        { label: "Proposal Value Currency", value: "ActivityLead.proposalValueCurrency" },
+        { label: "Value Currency", value: "ActivityLead.valueCurrency" }
+      ],
+      Organization: [
+        { label: "Organization", value: "ActivityOrganization.organization" },
+        { label: "Organization Labels", value: "ActivityOrganization.organizationLabels" },
+        { label: "Address", value: "ActivityOrganization.address" }
+      ],
+      Person: [
+        { label: "Contact Person", value: "ActivityPerson.contactPerson" },
+        { label: "Postal Address", value: "ActivityPerson.postalAddress" },
+        { label: "Email", value: "ActivityPerson.email" },
+        { label: "Phone", value: "ActivityPerson.phone" },
+        { label: "Job Title", value: "ActivityPerson.jobTitle" },
+        { label: "Person Labels", value: "ActivityPerson.personLabels" },
+        { label: "Organization", value: "ActivityPerson.organization" }
+      ]
+    };
 
     // For Activity Performance reports, generate the data
     let reportData = null;
@@ -247,8 +248,8 @@ exports.createActivityReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
       },
+      filters: availableFilterColumns
     });
   } catch (error) {
     console.error("Error creating reports:", error);

@@ -40,24 +40,24 @@ exports.createPersonReport = async (req, res) => {
     const yaxisArray = ["no of people"];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      "contactPerson",
-      "organization",
-      "email",
-      "phone",
-      "notes",
-      "postalAddress",
-      "jobTitle",
-      "personLabels",
-      "organiztion",
-
-
-      // Organization table columns (prefix with Organization.)
-      "LeadOrganization.organization",
-      "LeadOrganization.organizationLabels",
-      "LeadOrganization.address",
-
-    ];
+        const availableFilterColumns = {
+      Person: [
+        { label: "Email", value: "email" },
+        { label: "Phone", value: "phone" },
+        { label: "Notes", value: "notes" },
+        { label: "Postal Address", value: "postalAddress" },
+        { label: "Job Title", value: "jobTitle" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Person Labels", value: "personLabels" },
+      ],
+      Organization: [
+        { label: "Organization", value: "LeadOrganization.organization" },
+        { label: "Organization Labels", value: "LeadOrganization.organizationLabels" },
+        { label: "Address", value: "LeadOrganization.address" }
+      ],
+      
+    };
 
     // For Activity Performance reports, generate the data
     let reportData = null;
@@ -174,8 +174,9 @@ exports.createPersonReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+       
       },
+      filters: availableFilterColumns
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -1476,8 +1477,9 @@ exports.createOrganizationReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+       
       },
+      filters: availableFilterColumns
     });
   } catch (error) {
     console.error("Error creating reports:", error);
