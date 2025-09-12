@@ -52,43 +52,50 @@ exports.createLeadPerformReport = async (req, res) => {
     const yaxisArray = ["no of leads", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-
-      // Organization table columns (prefix with Organization.)
-      "LeadOrganization.organization",
-      "LeadOrganization.organizationLabels",
-      "LeadOrganization.address",
-
-      // Person table columns (prefix with Person.)
-      "LeadPerson.contactPerson",
-      "LeadPerson.postalAddress",
-      "LeadPerson.email",
-      "LeadPerson.phone",
-      "LeadPerson.jobTitle",
-      "LeadPerson.personLabels",
-      "LeadPerson.organization",
-    ];
+    const availableFilterColumns = {
+      Lead: [
+        { label: "ESPL Proposal No", value: "esplProposalNo" },
+        { label: "No of Reports", value: "numberOfReportsPrepared" },
+        { label: "Organization Country", value: "organizationCountry" },
+        { label: "Project Location", value: "projectLocation" },
+        { label: "Proposal Sent Date", value: "proposalSentDate" },
+        { label: "Owner Name", value: "ownerName" },
+        { label: "SBU Class", value: "SBUClass" },
+        { label: "Status", value: "status" },
+        { label: "Scope Of Service Type", value: "scopeOfServiceType" },
+        { label: "Service Type", value: "serviceType" },
+        { label: "Source Channel", value: "sourceChannel" },
+        { label: "Source Channel ID", value: "sourceChannelID" },
+        { label: "Source Origin", value: "sourceOrigin" },
+        { label: "Source Origin Id", value: "sourceOriginID" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Title", value: "title" },
+        { label: "Proposal Value", value: "proposalValue" },
+        { label: "Sectoral Sector", value: "sectoralSector" },
+        { label: "Lead Quality", value: "leadQuality" },
+        { label: "Value", value: "value" },
+        { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+        { label: "Value Currency", value: "valueCurrency" },
+        { label: "Value Labels", value: "valueLabels" },
+        { label: "Expected Close Date", value: "expectedCloseDate" }, 
+      ],
+      Organization: [
+        { label: "Organization", value: "LeadOrganization.organization" },
+        { label: "Organization Labels", value: "LeadOrganization.organizationLabels" },
+        { label: "Address", value: "LeadOrganization.address" }
+      ],
+      Person: [
+        { label: "Contact Person", value: "LeadPerson.contactPerson" },
+        { label: "Postal Address", value: "LeadPerson.postalAddress" },
+        { label: "Email", value: "LeadPerson.email" },
+        { label: "Phone", value: "LeadPerson.phone" },
+        { label: "Job Title", value: "LeadPerson.jobTitle" },
+        { label: "Person Labels", value: "LeadPerson.personLabels" },
+        { label: "Organization", value: "LeadPerson.organization" }
+      ]
+    };
+  
 
     // For Activity Performance reports, generate the data
     let reportData = null;
@@ -208,8 +215,9 @@ exports.createLeadPerformReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+       
       },
+       filters: availableFilterColumns
     });
   } catch (error) {
       console.error("Error creating reports:", error);
@@ -1338,43 +1346,49 @@ exports.createLeadConversionReport = async (req, res) => {
     const yaxisArray = ["no of leads", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-
-      // Organization table columns (prefix with Organization.)
-      "LeadOrganization.organization",
-      "LeadOrganization.organizationLabels",
-      "LeadOrganization.address",
-
-      // Person table columns (prefix with Person.)
-      "LeadPerson.contactPerson",
-      "LeadPerson.postalAddress",
-      "LeadPerson.email",
-      "LeadPerson.phone",
-      "LeadPerson.jobTitle",
-      "LeadPerson.personLabels",
-      "LeadPerson.organization",
-    ];
+    const availableFilterColumns = {
+      Lead: [
+        { label: "ESPL Proposal No", value: "esplProposalNo" },
+        { label: "No of Reports", value: "numberOfReportsPrepared" },
+        { label: "Organization Country", value: "organizationCountry" },
+        { label: "Project Location", value: "projectLocation" },
+        { label: "Proposal Sent Date", value: "proposalSentDate" },
+        { label: "Owner Name", value: "ownerName" },
+        { label: "SBU Class", value: "SBUClass" },
+        { label: "Status", value: "status" },
+        { label: "Scope Of Service Type", value: "scopeOfServiceType" },
+        { label: "Service Type", value: "serviceType" },
+        { label: "Source Channel", value: "sourceChannel" },
+        { label: "Source Channel ID", value: "sourceChannelID" },
+        { label: "Source Origin", value: "sourceOrigin" },
+        { label: "Source Origin Id", value: "sourceOriginID" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Title", value: "title" },
+        { label: "Proposal Value", value: "proposalValue" },
+        { label: "Sectoral Sector", value: "sectoralSector" },
+        { label: "Lead Quality", value: "leadQuality" },
+        { label: "Value", value: "value" },
+        { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+        { label: "Value Currency", value: "valueCurrency" },
+        { label: "Value Labels", value: "valueLabels" },
+        { label: "Expected Close Date", value: "expectedCloseDate" }, 
+      ],
+      Organization: [
+        { label: "Organization", value: "LeadOrganization.organization" },
+        { label: "Organization Labels", value: "LeadOrganization.organizationLabels" },
+        { label: "Address", value: "LeadOrganization.address" }
+      ],
+      Person: [
+        { label: "Contact Person", value: "LeadPerson.contactPerson" },
+        { label: "Postal Address", value: "LeadPerson.postalAddress" },
+        { label: "Email", value: "LeadPerson.email" },
+        { label: "Phone", value: "LeadPerson.phone" },
+        { label: "Job Title", value: "LeadPerson.jobTitle" },
+        { label: "Person Labels", value: "LeadPerson.personLabels" },
+        { label: "Organization", value: "LeadPerson.organization" }
+      ]
+    };
 
     // For Activity Conversion reports, generate the data
     let reportData = null;
@@ -1494,8 +1508,9 @@ exports.createLeadConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+       
       },
+      filters: availableFilterColumns
     });
   } catch (error) {
       console.error("Error creating reports:", error);

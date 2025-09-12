@@ -33,7 +33,7 @@ exports.createDealPerformReport = async (req, res) => {
       "organizationCountry",
       "projectLocation",
       "proposalSentDate",
-    //   "ownerName",
+      //   "ownerName",
       "sbuClass",
       "status",
       "scopeOfServiceType",
@@ -41,84 +41,103 @@ exports.createDealPerformReport = async (req, res) => {
       "sourceChannel",
       "sourceChannelID",
       "sourceOrigin",
-    //   "sourceOriginID",
+      //   "sourceOriginID",
       "contactPerson",
       "organization",
-    //   "proposalValueCurrency",
+      //   "proposalValueCurrency",
       "conversionDate",
       "createdAt",
       "updatedAt",
       "creator",
-      "creatorstatus"
+      "creatorstatus",
     ];
 
-    const yaxisArray = ["no of deals", "proposalValue", "value", "weightedValue", "productQuantity", "productAmount"];
+    const yaxisArray = [
+      "no of deals",
+      "proposalValue",
+      "value",
+      "weightedValue",
+      "productQuantity",
+      "productAmount",
+    ];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-
-      // Organization table columns (prefix with Organization.)
-      "Organization.organization",
-      "Organization.organizationLabels",
-      "Organization.address",
-
-      // Person table columns (prefix with Person.)
-      "Person.contactPerson",
-      "Person.postalAddress",
-      "Person.email",
-      "Person.phone",
-      "Person.jobTitle",
-      "Person.personLabels",
-      "Person.organization",
-
-      // Lead table columns (prefix with Lead.)
-      "Lead.contactPerson",
-      "Lead.organization",
-      "Lead.title",
-      "Lead.valueLabels",
-      "Lead.expectedCloseDate",
-      "Lead.sourceChannel",
-      "Lead.sourceChannelID",
-      "Lead.serviceType",
-      "Lead.scopeOfServiceType",
-      "Lead.phone",
-      "Lead.email",
-      "Lead.company",
-      "Lead.proposalValue",
-      "Lead.esplProposalNo",
-      "Lead.projectLocation",
-      "Lead.organizationCountry",
-      "Lead.proposalSentDate",
-      "Lead.status",
-      "Lead.SBUClass",
-      "Lead.sectoralSector",
-      "Lead.sourceOrigin",
-      "Lead.leadQuality",
-      "Lead.value",
-      "Lead.proposalValueCurrency",
-      "Lead.valueCurrency",
-    ];
+    const availableFilterColumns = {
+      Deal: [
+        { label: "ESPL Proposal No", value: "esplProposalNo" },
+        { label: "No of Reports", value: "numberOfReportsPrepared" },
+        { label: "Organization Country", value: "organizationCountry" },
+        { label: "Project Location", value: "projectLocation" },
+        { label: "Proposal Sent Date", value: "proposalSentDate" },
+        { label: "Owner Name", value: "ownerName" },
+        { label: "SBU Class", value: "SBUClass" },
+        { label: "Status", value: "status" },
+        { label: "Scope Of Service Type", value: "scopeOfServiceType" },
+        { label: "Service Type", value: "serviceType" },
+        { label: "Source Channel", value: "sourceChannel" },
+        { label: "Source Channel ID", value: "sourceChannelID" },
+        { label: "Source Origin", value: "sourceOrigin" },
+        { label: "Source Origin Id", value: "sourceOriginID" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Title", value: "title" },
+        { label: "Proposal Value", value: "proposalValue" },
+        { label: "Sectoral Sector", value: "sectoralSector" },
+        { label: "Lead Quality", value: "leadQuality" },
+        { label: "Value", value: "value" },
+        { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+        { label: "Value Currency", value: "valueCurrency" },
+        { label: "Value Labels", value: "valueLabels" },
+        { label: "Expected Close Date", value: "expectedCloseDate" },
+      ],
+      Lead: [
+        { label: "Contact Person", value: "Lead.contactPerson" },
+        { label: "Organization", value: "Lead.organization" },
+        { label: "Title", value: "Lead.title" },
+        { label: "Value Labels", value: "Lead.valueLabels" },
+        { label: "Expected Close Date", value: "Lead.expectedCloseDate" },
+        { label: "Source Channel", value: "Lead.sourceChannel" },
+        { label: "Source Channel ID", value: "Lead.sourceChannelID" },
+        { label: "Service Type", value: "Lead.serviceType" },
+        { label: "Scope Of Service Type", value: "Lead.scopeOfServiceType" },
+        { label: "Phone", value: "Lead.phone" },
+        { label: "Email", value: "Lead.email" },
+        { label: "Company", value: "Lead.company" },
+        { label: "Proposal Value", value: "Lead.proposalValue" },
+        { label: "ESPL Proposal No", value: "Lead.esplProposalNo" },
+        { label: "Project Location", value: "Lead.projectLocation" },
+        { label: "Organization Country", value: "Lead.organizationCountry" },
+        { label: "Proposal Sent Date", value: "Lead.proposalSentDate" },
+        { label: "Status", value: "Lead.status" },
+        { label: "SBU Class", value: "Lead.SBUClass" },
+        { label: "Sectoral Sector", value: "Lead.sectoralSector" },
+        { label: "Source Origin", value: "Lead.sourceOrigin" },
+        { label: "Lead Quality", value: "Lead.leadQuality" },
+        { label: "Value", value: "Lead.value" },
+        {
+          label: "Proposal Value Currency",
+          value: "Lead.proposalValueCurrency",
+        },
+        { label: "Value Currency", value: "Lead.valueCurrency" },
+      ],
+      Organization: [
+        { label: "Organization", value: "Organization.organization" },
+        {
+          label: "Organization Labels",
+          value: "Organization.organizationLabels",
+        },
+        { label: "Address", value: "Organization.address" },
+      ],
+      Person: [
+        { label: "Contact Person", value: "Person.contactPerson" },
+        { label: "Postal Address", value: "Person.postalAddress" },
+        { label: "Email", value: "Person.email" },
+        { label: "Phone", value: "Person.phone" },
+        { label: "Job Title", value: "Person.jobTitle" },
+        { label: "Person Labels", value: "Person.personLabels" },
+        { label: "Organization", value: "Person.organization" },
+      ],
+    };
 
     // For Activity Performance reports, generate the data
     let reportData = null;
@@ -165,8 +184,7 @@ exports.createDealPerformReport = async (req, res) => {
           });
         }
       }
-    } 
-    else if (reportId) {
+    } else if (reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -238,17 +256,18 @@ exports.createDealPerformReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+        
       },
+      filters: availableFilterColumns,
     });
   } catch (error) {
-      console.error("Error creating reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to create reports",
-        error: error.message,
-      });
-    }
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
 };
 
 async function generateExistingActivityPerformanceData(
@@ -357,20 +376,14 @@ async function generateExistingActivityPerformanceData(
 
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
-    attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("dealId")),
-      "yValue",
-    ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col("proposalValue")),
       "yValue",
     ]);
   } else if (existingyaxis === "value") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("value")),
-      "yValue",
-    ]);
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
@@ -537,10 +550,7 @@ async function generateActivityPerformanceData(
 
   // Handle existingyaxis
   if (yaxis === "no of deals") {
-    attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("dealId")),
-      "yValue",
-    ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
   } else if (yaxis === "proposalValue") {
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col("proposalValue")),
@@ -762,7 +772,9 @@ exports.saveDealPerformReport = async (req, res) => {
     }
 
     // Ensure dashboardIds is an array
-    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
 
     // Verify dashboard ownership if dashboardId is provided
     for (const dashboardId of dashboardIdsArray) {
@@ -840,7 +852,7 @@ exports.saveDealPerformReport = async (req, res) => {
           where: { dashboardId },
           order: [["position", "DESC"]],
         });
-        const nextPosition = lastReport ? (lastReport.position || 0) : 0;
+        const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
         const report = await Report.create({
           dashboardId,
@@ -853,7 +865,7 @@ exports.saveDealPerformReport = async (req, res) => {
           config: configObj,
           ownerId,
         });
-        
+
         reports.push(report);
       }
     }
@@ -864,7 +876,7 @@ exports.saveDealPerformReport = async (req, res) => {
         ? "Report updated successfully"
         : "Reports created successfully",
       data: {
-        reports: reports.map(report => ({
+        reports: reports.map((report) => ({
           ...report.toJSON(),
           config: report.config,
           reportData,
@@ -880,7 +892,6 @@ exports.saveDealPerformReport = async (req, res) => {
     });
   }
 };
-
 
 exports.getDealPerformReportSummary = async (req, res) => {
   try {
@@ -975,11 +986,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
     // Build order clause
     const order = [];
     if (sortBy === "Owner") {
-      order.push([
-        { model: MasterUser, as: "Owner" },
-        "name",
-        sortOrder,
-      ]);
+      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -1018,7 +1025,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
         "ownerName",
         "status",
         "createdAt",
-        "expectedCloseDate"
+        "expectedCloseDate",
       ],
     });
 
@@ -1154,7 +1161,6 @@ exports.getDealPerformReportSummary = async (req, res) => {
   }
 };
 
-
 exports.createDealConversionReport = async (req, res) => {
   try {
     const {
@@ -1177,7 +1183,7 @@ exports.createDealConversionReport = async (req, res) => {
       "organizationCountry",
       "projectLocation",
       "proposalSentDate",
-    //   "ownerName",
+      //   "ownerName",
       "sbuClass",
       "status",
       "scopeOfServiceType",
@@ -1185,84 +1191,103 @@ exports.createDealConversionReport = async (req, res) => {
       "sourceChannel",
       "sourceChannelID",
       "sourceOrigin",
-    //   "sourceOriginID",
+      //   "sourceOriginID",
       "contactPerson",
       "organization",
-    //   "proposalValueCurrency",
+      //   "proposalValueCurrency",
       "conversionDate",
       "createdAt",
       "updatedAt",
       "creator",
-      "creatorstatus"
+      "creatorstatus",
     ];
 
-    const yaxisArray = ["no of deals", "proposalValue", "value", "weightedValue", "productQuantity", "productAmount"];
+    const yaxisArray = [
+      "no of deals",
+      "proposalValue",
+      "value",
+      "weightedValue",
+      "productQuantity",
+      "productAmount",
+    ];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-
-      // Organization table columns (prefix with Organization.)
-      "Organization.organization",
-      "Organization.organizationLabels",
-      "Organization.address",
-
-      // Person table columns (prefix with Person.)
-      "Person.contactPerson",
-      "Person.postalAddress",
-      "Person.email",
-      "Person.phone",
-      "Person.jobTitle",
-      "Person.personLabels",
-      "Person.organization",
-
-      // Lead table columns (prefix with Lead.)
-      "Lead.contactPerson",
-      "Lead.organization",
-      "Lead.title",
-      "Lead.valueLabels",
-      "Lead.expectedCloseDate",
-      "Lead.sourceChannel",
-      "Lead.sourceChannelID",
-      "Lead.serviceType",
-      "Lead.scopeOfServiceType",
-      "Lead.phone",
-      "Lead.email",
-      "Lead.company",
-      "Lead.proposalValue",
-      "Lead.esplProposalNo",
-      "Lead.projectLocation",
-      "Lead.organizationCountry",
-      "Lead.proposalSentDate",
-      "Lead.status",
-      "Lead.SBUClass",
-      "Lead.sectoralSector",
-      "Lead.sourceOrigin",
-      "Lead.leadQuality",
-      "Lead.value",
-      "Lead.proposalValueCurrency",
-      "Lead.valueCurrency",
-    ];
+    const availableFilterColumns = {
+      Deal: [
+        { label: "ESPL Proposal No", value: "esplProposalNo" },
+        { label: "No of Reports", value: "numberOfReportsPrepared" },
+        { label: "Organization Country", value: "organizationCountry" },
+        { label: "Project Location", value: "projectLocation" },
+        { label: "Proposal Sent Date", value: "proposalSentDate" },
+        { label: "Owner Name", value: "ownerName" },
+        { label: "SBU Class", value: "SBUClass" },
+        { label: "Status", value: "status" },
+        { label: "Scope Of Service Type", value: "scopeOfServiceType" },
+        { label: "Service Type", value: "serviceType" },
+        { label: "Source Channel", value: "sourceChannel" },
+        { label: "Source Channel ID", value: "sourceChannelID" },
+        { label: "Source Origin", value: "sourceOrigin" },
+        { label: "Source Origin Id", value: "sourceOriginID" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Title", value: "title" },
+        { label: "Proposal Value", value: "proposalValue" },
+        { label: "Sectoral Sector", value: "sectoralSector" },
+        { label: "Lead Quality", value: "leadQuality" },
+        { label: "Value", value: "value" },
+        { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+        { label: "Value Currency", value: "valueCurrency" },
+        { label: "Value Labels", value: "valueLabels" },
+        { label: "Expected Close Date", value: "expectedCloseDate" },
+      ],
+      Lead: [
+        { label: "Contact Person", value: "Lead.contactPerson" },
+        { label: "Organization", value: "Lead.organization" },
+        { label: "Title", value: "Lead.title" },
+        { label: "Value Labels", value: "Lead.valueLabels" },
+        { label: "Expected Close Date", value: "Lead.expectedCloseDate" },
+        { label: "Source Channel", value: "Lead.sourceChannel" },
+        { label: "Source Channel ID", value: "Lead.sourceChannelID" },
+        { label: "Service Type", value: "Lead.serviceType" },
+        { label: "Scope Of Service Type", value: "Lead.scopeOfServiceType" },
+        { label: "Phone", value: "Lead.phone" },
+        { label: "Email", value: "Lead.email" },
+        { label: "Company", value: "Lead.company" },
+        { label: "Proposal Value", value: "Lead.proposalValue" },
+        { label: "ESPL Proposal No", value: "Lead.esplProposalNo" },
+        { label: "Project Location", value: "Lead.projectLocation" },
+        { label: "Organization Country", value: "Lead.organizationCountry" },
+        { label: "Proposal Sent Date", value: "Lead.proposalSentDate" },
+        { label: "Status", value: "Lead.status" },
+        { label: "SBU Class", value: "Lead.SBUClass" },
+        { label: "Sectoral Sector", value: "Lead.sectoralSector" },
+        { label: "Source Origin", value: "Lead.sourceOrigin" },
+        { label: "Lead Quality", value: "Lead.leadQuality" },
+        { label: "Value", value: "Lead.value" },
+        {
+          label: "Proposal Value Currency",
+          value: "Lead.proposalValueCurrency",
+        },
+        { label: "Value Currency", value: "Lead.valueCurrency" },
+      ],
+      Organization: [
+        { label: "Organization", value: "Organization.organization" },
+        {
+          label: "Organization Labels",
+          value: "Organization.organizationLabels",
+        },
+        { label: "Address", value: "Organization.address" },
+      ],
+      Person: [
+        { label: "Contact Person", value: "Person.contactPerson" },
+        { label: "Postal Address", value: "Person.postalAddress" },
+        { label: "Email", value: "Person.email" },
+        { label: "Phone", value: "Person.phone" },
+        { label: "Job Title", value: "Person.jobTitle" },
+        { label: "Person Labels", value: "Person.personLabels" },
+        { label: "Organization", value: "Person.organization" },
+      ],
+    };
 
     // For Activity Conversion reports, generate the data
     let reportData = null;
@@ -1309,8 +1334,7 @@ exports.createDealConversionReport = async (req, res) => {
           });
         }
       }
-    } 
-    else if (reportId) {
+    } else if (reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -1341,16 +1365,17 @@ exports.createDealConversionReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result = await generateConversionExistingActivityPerformanceData(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingfilters,
-            page,
-            limit,
-            type
-          );
+          const result =
+            await generateConversionExistingActivityPerformanceData(
+              ownerId,
+              role,
+              existingxaxis,
+              existingyaxis,
+              existingfilters,
+              page,
+              limit,
+              type
+            );
           reportData = result.data;
           paginationInfo = result.pagination;
 
@@ -1382,19 +1407,19 @@ exports.createDealConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+        
       },
+      filters: availableFilterColumns,
     });
   } catch (error) {
-      console.error("Error creating reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to create reports",
-        error: error.message,
-      });
-    }
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
 };
-
 
 async function generateConversionExistingActivityPerformanceData(
   ownerId,
@@ -1502,23 +1527,27 @@ async function generateConversionExistingActivityPerformanceData(
 
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
-     attributes.push([
-    Sequelize.literal(`(
+    attributes.push([
+      Sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
-    "yValue",
-  ]);
+      "yValue",
+    ]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`),
-    "yValue",
-  ]);
+      Sequelize.literal(
+        `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
+      ),
+      "yValue",
+    ]);
   } else if (existingyaxis === "value") {
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`),
-    "yValue",
-  ]);
+      Sequelize.literal(
+        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
+      ),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
@@ -1557,14 +1586,17 @@ async function generateConversionExistingActivityPerformanceData(
     limit: limit,
     offset: offset,
   });
-// console.log(results)
+  // console.log(results)
   // Format the results for the frontend
-const formattedResults = results.map((item) => ({
-  label: item.xValue || "Unknown",
-  value: (existingyaxis === "no of leads" || existingyaxis === "proposalValue" || existingyaxis === "value") 
-    ? parseFloat(item.yValue || 0) 
-    : item.yValue || 0,
-}));
+  const formattedResults = results.map((item) => ({
+    label: item.xValue || "Unknown",
+    value:
+      existingyaxis === "no of leads" ||
+      existingyaxis === "proposalValue" ||
+      existingyaxis === "value"
+        ? parseFloat(item.yValue || 0)
+        : item.yValue || 0,
+  }));
 
   // Return data with pagination info
   return {
@@ -1688,28 +1720,34 @@ async function generateConversionActivityPerformanceData(
   // Handle existingyaxis
   if (yaxis === "no of leads") {
     attributes.push([
-    Sequelize.literal(`(
+      Sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
-    "yValue",
-  ]);
+      "yValue",
+    ]);
   } else if (yaxis === "proposalValue") {
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`),
-    "yValue",
-  ]);
+      Sequelize.literal(
+        `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
+      ),
+      "yValue",
+    ]);
   } else if (yaxis === "value") {
     attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`),
-    "yValue",
-  ]);
+      Sequelize.literal(
+        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
+      ),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
-   attributes.push([
-    Sequelize.literal(`SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`),
-    "yValue",
-  ]);
+    attributes.push([
+      Sequelize.literal(
+        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`
+      ),
+      "yValue",
+    ]);
   }
 
   // Get total count for pagination
@@ -1745,11 +1783,12 @@ async function generateConversionActivityPerformanceData(
 
   // Format the results for the frontend
   const formattedResults = results.map((item) => ({
-  label: item.xValue || "Unknown",
-  value: (yaxis === "no of leads" || yaxis === "proposalValue" || yaxis === "value") 
-    ? parseFloat(item.yValue || 0) 
-    : item.yValue || 0,
-}));
+    label: item.xValue || "Unknown",
+    value:
+      yaxis === "no of leads" || yaxis === "proposalValue" || yaxis === "value"
+        ? parseFloat(item.yValue || 0)
+        : item.yValue || 0,
+  }));
 
   // Return data with pagination info
   return {
@@ -1764,7 +1803,6 @@ async function generateConversionActivityPerformanceData(
     },
   };
 }
-
 
 exports.saveDealConversionReport = async (req, res) => {
   try {
@@ -1790,7 +1828,9 @@ exports.saveDealConversionReport = async (req, res) => {
     }
 
     // Ensure dashboardIds is an array
-    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
 
     // Verify dashboard ownership if dashboardId is provided
     for (const dashboardId of dashboardIdsArray) {
@@ -1868,7 +1908,7 @@ exports.saveDealConversionReport = async (req, res) => {
           where: { dashboardId },
           order: [["position", "DESC"]],
         });
-        const nextPosition = lastReport ? (lastReport.position || 0) : 0;
+        const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
         const report = await Report.create({
           dashboardId,
@@ -1881,7 +1921,7 @@ exports.saveDealConversionReport = async (req, res) => {
           config: configObj,
           ownerId,
         });
-        
+
         reports.push(report);
       }
     }
@@ -1892,7 +1932,7 @@ exports.saveDealConversionReport = async (req, res) => {
         ? "Report updated successfully"
         : "Reports created successfully",
       data: {
-        reports: reports.map(report => ({
+        reports: reports.map((report) => ({
           ...report.toJSON(),
           config: report.config,
           reportData,
@@ -2001,11 +2041,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
     // Build order clause
     const order = [];
     if (sortBy === "Owner") {
-      order.push([
-        { model: MasterUser, as: "Owner" },
-        "name",
-        sortOrder,
-      ]);
+      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -2214,94 +2250,108 @@ exports.createDealProgressReport = async (req, res) => {
       "createdAt",
       "updatedAt",
       "creator",
-      "creatorstatus"
+      "creatorstatus",
     ];
 
-    const yaxisArray = ["no of deals", "proposalValue", "value", "weightedValue", "productQuantity", "productAmount"];
+    const yaxisArray = [
+      "no of deals",
+      "proposalValue",
+      "value",
+      "weightedValue",
+      "productQuantity",
+      "productAmount",
+    ];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-      // Lead table columns
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "ownerName",
-      "SBUClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "sourceOriginID",
-      "contactPerson",
-      "organization",
-      "proposalValueCurrency",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-
-      // Organization table columns (prefix with Organization.)
-      "Organization.organization",
-      "Organization.organizationLabels",
-      "Organization.address",
-
-      // Person table columns (prefix with Person.)
-      "Person.contactPerson",
-      "Person.postalAddress",
-      "Person.email",
-      "Person.phone",
-      "Person.jobTitle",
-      "Person.personLabels",
-      "Person.organization",
-
-      // Lead table columns (prefix with Lead.)
-      "Lead.contactPerson",
-      "Lead.organization",
-      "Lead.title",
-      "Lead.valueLabels",
-      "Lead.expectedCloseDate",
-      "Lead.sourceChannel",
-      "Lead.sourceChannelID",
-      "Lead.serviceType",
-      "Lead.scopeOfServiceType",
-      "Lead.phone",
-      "Lead.email",
-      "Lead.company",
-      "Lead.proposalValue",
-      "Lead.esplProposalNo",
-      "Lead.projectLocation",
-      "Lead.organizationCountry",
-      "Lead.proposalSentDate",
-      "Lead.status",
-      "Lead.SBUClass",
-      "Lead.sectoralSector",
-      "Lead.sourceOrigin",
-      "Lead.leadQuality",
-      "Lead.value",
-      "Lead.proposalValueCurrency",
-      "Lead.valueCurrency",
-      
-      // Deal table columns for pipeline stage
-      "Deal.pipelineStage",
-      "Deal.stage"
-    ];
+    const availableFilterColumns = {
+      Deal: [
+        { label: "ESPL Proposal No", value: "esplProposalNo" },
+        { label: "No of Reports", value: "numberOfReportsPrepared" },
+        { label: "Organization Country", value: "organizationCountry" },
+        { label: "Project Location", value: "projectLocation" },
+        { label: "Proposal Sent Date", value: "proposalSentDate" },
+        { label: "Owner Name", value: "ownerName" },
+        { label: "SBU Class", value: "SBUClass" },
+        { label: "Status", value: "status" },
+        { label: "Scope Of Service Type", value: "scopeOfServiceType" },
+        { label: "Service Type", value: "serviceType" },
+        { label: "Source Channel", value: "sourceChannel" },
+        { label: "Source Channel ID", value: "sourceChannelID" },
+        { label: "Source Origin", value: "sourceOrigin" },
+        { label: "Source Origin Id", value: "sourceOriginID" },
+        { label: "Contact Person", value: "contactPerson" },
+        { label: "Organization", value: "organization" },
+        { label: "Title", value: "title" },
+        { label: "Proposal Value", value: "proposalValue" },
+        { label: "Sectoral Sector", value: "sectoralSector" },
+        { label: "Lead Quality", value: "leadQuality" },
+        { label: "Value", value: "value" },
+        { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+        { label: "Value Currency", value: "valueCurrency" },
+        { label: "Value Labels", value: "valueLabels" },
+        { label: "Expected Close Date", value: "expectedCloseDate" },
+      ],
+      Lead: [
+        { label: "Contact Person", value: "Lead.contactPerson" },
+        { label: "Organization", value: "Lead.organization" },
+        { label: "Title", value: "Lead.title" },
+        { label: "Value Labels", value: "Lead.valueLabels" },
+        { label: "Expected Close Date", value: "Lead.expectedCloseDate" },
+        { label: "Source Channel", value: "Lead.sourceChannel" },
+        { label: "Source Channel ID", value: "Lead.sourceChannelID" },
+        { label: "Service Type", value: "Lead.serviceType" },
+        { label: "Scope Of Service Type", value: "Lead.scopeOfServiceType" },
+        { label: "Phone", value: "Lead.phone" },
+        { label: "Email", value: "Lead.email" },
+        { label: "Company", value: "Lead.company" },
+        { label: "Proposal Value", value: "Lead.proposalValue" },
+        { label: "ESPL Proposal No", value: "Lead.esplProposalNo" },
+        { label: "Project Location", value: "Lead.projectLocation" },
+        { label: "Organization Country", value: "Lead.organizationCountry" },
+        { label: "Proposal Sent Date", value: "Lead.proposalSentDate" },
+        { label: "Status", value: "Lead.status" },
+        { label: "SBU Class", value: "Lead.SBUClass" },
+        { label: "Sectoral Sector", value: "Lead.sectoralSector" },
+        { label: "Source Origin", value: "Lead.sourceOrigin" },
+        { label: "Lead Quality", value: "Lead.leadQuality" },
+        { label: "Value", value: "Lead.value" },
+        {
+          label: "Proposal Value Currency",
+          value: "Lead.proposalValueCurrency",
+        },
+        { label: "Value Currency", value: "Lead.valueCurrency" },
+      ],
+      Organization: [
+        { label: "Organization", value: "Organization.organization" },
+        {
+          label: "Organization Labels",
+          value: "Organization.organizationLabels",
+        },
+        { label: "Address", value: "Organization.address" },
+      ],
+      Person: [
+        { label: "Contact Person", value: "Person.contactPerson" },
+        { label: "Postal Address", value: "Person.postalAddress" },
+        { label: "Email", value: "Person.email" },
+        { label: "Phone", value: "Person.phone" },
+        { label: "Job Title", value: "Person.jobTitle" },
+        { label: "Person Labels", value: "Person.personLabels" },
+        { label: "Organization", value: "Person.organization" },
+      ],
+    };
 
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
     let reportConfig = null;
-    
+
     if (entity && type) {
       if (entity === "Deal" && type === "Progress") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
-            message:
-              "X-axis and Y-axis are required for Deal Progress reports",
+            message: "X-axis and Y-axis are required for Deal Progress reports",
           });
         }
 
@@ -2336,8 +2386,7 @@ exports.createDealProgressReport = async (req, res) => {
           });
         }
       }
-    } 
-    else if (reportId) {
+    } else if (reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -2361,8 +2410,7 @@ exports.createDealProgressReport = async (req, res) => {
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
-            message:
-              "X-axis and Y-axis are required for Deal Progress reports",
+            message: "X-axis and Y-axis are required for Deal Progress reports",
           });
         }
 
@@ -2409,17 +2457,17 @@ exports.createDealProgressReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns
+        filters: availableFilterColumns,
       },
     });
   } catch (error) {
-      console.error("Error creating reports:", error);
-      res.status(500).json({
-        success: false,
-        message: "Failed to create reports",
-        error: error.message,
-      });
-    }
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
 };
 
 async function generateProgressExistingActivityPerformanceData(
@@ -2531,17 +2579,35 @@ async function generateProgressExistingActivityPerformanceData(
 
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
+      "yValue",
+    ]);
   } else if (existingyaxis === "proposalValue") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
+      "yValue",
+    ]);
   } else if (existingyaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.value")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
+      "yValue",
+    ]);
   } else if (existingyaxis === "weightedValue") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.weightedValue")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.weightedValue")),
+      "yValue",
+    ]);
   } else if (existingyaxis === "productQuantity") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.productQuantity")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.productQuantity")),
+      "yValue",
+    ]);
   } else if (existingyaxis === "productAmount") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.productAmount")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.productAmount")),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Deal table
     attributes.push([
@@ -2582,7 +2648,11 @@ async function generateProgressExistingActivityPerformanceData(
   });
 
   // Format the results with pipeline stage breakdown
-  const formattedResults = formatResultsWithPipelineBreakdown(results, existingxaxis, existingyaxis);
+  const formattedResults = formatResultsWithPipelineBreakdown(
+    results,
+    existingxaxis,
+    existingyaxis
+  );
 
   // Return data with pagination info
   return {
@@ -2601,35 +2671,36 @@ async function generateProgressExistingActivityPerformanceData(
 // Helper function to format results with pipeline stage breakdown
 function formatResultsWithPipelineBreakdown(results, xaxis, yaxis) {
   const groupedByXValue = {};
-  
+
   // First pass: collect all pipeline stage values for each xValue
-  results.forEach(item => {
+  results.forEach((item) => {
     const xValue = item.xValue || "Unknown";
     const pipelineStage = item.pipelineStage || "Unknown";
     const yValue = parseFloat(item.yValue || 0);
-    
+
     if (!groupedByXValue[xValue]) {
       groupedByXValue[xValue] = {
         label: xValue,
         value: 0, // Initialize to 0
-        breakdown: {}
+        breakdown: {},
       };
     }
-    
+
     // Add to the pipeline stage breakdown
     groupedByXValue[xValue].breakdown[pipelineStage] = yValue;
   });
-  
+
   // Second pass: calculate the total value for each xValue
-  Object.keys(groupedByXValue).forEach(xValue => {
+  Object.keys(groupedByXValue).forEach((xValue) => {
     const breakdown = groupedByXValue[xValue].breakdown;
-    
+
     // Sum all pipeline stage values to get the total
     groupedByXValue[xValue].value = Object.values(breakdown).reduce(
-      (sum, stageValue) => sum + stageValue, 0
+      (sum, stageValue) => sum + stageValue,
+      0
     );
   });
-  
+
   // Convert to array
   return Object.values(groupedByXValue);
 }
@@ -2744,20 +2815,41 @@ async function generateProgressActivityPerformanceData(
 
   // Handle yaxis
   if (yaxis === "no of deals") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
+      "yValue",
+    ]);
   } else if (yaxis === "proposalValue") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
+      "yValue",
+    ]);
   } else if (yaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.value")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
+      "yValue",
+    ]);
   } else if (yaxis === "weightedValue") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.weightedValue")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.weightedValue")),
+      "yValue",
+    ]);
   } else if (yaxis === "productQuantity") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.productQuantity")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.productQuantity")),
+      "yValue",
+    ]);
   } else if (yaxis === "productAmount") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.productAmount")), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.productAmount")),
+      "yValue",
+    ]);
   } else {
     // For other yaxis values, explicitly specify the Deal table
-    attributes.push([Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)), "yValue"]);
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
+      "yValue",
+    ]);
   }
 
   // Get total count for pagination
@@ -2792,7 +2884,11 @@ async function generateProgressActivityPerformanceData(
   });
 
   // Format the results with pipeline stage breakdown
-  const formattedResults = formatResultsWithPipelineBreakdown(results, xaxis, yaxis);
+  const formattedResults = formatResultsWithPipelineBreakdown(
+    results,
+    xaxis,
+    yaxis
+  );
 
   // Return data with pagination info
   return {
@@ -2832,7 +2928,9 @@ exports.saveDealProgressReport = async (req, res) => {
     }
 
     // Ensure dashboardIds is an array
-    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
 
     // Verify dashboard ownership if dashboardId is provided
     for (const dashboardId of dashboardIdsArray) {
@@ -2910,7 +3008,7 @@ exports.saveDealProgressReport = async (req, res) => {
           where: { dashboardId },
           order: [["position", "DESC"]],
         });
-        const nextPosition = lastReport ? (lastReport.position || 0) : 0;
+        const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
         const report = await Report.create({
           dashboardId,
@@ -2923,7 +3021,7 @@ exports.saveDealProgressReport = async (req, res) => {
           config: configObj,
           ownerId,
         });
-        
+
         reports.push(report);
       }
     }
@@ -2934,7 +3032,7 @@ exports.saveDealProgressReport = async (req, res) => {
         ? "Report updated successfully"
         : "Reports created successfully",
       data: {
-        reports: reports.map(report => ({
+        reports: reports.map((report) => ({
           ...report.toJSON(),
           config: report.config,
           reportData,
@@ -3043,11 +3141,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
     // Build order clause
     const order = [];
     if (sortBy === "Owner") {
-      order.push([
-        { model: MasterUser, as: "Owner" },
-        "name",
-        sortOrder,
-      ]);
+      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
