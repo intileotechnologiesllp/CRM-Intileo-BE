@@ -42,19 +42,19 @@ exports.createPersonReport = async (req, res) => {
     // Add this to your createActivityReport function or make it available globally
         const availableFilterColumns = {
       Person: [
-        { label: "Email", value: "email" },
-        { label: "Phone", value: "phone" },
-        { label: "Notes", value: "notes" },
-        { label: "Postal Address", value: "postalAddress" },
-        { label: "Job Title", value: "jobTitle" },
-        { label: "Contact Person", value: "contactPerson" },
-        { label: "Organization", value: "organization" },
-        { label: "Person Labels", value: "personLabels" },
+        { label: "Email", value: "email", type: "text" },
+        { label: "Phone", value: "phone", type: "number" },
+        { label: "Notes", value: "notes", type: "text" },
+        { label: "Postal Address", value: "postalAddress", type: "text" },
+        { label: "Job Title", value: "jobTitle", type: "text" },
+        { label: "Contact Person", value: "contactPerson", type: "text" },
+        { label: "Organization", value: "organization", type: "text" },
+        { label: "Person Labels", value: "personLabels", type: "text" },
       ],
       Organization: [
-        { label: "Organization", value: "LeadOrganization.organization" },
-        { label: "Organization Labels", value: "LeadOrganization.organizationLabels" },
-        { label: "Address", value: "LeadOrganization.address" }
+        { label: "Organization", value: "LeadOrganization.organization", type: "text" },
+        { label: "Organization Labels", value: "LeadOrganization.organizationLabels", type: "text" },
+        { label: "Address", value: "LeadOrganization.address", type: "text" }
       ],
       
     };
@@ -1367,14 +1367,14 @@ exports.createOrganizationReport = async (req, res) => {
     const yaxisArray = ["no of organizations"];
 
     // Add this to your createActivityReport function or make it available globally
-    const availableFilterColumns = [
-
-      // Organization table columns (prefix with Organization.)
-      "organization",
-      "organizationLabels",
-      "address",
-
-    ];
+    const availableFilterColumns = {
+      Organization: [
+        { label: "Organization", value: "LeadOrganization.organization", type: "text" },
+        { label: "Organization Labels", value: "LeadOrganization.organizationLabels", type: "text" },
+        { label: "Address", value: "LeadOrganization.address", type: "text" }
+      ],
+      
+    };
 
     // For Activity Performance reports, generate the data
     let reportData = null;
