@@ -6492,6 +6492,7 @@ exports.GetReportsDataReportWise = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
+      saved: true,
       entity: entity,
       type: type,
       reportId: existingReportId,

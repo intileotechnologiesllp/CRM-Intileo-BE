@@ -19,6 +19,7 @@ exports.createDealPerformReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 6,
@@ -136,7 +137,7 @@ exports.createDealPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type) {
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -154,6 +155,7 @@ exports.createDealPerformReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            segmentedBy,
             filters,
             page,
             limit,
@@ -167,6 +169,7 @@ exports.createDealPerformReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            segmentedBy,
             filters: filters || {},
           };
         } catch (error) {
@@ -178,7 +181,7 @@ exports.createDealPerformReport = async (req, res) => {
           });
         }
       }
-    } else if (reportId) {
+    } else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -197,6 +200,7 @@ exports.createDealPerformReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -217,6 +221,7 @@ exports.createDealPerformReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingSegmentedBy,
             existingfilters,
             page,
             limit,
@@ -231,6 +236,7 @@ exports.createDealPerformReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors
@@ -274,6 +280,7 @@ async function generateExistingActivityPerformanceData(
   role,
   existingxaxis,
   existingyaxis,
+  existingSegmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -373,6 +380,32 @@ async function generateExistingActivityPerformanceData(
     attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${existingSegmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
     attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
@@ -422,11 +455,49 @@ async function generateExistingActivityPerformanceData(
     offset: offset,
   });
 
-  // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+// Format the results for the frontend
+  const formattedResults = []
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -448,6 +519,7 @@ async function generateActivityPerformanceData(
   role,
   xaxis,
   yaxis,
+  segmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -547,6 +619,32 @@ async function generateActivityPerformanceData(
     attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (segmentedBy && segmentedBy !== "none") {
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle existingyaxis
   if (yaxis === "no of deals") {
     attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
@@ -594,11 +692,49 @@ async function generateActivityPerformanceData(
     offset: offset,
   });
 
-  // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -759,6 +895,7 @@ exports.saveDealPerformReport = async (req, res) => {
       description,
       xaxis,
       yaxis,
+      segmentedBy,
       filters,
       graphtype,
       colors,
@@ -797,11 +934,12 @@ exports.saveDealPerformReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined
+        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
+                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -846,6 +984,7 @@ exports.saveDealPerformReport = async (req, res) => {
       const configObj = {
         xaxis,
         yaxis,
+        segmentedBy,
         filters: filters || {},
       };
 
@@ -891,6 +1030,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 200,
@@ -1051,6 +1191,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        segmentedBy,
         filters,
         page,
         limit
@@ -1092,6 +1233,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -1100,6 +1242,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingSegmentedBy,
         existingfilters,
         page,
         limit
@@ -1204,6 +1347,7 @@ exports.createDealConversionReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 6,
@@ -1321,7 +1465,7 @@ exports.createDealConversionReport = async (req, res) => {
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type) {
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "Conversion") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -1339,6 +1483,7 @@ exports.createDealConversionReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            segmentedBy,
             filters,
             page,
             limit,
@@ -1352,6 +1497,7 @@ exports.createDealConversionReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            segmentedBy,
             filters: filters || {},
           };
         } catch (error) {
@@ -1363,7 +1509,7 @@ exports.createDealConversionReport = async (req, res) => {
           });
         }
       }
-    } else if (reportId) {
+    } else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -1382,6 +1528,7 @@ exports.createDealConversionReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -1403,6 +1550,7 @@ exports.createDealConversionReport = async (req, res) => {
               role,
               existingxaxis,
               existingyaxis,
+              existingSegmentedBy,
               existingfilters,
               page,
               limit,
@@ -1417,6 +1565,7 @@ exports.createDealConversionReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors
@@ -1441,7 +1590,7 @@ exports.createDealConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        
+        segmentedBy: xaxisArray, 
       },
       filters: availableFilterColumns,
     });
@@ -1460,6 +1609,7 @@ async function generateConversionExistingActivityPerformanceData(
   role,
   existingxaxis,
   existingyaxis,
+  existingSegmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -1559,6 +1709,32 @@ async function generateConversionExistingActivityPerformanceData(
     attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${existingSegmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
     attributes.push([
@@ -1622,15 +1798,54 @@ async function generateConversionExistingActivityPerformanceData(
   });
   // console.log(results)
   // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value:
+  // Format the results for the frontend
+  const formattedResults = []
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+       value:
       existingyaxis === "no of leads" ||
       existingyaxis === "proposalValue" ||
       existingyaxis === "value"
         ? parseFloat(item.yValue || 0)
         : item.yValue || 0,
-  }));
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -1652,6 +1867,7 @@ async function generateConversionActivityPerformanceData(
   role,
   xaxis,
   yaxis,
+  segmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -1751,6 +1967,32 @@ async function generateConversionActivityPerformanceData(
     attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (segmentedBy && segmentedBy !== "none") {
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle existingyaxis
   if (yaxis === "no of leads") {
     attributes.push([
@@ -1815,14 +2057,53 @@ async function generateConversionActivityPerformanceData(
     offset: offset,
   });
 
-  // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value:
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+       value:
       yaxis === "no of leads" || yaxis === "proposalValue" || yaxis === "value"
         ? parseFloat(item.yValue || 0)
         : item.yValue || 0,
-  }));
+    }));
+  }
+
 
   // Return data with pagination info
   return {
@@ -1850,6 +2131,7 @@ exports.saveDealConversionReport = async (req, res) => {
       description,
       xaxis,
       yaxis,
+      segmentedBy,
       filters,
       graphtype,
       colors,
@@ -1888,11 +2170,12 @@ exports.saveDealConversionReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined
+        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
+                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -1937,6 +2220,7 @@ exports.saveDealConversionReport = async (req, res) => {
       const configObj = {
         xaxis,
         yaxis,
+        segmentedBy,
         filters: filters || {},
       };
 
@@ -1982,6 +2266,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 200,
@@ -2141,6 +2426,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        segmentedBy,
         filters,
         page,
         limit
@@ -2182,6 +2468,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -2190,6 +2477,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingSegmentedBy,
         existingfilters,
         page,
         limit
@@ -2294,6 +2582,7 @@ exports.createDealProgressReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 6,
@@ -2410,7 +2699,7 @@ exports.createDealProgressReport = async (req, res) => {
     let paginationInfo = null;
     let reportConfig = null;
 
-    if (entity && type) {
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "Progress") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -2427,6 +2716,7 @@ exports.createDealProgressReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            segmentedBy,
             filters,
             page,
             limit,
@@ -2440,6 +2730,7 @@ exports.createDealProgressReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            segmentedBy,
             filters: filters || {},
           };
         } catch (error) {
@@ -2451,7 +2742,7 @@ exports.createDealProgressReport = async (req, res) => {
           });
         }
       }
-    } else if (reportId) {
+    } else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -2470,6 +2761,7 @@ exports.createDealProgressReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -2489,6 +2781,7 @@ exports.createDealProgressReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingSegmentedBy,
             existingfilters,
             page,
             limit,
@@ -2503,6 +2796,7 @@ exports.createDealProgressReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors
@@ -2527,8 +2821,9 @@ exports.createDealProgressReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        filters: availableFilterColumns,
+        segmentedBy: xaxisArray, 
       },
+      filters: availableFilterColumns,
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -2545,6 +2840,7 @@ async function generateProgressExistingActivityPerformanceData(
   role,
   existingxaxis,
   existingyaxis,
+  existingSegmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -2647,6 +2943,34 @@ async function generateProgressExistingActivityPerformanceData(
   groupBy.push("Deal.pipelineStage");
   attributes.push([Sequelize.col("Deal.pipelineStage"), "pipelineStage"]);
 
+  
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${existingSegmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+    }
+  }
+
+
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
     attributes.push([
@@ -2717,12 +3041,50 @@ async function generateProgressExistingActivityPerformanceData(
     offset: offset,
   });
 
-  // Format the results with pipeline stage breakdown
-  const formattedResults = formatResultsWithPipelineBreakdown(
+  // Format the results for the frontend
+  const formattedResults = []
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    formattedResults = formatResultsWithPipelineBreakdown(
     results,
     existingxaxis,
     existingyaxis
   );
+  }
+
 
   // Return data with pagination info
   return {
@@ -2781,6 +3143,7 @@ async function generateProgressActivityPerformanceData(
   role,
   xaxis,
   yaxis,
+  segmentedBy,
   filters,
   page = 1,
   limit = 6,
@@ -2883,6 +3246,33 @@ async function generateProgressActivityPerformanceData(
   groupBy.push("Deal.pipelineStage");
   attributes.push([Sequelize.col("Deal.pipelineStage"), "pipelineStage"]);
 
+  // Handle segmentedBy if not "none"
+  if (segmentedBy && segmentedBy !== "none") {
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
+
   // Handle yaxis
   if (yaxis === "no of deals") {
     attributes.push([
@@ -2953,12 +3343,50 @@ async function generateProgressActivityPerformanceData(
     offset: offset,
   });
 
-  // Format the results with pipeline stage breakdown
-  const formattedResults = formatResultsWithPipelineBreakdown(
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = formatResultsWithPipelineBreakdown(
     results,
     xaxis,
     yaxis
   );
+  }
 
   // Return data with pagination info
   return {
@@ -2986,6 +3414,7 @@ exports.saveDealProgressReport = async (req, res) => {
       description,
       xaxis,
       yaxis,
+      segmentedBy,
       filters,
       graphtype,
       colors,
@@ -3024,11 +3453,12 @@ exports.saveDealProgressReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined
+        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
+                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -3073,6 +3503,7 @@ exports.saveDealProgressReport = async (req, res) => {
       const configObj = {
         xaxis,
         yaxis,
+        segmentedBy,
         filters: filters || {},
       };
 
@@ -3118,6 +3549,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 200,
@@ -3277,6 +3709,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        segmentedBy,
         filters,
         page,
         limit
@@ -3318,6 +3751,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -3326,6 +3760,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingSegmentedBy,
         existingfilters,
         page,
         limit

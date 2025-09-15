@@ -17,6 +17,7 @@ exports.createPersonReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 6,
@@ -62,7 +63,7 @@ exports.createPersonReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type && !reportId) {
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Contact" && type === "Person") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -80,6 +81,7 @@ exports.createPersonReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            segmentedBy,
             filters,
             page,
             limit
@@ -92,6 +94,7 @@ exports.createPersonReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            segmentedBy,
             filters: filters || {},
           };
         } catch (error) {
@@ -122,6 +125,7 @@ exports.createPersonReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -142,6 +146,7 @@ exports.createPersonReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingSegmentedBy,
             existingfilters,
             page,
             limit
@@ -155,6 +160,7 @@ exports.createPersonReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors
@@ -179,7 +185,7 @@ exports.createPersonReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-       
+        segmentedBy: xaxisArray,
       },
       filters: availableFilterColumns
     });
@@ -198,6 +204,7 @@ async function generateExistingActivityPerformanceData(
   role,
   existingxaxis,
   existingyaxis,
+  existingSegmentedBy,
   filters,
   page = 1,
   limit = 6
@@ -296,6 +303,33 @@ async function generateExistingActivityPerformanceData(
     attributes.push([Sequelize.col(`LeadPerson.${existingxaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${existingSegmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+    }
+  }
+
+
   // Handle existingyaxis
   if (existingyaxis === "no of people") {
     attributes.push([
@@ -342,10 +376,49 @@ async function generateExistingActivityPerformanceData(
   });
 
   // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+  // Format the results for the frontend
+  const formattedResults = []
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -367,6 +440,7 @@ async function generateActivityPerformanceData(
   role,
   xaxis,
   yaxis,
+  segmentedBy,
   filters,
   page = 1,
   limit = 6
@@ -466,6 +540,32 @@ async function generateActivityPerformanceData(
     attributes.push([Sequelize.col(`LeadPerson.${xaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy if not "none"
+  if (segmentedBy && segmentedBy !== "none") {
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle yaxis
   if (yaxis === "no of people") {
     attributes.push([
@@ -526,10 +626,49 @@ async function generateActivityPerformanceData(
   });
 
   // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -673,6 +812,7 @@ exports.savePersonReport = async (req, res) => {
       description,
       xaxis,
       yaxis,
+      segmentedBy,
       filters,
       graphtype,
       colors,
@@ -711,11 +851,12 @@ exports.savePersonReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined
+        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
+                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -760,6 +901,7 @@ exports.savePersonReport = async (req, res) => {
       const configObj = {
         xaxis,
         yaxis,
+        segmentedBy,
         filters: filters || {},
       };
 
@@ -805,6 +947,7 @@ exports.getPersonReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 200,
@@ -941,6 +1084,7 @@ exports.getPersonReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        segmentedBy,
         filters,
         page,
         limit
@@ -982,6 +1126,7 @@ exports.getPersonReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -990,6 +1135,7 @@ exports.getPersonReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingSegmentedBy,
         existingfilters,
         page,
         limit
@@ -1348,6 +1494,7 @@ exports.createOrganizationReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 6,
@@ -1377,7 +1524,7 @@ exports.createOrganizationReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if (entity && type && !reportId) {
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Contact" && type === "Organization") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -1395,6 +1542,7 @@ exports.createOrganizationReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            segmentedBy,
             filters,
             page,
             limit
@@ -1407,6 +1555,7 @@ exports.createOrganizationReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            segmentedBy,
             filters: filters || {},
           };
         } catch (error) {
@@ -1437,6 +1586,7 @@ exports.createOrganizationReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -1457,6 +1607,7 @@ exports.createOrganizationReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingSegmentedBy,
             existingfilters,
             page,
             limit
@@ -1470,6 +1621,7 @@ exports.createOrganizationReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors
@@ -1513,6 +1665,7 @@ async function generateExistingOrganizationPerformanceData(
   role,
   existingxaxis,
   existingyaxis,
+  existingSegmentedBy,
   filters,
   page = 1,
   limit = 6
@@ -1611,6 +1764,32 @@ async function generateExistingOrganizationPerformanceData(
     attributes.push([Sequelize.col(`LeadOrganization.${existingxaxis}`), "xValue"]);
   }
 
+      // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${existingSegmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle existingyaxis
   if (existingyaxis === "no of organizations") {
     attributes.push([
@@ -1656,11 +1835,49 @@ async function generateExistingOrganizationPerformanceData(
     offset: offset,
   });
 
-  // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+   // Format the results for the frontend
+  const formattedResults = []
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -1682,6 +1899,7 @@ async function generateOrganizationPerformanceData(
   role,
   xaxis,
   yaxis,
+  segmentedBy,
   filters,
   page = 1,
   limit = 6
@@ -1781,6 +1999,32 @@ async function generateOrganizationPerformanceData(
     attributes.push([Sequelize.col(`LeadOrganization.${xaxis}`), "xValue"]);
   }
 
+    // Handle segmentedBy if not "none"
+  if (segmentedBy && segmentedBy !== "none") {
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Activity.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
   // Handle yaxis
   if (yaxis === "no of organizations") {
     attributes.push([
@@ -1840,11 +2084,49 @@ async function generateOrganizationPerformanceData(
     offset: offset,
   });
 
-  // Format the results for the frontend
-  const formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value: item.yValue || 0,
-  }));
+// Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+    
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = item.yValue || 0;
+      
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = {
+          label: xValue,
+          segments: []
+        };
+      }
+      
+      // Check if this segment already exists
+      const existingSegment = groupedData[xValue].segments.find(
+        seg => seg.labeltype === segmentValue
+      );
+      
+      if (existingSegment) {
+        existingSegment.value += yValue;
+      } else {
+        groupedData[xValue].segments.push({
+          labeltype: segmentValue,
+          value: yValue
+        });
+      }
+    });
+    
+    // Convert to array
+    formattedResults = Object.values(groupedData);
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: item.yValue || 0,
+    }));
+  }
 
   // Return data with pagination info
   return {
@@ -1989,6 +2271,7 @@ exports.saveOrganizationReport = async (req, res) => {
       description,
       xaxis,
       yaxis,
+      segmentedBy,
       filters,
       graphtype,
       colors,
@@ -2027,11 +2310,12 @@ exports.saveOrganizationReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined
+        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
+                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -2076,6 +2360,7 @@ exports.saveOrganizationReport = async (req, res) => {
       const configObj = {
         xaxis,
         yaxis,
+        segmentedBy,
         filters: filters || {},
       };
 
@@ -2121,6 +2406,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      segmentedBy = "none",
       filters,
       page = 1,
       limit = 200,
@@ -2251,6 +2537,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        segmentedBy,
         filters,
         page,
         limit
@@ -2292,6 +2579,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
 
@@ -2300,6 +2588,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingSegmentedBy,
         existingfilters,
         page,
         limit
