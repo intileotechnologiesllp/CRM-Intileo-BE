@@ -245,30 +245,45 @@ exports.getActivities = async (req, res) => {
       case "overdue":
         where.startDateTime = { [Op.lt]: now.toDate() };
         where.isDone = false;
+        where.assignedTo =assignedTo;
         break;
       case "today":
-        where.startDateTime = {
+        where.dueDate = {
           [Op.gte]: now.toDate(),
           [Op.lt]: moment(now).add(1, "day").toDate(),
+          // where.assignedTo = req.adminId;
         };
+         where.assignedTo =assignedTo;
         break;
       case "tomorrow":
         where.startDateTime = {
           [Op.gte]: moment(now).add(1, "day").toDate(),
           [Op.lt]: moment(now).add(2, "day").toDate(),
         };
+         where.assignedTo =assignedTo;
         break;
       case "this_week":
-        where.startDateTime = {
-          [Op.gte]: now.toDate(),
-          [Op.lt]: moment(now).endOf("week").toDate(),
+        // Calculate current week Monday to Sunday
+        const today = moment(now);
+        const startOfWeek = today.clone().isoWeekday(1).startOf('day'); // Monday
+        const endOfWeek = today.clone().isoWeekday(7).endOf('day'); // Sunday
+        
+        where.dueDate = {
+          [Op.gte]: startOfWeek.toDate(),
+          [Op.lt]: endOfWeek.toDate(),
         };
+        where.assignedTo =assignedTo;
         break;
       case "next_week":
-        where.startDateTime = {
-          [Op.gte]: moment(now).add(1, "week").startOf("week").toDate(),
-          [Op.lt]: moment(now).add(1, "week").endOf("week").toDate(),
+        // Calculate next week Monday to Sunday
+        const nextWeekStart = moment(now).isoWeekday(1).add(1, 'week').startOf('day'); // Next Monday
+        const nextWeekEnd = moment(now).isoWeekday(1).add(2, 'week').startOf('day'); // Monday after next week
+        
+        where.dueDate = {
+          [Op.gte]: nextWeekStart.toDate(),
+          [Op.lt]: nextWeekEnd.toDate(),
         };
+        where.assignedTo =assignedTo;
         break;
       case "select_period":
         if (startDate && endDate) {
@@ -280,7 +295,7 @@ exports.getActivities = async (req, res) => {
         break;
       case "To-do":
         where.isDone = false;
-        where.startDateTime = { [Op.gte]: now.toDate() };
+        where.assignedTo =assignedTo;
         break;
       default:
         break;
