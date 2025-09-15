@@ -6435,6 +6435,82 @@ exports.GetAllReports = async (req, res) => {
 };
 
 
+exports.GetReportsDataReportWise = async (req, res) => {
+  try {
+    const { reportId } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportConfig = {};
+    let xaxisArray = [];
+    let yaxisArray = [];
+    let availableFilterColumns = [];
+    let entity, type, existingReportId;
+
+    if (reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+        reportId: reportIdValue
+      } = existingReports.dataValues;
+
+      // Set the variables for response
+      entity = existingentity;
+      type = existingtype;
+      existingReportId = reportIdValue;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        filters: existingfilters,
+      } = config;
+
+      // Set the response values
+      reportConfig = config;
+      xaxisArray = existingxaxis || [];
+      yaxisArray = existingyaxis || [];
+      availableFilterColumns = existingfilters || [];
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      entity: entity,
+      type: type,
+      reportId: existingReportId,
+      availableOptions: {
+        xaxis: xaxisArray,
+        yaxis: yaxisArray,
+      },
+      filters: availableFilterColumns
+    });
+  } catch (error) {
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
+};
+
 exports.GetReportsDataDashboardWise = async (req, res) => {
   try {
     const { dashboardId } = req.params;
