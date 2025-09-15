@@ -245,22 +245,21 @@ exports.getActivities = async (req, res) => {
       case "overdue":
         where.startDateTime = { [Op.lt]: now.toDate() };
         where.isDone = false;
-        where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       case "today":
         where.dueDate = {
           [Op.gte]: now.toDate(),
           [Op.lt]: moment(now).add(1, "day").toDate(),
-          // where.assignedTo = req.adminId;
         };
-         where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       case "tomorrow":
         where.startDateTime = {
           [Op.gte]: moment(now).add(1, "day").toDate(),
           [Op.lt]: moment(now).add(2, "day").toDate(),
         };
-         where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       case "this_week":
         // Calculate current week Monday to Sunday
@@ -272,7 +271,7 @@ exports.getActivities = async (req, res) => {
           [Op.gte]: startOfWeek.toDate(),
           [Op.lt]: endOfWeek.toDate(),
         };
-        where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       case "next_week":
         // Calculate next week Monday to Sunday
@@ -283,7 +282,7 @@ exports.getActivities = async (req, res) => {
           [Op.gte]: nextWeekStart.toDate(),
           [Op.lt]: nextWeekEnd.toDate(),
         };
-        where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       case "select_period":
         if (startDate && endDate) {
@@ -295,7 +294,7 @@ exports.getActivities = async (req, res) => {
         break;
       case "To-do":
         where.isDone = false;
-        where.assignedTo =assignedTo;
+        if (assignedTo) where.assignedTo = assignedTo;
         break;
       default:
         break;
@@ -313,6 +312,7 @@ exports.getActivities = async (req, res) => {
     if (leadOrganizationId) where.leadOrganizationId = leadOrganizationId;
     if (dealId) where.dealId = dealId;
     if (leadId) where.leadId = leadId;
+    if (assignedTo) where.assignedTo = assignedTo;
 
     // Handle masterUserID filtering
     if (masterUserID) {
