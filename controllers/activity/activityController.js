@@ -435,6 +435,335 @@ exports.getActivities = async (req, res) => {
   }
 };
 
+// exports.getActivities = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 100,
+//       search = "",
+//       type,
+//       assignedTo,
+//       isDone,
+//       personId,
+//       leadOrganizationId,
+//       dealId,
+//       leadId,
+//       dateFilter,
+//       filterId,
+//       startDate,
+//       endDate,
+//       priority,
+//       status,
+//       masterUserID
+//     } = req.query;
+
+//     let { entityType } = req.query; // Extract entityType from query parameters
+
+//     const pref = await ActivityColumnPreference.findOne();
+//     let attributes = [];
+//     if (pref) {
+//       const columns =
+//         typeof pref.columns === "string"
+//           ? JSON.parse(pref.columns)
+//           : pref.columns;
+//       const activityFields = Object.keys(Activity.rawAttributes);
+//       columns
+//         .filter((col) => col.check && activityFields.includes(col.key))
+//         .forEach((col) => {
+//           attributes.push(col.key);
+//         });
+//       if (attributes.length === 0) attributes = undefined;
+//     }
+
+//     const where = {};
+//     let filterWhere = {};
+
+//     if (filterId) {
+//       const filter = await LeadFilter.findByPk(filterId);
+//       if (!filter) {
+//         return res.status(404).json({ message: "Filter not found." });
+//       }
+//       const filterConfig =
+//         typeof filter.filterConfig === "string"
+//           ? JSON.parse(filter.filterConfig)
+//           : filter.filterConfig;
+
+//       // If entityType is not provided in query, try to infer from filterConfig
+//       if (!entityType) {
+//         // Try to get the first entity from 'all' or 'any' conditions
+//         if (
+//           filterConfig.all &&
+//           filterConfig.all.length > 0 &&
+//           filterConfig.all[0].entity
+//         ) {
+//           entityType = filterConfig.all[0].entity;
+//         } else if (
+//           filterConfig.any &&
+//           filterConfig.any.length > 0 &&
+//           filterConfig.any[0].entity
+//         ) {
+//           entityType = filterConfig.any[0].entity;
+//         }
+//       }
+
+//       const { all = [], any = [] } = filterConfig;
+//       const activityFields = Object.keys(Activity.rawAttributes);
+//       console.log(activityFields, "Activity Fields in getActivities");
+
+//       if (all.length > 0) {
+//         filterWhere[Op.and] = [];
+//         all.forEach((cond) => {
+//           if (cond.entity === "Lead" && cond.field === "title") {
+//             filterWhere[Op.and].push({
+//               "$ActivityLead.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Deal" && cond.field === "title") {
+//             filterWhere[Op.and].push({
+//               "$ActivityDeal.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Person") {
+//             filterWhere[Op.and].push({
+//               [`$ActivityPerson.${cond.field}$`]: { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Organization") {
+//             filterWhere[Op.and].push({
+//               [`$ActivityOrganization.${cond.field}$`]: { [Op.eq]: cond.value },
+//             });
+//           } else if (activityFields.includes(cond.field)) {
+//             const condition = buildCondition(cond);
+//             if (condition && Object.keys(condition).length > 0) {
+//               filterWhere[Op.and].push(condition);
+//             }
+//           }
+//         });
+//         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
+//       }
+
+//       if (any.length > 0) {
+//         filterWhere[Op.or] = [];
+//         any.forEach((cond) => {
+//           if (cond.entity === "Lead" && cond.field === "title") {
+//             filterWhere[Op.or].push({
+//               "$ActivityLead.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Deal" && cond.field === "title") {
+//             filterWhere[Op.or].push({
+//               "$ActivityDeal.title$": { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Person") {
+//             filterWhere[Op.or].push({
+//               [`$ActivityPerson.${cond.field}$`]: { [Op.eq]: cond.value },
+//             });
+//           } else if (cond.entity === "Organization") {
+//             filterWhere[Op.or].push({
+//               [`$ActivityOrganization.${cond.field}$`]: { [Op.eq]: cond.value },
+//             });
+//           } else if (activityFields.includes(cond.field)) {
+//             const condition = buildCondition(cond);
+//             if (condition && Object.keys(condition).length > 0) {
+//               filterWhere[Op.or].push(condition);
+//             }
+//           }
+//         });
+//         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
+//       }
+//     }
+
+//     const now = moment().startOf("day");
+//     switch (dateFilter) {
+//       case "overdue":
+//         where.startDateTime = { [Op.lt]: now.toDate() };
+//         where.isDone = false;
+//         where.assignedTo =assignedTo;
+//         break;
+//       case "today":
+//         where.dueDate = {
+//           [Op.gte]: now.toDate(),
+//           [Op.lt]: moment(now).add(1, "day").toDate(),
+//           // where.assignedTo = req.adminId;
+//         };
+//          where.assignedTo =assignedTo;
+//         break;
+//       case "tomorrow":
+//         where.startDateTime = {
+//           [Op.gte]: moment(now).add(1, "day").toDate(),
+//           [Op.lt]: moment(now).add(2, "day").toDate(),
+//         };
+//          where.assignedTo =assignedTo;
+//         break;
+//       case "this_week":
+//         // Calculate current week Monday to Sunday
+//         const today = moment(now);
+//         const startOfWeek = today.clone().isoWeekday(1).startOf('day'); // Monday
+//         const endOfWeek = today.clone().isoWeekday(7).endOf('day'); // Sunday
+        
+//         where.dueDate = {
+//           [Op.gte]: startOfWeek.toDate(),
+//           [Op.lt]: endOfWeek.toDate(),
+//         };
+//         where.assignedTo =assignedTo;
+//         break;
+//       case "next_week":
+//         // Calculate next week Monday to Sunday
+//         const nextWeekStart = moment(now).isoWeekday(1).add(1, 'week').startOf('day'); // Next Monday
+//         const nextWeekEnd = moment(now).isoWeekday(1).add(2, 'week').startOf('day'); // Monday after next week
+        
+//         where.dueDate = {
+//           [Op.gte]: nextWeekStart.toDate(),
+//           [Op.lt]: nextWeekEnd.toDate(),
+//         };
+//         where.assignedTo =assignedTo;
+//         break;
+//       case "select_period":
+//         if (startDate && endDate) {
+//           where.startDateTime = {
+//             [Op.gte]: new Date(startDate),
+//             [Op.lte]: new Date(endDate),
+//           };
+//         }
+//         break;
+//       case "To-do":
+//         where.isDone = false;
+//         where.assignedTo =assignedTo;
+//         break;
+//       default:
+//         break;
+//     }
+
+//     if (search) {
+//       where[Op.or] = [
+//         { subject: { [Op.like]: `%${search}%` } },
+//         { description: { [Op.like]: `%${search}%` } },
+//       ];
+//     }
+//     if (type) where.type = type;
+//     if (typeof isDone !== "undefined") where.isDone = isDone === "true";
+//     if (personId) where.personId = personId;
+//     if (leadOrganizationId) where.leadOrganizationId = leadOrganizationId;
+//     if (dealId) where.dealId = dealId;
+//     if (leadId) where.leadId = leadId;
+
+//     // Handle masterUserID filtering
+//     if (masterUserID) {
+//       // If a specific masterUserID is provided, filter by that user
+//       where.masterUserID = masterUserID;
+//     } else if (req.role !== "admin") {
+//       // Only apply role-based restrictions if no specific masterUserID is requested
+//       where[Op.or] = [
+//         { masterUserID: req.adminId },
+//         { assignedTo: req.adminId },
+//       ];
+//     }
+
+//     const finalWhere = { ...filterWhere, ...where };
+//     console.log(JSON.stringify(finalWhere, null, 2));
+//     const alwaysInclude = [
+//       "dealId",
+//       "leadId",
+//       "assignedTo",
+//       "leadOrganizationId",
+//       "personId",
+//       "activityId",
+//       "type",
+//       "startDateTime",
+//       "endDateTime",
+//       "priority",
+//       "status"
+//     ];
+//     if (attributes) {
+//       alwaysInclude.forEach((field) => {
+//         if (!attributes.includes(field)) attributes.push(field);
+//       });
+//     }
+//     const offset = (parseInt(page) - 1) * parseInt(limit);
+
+//     const { rows: activities, count: total } = await Activity.findAndCountAll({
+//       where: finalWhere,
+//       limit: parseInt(limit),
+//       offset,
+//       order: [["startDateTime", "DESC"]],
+//       attributes,
+//       include: [
+//         {
+//           model: Lead,
+//           as: "ActivityLead", // Use the alias here
+//           attributes: Object.keys(Lead.rawAttributes),
+//           required: entityType === "Lead", // Apply filter only for Lead
+//           where:
+//             entityType === "Lead" && (filterWhere[Op.and] || filterWhere[Op.or])
+//               ? filterWhere
+//               : undefined,
+//         },
+//         {
+//           model: Deal,
+//           as: "ActivityDeal", // Use the alias here
+//           attributes: Object.keys(Deal.rawAttributes),
+//           required: entityType === "Deal", // Apply filter only for Deal
+//           where:
+//             entityType === "Deal" &&
+//             Object.keys(filterWhere).length > 0 &&
+//             filterWhere[Op.and]
+//               ? filterWhere
+//               : undefined,
+//         },
+//         {
+//           model: Organizations,
+//           as: "ActivityOrganization",
+//           attributes: Object.keys(Organizations.rawAttributes),
+//           required: entityType === "Organization", // Apply filter only for Organization
+//           where:
+//             entityType === "Organization" &&
+//             (filterWhere[Op.and] || filterWhere[Op.or])
+//               ? filterWhere
+//               : undefined,
+//         },
+//         {
+//           model: Person,
+//           as: "ActivityPerson",
+//           attributes: Object.keys(Person.rawAttributes),
+//           required: entityType === "Person", // Apply filter only for Person
+//           where:
+//             entityType === "Person" &&
+//             (filterWhere[Op.and] || filterWhere[Op.or])
+//               ? filterWhere
+//               : undefined,
+//         },
+//       ],
+//     });
+
+//     const activitiesWithTitle = activities.map((activity) => {
+//       const data = activity.get ? activity.get({ plain: true }) : activity;
+//       const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
+//         data;
+//       let title = null;
+//       if (rest.leadId && ActivityLead) {
+//         title = ActivityLead.title;
+//       } else if (rest.dealId && ActivityDeal) {
+//         title = ActivityDeal.title;
+//       }
+//       return {
+//         ...rest,
+//         title,
+//         organization: ActivityOrganization
+//           ? ActivityOrganization.organization
+//           : null,
+//         contactPerson: ActivityPerson ? ActivityPerson.contactPerson : null,
+//         email: ActivityPerson ? ActivityPerson.email : null,
+//       };
+//     });
+
+//     res.status(200).json({
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       currentPage: parseInt(page),
+//       activities: activitiesWithTitle,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching activities:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
 const operatorMap = {
   is: "eq",
   "is not": "ne",
