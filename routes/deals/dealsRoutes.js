@@ -6,6 +6,7 @@ const dealsController = require("../../controllers/deals/dealsController");
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 const validatePrivilege = require("../../middlewares/validatePrivilege");
+const activitySettingsMiddleware = require("../../middlewares/activitySettingsMiddleware");
 
 router.post("/create-deal", verifyToken, validatePrivilege(3, "create"), dealsController.createDeal);
 router.get("/get-deals", verifyToken, validatePrivilege(3, "view"), dealsController.getDeals);
@@ -65,7 +66,7 @@ router.get(
 router.get(
   "/mark-deal-as-won/:dealId",
   verifyToken,
-  validatePrivilege(3, "view"),
+  validatePrivilege(3, "view"),activitySettingsMiddleware,
   dealsController.markDealAsWon
 );
 router.post(
