@@ -1,3 +1,65 @@
+const { google } = require('googleapis');
+
+// Start Google OAuth flow for calendar sync
+exports.startGoogleOAuth = async (req, res) => {
+  const { email } = req.body;
+  const masterUserID = req.body.masterUserID || req.adminId;
+  if (!email || !masterUserID) {
+    return res.status(400).json({ message: 'Email and masterUserID are required.' });
+  }
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI // e.g. https://yourdomain.com/api/master-user/google-auth/callback
+  );
+  const scopes = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/userinfo.email'
+  ];
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: scopes,
+    prompt: 'consent',
+    state: JSON.stringify({ email, masterUserID })
+  });
+  res.json({ url });
+};
+
+// Handle Google OAuth callback and save token
+exports.handleGoogleOAuthCallback = async (req, res) => {
+  const code = req.query.code;
+  let state = req.query.state;
+  let email, masterUserID;
+  try {
+    if (state) {
+      const parsed = JSON.parse(state);
+      email = parsed.email;
+      masterUserID = parsed.masterUserID || req.adminId;
+    }
+  } catch (err) {
+    return res.status(400).json({ message: 'Invalid state parameter.' });
+  }
+  if (!code || !email || !masterUserID) {
+    return res.status(400).json({ message: 'Missing code, email, or masterUserID.' });
+  }
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+  try {
+    const { tokens } = await oauth2Client.getToken(code);
+    // Save token to user record
+    await MasterUser.update(
+      { googleOAuthToken: JSON.stringify(tokens) },
+      { where: { masterUserID, email } }
+    );
+    res.json({ message: 'Google Calendar connected successfully.' });
+  } catch (err) {
+    console.error('OAuth error:', err);
+    res.status(500).json({ message: 'Failed to connect Google Calendar.' });
+  }
+};
 const MasterUser = require("../../models/master/masterUserModel");
 const { logAuditTrail } = require("../../utils/auditTrailLogger");
 const PROGRAMS = require("../../utils/programConstants");

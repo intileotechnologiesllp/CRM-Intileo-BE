@@ -106,6 +106,10 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.TEXT,
     allowNull: true, // Reason for deactivation
   },
+  googleOAuthToken: {
+    type: DataTypes.STRING,
+    allowNull: true, // Store Google OAuth token for calendar sync
+  },
 });
 
 const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
