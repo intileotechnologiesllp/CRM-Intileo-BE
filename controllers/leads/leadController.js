@@ -2103,13 +2103,43 @@ exports.getLeads = async (req, res) => {
       if (!leadAttributes.includes(sortBy)) {
         leadAttributes.push(sortBy);
       }
+      // Always include currency fields for proper financial data display
+      if (!leadAttributes.includes("proposalValueCurrency")) {
+        leadAttributes.push("proposalValueCurrency");
+      }
+      if (!leadAttributes.includes("valueCurrency")) {
+        leadAttributes.push("valueCurrency");
+      }
+      // Always include relationship fields for proper data joining
+      if (!leadAttributes.includes('leadOrganizationId')) {
+        leadAttributes.push('leadOrganizationId');
+      }
+      if (!leadAttributes.includes('personId')) {
+        leadAttributes.push('personId');
+      }
+      // Always include ownership fields
+      if (!leadAttributes.includes('ownerId')) {
+        leadAttributes.push('ownerId');
+      }
+      if (!leadAttributes.includes('masterUserID')) {
+        leadAttributes.push('masterUserID');
+      }
 
       leadDetailsAttributes = columns
         .filter((col) => col.check && leadDetailsFields.includes(col.key))
         .map((col) => col.key);
     }
 
-    console.log(leadAttributes, "leadAttributes from preferences");
+    console.log("leadAttributes from preferences:", leadAttributes);
+    console.log("leadDetailsAttributes from preferences:", leadDetailsAttributes);
+    
+    // Debug: Check if currency fields are included
+    if (leadAttributes) {
+      const currencyFields = leadAttributes.filter(attr => 
+        attr.includes('Currency') || attr.includes('currency')
+      );
+      console.log("✅ Currency fields included in leadAttributes:", currencyFields);
+    }
 
     let whereClause = {};
     let hasActivityFiltering = false; // Initialize early for use throughout the function
@@ -2126,12 +2156,36 @@ exports.getLeads = async (req, res) => {
     //   },
     // ];
     let include = [];
+    // Always include LeadDetails but only fetch checked attributes if preferences exist
     if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
+      // Ensure currency field is included if it exists in LeadDetails
+      if (!leadDetailsAttributes.includes("currency") && Object.keys(LeadDetails.rawAttributes).includes("currency")) {
+        leadDetailsAttributes.push("currency");
+      }
       include.push({
         model: LeadDetails,
         as: "details",
         required: false,
         attributes: leadDetailsAttributes,
+      });
+    } else if (pref && pref.columns) {
+      // If preferences exist but no LeadDetails columns are checked, include minimal LeadDetails with currency
+      const minimalAttributes = ['id'];
+      if (Object.keys(LeadDetails.rawAttributes).includes("currency")) {
+        minimalAttributes.push("currency");
+      }
+      include.push({
+        model: LeadDetails,
+        as: "details",
+        required: false,
+        attributes: minimalAttributes
+      });
+    } else {
+      // If no preferences, include all LeadDetails
+      include.push({
+        model: LeadDetails,
+        as: "details",
+        required: false,
       });
     }
 
@@ -3271,6 +3325,27 @@ exports.getLeads = async (req, res) => {
 
       return leadObj;
     });
+    
+    // Debug: Check if currency fields are present in processed leads
+    if (flatLeads.length > 0) {
+      const firstLead = flatLeads[0];
+      const currencyFieldsInLead = Object.keys(firstLead).filter(key => 
+        key.includes('Currency') || key.includes('currency')
+      );
+      console.log("🔍 Currency fields in processed lead:", currencyFieldsInLead);
+      console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
+      console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
+      
+      // Check for missing essential currency fields
+      const expectedCurrencyFields = ['proposalValueCurrency', 'valueCurrency'];
+      const missingCurrencyFields = expectedCurrencyFields.filter(field => !Object.keys(firstLead).includes(field));
+      if (missingCurrencyFields.length > 0) {
+        console.warn("⚠️ Missing currency fields in lead object:", missingCurrencyFields);
+      } else {
+        console.log("✅ All expected currency fields present in lead object");
+      }
+    }
+    
     // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
 
     let persons, organizations;

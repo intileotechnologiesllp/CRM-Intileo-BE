@@ -217,7 +217,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         fieldLabel: "Value Currency",
         fieldType: "text",
         dbColumn: "valueCurrency",
-        isRequired: false,
+        isRequired:false,
         entityType: "leads",
         isActive: true,
         isDefault: true,
