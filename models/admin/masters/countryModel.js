@@ -7,18 +7,18 @@ const Country = sequelize.define("Country", {
     primaryKey: true, // Set as primary key
     autoIncrement: true, // Auto-increment the ID
   },
-  country_desc: {
-    type: DataTypes.STRING,
-    allowNull: false, // Ensure this field cannot be null
-    validate: {
-      notNull: {
-        msg: "country description is required", // Custom error message
-      },
-      notEmpty: {
-        msg: "country description cannot be empty", // Custom error message
-      },
-    },
-  },
+  // country_desc: {
+  //   type: DataTypes.STRING,
+  //   allowNull: true, // Ensure this field cannot be null
+  //   validate: {
+  //     notNull: {
+  //       msg: "country description is required", // Custom error message
+  //     },
+  //     notEmpty: {
+  //       msg: "country description cannot be empty", // Custom error message
+  //     },
+  //   },
+  // },
   createdBy: {
     type: DataTypes.STRING,
     allowNull: false,
@@ -35,6 +35,14 @@ const Country = sequelize.define("Country", {
     type: DataTypes.DATE,
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
+  },
+  countryName : {
+    type: DataTypes.STRING,
+    allowNull: false, // Ensure this field cannot be null
+  },
+  isoCode : {
+    type: DataTypes.STRING,
+    allowNull: false, // Ensure this field cannot be null
   },
 });
 
