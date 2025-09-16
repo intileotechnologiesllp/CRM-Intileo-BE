@@ -6445,7 +6445,7 @@ exports.GetReportsDataReportWise = async (req, res) => {
     let xaxisArray = [];
     let yaxisArray = [];
     let availableFilterColumns = [];
-    let entity, type, existingReportId;
+    let entity, type, existingReportId, dashboardId, folderId;
 
     if (reportId) {
       const existingReports = await Report.findOne({
@@ -6465,13 +6465,17 @@ exports.GetReportsDataReportWise = async (req, res) => {
         config: configString,
         graphtype: existinggraphtype,
         colors: existingcolors,
-        reportId: reportIdValue
+        reportId: reportIdValue,
+        dashboardId: existingDashboardId,
+        folderId: existingFolderId
       } = existingReports.dataValues;
 
       // Set the variables for response
       entity = existingentity;
       type = existingtype;
       existingReportId = reportIdValue;
+      dashboardId = existingDashboardId;
+      folderId = existingFolderId;
 
       const colors = JSON.parse(existingcolors);
       // Parse the config JSON string
@@ -6496,6 +6500,8 @@ exports.GetReportsDataReportWise = async (req, res) => {
       entity: entity,
       type: type,
       reportId: existingReportId,
+      dashboardId: dashboardId,
+      folderId: folderId,
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
