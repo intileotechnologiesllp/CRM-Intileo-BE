@@ -477,7 +477,7 @@ async function generateExistingActivityPerformanceData(
   });
 
   // Format the results for the frontend
-  const formattedResults = [];
+  let formattedResults = [];
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
@@ -2027,7 +2027,7 @@ async function generateConversionExistingActivityPerformanceData(
   // Format the results for the frontend
 
   // Format the results for the frontend
-  const formattedResults = [];
+  let formattedResults = [];
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
