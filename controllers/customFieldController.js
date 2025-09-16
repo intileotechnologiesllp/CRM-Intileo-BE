@@ -950,21 +950,19 @@ exports.getCustomFields = async (req, res) => {
       order: [
         ["category", "ASC"],
         ["fieldGroup", "ASC"],
-        ["displayOrder", "ASC"],
+        ["sortOrder", "ASC"], // sort by sortOrder ascending
         ["fieldLabel", "ASC"],
       ],
     });
 
-    // Sort by sortOrder: 1 first, then ascending, null/undefined always last
+    // Ensure sortOrder starts at 0, then 1, 2, ...
     customFields = customFields.sort((a, b) => {
       const aNull = a.sortOrder === null || a.sortOrder === undefined;
       const bNull = b.sortOrder === null || b.sortOrder === undefined;
       if (aNull && !bNull) return 1;
       if (!aNull && bNull) return -1;
       if (aNull && bNull) return 0;
-      // Both have sortOrder, put 1 first, then ascending
-      if (a.sortOrder === 1 && b.sortOrder !== 1) return -1;
-      if (b.sortOrder === 1 && a.sortOrder !== 1) return 1;
+      // Both have sortOrder, sort ascending (0, 1, 2, ...)
       return a.sortOrder - b.sortOrder;
     });
 
