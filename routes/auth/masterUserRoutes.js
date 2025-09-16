@@ -55,5 +55,7 @@ router.get("/resend-reset-link",masterUserController.resendResetLink);
 router.post("/update/:masterUserID", verifyToken, masterUserController.updateMasterUser);
 router.get("/profile", verifyToken,masterUserController.getProfile);
 router.post("/update-profile", verifyToken,upload.single("profileImage"),masterUserController.updateProfile);
+router.post("/start-google-oauth", verifyToken,masterUserController.startGoogleOAuth);
+router.get("/api/oauth2callback", masterUserController.handleGoogleOAuthCallback);
 
 module.exports = router;

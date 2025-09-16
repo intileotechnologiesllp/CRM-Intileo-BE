@@ -6,6 +6,8 @@ const Deal = require("../../models/deals/dealsModels");
 const Person = require("../../models/leads/leadPersonModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const Organization = require("../../models/leads/leadOrganizationModel");
+const User = require("../../models/master/masterUserModel");
+const { syncActivityToGoogleCalendar } = require('../../utils/googleCalendarSync');
 
 const Activity = sequelize.define(
   "Activity",
@@ -118,12 +120,36 @@ const Activity = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    calendar_event_id: {
+  type: DataTypes.STRING,
+  allowNull: true,
+},
   },
   {
     tableName: "Activities",
     timestamps: true,
   }
 );
+
+
+
+Activity.afterCreate(async (activity, options) => {
+  try {
+    // Fetch user's OAuth token (from DB or session)
+    const user = await User.findByPk(activity.masterUserID);
+    if (!user || !user.googleOAuthToken) return;
+
+    // Sync to Google Calendar
+    const eventId = await syncActivityToGoogleCalendar(activity, user.googleOAuthToken);
+
+    // Save calendar_event_id for future updates/deletes
+    activity.calendar_event_id = eventId;
+    await activity.save();
+  } catch (err) {
+    console.error('Google Calendar sync failed:', err);
+    // Optionally log error or notify user
+  }
+});
 
 
 module.exports = Activity;
