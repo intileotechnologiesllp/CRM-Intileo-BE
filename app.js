@@ -89,6 +89,7 @@ app.use("/api/regions", regionRoutes); // Register region routes
 app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
+ //app.use("/api", masterUserRoutes); // Register master user routes
 app.use("/api/get-history", historyRoutes); // Register history routes
 app.use("/api/privileges", privilegesRoutes); // Register privileges routes
 app.use("/api/lead-columns", leadColumnRoutes); // Register lead column routes
