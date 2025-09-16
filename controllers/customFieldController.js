@@ -1077,6 +1077,7 @@ exports.getCustomFields = async (req, res) => {
           dealView: field.dealView || false,
           personView: field.personView || false,
           organizationView: field.organizationView || false,
+          options: field.options || null,
         };
       }
 
