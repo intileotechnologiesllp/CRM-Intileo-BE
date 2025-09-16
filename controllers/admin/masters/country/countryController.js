@@ -1,4 +1,9 @@
+const axios = require('axios');
+// const Country = require('../../../models/admin/masters/countryModel');
 const Country = require("../../../../models/admin/masters/countryModel");
+// POST /api/countries/refresh - fetch from RESTCountries and upsert into DB
+
+// const Country = require("../../../../models/admin/masters/countryModel");
 const Region = require("../../../../models/admin/masters/regionModel");
 const Joi = require("joi");
 const { Op } = require("sequelize");
@@ -274,5 +279,59 @@ exports.deleteCountry = async (req, res) => {
       req.adminId
     );
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.refreshCountries = async (req, res) => {
+  try {
+    // const url = 'https://restcountries.com/v3.1/all';
+    const url = 'https://restcountries.com/v3.1/all?fields=name,cca2,cca3'; // Fetch only necessary fields
+    console.log('Fetching countries from:', url);
+    const response = await axios.get(url);
+    const now = new Date();
+    const createdBy = req.role || 'system';
+    const createdById = req.adminId || 0;
+    const countries = response.data.map(c => ({
+      countryName: c.name.common,
+      isoCode: c.cca2 || c.cca3 || '',
+      createdBy,
+      createdById,
+      creationDate: now,
+    }));
+
+    let upserted = 0;
+    for (const country of countries) {
+      await Country.upsert({
+        countryName: country.countryName,
+        isoCode: country.isoCode,
+        createdBy: country.createdBy,
+        createdById: country.createdById,
+        creationDate: country.creationDate
+      });
+      upserted++;
+    }
+    res.status(200).json({ message: `Countries refreshed. Upserted: ${upserted}` });
+  } catch (err) {
+    console.error('Error refreshing countries:', err);
+    res.status(500).json({ message: 'Failed to refresh countries.' });
+  }
+};
+
+// GET /api/countries?q= - autocomplete by prefix
+exports.searchCountries = async (req, res) => {
+  const country = (req.query.country || '').trim();
+  if (!country) return res.status(400).json({ message: 'Query required.' });
+  try {
+    const countries = await Country.findAll({
+      where: {
+        countryName: { [Op.like]: `${country}%` }
+      },
+      order: [['countryName', 'ASC']],
+      limit: 10,
+    });
+    res.json({ countries });
+  } catch (err) {
+    console.error('Country search error:', err);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };

@@ -9,6 +9,8 @@ router.post("/create", verifyToken, validatePrivilege(14, "create"), countryCont
 router.get("/get", verifyToken, validatePrivilege(14, "view"), countryController.getCountries); // Get countries
 router.post("/edit/:countryID",verifyToken, validatePrivilege(14, "edit"), countryController.editCountry); // Edit country
 router.post("/delete/:countryID",verifyToken, validatePrivilege(14, "delete"), countryController.deleteCountry); // Delete country
+router.get("/searchCountries", verifyToken, validatePrivilege(14, "view"), countryController.searchCountries); // Search countries
+router.get("/refreshCountries", verifyToken, validatePrivilege(14, "view"), countryController.refreshCountries); // Refresh countries from external API
 
 // router.post("/create", verifyToken,countryController.createCountry); // Add country
 // router.get("/get", verifyToken,countryController.getCountries); // Get countries
