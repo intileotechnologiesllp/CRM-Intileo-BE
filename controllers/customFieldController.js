@@ -113,10 +113,10 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
       },
       
       {
-        fieldName: "label",
+        fieldName: "valuelabels",
         fieldLabel: "Label",
         fieldType: "multiselect",
-        dbColumn: "label",
+        dbColumn: "valuelabels",
         isRequired: false,
         entityType: "leads",
         isActive: true,
