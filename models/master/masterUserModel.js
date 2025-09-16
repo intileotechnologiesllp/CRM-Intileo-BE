@@ -107,7 +107,7 @@ const MasterUser = sequelize.define("MasterUser", {
     allowNull: true, // Reason for deactivation
   },
   googleOAuthToken: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT,
     allowNull: true, // Store Google OAuth token for calendar sync
   },
 });
