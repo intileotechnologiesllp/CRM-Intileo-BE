@@ -8,6 +8,7 @@ const { Op } = require("sequelize");
 const sequelize = require("../config/db");
 const { logAuditTrail } = require("../utils/auditTrailLogger");
 const PROGRAMS = require("../utils/programConstants");
+const { options } = require("joi");
 const historyLogger = require("../utils/historyLogger").logHistory;
 
 // Helper function to extract default fields from Sequelize model
@@ -115,7 +116,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
       {
         fieldName: "valuelabels",
         fieldLabel: "Label",
-        fieldType: "multiselect",
+        fieldType: "singleselect",
         dbColumn: "valuelabels",
         isRequired: false,
         entityType: "leads",
@@ -123,6 +124,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: false,
+        options:["Hot","Dead","Warm","Cold"]
       },
             {
         fieldName: "sourceChannel",
