@@ -279,7 +279,7 @@ async function generateExistingActivityPerformanceData(
   existingxaxis,
   existingyaxis,
   existingSegmentedBy,
-  filters,
+  existingfilters,
   page = 1,
   limit = 6
 ) {
@@ -297,8 +297,8 @@ async function generateExistingActivityPerformanceData(
 
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
+  if (existingfilters && existingfilters.conditions) {
+    const validConditions = existingfilters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
     );
 
@@ -464,7 +464,7 @@ async function generateExistingActivityPerformanceData(
   });
 
   // Format the results for the frontend
-  const formattedResults = []
+  let formattedResults = []
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
@@ -496,7 +496,7 @@ async function generateExistingActivityPerformanceData(
         });
       }
     });
-    
+   
     // Convert to array
     formattedResults = Object.values(groupedData);
   } else {
@@ -505,6 +505,7 @@ async function generateExistingActivityPerformanceData(
       label: item.xValue || "Unknown",
       value: item.yValue || 0,
     }));
+    
   }
 
   // Return data with pagination info
