@@ -5249,10 +5249,21 @@ exports.markDealAsWon = async (req, res) => {
       note: "Marked as won",
     });
 
-    res.status(200).json({ message: "Deal marked as won", deal });
+    // --- Activity popup settings logic (for frontend popup) ---
+    const popup = req.activityPopupSettings || {};
+    const activityPopupSettings = {
+      defaultActivityType: popup.defaultActivityType || 'Task',
+      followUpTime: popup.followUpTime || 'in 3 months',
+      allowUserDisable: typeof popup.allowUserDisable === 'boolean' ? popup.allowUserDisable : true,
+    };
+
+    res.status(200).json({
+      message: "Deal marked as won",
+      deal,
+      activityPopupSettings,
+    });
   } catch (error) {
     console.log(error);
-
     res.status(500).json({ message: "Internal server error" });
   }
 };

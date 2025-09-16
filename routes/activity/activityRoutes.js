@@ -3,13 +3,14 @@ const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
 
 const activityController = require("../../controllers/activity/activityController");
+const activitySettingsMiddleware = require("../../middlewares/activitySettingsMiddleware");
 
 router.post("/create-activity", verifyToken, activityController.createActivity);
-router.get("/get-activities", verifyToken, activityController.getActivities);
+router.get("/get-activities", verifyToken,activityController.getActivities);
 router.delete("/delete-activity/:activityId", verifyToken, activityController.deleteActivity);
 router.get(
   "/mark-as-done/:activityId",
-  verifyToken,
+  verifyToken,activitySettingsMiddleware,
   activityController.markActivityAsDone
 );
 router.post(

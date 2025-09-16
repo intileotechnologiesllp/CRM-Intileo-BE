@@ -45,6 +45,9 @@ const personRoutes = require("./routes/personRoutes.js"); // Import person route
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
 const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
+const activitySettingRoutes = require("./routes/activity/activitySettingRoutes.js"); // Import activity setting routes
+const activityTypeRoutes = require("./routes/activity/activityTypeRoutes.js"); // Import activity type routes
+const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
@@ -112,6 +115,9 @@ app.use("/api/persons", personRoutes); // Register person routes
 app.use("/api/organizations-new", organizationRoutesNew); // Register new organization routes
 app.use("/api/global-search", globalSearchRoutes); // Register global search routes
 app.use("/api/groupvisibility", groupVisibilityRoutes);
+app.use("/api/activity-settings", activitySettingRoutes); // Register activity setting routes
+app.use("/api/activity-types", activityTypeRoutes); // Register activity type routes
+app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 

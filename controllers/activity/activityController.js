@@ -1653,7 +1653,28 @@ exports.markActivityAsDone = async (req, res) => {
       await updateNextActivityForLead(activity.leadId);
     }
 
-    res.status(200).json({ message: "Activity marked as done", activity });
+    // --- Activity popup settings logic ---
+    let showSchedulePopup = false;
+    if (req.activityPopupSettings) {
+      const { showPopup, showType, pipelines } = req.activityPopupSettings;
+      if (showPopup) {
+        if (showType === 'always') {
+          showSchedulePopup = true;
+        } else if (showType === 'pipelines') {
+          // If you store pipelineId on the activity, use it here
+          const pipelineId = activity.pipelineId || null;
+          if (pipelineId && Array.isArray(pipelines)) {
+            showSchedulePopup = pipelines.includes(pipelineId);
+          }
+        }
+      }
+    }
+
+    res.status(200).json({
+      message: "Activity marked as done",
+      activity,
+      showSchedulePopup,
+    });
   } catch (error) {
     console.error("Error marking activity as done:", error);
     res.status(500).json({ message: "Internal server error" });
