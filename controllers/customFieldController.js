@@ -394,7 +394,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
-        personView:true
+        personView:true,
+        options:["Hot","Dead","Warm","Cold"]
       },
 
       {
@@ -503,7 +504,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: false,
         dealView: false,
-        organizationView:true
+        organizationView:true,
+        options:["Hot","Dead","Warm","Cold"]
       },
       {
         fieldName: "visibleTo",
