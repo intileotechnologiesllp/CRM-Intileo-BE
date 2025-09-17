@@ -8,6 +8,7 @@ const MasterUser = require("../../../models/master/masterUserModel");
 const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
+const LeadPerson = require("../../../models/leads/leadPersonModel");
 
 exports.createPersonReport = async (req, res) => {
   try {
@@ -35,13 +36,12 @@ exports.createPersonReport = async (req, res) => {
       "postalAddress",
       "jobTitle",
       "personLabels",
-      "organiztion",
     ];
 
     const yaxisArray = ["no of people"];
 
     // Add this to your createActivityReport function or make it available globally
-        const availableFilterColumns = {
+    const availableFilterColumns = {
       Person: [
         { label: "Email", value: "email", type: "text" },
         { label: "Phone", value: "phone", type: "number" },
@@ -53,11 +53,18 @@ exports.createPersonReport = async (req, res) => {
         { label: "Person Labels", value: "personLabels", type: "text" },
       ],
       Organization: [
-        { label: "Organization", value: "LeadOrganization.organization", type: "text" },
-        { label: "Organization Labels", value: "LeadOrganization.organizationLabels", type: "text" },
-        { label: "Address", value: "LeadOrganization.address", type: "text" }
+        {
+          label: "Organization",
+          value: "LeadOrganization.organization",
+          type: "text",
+        },
+        {
+          label: "Organization Labels",
+          value: "LeadOrganization.organizationLabels",
+          type: "text",
+        },
+        { label: "Address", value: "LeadOrganization.address", type: "text" },
       ],
-      
     };
 
     // For Activity Performance reports, generate the data
@@ -88,7 +95,7 @@ exports.createPersonReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             entity,
             type,
@@ -153,7 +160,7 @@ exports.createPersonReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -163,7 +170,7 @@ exports.createPersonReport = async (req, res) => {
             segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
-            colors: colors
+            colors: colors,
           };
         } catch (error) {
           console.error("Error generating Contact Person data:", error);
@@ -180,6 +187,7 @@ exports.createPersonReport = async (req, res) => {
       success: true,
       message: "Data generated successfully",
       data: reportData,
+      totalValue: totalValue,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -187,7 +195,7 @@ exports.createPersonReport = async (req, res) => {
         yaxis: yaxisArray,
         segmentedBy: xaxisArray,
       },
-      filters: availableFilterColumns
+      filters: availableFilterColumns,
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -305,30 +313,39 @@ async function generateExistingActivityPerformanceData(
 
   // Handle segmentedBy if not "none"
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo" ||
+        existingSegmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (
+      existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo"
+    ) {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
-      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+      groupBy.push(`LeadPerson.${existingSegmentedBy}`);
+      attributes.push([
+        Sequelize.col(`LeadPerson.${existingSegmentedBy}`),
+        "segmentValue",
+      ]);
     }
   }
-
 
   // Handle existingyaxis
   if (existingyaxis === "no of people") {
@@ -363,66 +380,143 @@ async function generateExistingActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Person.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
-
-  // Format the results for the frontend
-  // Format the results for the frontend
-  let formattedResults = []
+  let results;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    const paginatedGroups = await LeadPerson.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        existingyaxis === "no of people"
+          ? [Sequelize.fn("COUNT", Sequelize.col("personId")), "DESC"]
+          : existingyaxis === "duration"
+          ? [
+              Sequelize.fn(
+                "AVG",
+                Sequelize.fn(
+                  "TIMESTAMPDIFF",
+                  Sequelize.literal("HOUR"),
+                  Sequelize.col("startDateTime"),
+                  Sequelize.col("endDateTime")
+                )
+              ),
+              "DESC",
+            ]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${existingyaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupBy[0];
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await LeadPerson.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await LeadPerson.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
+  // --- NEW FORMATTING AND TOTALING LOGIC ---
+  let formattedResults = [];
+  let totalValue = 0;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
     const groupedData = {};
-    
     results.forEach((item) => {
       const xValue = item.xValue || "Unknown";
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-      
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: []
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-      
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        seg => seg.labeltype === segmentValue
-      );
-      
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
-    
-    // Convert to array
+
     formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
-    // Original format for non-segmented data
+    // Logic for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
+      value: Number(item.yValue) || 0,
     }));
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -432,7 +526,7 @@ async function generateExistingActivityPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-};
+}
 
 // Helper function to generate activity performance data with pagination
 async function generateActivityPerformanceData(
@@ -542,27 +636,34 @@ async function generateActivityPerformanceData(
 
   // Handle segmentedBy if not "none"
   if (segmentedBy && segmentedBy !== "none") {
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+      groupBy.push(`LeadPerson.${segmentedBy}`);
+      attributes.push([
+        Sequelize.col(`LeadPerson.${segmentedBy}`),
+        "segmentValue",
+      ]);
     }
   }
 
@@ -613,66 +714,139 @@ async function generateActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Person.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
 
-  // Format the results for the frontend
+  if (segmentedBy && segmentedBy !== "none") {
+    const paginatedGroups = await LeadPerson.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        yaxis === "no of people"
+          ? [Sequelize.fn("COUNT", Sequelize.col("personId")), "DESC"]
+          : yaxis === "duration"
+          ? [
+              Sequelize.fn(
+                "AVG",
+                Sequelize.fn(
+                  "TIMESTAMPDIFF",
+                  Sequelize.literal("HOUR"),
+                  Sequelize.col("startDateTime"),
+                  Sequelize.col("endDateTime")
+                )
+              ),
+              "DESC",
+            ]
+          : [Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${yaxis}`)), "DESC"],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const [groupModel, groupColumn] = groupBy[0].includes(".")
+        ? groupBy[0].split(".")
+        : ["LeadPerson", groupBy[0]];
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupColumn;
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await LeadPerson.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await LeadPerson.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
   // Format the results based on whether segmentedBy is used
   let formattedResults = [];
-  
+  let totalValue = 0;
+
   if (segmentedBy && segmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
-    
+
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-      
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: []
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-      
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        seg => seg.labeltype === segmentValue
-      );
-      
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
-    
-    // Convert to array
-    formattedResults = Object.values(groupedData);
+
+    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    }); // Sort groups based on their total value
+
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
-    }));
+      value: Number(item.yValue) || 0,
+    })); // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -682,7 +856,7 @@ async function generateActivityPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-};
+}
 
 // Helper function to convert operator strings to Sequelize operators
 function getConditionObject(column, operator, value, includeModels = []) {
@@ -742,7 +916,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     // Regular activity table column
     return getOperatorCondition(column, operator, conditionValue);
   }
-};
+}
 
 // Helper function to convert operator strings to Sequelize operators
 function getSequelizeOperator(operator) {
@@ -768,7 +942,7 @@ function getSequelizeOperator(operator) {
     default:
       return Op.eq;
   }
-};
+}
 
 // Helper function for operator conditions
 function getOperatorCondition(column, operator, value) {
@@ -798,7 +972,7 @@ function getOperatorCondition(column, operator, value) {
     default:
       return { [column]: { [op]: value } };
   }
-};
+}
 
 exports.savePersonReport = async (req, res) => {
   try {
@@ -821,7 +995,10 @@ exports.savePersonReport = async (req, res) => {
     const ownerId = req.adminId;
 
     // Validate required fields (for create only)
-    if (!reportId && (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId)) {
+    if (
+      !reportId &&
+      (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -851,12 +1028,15 @@ exports.savePersonReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
+        ...(xaxis !== undefined ||
+        yaxis !== undefined ||
+        filters !== undefined ||
+        segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -877,7 +1057,9 @@ exports.savePersonReport = async (req, res) => {
     }
 
     // Otherwise → CREATE
-    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
@@ -896,7 +1078,7 @@ exports.savePersonReport = async (req, res) => {
         where: { dashboardId },
         order: [["position", "DESC"]],
       });
-      const nextPosition = lastReport ? (lastReport.position || 0)  : 0;
+      const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
       const configObj = {
         xaxis,
@@ -1048,7 +1230,7 @@ exports.getPersonReportSummary = async (req, res) => {
         "personLabels",
         "createdAt",
         "updatedAt",
-        "masterUserID" // Include masterUserID if you need it
+        "masterUserID", // Include masterUserID if you need it
       ],
     });
 
@@ -1057,16 +1239,18 @@ exports.getPersonReportSummary = async (req, res) => {
     let userMap = {};
     if (persons.length > 0) {
       // Get all unique user IDs from persons
-      const userIds = [...new Set(persons.map(person => person.masterUserID))];
-      
+      const userIds = [
+        ...new Set(persons.map((person) => person.masterUserID)),
+      ];
+
       // Fetch users in bulk
       const users = await MasterUser.findAll({
         where: {
-          masterUserID: userIds
+          masterUserID: userIds,
         },
-        attributes: ["masterUserID", "name", "email"]
+        attributes: ["masterUserID", "name", "email"],
       });
-      
+
       // Create a map for easy lookup
       userMap = users.reduce((map, user) => {
         map[user.masterUserID] = user;
@@ -1166,7 +1350,7 @@ exports.getPersonReportSummary = async (req, res) => {
     // Format persons for response
     const formattedPersons = persons.map((person) => {
       const user = userMap[person.masterUserID];
-      
+
       return {
         id: person.personId,
         contactPerson: person.contactPerson,
@@ -1180,11 +1364,13 @@ exports.getPersonReportSummary = async (req, res) => {
         birthday: person.birthday,
         jobTitle: person.jobTitle,
         personLabels: person.personLabels,
-        assignedTo: user ? {
-          id: user.masterUserID,
-          name: user.name,
-          email: user.email,
-        } : null,
+        assignedTo: user
+          ? {
+              id: user.masterUserID,
+              name: user.name,
+              email: user.email,
+            }
+          : null,
       };
     });
 
@@ -1485,7 +1671,6 @@ exports.getPersonReportSummary = async (req, res) => {
 //   }
 // };
 
-
 exports.createOrganizationReport = async (req, res) => {
   try {
     const {
@@ -1503,22 +1688,25 @@ exports.createOrganizationReport = async (req, res) => {
     const role = req.role;
 
     // Define available options for xaxis and yaxis
-    const xaxisArray = [
-      "organization",
-      "organizationLabels",
-      "address",
-    ];
+    const xaxisArray = ["organization", "organizationLabels", "address"];
 
     const yaxisArray = ["no of organizations"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = {
       Organization: [
-        { label: "Organization", value: "LeadOrganization.organization", type: "text" },
-        { label: "Organization Labels", value: "LeadOrganization.organizationLabels", type: "text" },
-        { label: "Address", value: "LeadOrganization.address", type: "text" }
+        {
+          label: "Organization",
+          value: "LeadOrganization.organization",
+          type: "text",
+        },
+        {
+          label: "Organization Labels",
+          value: "LeadOrganization.organizationLabels",
+          type: "text",
+        },
+        { label: "Address", value: "LeadOrganization.address", type: "text" },
       ],
-      
     };
 
     // For Activity Performance reports, generate the data
@@ -1549,7 +1737,7 @@ exports.createOrganizationReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             entity,
             type,
@@ -1614,7 +1802,7 @@ exports.createOrganizationReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+           totalValue = result.totalValue;
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -1624,7 +1812,7 @@ exports.createOrganizationReport = async (req, res) => {
             segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
-            colors: colors
+            colors: colors,
           };
         } catch (error) {
           console.error("Error generating Contact Organization data:", error);
@@ -1641,14 +1829,14 @@ exports.createOrganizationReport = async (req, res) => {
       success: true,
       message: "Data generated successfully",
       data: reportData,
+      totalValue: totalValue,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-       
       },
-      filters: availableFilterColumns
+      filters: availableFilterColumns,
     });
   } catch (error) {
     console.error("Error creating reports:", error);
@@ -1761,32 +1949,45 @@ async function generateExistingOrganizationPerformanceData(
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`LeadOrganization.${existingxaxis}`);
-    attributes.push([Sequelize.col(`LeadOrganization.${existingxaxis}`), "xValue"]);
+    attributes.push([
+      Sequelize.col(`LeadOrganization.${existingxaxis}`),
+      "xValue",
+    ]);
   }
 
-      // Handle segmentedBy if not "none"
+   // Handle segmentedBy if not "none"
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    if (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo" ||
+        existingSegmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (
+      existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo"
+    ) {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
-      attributes.push([Sequelize.col(`Activity.${existingSegmentedBy}`), "segmentValue"]);
+      groupBy.push(`LeadOrganization.${existingSegmentedBy}`);
+      attributes.push([
+        Sequelize.col(`LeadOrganization.${existingSegmentedBy}`),
+        "segmentValue",
+      ]);
     }
   }
 
@@ -1823,65 +2024,132 @@ async function generateExistingOrganizationPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Organization.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
 
-   // Format the results for the frontend
-  let formattedResults = []
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const paginatedGroups = await Organization.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        existingyaxis === "no of organizations"
+          ? [Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")), "DESC"]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${existingyaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupBy[0];
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Organization.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Organization.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
+  // Format the results for the frontend
+  let formattedResults = [];
+  let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
-    
+
     results.forEach((item) => {
       const xValue = item.xValue || "Unknown";
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-      
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: []
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-      
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        seg => seg.labeltype === segmentValue
-      );
-      
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
-    
-    // Convert to array
+
     formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
+      value: Number(item.yValue) || 0,
     }));
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -1891,7 +2159,7 @@ async function generateExistingOrganizationPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-};
+}
 
 // Helper function to generate activity performance data with pagination
 async function generateOrganizationPerformanceData(
@@ -1999,29 +2267,36 @@ async function generateOrganizationPerformanceData(
     attributes.push([Sequelize.col(`LeadOrganization.${xaxis}`), "xValue"]);
   }
 
-    // Handle segmentedBy if not "none"
+  // Handle segmentedBy if not "none"
   if (segmentedBy && segmentedBy !== "none") {
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+      groupBy.push(`LeadOrganization.${segmentedBy}`);
+      attributes.push([
+        Sequelize.col(`LeadOrganization.${segmentedBy}`),
+        "segmentValue",
+      ]);
     }
   }
 
@@ -2072,65 +2347,142 @@ async function generateOrganizationPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Organization.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
 
-// Format the results based on whether segmentedBy is used
+  if (segmentedBy && segmentedBy !== "none") {
+    const paginatedGroups = await Organization.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        yaxis === "no of organizations"
+          ? [Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")), "DESC"]
+          : yaxis === "duration"
+          ? [
+              Sequelize.fn(
+                "AVG",
+                Sequelize.fn(
+                  "TIMESTAMPDIFF",
+                  Sequelize.literal("HOUR"),
+                  Sequelize.col("startDateTime"),
+                  Sequelize.col("endDateTime")
+                )
+              ),
+              "DESC",
+            ]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const [groupModel, groupColumn] = groupBy[0].includes(".")
+        ? groupBy[0].split(".")
+        : ["Lead", groupBy[0]];
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupColumn;
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Organization.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Organization.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
+  // Format the results based on whether segmentedBy is used
   let formattedResults = [];
-  
+  let totalValue = 0;
+
   if (segmentedBy && segmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
-    
+
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-      
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: []
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-      
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        seg => seg.labeltype === segmentValue
-      );
-      
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
-    
-    // Convert to array
-    formattedResults = Object.values(groupedData);
+
+    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    }); // Sort groups based on their total value
+
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
-    }));
+      value: Number(item.yValue) || 0,
+    })); // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -2140,7 +2492,7 @@ async function generateOrganizationPerformanceData(
       hasPrevPage: page > 1,
     },
   };
-};
+}
 
 // Helper function to convert operator strings to Sequelize operators
 function getConditionObject(column, operator, value, includeModels = []) {
@@ -2165,7 +2517,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
   }
 
   // Handle related table joins
-if (hasRelation) {
+  if (hasRelation) {
     let modelConfig;
 
     switch (tableAlias) {
@@ -2200,7 +2552,7 @@ if (hasRelation) {
     // Regular activity table column
     return getOperatorCondition(column, operator, conditionValue);
   }
-};
+}
 
 // Helper function to convert operator strings to Sequelize operators
 function getSequelizeOperator(operator) {
@@ -2226,7 +2578,7 @@ function getSequelizeOperator(operator) {
     default:
       return Op.eq;
   }
-};
+}
 
 // Helper function for operator conditions
 function getOperatorCondition(column, operator, value) {
@@ -2256,8 +2608,7 @@ function getOperatorCondition(column, operator, value) {
     default:
       return { [column]: { [op]: value } };
   }
-};
-
+}
 
 exports.saveOrganizationReport = async (req, res) => {
   try {
@@ -2280,7 +2631,10 @@ exports.saveOrganizationReport = async (req, res) => {
     const ownerId = req.adminId;
 
     // Validate required fields (for create only)
-    if (!reportId && (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId)) {
+    if (
+      !reportId &&
+      (!entity || !type || !xaxis || !yaxis || !dashboardIds || !folderId)
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -2310,12 +2664,15 @@ exports.saveOrganizationReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
+        ...(xaxis !== undefined ||
+        yaxis !== undefined ||
+        filters !== undefined ||
+        segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
@@ -2336,7 +2693,9 @@ exports.saveOrganizationReport = async (req, res) => {
     }
 
     // Otherwise → CREATE
-    const dashboardIdsArray = Array.isArray(dashboardIds) ? dashboardIds : [dashboardIds];
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
 
     for (const dashboardId of dashboardIdsArray) {
       // Verify dashboard ownership
@@ -2355,7 +2714,7 @@ exports.saveOrganizationReport = async (req, res) => {
         where: { dashboardId },
         order: [["position", "DESC"]],
       });
-      const nextPosition = lastReport ? (lastReport.position || 0)  : 0;
+      const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
       const configObj = {
         xaxis,
@@ -2501,7 +2860,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
         "active",
         "createdAt",
         "updatedAt",
-        "masterUserID" // Include masterUserID if you need it
+        "masterUserID", // Include masterUserID if you need it
       ],
     });
 
@@ -2510,16 +2869,18 @@ exports.getOrganizationReportSummary = async (req, res) => {
     let userMap = {};
     if (organizations.length > 0) {
       // Get all unique user IDs from persons
-      const userIds = [...new Set(organizations.map(person => person.masterUserID))];
-      
+      const userIds = [
+        ...new Set(organizations.map((person) => person.masterUserID)),
+      ];
+
       // Fetch users in bulk
       const users = await MasterUser.findAll({
         where: {
-          masterUserID: userIds
+          masterUserID: userIds,
         },
-        attributes: ["masterUserID", "name", "email"]
+        attributes: ["masterUserID", "name", "email"],
       });
-      
+
       // Create a map for easy lookup
       userMap = users.reduce((map, user) => {
         map[user.masterUserID] = user;
@@ -2619,21 +2980,23 @@ exports.getOrganizationReportSummary = async (req, res) => {
     // Format persons for response
     const formattedPersons = organizations.map((person) => {
       const user = userMap[person.masterUserID];
-      
+
       return {
         id: person.leadOrganizationId,
         organization: person.organization,
         organizationLabels: person.organizationLabels,
         address: person.address,
         visibleTo: person.visibleTo,
-        active: person.active == true? "Yes": "No",
+        active: person.active == true ? "Yes" : "No",
         updatedAt: person.updatedAt,
         createdAt: person.createdAt,
-        assignedTo: user ? {
-          id: user.masterUserID,
-          name: user.name,
-          email: user.email,
-        } : null,
+        assignedTo: user
+          ? {
+              id: user.masterUserID,
+              name: user.name,
+              email: user.email,
+            }
+          : null,
       };
     });
 
