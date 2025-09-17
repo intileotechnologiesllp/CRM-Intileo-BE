@@ -2767,18 +2767,42 @@ const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const sequelize = require("../../config/db");
 
+/**
+ * Create a person with support for multiple emails and phones
+ * Request body format:
+ * {
+ *   contactPerson: "John Doe", // Required
+ *   email: "john@example.com", // Optional if emails array is provided
+ *   emails: [                  // Optional array format
+ *     { email: "john@work.com", type: "Work" },
+ *     { email: "john@personal.com", type: "Personal" }
+ *   ],
+ *   phone: "1234567890",      // Optional if phones array is provided
+ *   phones: [                 // Optional array format
+ *     { phone: "1234567890", type: "Work" },
+ *     { phone: "0987654321", type: "Mobile" }
+ *   ],
+ *   organization: "Company Name",
+ *   jobTitle: "Manager",
+ *   notes: "Additional notes",
+ *   // ... other standard fields
+ * }
+ */
 exports.createPerson = async (req, res) => {
   try {
     const masterUserID = req.adminId;
-    if (!req.body || !req.body.contactPerson || !req.body.email) {
+    if (!req.body || !req.body.contactPerson) {
       return res
         .status(400)
-        .json({ message: "Contact person and email are required." });
+        .json({ message: "Contact person is required." });
     }
+    
     const {
       contactPerson,
       email,
+      emails, // Array of email objects: [{ email: "test@example.com", type: "Work" }]
       phone,
+      phones, // Array of phone objects: [{ phone: "123456789", type: "Work" }]
       notes,
       postalAddress,
       birthday,
@@ -2788,8 +2812,35 @@ exports.createPerson = async (req, res) => {
       ...rest
     } = req.body;
 
-    // Check for duplicate email (email must be unique across all persons)
-    const existingEmailPerson = await Person.findOne({ where: { email } });
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && typeof emailObj.email === 'string' && emailObj.email.trim());
+    } else if (email && typeof email === 'string' && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Require at least one email
+    if (emailList.length === 0) {
+      return res.status(400).json({ 
+        message: "At least one email address is required." 
+      });
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && typeof phoneObj.phone === 'string' && phoneObj.phone.trim());
+    } else if (phone && typeof phone === 'string' && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Use primary email for uniqueness check (first email in the list)
+    const primaryEmail = emailList[0].email;
+    const primaryPhone = phoneList.length > 0 ? phoneList[0].phone : null;
+
+    // Check for duplicate primary email (primary email must be unique across all persons)
+    const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
     if (existingEmailPerson) {
       return res.status(409).json({
         message: "A person with this email address already exists.",
@@ -2837,11 +2888,13 @@ exports.createPerson = async (req, res) => {
       }
     }
 
-    // Create the person
+    // Create the person with primary email and phone + arrays in table fields
     const person = await Person.create({
       contactPerson,
-      email,
-      phone,
+      email: primaryEmail, // Store primary email in the main field
+      phone: primaryPhone, // Store primary phone in the main field
+      emails: emailList, // Store all emails array directly in table
+      phones: phoneList.length > 0 ? phoneList : null, // Store all phones array directly in table
       notes,
       postalAddress,
       birthday,
@@ -2853,8 +2906,6 @@ exports.createPerson = async (req, res) => {
     });
 
     // Save custom fields if any
-    const CustomField = require("../../models/customFieldModel");
-    const CustomFieldValue = require("../../models/customFieldValueModel");
     for (const [fieldKey, value] of Object.entries(customFields)) {
       if (value === undefined || value === null || value === "") continue;
       // Find custom field by fieldId or fieldName
@@ -2876,7 +2927,17 @@ exports.createPerson = async (req, res) => {
       }
     }
 
-    res.status(201).json({ message: "Person created successfully", person });
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      emails: emailList, // Include all emails in response
+      phones: phoneList, // Include all phones in response
+    };
+
+    res.status(201).json({ 
+      message: "Person created successfully", 
+      person: personResponse 
+    });
   } catch (error) {
     console.error("Error creating person:", error);
 
@@ -2903,6 +2964,57 @@ exports.createPerson = async (req, res) => {
     res
       .status(500)
       .json({ message: "Internal server error", error: error.message });
+  }
+};
+
+/**
+ * Get a person by ID with all emails and phones
+ */
+exports.getPerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Find the person
+    const person = await Person.findOne({
+      where: { 
+        personId,
+        // Role-based access control
+        ...(req.role !== "admin" && { masterUserID })
+      }
+    });
+
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    // Get emails and phones directly from the person record
+    let emails = person.emails || [];
+    let phones = person.phones || [];
+
+    // If no arrays stored, create from primary email/phone (backward compatibility)
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
+    }
+
+    // Prepare response
+    const personResponse = {
+      ...person.toJSON(),
+      emails,
+      phones,
+    };
+
+    res.status(200).json({
+      message: "Person fetched successfully",
+      person: personResponse
+    });
+
+  } catch (error) {
+    console.error("Error fetching person:", error);
+    res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 
@@ -3796,15 +3908,68 @@ exports.updateOrganization = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+/**
+ * Update person with support for multiple emails and phones
+ * Request body can include:
+ * - emails: [{ email: "new@email.com", type: "Work" }]
+ * - phones: [{ phone: "1234567890", type: "Work" }]
+ * - Any other standard person fields
+ */
 exports.updatePerson = async (req, res) => {
   try {
     const { personId } = req.params;
-    const updateFields = req.body;
+    const { emails, phones, email, phone, ...updateFields } = req.body;
+    const masterUserID = req.adminId;
 
     // Find the person
     const person = await Person.findByPk(personId);
     if (!person) {
       return res.status(404).json({ message: "Person not found" });
+    }
+
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && emailObj.email.trim());
+    } else if (email && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && phoneObj.phone.trim());
+    } else if (phone && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // If emails are being updated, validate primary email uniqueness
+    if (emailList.length > 0) {
+      const primaryEmail = emailList[0].email;
+      const existingEmailPerson = await Person.findOne({ 
+        where: { 
+          email: primaryEmail,
+          personId: { [Sequelize.Op.ne]: personId } // Exclude current person
+        } 
+      });
+      if (existingEmailPerson) {
+        return res.status(409).json({
+          message: "A person with this email address already exists.",
+          person: {
+            personId: existingEmailPerson.personId,
+            contactPerson: existingEmailPerson.contactPerson,
+            email: existingEmailPerson.email,
+          },
+        });
+      }
+      updateFields.email = primaryEmail;
+      updateFields.primaryEmailType = emailList[0].type || 'Work';
+    }
+
+    // If phones are being updated, set primary phone
+    if (phoneList.length > 0) {
+      updateFields.phone = phoneList[0].phone;
+      updateFields.primaryPhoneType = phoneList[0].type || 'Work';
     }
 
     // If ownerId is being updated, also update it in the related organization
@@ -3818,6 +3983,54 @@ exports.updatePerson = async (req, res) => {
     // Update all fields provided in req.body for the person
     await person.update(updateFields);
 
+    // Update or create custom field values for multiple emails and phones
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+
+    if (emailList.length > 0) {
+      // Remove existing emails custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new emails if more than one or if explicitly provided as array
+      if (emailList.length > 1 || emails) {
+        await CustomFieldValue.create({
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(emailList),
+          masterUserID,
+        });
+      }
+    }
+
+    if (phoneList.length > 0) {
+      // Remove existing phones custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new phones if more than one or if explicitly provided as array
+      if (phoneList.length > 1 || phones) {
+        await CustomFieldValue.create({
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(phoneList),
+          masterUserID,
+        });
+      }
+    }
+
     // Fetch ownerName via organization.ownerId and MasterUser
     let ownerName = null;
     if (person.leadOrganizationId) {
@@ -3830,12 +4043,101 @@ exports.updatePerson = async (req, res) => {
       }
     }
 
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      ownerName,
+      emails: emailList.length > 0 ? emailList : undefined,
+      phones: phoneList.length > 0 ? phoneList : undefined,
+    };
+
     res.status(200).json({
       message: "Person updated successfully",
-      person: { ...person.toJSON(), ownerName },
+      person: personResponse,
     });
   } catch (error) {
     console.error("Error updating person:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Helper function to get person with multiple emails and phones
+ * @param {number} personId - The person ID
+ * @returns {Object} Person object with emails and phones arrays
+ */
+const getPersonWithContactInfo = async (personId) => {
+  try {
+    const person = await Person.findByPk(personId);
+    if (!person) return null;
+
+    // Get custom field values for emails and phones
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: personId,
+        entityType: 'person',
+        fieldId: ['person_emails', 'person_phones']
+      }
+    });
+
+    let emails = [];
+    let phones = [];
+
+    // Parse custom field values
+    customFieldValues.forEach(cfv => {
+      if (cfv.fieldId === 'person_emails' && cfv.value) {
+        try {
+          emails = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person emails:', e);
+        }
+      }
+      if (cfv.fieldId === 'person_phones' && cfv.value) {
+        try {
+          phones = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person phones:', e);
+        }
+      }
+    });
+
+    // If no custom field arrays found, use the primary email/phone
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
+    }
+
+    return {
+      ...person.toJSON(),
+      emails,
+      phones
+    };
+  } catch (error) {
+    console.error('Error getting person with contact info:', error);
+    return null;
+  }
+};
+
+/**
+ * Get a single person by ID with multiple emails and phones
+ */
+exports.getPerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    
+    const person = await getPersonWithContactInfo(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    res.status(200).json({
+      message: "Person retrieved successfully",
+      person
+    });
+  } catch (error) {
+    console.error("Error getting person:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };

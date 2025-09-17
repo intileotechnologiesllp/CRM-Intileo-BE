@@ -23,7 +23,7 @@ const LeadPerson = sequelize.define("LeadPerson", {
   },
   email: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true,
     unique: true,
   },
   phone: {
@@ -58,6 +58,17 @@ const LeadPerson = sequelize.define("LeadPerson", {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
 },
+  // Multiple emails and phones support
+  emails: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    comment: "Array of email objects: [{ email: 'test@example.com', type: 'Work' }]"
+  },
+  phones: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    comment: "Array of phone objects: [{ phone: '1234567890', type: 'Work' }]"
+  },
 // visibilityGroupId: {
 //     type: DataTypes.INTEGER,
 //     allowNull: true,
