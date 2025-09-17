@@ -61,7 +61,6 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
   const specificFields = {
     // Fields from your screenshot that exist in database models
     leads: [
-
       // ...existing code for leads fields...
 
             {
@@ -345,12 +344,12 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dealView: true,
         personView:true
       },
-      {
-        fieldName: "email",
-        fieldLabel: "Email",
-        fieldType: "email",
-        dbColumn: "email",
-        isRequired: true,
+        {
+        fieldName: "organization",
+        fieldLabel: "Organization",
+        fieldType: "text",
+        dbColumn: "organization",
+        isRequired: false,
         entityType: "person",
         isActive: true,
         isDefault: true,
@@ -358,7 +357,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dealView: true,
         personView:true
       },
-      {
+            {
         fieldName: "phone",
         fieldLabel: "Phone",
         fieldType: "phone",
@@ -372,24 +371,11 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         personView:true
       },
       {
-        fieldName: "jobTitle",
-        fieldLabel: "Job title",
-        fieldType: "text",
-        dbColumn: "jobTitle",
-        isRequired: false,
-        entityType: "person",
-        isActive: true,
-        isDefault: true,
-        leadView: true,
-        dealView: true,
-        personView:false
-      },
-      {
-        fieldName: "organization",
-        fieldLabel: "Organization",
-        fieldType: "text",
-        dbColumn: "organization",
-        isRequired: false,
+        fieldName: "email",
+        fieldLabel: "Email",
+        fieldType: "email",
+        dbColumn: "email",
+        isRequired: true,
         entityType: "person",
         isActive: true,
         isDefault: true,
@@ -397,20 +383,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dealView: true,
         personView:true
       },
-      {
-        fieldName: "postalAddress",
-        fieldLabel: "Address",
-        fieldType: "text",
-        dbColumn: "postalAddress",
-        isRequired: false,
-        entityType: "person",
-        isActive: true,
-        isDefault: true,
-        leadView: true,
-        dealView: true,
-        personView:false
-      },
-      {
+            {
         fieldName: "personLabels",
         fieldLabel: "Labels",
         fieldType: "text",
@@ -423,6 +396,35 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         dealView: true,
         personView:false
       },
+
+      {
+        fieldName: "jobTitle",
+        fieldLabel: "Job title",
+        fieldType: "text",
+        dbColumn: "jobTitle",
+        isRequired: false,
+        entityType: "person",
+        isActive: true,
+        isDefault: true,
+        leadView: false,
+        dealView: false,
+        personView:false
+      },
+
+      {
+        fieldName: "postalAddress",
+        fieldLabel: "Address",
+        fieldType: "text",
+        dbColumn: "postalAddress",
+        isRequired: false,
+        entityType: "person",
+        isActive: true,
+        isDefault: true,
+        leadView: false,
+        dealView: false,
+        personView:false
+      },
+
       {
         fieldName: "birthday",
         fieldLabel: "Birthday",
@@ -432,8 +434,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "person",
         isActive: true,
         isDefault: true,
-        leadView: true,
-        dealView: true,
+        leadView: false,
+        dealView: false,
         person:false
       },
       {
@@ -445,8 +447,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "person",
         isActive: true,
         isDefault: true,
-        leadView: true,
-        dealView: true,
+        leadView: false,
+        dealView: false,
         personView:false
       },
     ],
@@ -460,8 +462,8 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-        leadView: true,
-        dealView: true,
+        leadView: false,
+        dealView: false,
         organizationView:true
       },
       {
@@ -473,8 +475,34 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-        leadView: true,
-        dealView: true,
+        leadView: false,
+        dealView: false,
+        organizationView:true
+      },
+            {
+        fieldName: "address",
+        fieldLabel: "Address",
+        fieldType: "text",
+        dbColumn: "address",
+        isRequired: false,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+        leadView: false,
+        dealView: false,
+        organizationView:true
+      },
+            {
+        fieldName: "organizationLabels",
+        fieldLabel: "Labels",
+        fieldType: "multiselect",
+        dbColumn: "labels",
+        isRequired: false,
+        entityType: "organization",
+        isActive: true,
+        isDefault: true,
+        leadView: false,
+        dealView: false,
         organizationView:true
       },
       {
@@ -486,36 +514,11 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         entityType: "organization",
         isActive: true,
         isDefault: true,
-        leadView: true,
-        dealView: true,
+        leadView: false,
+        dealView: false,
         organizationView:false
       },
-      {
-        fieldName: "address",
-        fieldLabel: "Address",
-        fieldType: "text",
-        dbColumn: "address",
-        isRequired: false,
-        entityType: "organization",
-        isActive: true,
-        isDefault: true,
-        leadView: true,
-        dealView: true,
-        organizationView:true
-      },
-      {
-        fieldName: "organizationLabels",
-        fieldLabel: "Labels",
-        fieldType: "multiselect",
-        dbColumn: "labels",
-        isRequired: false,
-        entityType: "organization",
-        isActive: true,
-        isDefault: true,
-        leadView: true,
-        dealView: true,
-        organizationView:false
-      },
+
     ],
   };
 
