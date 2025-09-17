@@ -3367,10 +3367,6 @@ exports.getLeads = async (req, res) => {
       if (isValueCurrencyChecked) {
         if (leadObj.valueCurrency && leadObj.valueCurrency !== null && leadObj.valueCurrency !== '') {
           // Keep the currency ID
-          // Add description if available in currency map
-          if (currencyMap[leadObj.valueCurrency]) {
-            leadObj.valueCurrency_desc = currencyMap[leadObj.valueCurrency];
-          }
         } else {
           // Remove empty/null valueCurrency fields from response
           delete leadObj.valueCurrency;
@@ -3384,10 +3380,6 @@ exports.getLeads = async (req, res) => {
       if (isProposalValueCurrencyChecked) {
         if (leadObj.proposalValueCurrency && leadObj.proposalValueCurrency !== null && leadObj.proposalValueCurrency !== '') {
           // Keep the currency ID
-          // Add description if available in currency map
-          if (currencyMap[leadObj.proposalValueCurrency]) {
-            leadObj.proposalValueCurrency_desc = currencyMap[leadObj.proposalValueCurrency];
-          }
         } else {
           // Remove empty/null proposalValueCurrency fields from response
           delete leadObj.proposalValueCurrency;
@@ -3401,10 +3393,6 @@ exports.getLeads = async (req, res) => {
       if (isCurrencyChecked) {
         if (leadObj.currency && leadObj.currency !== null && leadObj.currency !== '') {
           // Keep the currency ID
-          // Add description if available in currency map
-          if (currencyMap[leadObj.currency]) {
-            leadObj.currency_desc = currencyMap[leadObj.currency];
-          }
         } else {
           // Remove empty/null currency fields from response
           delete leadObj.currency;
