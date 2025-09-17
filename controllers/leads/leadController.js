@@ -3293,6 +3293,33 @@ exports.getLeads = async (req, res) => {
       };
     });
 
+    // Fetch currency descriptions for currency IDs found in leads
+    const currencyIds = new Set();
+    leads.rows.forEach((lead) => {
+      const leadObj = lead.toJSON();
+      if (leadObj.valueCurrency) currencyIds.add(leadObj.valueCurrency);
+      if (leadObj.proposalValueCurrency) currencyIds.add(leadObj.proposalValueCurrency);
+      if (leadObj.details && leadObj.details.currency) currencyIds.add(leadObj.details.currency);
+    });
+
+    // Fetch currency descriptions from database
+    let currencyMap = {};
+    if (currencyIds.size > 0) {
+      const currencies = await Currency.findAll({
+        where: {
+          currencyId: { [Op.in]: Array.from(currencyIds) }
+        },
+        attributes: ['currencyId', 'currency_desc'],
+        raw: true
+      });
+      
+      currencies.forEach(currency => {
+        currencyMap[currency.currencyId] = currency.currency_desc;
+      });
+      
+      console.log("🔍 Currency map created:", currencyMap);
+    }
+
     const flatLeads = leads.rows.map((lead) => {
       const leadObj = lead.toJSON();
       // Overwrite ownerName with the latest Owner.name if present
@@ -3312,6 +3339,18 @@ exports.getLeads = async (req, res) => {
       if (leadObj.details) {
         Object.assign(leadObj, leadObj.details);
         delete leadObj.details;
+      }
+
+      // Add currency descriptions alongside currency IDs
+      if (leadObj.valueCurrency && currencyMap[leadObj.valueCurrency]) {
+        leadObj.valueCurrency_desc = currencyMap[leadObj.valueCurrency];
+      }
+      if (leadObj.proposalValueCurrency && currencyMap[leadObj.proposalValueCurrency]) {
+        leadObj.proposalValueCurrency_desc = currencyMap[leadObj.proposalValueCurrency];
+      }
+      // Handle currency from LeadDetails if present
+      if (leadObj.currency && currencyMap[leadObj.currency]) {
+        leadObj.currency_desc = currencyMap[leadObj.currency];
       }
 
       // Add custom fields directly to the lead object (not wrapped in customFields)
@@ -3334,7 +3373,9 @@ exports.getLeads = async (req, res) => {
       );
       console.log("🔍 Currency fields in processed lead:", currencyFieldsInLead);
       console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
+      console.log("🔍 proposalValueCurrency_desc value:", firstLead.proposalValueCurrency_desc);
       console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
+      console.log("🔍 valueCurrency_desc value:", firstLead.valueCurrency_desc);
       
       // Check for missing essential currency fields
       const expectedCurrencyFields = ['proposalValueCurrency', 'valueCurrency'];
@@ -3343,6 +3384,7 @@ exports.getLeads = async (req, res) => {
         console.warn("⚠️ Missing currency fields in lead object:", missingCurrencyFields);
       } else {
         console.log("✅ All expected currency fields present in lead object");
+        console.log("✅ Currency descriptions added successfully");
       }
     }
     
