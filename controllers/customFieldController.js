@@ -386,7 +386,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
             {
         fieldName: "personLabels",
         fieldLabel: "Labels",
-        fieldType: "text",
+        fieldType: "singleselect",
         dbColumn: "personLabels",
         isRequired: false,
         entityType: "person",
@@ -496,7 +496,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
             {
         fieldName: "organizationLabels",
         fieldLabel: "Labels",
-        fieldType: "multiselect",
+        fieldType: "singleselect",
         dbColumn: "labels",
         isRequired: false,
         entityType: "organization",
