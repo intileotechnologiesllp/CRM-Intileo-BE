@@ -394,7 +394,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: true,
-        personView:false
+        personView:true
       },
 
       {
