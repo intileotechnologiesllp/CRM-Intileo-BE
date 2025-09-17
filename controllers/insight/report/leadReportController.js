@@ -178,7 +178,7 @@ exports.createLeadPerformReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             entity,
             type,
@@ -244,7 +244,7 @@ exports.createLeadPerformReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -271,6 +271,7 @@ exports.createLeadPerformReport = async (req, res) => {
       success: true,
       message: "Data generated successfully",
       data: reportData,
+      totalValue: totalValue,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -298,7 +299,7 @@ async function generateExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6,
+  limit = 6
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -396,31 +397,35 @@ async function generateExistingActivityPerformanceData(
 
   // Handle segmentedBy if not "none"
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
     if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo" ||
+        existingSegmentedBy === "Team") &&
+      !assignedUserIncludeExists
     ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (
+      existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo"
+    ) {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
+      groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`Activity.${existingSegmentedBy}`),
+        Sequelize.col(`Lead.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
@@ -463,20 +468,82 @@ async function generateExistingActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Lead.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const paginatedGroups = await Lead.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        existingyaxis === "no of leads"
+          ? [Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]
+          : existingyaxis === "proposalValue"
+          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupBy[0];
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Lead.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Lead.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
 
   // Format the results for the frontend
   let formattedResults = [];
+  let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
@@ -485,43 +552,50 @@ async function generateExistingActivityPerformanceData(
     results.forEach((item) => {
       const xValue = item.xValue || "Unknown";
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
+      const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        (seg) => seg.labeltype === segmentValue
-      );
-
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue,
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
 
-    // Convert to array
     formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
+      value: Number(item.yValue) || 0,
     }));
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -542,8 +616,7 @@ async function generateActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
 
@@ -639,32 +712,32 @@ async function generateActivityPerformanceData(
     attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
   }
 
-  // Handle segmentedBy if not "none"
   if (segmentedBy && segmentedBy !== "none") {
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${segmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Activity.${segmentedBy}`),
-        "segmentValue",
-      ]);
+      groupBy.push(`Lead.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
     }
   }
 
@@ -703,65 +776,128 @@ async function generateActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Lead.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const paginatedGroups = await Lead.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        yaxis === "no of leads"
+          ? [Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]
+          : yaxis === "proposalValue"
+          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          : [Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)), "DESC"],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const [groupModel, groupColumn] = groupBy[0].includes(".")
+        ? groupBy[0].split(".")
+        : ["Lead", groupBy[0]];
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupColumn;
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Lead.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Lead.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
 
   // Format the results based on whether segmentedBy is used
   let formattedResults = [];
+  let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
+      const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        (seg) => seg.labeltype === segmentValue
-      );
-
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue,
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
 
-    // Convert to array
-    formattedResults = Object.values(groupedData);
+    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    }); // Sort groups based on their total value
+
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value: item.yValue || 0,
-    }));
+      value: Number(item.yValue) || 0,
+    })); // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -1712,7 +1848,7 @@ exports.createLeadConversionReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             entity,
             type,
@@ -1779,7 +1915,7 @@ exports.createLeadConversionReport = async (req, res) => {
             );
           reportData = result.data;
           paginationInfo = result.pagination;
-
+          totalValue = result.totalValue;
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -1806,6 +1942,7 @@ exports.createLeadConversionReport = async (req, res) => {
       success: true,
       message: "Data generated successfully",
       data: reportData,
+      totalValue: totalValue,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -1832,8 +1969,7 @@ async function generateConversionExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -1953,9 +2089,9 @@ async function generateConversionExistingActivityPerformanceData(
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
+      groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`Activity.${existingSegmentedBy}`),
+        Sequelize.col(`Lead.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
@@ -2011,22 +2147,100 @@ async function generateConversionExistingActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Lead.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
-  // console.log(results)
-  // Format the results for the frontend
+  let results;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const paginatedGroups = await Lead.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        existingyaxis === "no of leads"
+          ? [
+              Sequelize.literal(`(
+      COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
+      COUNT(*)
+    )`),
+              "DESC",
+            ]
+          : existingyaxis === "proposalValue"
+          ? [
+              Sequelize.literal(
+                `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
+              ),
+              "DESC",
+            ]
+          : existingyaxis === "value"
+          ? [
+              Sequelize.literal(
+                `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
+              ),
+              "DESC",
+            ]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupBy[0];
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Lead.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Lead.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
 
   // Format the results for the frontend
   let formattedResults = [];
+  let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // Group by xValue and then by segmentValue
@@ -2035,48 +2249,50 @@ async function generateConversionExistingActivityPerformanceData(
     results.forEach((item) => {
       const xValue = item.xValue || "Unknown";
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
+      const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        (seg) => seg.labeltype === segmentValue
-      );
-
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue,
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
 
-    // Convert to array
     formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
-      value:
-        existingyaxis === "no of leads" ||
-        existingyaxis === "proposalValue" ||
-        existingyaxis === "value"
-          ? parseFloat(item.yValue || 0)
-          : item.yValue || 0,
+      value: Number(item.yValue) || 0,
     }));
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -2097,8 +2313,7 @@ async function generateConversionActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6,
-  type
+  limit = 6
 ) {
   let includeModels = [];
 
@@ -2194,29 +2409,32 @@ async function generateConversionActivityPerformanceData(
     attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
   }
 
-    // Handle segmentedBy if not "none"
   if (segmentedBy && segmentedBy !== "none") {
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
       includeModels.push({
         model: MasterUser,
         as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
+        attributes: [],
       });
-      groupBy.push("assignedUser.masterUserID");
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Activity.${segmentedBy}`), "segmentValue"]);
+      groupBy.push(`Lead.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
     }
   }
 
@@ -2272,68 +2490,128 @@ async function generateConversionActivityPerformanceData(
   const totalCount = parseInt(totalCountResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  // Execute query with pagination
-  const results = await Lead.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
+  let results;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const paginatedGroups = await Lead.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        yaxis === "no of leads"
+          ? [Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]
+          : yaxis === "proposalValue"
+          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          : [Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)), "DESC"],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const [groupModel, groupColumn] = groupBy[0].includes(".")
+        ? groupBy[0].split(".")
+        : ["Lead", groupBy[0]];
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupColumn;
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Lead.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Lead.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
 
   // Format the results based on whether segmentedBy is used
   let formattedResults = [];
-  
+  let totalValue = 0;
+
   if (segmentedBy && segmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
-    
+
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-      
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: []
-        };
+        groupedData[xValue] = { label: xValue, segments: [] };
       }
-      
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        seg => seg.labeltype === segmentValue
-      );
-      
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue
-        });
-      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
     });
-    
-    // Convert to array
-    formattedResults = Object.values(groupedData);
+
+    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    }); // Sort groups based on their total value
+
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => ({
-    label: item.xValue || "Unknown",
-    value:
-      yaxis === "no of leads" || yaxis === "proposalValue" || yaxis === "value"
-        ? parseFloat(item.yValue || 0)
-        : item.yValue || 0,
-  }));
+      label: item.xValue || "Unknown",
+      value: Number(item.yValue) || 0,
+    })); // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data with pagination info
   return {
     data: formattedResults,
+    totalValue: totalValue,
     pagination: {
       currentPage: page,
       totalPages: totalPages,
@@ -2399,12 +2677,15 @@ exports.saveLeadConversionReport = async (req, res) => {
         ...(entity !== undefined && { entity }),
         ...(type !== undefined && { type }),
         ...(description !== undefined && { description }),
-        ...(xaxis !== undefined || yaxis !== undefined || filters !== undefined || segmentedBy !== undefined
+        ...(xaxis !== undefined ||
+        yaxis !== undefined ||
+        filters !== undefined ||
+        segmentedBy !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
               },
             }
