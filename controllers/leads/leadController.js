@@ -2081,7 +2081,7 @@ exports.getLeads = async (req, res) => {
 
     const pref = await LeadColumnPreference.findOne();
 
-    let leadAttributes, leadDetailsAttributes;
+    let leadAttributes, leadDetailsAttributes, checkedColumnKeys = [];
     if (pref && pref.columns) {
       // Parse columns if it's a string
       const columns =
@@ -2092,9 +2092,14 @@ exports.getLeads = async (req, res) => {
       const leadFields = Object.keys(Lead.rawAttributes);
       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
 
-      leadAttributes = columns
-        .filter((col) => col.check && leadFields.includes(col.key))
+      // Get checked columns based on preferences
+      const checkedColumns = columns.filter((col) => col.check);
+      checkedColumnKeys = checkedColumns.map((col) => col.key);
+      
+      leadAttributes = checkedColumns
+        .filter((col) => leadFields.includes(col.key))
         .map((col) => col.key);
+        
       // Always include leadId
       if (!leadAttributes.includes("leadId")) {
         leadAttributes.unshift("leadId");
@@ -2103,13 +2108,10 @@ exports.getLeads = async (req, res) => {
       if (!leadAttributes.includes(sortBy)) {
         leadAttributes.push(sortBy);
       }
-      // Always include currency fields for proper financial data display
-      if (!leadAttributes.includes("proposalValueCurrency")) {
-        leadAttributes.push("proposalValueCurrency");
-      }
-      if (!leadAttributes.includes("valueCurrency")) {
-        leadAttributes.push("valueCurrency");
-      }
+      
+      // Only include currency fields if they are checked in preferences
+      // (Remove the forced inclusion of currency fields)
+      
       // Always include relationship fields for proper data joining
       if (!leadAttributes.includes('leadOrganizationId')) {
         leadAttributes.push('leadOrganizationId');
@@ -3293,13 +3295,31 @@ exports.getLeads = async (req, res) => {
       };
     });
 
-    // Fetch currency descriptions for currency IDs found in leads
+    // Fetch currency descriptions for valid currency IDs found in leads
+    // Only collect currencies for fields that are checked in column preferences
     const currencyIds = new Set();
+    const isValueCurrencyChecked = checkedColumnKeys.includes('valueCurrency');
+    const isProposalValueCurrencyChecked = checkedColumnKeys.includes('proposalValueCurrency');
+    const isCurrencyChecked = checkedColumnKeys.includes('currency');
+    
+    console.log("🔍 Currency field preferences:");
+    console.log("  - valueCurrency checked:", isValueCurrencyChecked);
+    console.log("  - proposalValueCurrency checked:", isProposalValueCurrencyChecked);
+    console.log("  - currency checked:", isCurrencyChecked);
+    
     leads.rows.forEach((lead) => {
       const leadObj = lead.toJSON();
-      if (leadObj.valueCurrency) currencyIds.add(leadObj.valueCurrency);
-      if (leadObj.proposalValueCurrency) currencyIds.add(leadObj.proposalValueCurrency);
-      if (leadObj.details && leadObj.details.currency) currencyIds.add(leadObj.details.currency);
+      
+      // Only collect currency IDs for fields that are checked in preferences
+      if (isValueCurrencyChecked && leadObj.valueCurrency && leadObj.valueCurrency !== null && leadObj.valueCurrency !== '') {
+        currencyIds.add(leadObj.valueCurrency);
+      }
+      if (isProposalValueCurrencyChecked && leadObj.proposalValueCurrency && leadObj.proposalValueCurrency !== null && leadObj.proposalValueCurrency !== '') {
+        currencyIds.add(leadObj.proposalValueCurrency);
+      }
+      if (isCurrencyChecked && leadObj.details && leadObj.details.currency && leadObj.details.currency !== null && leadObj.details.currency !== '') {
+        currencyIds.add(leadObj.details.currency);
+      }
     });
 
     // Fetch currency descriptions from database
@@ -3341,16 +3361,57 @@ exports.getLeads = async (req, res) => {
         delete leadObj.details;
       }
 
-      // Add currency descriptions alongside currency IDs
-      if (leadObj.valueCurrency && currencyMap[leadObj.valueCurrency]) {
-        leadObj.valueCurrency_desc = currencyMap[leadObj.valueCurrency];
+      // Conditionally add currency fields based on column preferences and valid values
+      
+      // Handle valueCurrency - only include if checked in preferences AND has valid value
+      if (isValueCurrencyChecked) {
+        if (leadObj.valueCurrency && leadObj.valueCurrency !== null && leadObj.valueCurrency !== '') {
+          // Keep the currency ID
+          // Add description if available in currency map
+          if (currencyMap[leadObj.valueCurrency]) {
+            leadObj.valueCurrency_desc = currencyMap[leadObj.valueCurrency];
+          }
+        } else {
+          // Remove empty/null valueCurrency fields from response
+          delete leadObj.valueCurrency;
+        }
+      } else {
+        // Remove valueCurrency field if not checked in preferences
+        delete leadObj.valueCurrency;
       }
-      if (leadObj.proposalValueCurrency && currencyMap[leadObj.proposalValueCurrency]) {
-        leadObj.proposalValueCurrency_desc = currencyMap[leadObj.proposalValueCurrency];
+      
+      // Handle proposalValueCurrency - only include if checked in preferences AND has valid value
+      if (isProposalValueCurrencyChecked) {
+        if (leadObj.proposalValueCurrency && leadObj.proposalValueCurrency !== null && leadObj.proposalValueCurrency !== '') {
+          // Keep the currency ID
+          // Add description if available in currency map
+          if (currencyMap[leadObj.proposalValueCurrency]) {
+            leadObj.proposalValueCurrency_desc = currencyMap[leadObj.proposalValueCurrency];
+          }
+        } else {
+          // Remove empty/null proposalValueCurrency fields from response
+          delete leadObj.proposalValueCurrency;
+        }
+      } else {
+        // Remove proposalValueCurrency field if not checked in preferences
+        delete leadObj.proposalValueCurrency;
       }
-      // Handle currency from LeadDetails if present
-      if (leadObj.currency && currencyMap[leadObj.currency]) {
-        leadObj.currency_desc = currencyMap[leadObj.currency];
+      
+      // Handle currency from LeadDetails - only include if checked in preferences AND has valid value
+      if (isCurrencyChecked) {
+        if (leadObj.currency && leadObj.currency !== null && leadObj.currency !== '') {
+          // Keep the currency ID
+          // Add description if available in currency map
+          if (currencyMap[leadObj.currency]) {
+            leadObj.currency_desc = currencyMap[leadObj.currency];
+          }
+        } else {
+          // Remove empty/null currency fields from response
+          delete leadObj.currency;
+        }
+      } else {
+        // Remove currency field if not checked in preferences
+        delete leadObj.currency;
       }
 
       // Add custom fields directly to the lead object (not wrapped in customFields)
@@ -3372,20 +3433,28 @@ exports.getLeads = async (req, res) => {
         key.includes('Currency') || key.includes('currency')
       );
       console.log("🔍 Currency fields in processed lead:", currencyFieldsInLead);
-      console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
-      console.log("🔍 proposalValueCurrency_desc value:", firstLead.proposalValueCurrency_desc);
-      console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
-      console.log("🔍 valueCurrency_desc value:", firstLead.valueCurrency_desc);
       
-      // Check for missing essential currency fields
-      const expectedCurrencyFields = ['proposalValueCurrency', 'valueCurrency'];
-      const missingCurrencyFields = expectedCurrencyFields.filter(field => !Object.keys(firstLead).includes(field));
-      if (missingCurrencyFields.length > 0) {
-        console.warn("⚠️ Missing currency fields in lead object:", missingCurrencyFields);
+      // Log currency values only if they exist
+      if (firstLead.proposalValueCurrency) {
+        console.log("🔍 proposalValueCurrency value:", firstLead.proposalValueCurrency);
+        console.log("🔍 proposalValueCurrency_desc value:", firstLead.proposalValueCurrency_desc);
+      } else if (isProposalValueCurrencyChecked) {
+        console.log("🔍 proposalValueCurrency: Checked in preferences but not present (empty/null value)");
       } else {
-        console.log("✅ All expected currency fields present in lead object");
-        console.log("✅ Currency descriptions added successfully");
+        console.log("🔍 proposalValueCurrency: Not checked in column preferences");
       }
+      
+      if (firstLead.valueCurrency) {
+        console.log("🔍 valueCurrency value:", firstLead.valueCurrency);
+        console.log("🔍 valueCurrency_desc value:", firstLead.valueCurrency_desc);
+      } else if (isValueCurrencyChecked) {
+        console.log("🔍 valueCurrency: Checked in preferences but not present (empty/null value)");
+      } else {
+        console.log("🔍 valueCurrency: Not checked in column preferences");
+      }
+      
+      console.log("✅ Currency fields included based on column preferences and validity");
+      console.log("✅ Currency fields respect leadColumnPreference table settings");
     }
     
     // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
