@@ -11,6 +11,7 @@ router.post(
   leadContactsController.createOrganization
 );
 router.post("/create-person", verifyToken, validatePrivilege(5, "create"), leadContactsController.createPerson);
+router.get("/get-person/:personId", verifyToken, validatePrivilege(5, "view"), leadContactsController.getPerson);
 router.get("/get-contact-timeline", validatePrivilege(5, "view"), leadContactsController.getContactTimeline);
 router.get(
   "/get-person-timeline/:personId", verifyToken,

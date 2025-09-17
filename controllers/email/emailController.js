@@ -10,7 +10,6 @@ const amqp = require('amqplib'); // Added for auto-pagination queue system
 const {
   saveAttachments,
   saveUserUploadedAttachments,
-  fetchAndSaveInlineAttachments,
 } = require("../../services/attachmentService");
 const multer = require("multer");
 const path = require("path");
@@ -295,30 +294,36 @@ const imapConfig = {
 
 //   return cleanBody;
 // };
-const cleanEmailBody = (body, attachments = [], baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
+const cleanEmailBody = (body, attachments = [], emailId = null, baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
   if (!body) return "";
   
   let cleanedBody = body;
   
-  // Replace cid: references with actual attachment URLs (only if we have attachments)
-  if (attachments && attachments.length > 0) {
-    attachments.forEach(attachment => {
-      if (attachment.contentId && attachment.filePath) {
-        // Clean the contentId (remove < > brackets if present)
-        const contentId = attachment.contentId.replace(/[<>]/g, '');
+  // Replace cid: references with our proxy endpoint URLs (only if emailId is available)
+  if (emailId) {
+    // Look for cid: references in the email body
+    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
+    
+    if (cidMatches) {
+      cidMatches.forEach(cidMatch => {
+        // Extract the content ID (remove 'cid:' prefix)
+        const contentId = cidMatch.replace(/^cid:/i, '').replace(/[<>]/g, '');
         
-        // Create the proper URL path for the attachment
-        const attachmentUrl = attachment.filePath.startsWith('http') 
-          ? attachment.filePath 
-          : `${baseURL}${attachment.filePath}`;
+        // Create proxy URL for the inline image
+        const proxyUrl = `${baseURL}/api/email/inline-image/${emailId}/${encodeURIComponent(contentId)}`;
         
-        // Replace all cid: references in the email body
-        const cidPattern = new RegExp(`cid:${contentId}`, 'gi');
-        cleanedBody = cleanedBody.replace(cidPattern, attachmentUrl);
+        // Replace the cid: reference with the proxy URL
+        cleanedBody = cleanedBody.replace(new RegExp(cidMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), proxyUrl);
         
-        console.log(`[cleanEmailBody] 🔗 Replaced cid:${contentId} with ${attachmentUrl}`);
-      }
-    });
+        console.log(`[cleanEmailBody] 🔗 Replaced ${cidMatch} with ${proxyUrl}`);
+      });
+    }
+  } else {
+    // If no emailId, just log that we found CID references but can't replace them yet
+    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
+    if (cidMatches) {
+      console.log(`[cleanEmailBody] ⚠️ Found ${cidMatches.length} cid: references but no emailId available for replacement`);
+    }
   }
   
   // Remove quoted replies (e.g., lines starting with ">")
@@ -4934,7 +4939,7 @@ exports.getOneEmail = async (req, res) => {
 
     // Clean the body of the main email AFTER processing attachments so we can replace cid: references
     console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments);
+    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments, emailId);
     console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
     console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
 
@@ -5154,7 +5159,7 @@ exports.getOneEmail = async (req, res) => {
       });
       
       // Then clean the body with attachment info to replace cid: references
-      email.body = cleanEmailBody(email.body, email.attachments);
+      email.body = cleanEmailBody(email.body, email.attachments, email.emailID);
     });
 
     const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];

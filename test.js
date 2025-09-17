@@ -10,6 +10,7 @@ const amqp = require('amqplib'); // Added for auto-pagination queue system
 const {
   saveAttachments,
   saveUserUploadedAttachments,
+  fetchAndSaveInlineAttachments,
 } = require("../../services/attachmentService");
 const multer = require("multer");
 const path = require("path");
@@ -33,12 +34,13 @@ const isIconAttachment = (attachment) => {
   const contentId = attachment.contentId || "";
   const contentDisposition = attachment.contentDisposition || "";
 
-  // Skip if it's an inline attachment (part of email body)
+  // DON'T skip inline attachments anymore - we need them for email body rendering
+  // Instead, we'll save them and mark them as inline for proper handling
   if (contentDisposition.toLowerCase().includes("inline")) {
     console.log(
-      `Filtering out inline attachment: ${filename} (${contentType})`
+      `Keeping inline attachment for email body: ${filename} (${contentType}) with contentId: ${contentId}`
     );
-    return true;
+    return false; // Changed from true to false - keep inline attachments
   }
 
   // Skip if it has a content ID (usually embedded images)
@@ -293,17 +295,40 @@ const imapConfig = {
 
 //   return cleanBody;
 // };
-const cleanEmailBody = (body) => {
+const cleanEmailBody = (body, attachments = [], baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
   if (!body) return "";
   
+  let cleanedBody = body;
+  
+  // Replace cid: references with actual attachment URLs (only if we have attachments)
+  if (attachments && attachments.length > 0) {
+    attachments.forEach(attachment => {
+      if (attachment.contentId && attachment.filePath) {
+        // Clean the contentId (remove < > brackets if present)
+        const contentId = attachment.contentId.replace(/[<>]/g, '');
+        
+        // Create the proper URL path for the attachment
+        const attachmentUrl = attachment.filePath.startsWith('http') 
+          ? attachment.filePath 
+          : `${baseURL}${attachment.filePath}`;
+        
+        // Replace all cid: references in the email body
+        const cidPattern = new RegExp(`cid:${contentId}`, 'gi');
+        cleanedBody = cleanedBody.replace(cidPattern, attachmentUrl);
+        
+        console.log(`[cleanEmailBody] 🔗 Replaced cid:${contentId} with ${attachmentUrl}`);
+      }
+    });
+  }
+  
   // Remove quoted replies (e.g., lines starting with ">")
-  const cleaned = body
+  cleanedBody = cleanedBody
     .split("\n")
     .filter((line) => !line.startsWith(">"))
     .join("\n")
     .trim();
     
-  return cleaned;
+  return cleanedBody;
 };
 
 // Helper function to create email body preview
@@ -480,6 +505,14 @@ function findMatchingFolder(allFoldersArr, folderType) {
   }
   
   for (const pattern of patterns) {
+    // 🔧 GMAIL FIX: Use exact case matching for Gmail folders first
+    const exactFound = allFoldersArr.find(folder => folder === pattern);
+    if (exactFound) {
+      console.log(`✅ EXACT MATCH: Found '${exactFound}' for exact pattern '${pattern}'`);
+      return exactFound;
+    }
+    
+    // Fallback to case-insensitive matching for other providers
     const found = allFoldersArr.find(folder => 
       folder.toLowerCase() === pattern.toLowerCase() ||
       folder.toLowerCase().includes(pattern.toLowerCase())
@@ -894,6 +927,7 @@ const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider
       ], {
         bodies: "HEADER",
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       });
       
       const chunkTimeout = new Promise((_, reject) =>
@@ -1015,6 +1049,7 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       ], {
         bodies: "HEADER",
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       });
       
       const chunkTimeout = new Promise((_, reject) =>
@@ -1073,7 +1108,7 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
 };
 
 exports.queueFetchAllEmails = async (req, res) => {
-  const { batchSize = 50, days = "all", folders = "all" } = req.query; // Enable ALL emails for all providers + explicit folder control
+  const { batchSize = 50, days = "all" } = req.query; // Enable ALL emails for all providers
   const masterUserID = req.adminId;
   const email = req.body?.email || req.email;
   const appPassword = req.body?.appPassword || req.appPassword;
@@ -1085,18 +1120,8 @@ exports.queueFetchAllEmails = async (req, res) => {
     }
 
     console.log(
-      `[Queue] 🚀 ENHANCED: Queuing ALL FOLDERS email fetch job for masterUserID: ${masterUserID} (including SENT folder)`
+      `[Queue] Queuing all folders email fetch job for masterUserID: ${masterUserID} (delegated to workers)`
     );
-    
-    // 📧 EXPLICIT FOLDER CONFIGURATION: Enhanced folder support
-    let foldersToProcess = ["inbox", "sent", "drafts", "archive"]; // Default: all folders
-    if (folders && folders !== "all") {
-      // Allow specific folder selection: ?folders=inbox,sent
-      foldersToProcess = folders.split(",").map(f => f.trim().toLowerCase());
-    }
-    
-    console.log(`[Queue] 📂 FOLDERS TO PROCESS: [${foldersToProcess.join(', ')}] for user ${masterUserID}`);
-    console.log(`[Queue] 🎯 SENT FOLDER: ${foldersToProcess.includes('sent') ? '✅ ENABLED' : '❌ DISABLED'}`);
 
     // Save user credentials for workers to use
     console.log(
@@ -1221,30 +1246,18 @@ exports.queueFetchAllEmails = async (req, res) => {
       smtpSecure: req.body.smtpSecure,
       dynamicFetch: true, // Let workers handle all IMAP operations
       skipCount: 0, // Start from beginning
-      foldersToProcess, // 📧 NEW: Explicit folder configuration
-      enforceSentFolder: foldersToProcess.includes('sent'), // 🎯 NEW: Explicit sent folder flag
     });
 
     console.log(
-      `[Queue] ✅ Successfully queued ALL FOLDERS fetch job to ${userQueueName} - workers will handle all processing`
-    );
-    console.log(
-      `[Queue] 📂 FOLDERS QUEUED: [${foldersToProcess.join(', ')}] - SENT folder: ${foldersToProcess.includes('sent') ? '✅ ENABLED' : '❌ DISABLED'}`
+      `[Queue] Successfully queued all folders fetch job to ${userQueueName} - workers will handle all processing`
     );
 
     return res.status(200).json({
       message:
-        "✅ Enhanced ALL FOLDERS email fetch job queued successfully! Workers will process emails from INBOX, SENT, DRAFTS, and ARCHIVE folders.",
+        "All folders email fetch job queued successfully. Workers will process emails from inbox, sent, drafts, and archive.",
       queueName: userQueueName,
       masterUserID,
-      folders: foldersToProcess,
-      sentFolderEnabled: foldersToProcess.includes('sent'),
-      processingDetails: {
-        primaryFolders: foldersToProcess.filter(f => ['inbox', 'sent'].includes(f)),
-        optionalFolders: foldersToProcess.filter(f => ['drafts', 'archive'].includes(f)),
-        provider: provider,
-        batchSize: Math.min(parseInt(batchSize), 25)
-      }
+      folders: ["inbox", "sent", "drafts", "archive"],
     });
   } catch (error) {
     console.error("[Queue] Error queuing all folders fetch job:", error);
@@ -1505,6 +1518,7 @@ exports.fetchInboxEmails = async (req, res) => {
               const testPromise = connection.search([["SINCE", testDate]], {
                 bodies: "HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES)",
                 struct: true,
+                envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
               });
               const timeoutPromise = new Promise((_, reject) =>
                 setTimeout(() => reject(new Error("Test timeout")), 3000) // Ultra-fast 3 second test
@@ -1523,7 +1537,8 @@ exports.fetchInboxEmails = async (req, res) => {
                   console.log(`[Batch ${page}] 📊 Getting total inbox count for user ${masterUserID}...`);
                   const totalPromise = connection.search(["ALL"], { 
                     bodies: "HEADER", 
-                    struct: true 
+                    struct: true,
+                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                   });
                   const totalTimeout = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error("Total count timeout")), 10000)
@@ -1614,6 +1629,7 @@ exports.fetchInboxEmails = async (req, res) => {
                     const fallbackPromise = connection.search(["ALL"], {
                       bodies: "HEADER", 
                       struct: true,
+                      envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                     });
                     const fallbackTimeoutPromise = new Promise((_, reject) =>
                       setTimeout(() => reject(new Error(`${provider || 'Email'} progressive fallback timeout`)), progressiveTimeout)
@@ -1634,6 +1650,7 @@ exports.fetchInboxEmails = async (req, res) => {
                   const searchPromise = connection.search(["ALL"], {
                     bodies: "HEADER", 
                     struct: true,
+                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
                   });
                   const normalTimeout = new Promise((_, reject) =>
                     setTimeout(() => reject(new Error(`${provider || 'Email'} search timeout`)), 15000)
@@ -1662,6 +1679,7 @@ exports.fetchInboxEmails = async (req, res) => {
             allMessages = await connection.search([["SINCE", sinceDate]], {
               bodies: "HEADER",
               struct: true,
+              envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
             });
           }
 
@@ -1782,7 +1800,8 @@ exports.fetchInboxEmails = async (req, res) => {
           // Fetch specific header fields for metadata without body content
           const fetchOptions = { 
             bodies: "HEADER", 
-            struct: true 
+            struct: true,
+            envelope: true  // 🔧 ADD ENVELOPE for proper email metadata (fixes sent folder fallback data)
           };
           messages = await connection.search(searchCriteria, fetchOptions);
         }
@@ -1931,42 +1950,24 @@ exports.fetchInboxEmails = async (req, res) => {
     
     // Continue with main email processing
     const boxes = await connection.getBoxes();
-    const allFoldersArr = flattenFolders(boxes).map((f) => f.toLowerCase());
+    const allFoldersArr = flattenFolders(boxes); // 🔧 GMAIL FIX: Keep original case for proper folder matching
 
     console.log(
       `[Batch ${page}] Processing all folders for masterUserID: ${masterUserID}`
     );
 
-    // 🎯 SMART FOLDER PROCESSING: Provider-specific folder configuration with explicit control
+    // 🎯 SMART FOLDER PROCESSING: Provider-specific folder configuration
     let primaryFolders, optionalFolders;
     
     console.log(`[Batch ${page}] 🔍 FOLDER DEBUG: Provider detected as '${provider}' for USER ${masterUserID}`);
     
-    // 📧 ENHANCED FOLDER CONFIGURATION: Check for explicit folder parameters
-    const foldersToProcess = req.body?.foldersToProcess || req.query?.foldersToProcess;
-    const enforceSentFolder = req.body?.enforceSentFolder || req.query?.enforceSentFolder;
-    
-    if (foldersToProcess && Array.isArray(foldersToProcess)) {
-      // Use explicit folder configuration from queue parameters
-      primaryFolders = foldersToProcess.filter(f => ['inbox', 'sent'].includes(f));
-      optionalFolders = foldersToProcess.filter(f => ['drafts', 'archive'].includes(f));
-      console.log(`[Batch ${page}] 🎯 EXPLICIT FOLDER CONFIG: Primary=[${primaryFolders.join(', ')}], Optional=[${optionalFolders.join(', ')}]`);
-    } else {
-      // Default: ALL PROVIDERS process both INBOX and SENT folders
-      primaryFolders = ["inbox", "sent"];
-      optionalFolders = ["drafts", "archive"];
-      console.log(`[Batch ${page}] 📧 DEFAULT FOLDER CONFIG: Processing INBOX + SENT folders for all providers`);
-    }
-    
-    // 🎯 SENT FOLDER ENFORCEMENT: Ensure sent folder is processed if explicitly requested
-    if (enforceSentFolder && !primaryFolders.includes('sent')) {
-      primaryFolders.push('sent');
-      console.log(`[Batch ${page}] 🔥 SENT FOLDER ENFORCED: Added to primary folders due to enforceSentFolder=true`);
-    }
+    // ALL PROVIDERS: Process both INBOX and SENT folders
+    primaryFolders = ["inbox", "sent"];
+    optionalFolders = ["drafts", "archive"];
+    console.log(`[Batch ${page}] 📧 PROVIDER (${provider}): Processing INBOX + SENT folders (updated to include all providers)`);
     
     console.log(`[Batch ${page}] 📂 PRIMARY FOLDERS TO PROCESS: [${primaryFolders.join(', ')}]`);
     console.log(`[Batch ${page}] 📂 OPTIONAL FOLDERS TO PROCESS: [${optionalFolders.join(', ')}]`);
-    console.log(`[Batch ${page}] 🎯 SENT FOLDER STATUS: ${primaryFolders.includes('sent') ? '✅ ENABLED (Primary)' : (optionalFolders.includes('sent') ? '⚠️ OPTIONAL' : '❌ DISABLED')}`);
     console.log(`[Batch ${page}] 📂 ALL AVAILABLE FOLDERS (COMPLETE): [${allFoldersArr.join(', ')}]`);
     console.log(`[Batch ${page}] 📂 TOTAL FOLDER COUNT: ${allFoldersArr.length}`);
     
@@ -1975,28 +1976,14 @@ exports.fetchInboxEmails = async (req, res) => {
     const folderResults = {};
     let paginationInfo = null; // 🔧 FIX: Declare paginationInfo before the loop
 
-    // Process primary folders (INBOX and SENT - both guaranteed to be processed)
+    // Process primary folders (INBOX - guaranteed to exist)
     for (const folderType of primaryFolders) {
       try {
-        console.log(`[Batch ${page}] 🔍 ATTEMPTING TO FIND: ${folderType.toUpperCase()} folder for provider ${provider}`);
-        
-        // 🎯 ENHANCED SENT FOLDER DETECTION: Special handling for sent folders
-        if (folderType === 'sent') {
-          console.log(`[Batch ${page}] 📧 SENT FOLDER SEARCH: Looking for sent folder with provider-specific patterns...`);
-          console.log(`[Batch ${page}] 📧 PROVIDER: ${provider} - Available folders: [${allFoldersArr.slice(0, 10).join(', ')}...]`);
-        }
-        
+        console.log(`[Batch ${page}] 🔍 ATTEMPTING TO FIND: ${folderType.toUpperCase()} folder`);
         const folderName = findMatchingFolder(allFoldersArr, folderType);
         
         if (folderName) {
-          // 🎯 ENHANCED LOGGING FOR SENT FOLDER
-          if (folderType === 'sent') {
-            console.log(`[Batch ${page}] ✅ 🎯 SENT FOLDER FOUND: '${folderName}' for provider ${provider} - PROCESSING NOW...`);
-            console.log(`[Batch ${page}] 📧 SENT FOLDER PROCESSING: This will fetch all emails from your sent folder`);
-          } else {
-            console.log(`[Batch ${page}] ✅ FOUND ${folderType.toUpperCase()} FOLDER: '${folderName}' - Processing now...`);
-          }
-          
+          console.log(`[Batch ${page}] ✅ FOUND ${folderType.toUpperCase()} FOLDER: '${folderName}' - Processing now...`);
           const result = await fetchEmailsFromFolder(folderName, folderType);
           
           if (result && result.processedCount !== undefined) {
@@ -2006,16 +1993,7 @@ exports.fetchInboxEmails = async (req, res) => {
             result.folderName = folderName;
             folderResults[folderType] = result;
             
-            // 🎯 ENHANCED LOGGING FOR SENT FOLDER RESULTS
-            if (folderType === 'sent') {
-              console.log(`[Batch ${page}] ✅ 🎯 SENT FOLDER COMPLETE: ${result.processedCount} emails processed from '${folderName}'`);
-              console.log(`[Batch ${page}] 📧 SENT EMAILS SAVED: ${result.processedCount} sent emails have been saved to database`);
-              if (result.processedCount === 0) {
-                console.log(`[Batch ${page}] ℹ️ SENT FOLDER EMPTY: No new sent emails found (may be duplicates or already processed)`);
-              }
-            } else {
-              console.log(`[Batch ${page}] ✅ ${folderType.toUpperCase()} COMPLETE: ${result.processedCount} emails processed from '${folderName}'`);
-            }
+            console.log(`[Batch ${page}] ✅ ${folderType.toUpperCase()} COMPLETE: ${result.processedCount} emails processed from '${folderName}'`);
             
             // Enhanced auto-pagination support
             if (result.hasMoreEmails && result.remainingEmails > 0) {
@@ -2034,39 +2012,11 @@ exports.fetchInboxEmails = async (req, res) => {
             };
           }
         } else {
-          // 🎯 ENHANCED ERROR LOGGING FOR SENT FOLDER
-          if (folderType === 'sent') {
-            console.log(`[Batch ${page}] ❌ 🔥 SENT FOLDER NOT FOUND for provider ${provider}!`);
-            console.log(`[Batch ${page}] 📧 SENT FOLDER DEBUG: Available folders that might be sent:`);
-            const sentLikefolders = allFoldersArr.filter(f => 
-              f.toLowerCase().includes('sent') || 
-              f.toLowerCase().includes('отправ') || 
-              f.toLowerCase().includes('outbox') ||
-              f.toLowerCase().includes('enviados') ||
-              f.toLowerCase().includes('inviati')
-            );
-            console.log(`[Batch ${page}] 📧 POSSIBLE SENT FOLDERS: [${sentLikefolders.join(', ')}]`);
-            console.log(`[Batch ${page}] 📧 PROVIDER ${provider} FOLDER PATTERNS: Check if your sent folder has a different name`);
-            
-            folderResults[folderType] = { 
-              processedCount: 0, 
-              message: `Sent folder not found for provider ${provider}. Available sent-like folders: [${sentLikefolders.join(', ')}]`,
-              status: 'folder_not_found',
-              availableSentLikeFolders: sentLikefolders
-            };
-          } else {
-            console.log(`[Batch ${page}] ❌ ${folderType.toUpperCase()} FOLDER NOT FOUND in available folders: [${allFoldersArr.slice(0, 5).join(', ')}...]`);
-            folderResults[folderType] = { processedCount: 0, message: "Critical folder not found" };
-          }
+          console.log(`[Batch ${page}] ❌ ${folderType.toUpperCase()} FOLDER NOT FOUND in available folders: [${allFoldersArr.slice(0, 5).join(', ')}...]`);
+          folderResults[folderType] = { processedCount: 0, message: "Critical folder not found" };
         }
       } catch (folderError) {
         console.error(`[Batch ${page}] Error processing ${folderType}:`, folderError.message);
-        
-        // 🎯 ENHANCED ERROR LOGGING FOR SENT FOLDER
-        if (folderType === 'sent') {
-          console.error(`[Batch ${page}] 🔥 SENT FOLDER ERROR: Failed to process sent folder - ${folderError.message}`);
-        }
-        
         folderResults[folderType] = { processedCount: 0, error: folderError.message };
       }
     }
@@ -2166,32 +2116,21 @@ exports.fetchInboxEmails = async (req, res) => {
     connection.end();
     console.log(`[Batch ${page}] IMAP connection closed successfully.`);
 
-    // Enhanced logging with prominent email count display for all folders + sent folder focus
-    const sentFolderResult = folderResults.sent;
-    const sentFolderSummary = sentFolderResult ? 
-      `✅ SENT: ${sentFolderResult.processedCount} emails (${sentFolderResult.status}) from '${sentFolderResult.folderName || 'unknown'}'` :
-      '❌ SENT: Not processed';
-    
+    // Enhanced logging with prominent email count display for all folders
     console.log(`
-====== 📧 ENHANCED ALL FOLDERS FETCH RESULTS FOR BATCH ${page} ======
+====== FETCH ALL FOLDERS QUEUE RESULTS FOR BATCH ${page} ======
 ✅ TOTAL EMAILS FETCHED: ${totalProcessedEmails} emails
-🎯 SENT FOLDER RESULT: ${sentFolderSummary}
 📊 Batch Info: Page ${page}, Batch size: ${batchSize}
-👤 User: ${masterUserID}, Provider: ${provider}
+👤 User: ${masterUserID}
 📁 Folders Processed:
 ${Object.entries(folderResults)
   .map(
     ([type, result]) =>
       `   ${type.toUpperCase()}: ${result.processedCount} emails (${
         result.status
-      }) - ${result.folderName || result.message || 'unknown'}`
+      }) - ${result.folderName}`
   )
   .join("\n")}
-📧 Special Notes:
-${sentFolderResult ? 
-  `   - SENT folder found and processed: ${sentFolderResult.folderName}` :
-  '   - SENT folder: Check logs above for folder detection issues'
-}
 📅 Timestamp: ${new Date().toISOString()}
 ${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : `📋 Processing: Metadata-only strategy (auto UIDs)`}
 ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
@@ -2199,22 +2138,14 @@ ${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
 `);
 
     res.status(200).json({
-      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from all folders! ${sentFolderResult ? `SENT: ${sentFolderResult.processedCount} emails processed.` : 'SENT: Check logs for issues.'}`,
+      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from all folders!`,
       processedBatch: `Page ${page}, Batch size: ${batchSize}`,
       processedEmails: totalProcessedEmails,
       folderResults: folderResults,
-      sentFolderSpecific: {
-        processed: sentFolderResult?.processedCount || 0,
-        status: sentFolderResult?.status || 'not_processed',
-        folderName: sentFolderResult?.folderName || null,
-        message: sentFolderResult?.message || null,
-        enabled: primaryFolders.includes('sent') || optionalFolders.includes('sent')
-      },
       expectedEmails: expectedCount ? parseInt(expectedCount) : null,
       uidRange: startUID && endUID ? `${startUID}-${endUID}` : "Not specified",
       specificUIDs: allUIDsInBatch ? allUIDsInBatch : "Not specified",
       masterUserID: masterUserID,
-      provider: provider,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -2815,6 +2746,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       const fetchOptions = {
         bodies: "HEADER", // Only fetch headers first for better performance
         struct: true,
+        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
       };
 
       console.log("Searching for recent emails (headers only)...");
@@ -2965,11 +2897,10 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
           `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
         );
 
-        // Filter out icon/image attachments and inline (body/html) attachments
+        // Filter out icon attachments but KEEP inline attachments for email body rendering
         const filteredAttachments = parsedEmail.attachments.filter(
           (att) =>
             !isIconAttachment(att) &&
-            !att.contentDisposition?.toLowerCase().includes("inline") &&
             att.contentType !== "text/html" &&
             att.contentType !== "text/plain" &&
             att.size > 0 &&
@@ -4818,13 +4749,13 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
 
       // Update the email object
       email.body = finalBody;
-      email.body_fetch_status = 'fetched';
+      email.body_fetch_status = 'completed';
 
       // Update the database record
       await Email.update(
         {
           body: email.body || '',
-          body_fetch_status: 'fetched'
+          body_fetch_status: 'completed'
         },
         { where: { emailID: email.emailID } }
       );
@@ -4954,13 +4885,13 @@ exports.getOneEmail = async (req, res) => {
             }
 
             mainEmail.body = finalBody;
-            mainEmail.body_fetch_status = 'fetched';
+            mainEmail.body_fetch_status = 'completed';
 
             // Also update the database record
             await Email.update(
               {
                 body: mainEmail.body || '',
-                body_fetch_status: 'fetched'
+                body_fetch_status: 'completed'
               },
               { where: { emailID: mainEmail.emailID } }
             );
@@ -4987,12 +4918,6 @@ exports.getOneEmail = async (req, res) => {
       console.log(`[Phase 2] ✅ BODY EXISTS: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0})`);
     }
 
-    // Clean the body of the main email
-    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    mainEmail.body = cleanEmailBody(mainEmail.body || '');
-    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
-
     // Handle attachments appropriately based on type (user-uploaded vs fetched)
     mainEmail.attachments = mainEmail.attachments.map((attachment) => {
       const baseAttachment = { ...attachment };
@@ -5006,6 +4931,12 @@ exports.getOneEmail = async (req, res) => {
 
       return baseAttachment;
     });
+
+    // Clean the body of the main email AFTER processing attachments so we can replace cid: references
+    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments);
+    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
+    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
 
     // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
@@ -5209,7 +5140,7 @@ exports.getOneEmail = async (req, res) => {
 
     // Now clean the bodies (whether fetched or existing)
     relatedEmails.forEach((email) => {
-      email.body = cleanEmailBody(email.body);
+      // First process attachments to get the paths ready
       email.attachments = email.attachments.map((attachment) => {
         const baseAttachment = { ...attachment };
 
@@ -5218,10 +5149,12 @@ exports.getOneEmail = async (req, res) => {
         if (attachment.filePath) {
           baseAttachment.path = attachment.filePath; // User-uploaded files
         }
-        // For metadata-only attachments, we just return the basic info
-
+        
         return baseAttachment;
       });
+      
+      // Then clean the body with attachment info to replace cid: references
+      email.body = cleanEmailBody(email.body, email.attachments);
     });
 
     const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];
