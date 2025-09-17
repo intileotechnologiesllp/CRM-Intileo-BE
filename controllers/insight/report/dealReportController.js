@@ -1923,6 +1923,295 @@ exports.createDealConversionReport = async (req, res) => {
   }
 };
 
+// Helper function to generate activity performance data with pagination
+async function generateConversionActivityPerformanceData(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  segmentedBy,
+  filters,
+  page = 1,
+  limit = 6
+) {
+  let includeModels = [];
+
+  // Calculate offset for pagination
+  const offset = (page - 1) * limit;
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhereConditions = [
+    {
+      // Only include won or lost deals
+      status: {
+        [Op.in]: ["won", "lost"],
+      },
+    }
+  ];
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhereConditions.push({
+      masterUserID: ownerId
+    });
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      baseWhereConditions.push(combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Create the final where condition
+  const baseWhere = baseWhereConditions.length > 1 
+    ? { [Op.and]: baseWhereConditions }
+    : baseWhereConditions[0];
+
+  // Handle special cases for xaxis (like Owner which needs join)
+  let xaxisColumn;
+  let xaxisIncludeModels = [];
+
+  if (xaxis === "creator") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.name";
+  } else if (xaxis === "creatorstatus") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.creatorstatus";
+  } else {
+    xaxisColumn = `Deal.${xaxis}`;
+  }
+
+  // Combine all include models
+  const allIncludeModels = [...includeModels, ...xaxisIncludeModels];
+
+  // First, get distinct x-axis values with pagination
+  const distinctXValues = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"]
+    ],
+    include: allIncludeModels,
+    raw: true,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
+    limit: limit,
+    offset: offset,
+  });
+
+  // Extract the xValues
+  const xValues = distinctXValues.map(item => item.xValue || "Unknown");
+
+  if (xValues.length === 0) {
+    return {
+      data: [],
+      pagination: {
+        currentPage: page,
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: limit,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+    };
+  }
+
+  // Get total count of distinct x-axis values for pagination
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))),
+        "total",
+      ],
+    ],
+    include: allIncludeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  const totalPages = Math.ceil(totalCount / limit);
+
+  // Now get the status breakdown for only the paginated x-axis values
+  let groupBy = [];
+  let attributes = [];
+
+  if (xaxis === "creator") {
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (xaxis === "creatorstatus") {
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    groupBy.push(`Deal.${xaxis}`);
+    attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
+  }
+
+  // Always group by status to get the breakdown
+  groupBy.push("Deal.status");
+  attributes.push([Sequelize.col("Deal.status"), "status"]);
+
+  // Handle yaxis
+  if (yaxis === "no of deals") {
+    attributes.push([
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
+      "yValue",
+    ]);
+  } else if (yaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
+      "yValue",
+    ]);
+  } else if (yaxis === "value") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
+      "yValue",
+    ]);
+  } else {
+    // For other yaxis values
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Add condition to only include the paginated x-values
+  // Use Sequelize.where to properly format the column reference
+  const paginatedWhere = {
+    [Op.and]: [
+      baseWhere,
+      Sequelize.where(Sequelize.col(xaxisColumn), {
+        [Op.in]: xValues
+      })
+    ]
+  };
+
+  // Execute query to get status breakdown for paginated x-values
+  const results = await Deal.findAll({
+    where: paginatedWhere,
+    attributes: attributes,
+    include: allIncludeModels,
+    group: groupBy,
+    raw: true,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
+  });
+
+  // Format the results to group by xValue and include status breakdown
+  const groupedData = {};
+
+  results.forEach((item) => {
+    const xValue = item.xValue || "Unknown";
+    const status = item.status || "Unknown";
+    const yValue = item.yValue || 0;
+
+    // Only include won and lost statuses
+    if (status !== "won" && status !== "lost") {
+      return;
+    }
+
+    if (!groupedData[xValue]) {
+      groupedData[xValue] = {
+        label: xValue,
+        status: [],
+        total: 0,
+      };
+    }
+
+    // Add status breakdown
+    groupedData[xValue].status.push({
+      labeltype: status,
+      value: yValue,
+    });
+
+    // Calculate total
+    groupedData[xValue].total += yValue;
+  });
+
+  // Calculate percentages for each status
+  Object.keys(groupedData).forEach((key) => {
+    const group = groupedData[key];
+    group.status.forEach((status) => {
+      status.percentage =
+        group.total > 0 ? Math.round((status.value / group.total) * 100) : 0;
+    });
+  });
+
+  // Convert to array and ensure order matches the paginated x-values
+  const formattedResults = xValues.map(xValue => {
+    return groupedData[xValue] || {
+      label: xValue,
+      status: [],
+      total: 0
+    };
+  });
+
+  // Return data with pagination info
+  return {
+    data: formattedResults,
+    pagination: {
+      currentPage: page,
+      totalPages: totalPages,
+      totalItems: totalCount,
+      itemsPerPage: limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+// Similarly, update the generateConversionExistingActivityPerformanceData function
 async function generateConversionExistingActivityPerformanceData(
   ownerId,
   role,
@@ -1939,15 +2228,23 @@ async function generateConversionExistingActivityPerformanceData(
   const offset = (page - 1) * limit;
 
   // Base where condition - only show activities owned by the user if not admin
-  const baseWhere = {};
+  const baseWhereConditions = [
+    {
+      // Only include won or lost deals
+      status: {
+        [Op.in]: ["won", "lost"],
+      },
+    }
+  ];
 
   // If user is not admin, filter by ownerId
   if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
+    baseWhereConditions.push({
+      masterUserID: ownerId
+    });
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -1982,7 +2279,7 @@ async function generateConversionExistingActivityPerformanceData(
         }
       }
 
-      Object.assign(baseWhere, combinedCondition);
+      baseWhereConditions.push(combinedCondition);
 
       // Add filter-related include models to the main includeModels array
       // Avoid duplicates
@@ -1997,442 +2294,196 @@ async function generateConversionExistingActivityPerformanceData(
     }
   }
 
+  // Create the final where condition
+  const baseWhere = baseWhereConditions.length > 1 
+    ? { [Op.and]: baseWhereConditions }
+    : baseWhereConditions[0];
+
   // Handle special cases for xaxis (like Owner which needs join)
+  let xaxisColumn;
+  let xaxisIncludeModels = [];
 
-  let groupBy = [];
-  let attributes = [];
-
-  // Handle existingxaxis special cases
   if (existingxaxis === "creator") {
-    includeModels.push({
+    xaxisIncludeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "name"],
       required: true,
     });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+    xaxisColumn = "assignedUser.name";
   } else if (existingxaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
+    xaxisIncludeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "creatorstatus"],
       required: true,
     });
+    xaxisColumn = "assignedUser.creatorstatus";
+  } else {
+    xaxisColumn = `Deal.${existingxaxis}`;
+  }
+
+  // Combine all include models
+  const allIncludeModels = [...includeModels, ...xaxisIncludeModels];
+
+  // First, get distinct x-axis values with pagination
+  const distinctXValues = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"]
+    ],
+    include: allIncludeModels,
+    raw: true,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
+    limit: limit,
+    offset: offset,
+  });
+
+  // Extract the xValues
+  const xValues = distinctXValues.map(item => item.xValue || "Unknown");
+
+  if (xValues.length === 0) {
+    return {
+      data: [],
+      pagination: {
+        currentPage: page,
+        totalPages: 0,
+        totalItems: 0,
+        itemsPerPage: limit,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+    };
+  }
+
+  // Get total count of distinct x-axis values for pagination
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))),
+        "total",
+      ],
+    ],
+    include: allIncludeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  const totalPages = Math.ceil(totalCount / limit);
+
+  // Now get the status breakdown for only the paginated x-axis values
+  let groupBy = [];
+  let attributes = [];
+
+  if (existingxaxis === "creator") {
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (existingxaxis === "creatorstatus") {
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the Activity table
     groupBy.push(`Deal.${existingxaxis}`);
     attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
   }
 
-  // Handle segmentedBy if not "none"
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
-    ) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
-      });
-      groupBy.push("assignedUser.masterUserID");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team") {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
-      groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Activity.${existingSegmentedBy}`),
-        "segmentValue",
-      ]);
-    }
-  }
+  // Always group by status to get the breakdown
+  groupBy.push("Deal.status");
+  attributes.push([Sequelize.col("Deal.status"), "status"]);
 
   // Handle existingyaxis
   if (existingyaxis === "no of deals") {
     attributes.push([
-      Sequelize.literal(`(
-      COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
-      COUNT(*)
-    )`),
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
       "yValue",
     ]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
-      Sequelize.literal(
-        `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
-      ),
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
       "yValue",
     ]);
   } else if (existingyaxis === "value") {
     attributes.push([
-      Sequelize.literal(
-        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
-      ),
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
+    // For other yaxis values
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
       "yValue",
     ]);
   }
 
-  // Get total count for pagination
-  const totalCountResult = await Deal.findAll({
-    where: baseWhere,
-    attributes: [
-      [
-        Sequelize.fn(
-          "COUNT",
-          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
-        ),
-        "total",
-      ],
-    ],
-    include: includeModels,
-    raw: true,
-  });
-
-  const totalCount = parseInt(totalCountResult[0]?.total || 0);
-  const totalPages = Math.ceil(totalCount / limit);
-
-  // Execute query with pagination
-  const results = await Deal.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
-  });
-  // console.log(results)
-  // Format the results for the frontend
-  // Format the results for the frontend
-  let formattedResults = [];
-
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
-    const groupedData = {};
-
-    results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
-      const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
-
-      if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
-        };
-      }
-
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        (seg) => seg.labeltype === segmentValue
-      );
-
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue,
-        });
-      }
-    });
-
-    // Convert to array
-    formattedResults = Object.values(groupedData);
-  } else {
-    // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value:
-        existingyaxis === "no of leads" ||
-        existingyaxis === "proposalValue" ||
-        existingyaxis === "value"
-          ? parseFloat(item.yValue || 0)
-          : item.yValue || 0,
-    }));
-  }
-
-  // Return data with pagination info
-  return {
-    data: formattedResults,
-    pagination: {
-      currentPage: page,
-      totalPages: totalPages,
-      totalItems: totalCount,
-      itemsPerPage: limit,
-      hasNextPage: page < totalPages,
-      hasPrevPage: page > 1,
-    },
+  // Add condition to only include the paginated x-values
+  // Use Sequelize.where to properly format the column reference
+  const paginatedWhere = {
+    [Op.and]: [
+      baseWhere,
+      Sequelize.where(Sequelize.col(xaxisColumn), {
+        [Op.in]: xValues
+      })
+    ]
   };
-}
 
-// Helper function to generate activity performance data with pagination
-async function generateConversionActivityPerformanceData(
-  ownerId,
-  role,
-  xaxis,
-  yaxis,
-  segmentedBy,
-  filters,
-  page = 1,
-  limit = 6,
-) {
-  let includeModels = [];
-
-  // Calculate offset for pagination
-  const offset = (page - 1) * limit;
-
-  // Base where condition - only show activities owned by the user if not admin
-  const baseWhere = {};
-
-  // If user is not admin, filter by ownerId
-  if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
-  }
-
-  // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
-      (cond) => cond.value !== undefined && cond.value !== ""
-    );
-
-    if (validConditions.length > 0) {
-      // Array to track include models for filtering
-      const filterIncludeModels = [];
-
-      // Process all conditions first to collect include models
-      const conditions = validConditions.map((cond) => {
-        return getConditionObject(
-          cond.column,
-          cond.operator,
-          cond.value,
-          filterIncludeModels
-        );
-      });
-
-      // Build combined condition with logical operators
-      let combinedCondition = conditions[0];
-
-      for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
-        ).toUpperCase();
-
-        if (logicalOp === "AND") {
-          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
-        } else {
-          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
-        }
-      }
-
-      Object.assign(baseWhere, combinedCondition);
-
-      // Add filter-related include models to the main includeModels array
-      // Avoid duplicates
-      filterIncludeModels.forEach((newInclude) => {
-        const exists = includeModels.some(
-          (existingInclude) => existingInclude.as === newInclude.as
-        );
-        if (!exists) {
-          includeModels.push(newInclude);
-        }
-      });
-    }
-  }
-
-  // Handle special cases for xaxis (like Owner which needs join)
-
-  let groupBy = [];
-  let attributes = [];
-
-  if (xaxis === "creator") {
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
-      required: true,
-    });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else {
-    // For regular columns, explicitly specify the lead table
-    groupBy.push(`Deal.${xaxis}`);
-    attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
-  }
-
-  // Handle segmentedBy if not "none"
- if (segmentedBy && segmentedBy !== "none") {
-    const assignedUserIncludeExists = includeModels.some(
-      (inc) => inc.as === "assignedUser"
-    );
-    if (
-      (segmentedBy === "Owner" ||
-        segmentedBy === "assignedTo" ||
-        segmentedBy === "Team") &&
-      !assignedUserIncludeExists
-    ) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: [],
-      });
-    }
-
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
-      groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
-      groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else {
-      groupBy.push(`Deal.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
-    }
-  }
-
-  // Handle existingyaxis
-  if (yaxis === "no of deals") {
-    attributes.push([
-      Sequelize.literal(`(
-      COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
-      COUNT(*)
-    )`),
-      "yValue",
-    ]);
-  } else if (yaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.literal(
-        `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
-      ),
-      "yValue",
-    ]);
-  } else if (yaxis === "value") {
-    attributes.push([
-      Sequelize.literal(
-        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
-      ),
-      "yValue",
-    ]);
-  } else {
-    // For other yaxis values, explicitly specify the Activity table
-    attributes.push([
-      Sequelize.literal(
-        `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`
-      ),
-      "yValue",
-    ]);
-  }
-
-  // Get total count for pagination
-  const totalCountResult = await Deal.findAll({
-    where: baseWhere,
-    attributes: [
-      [
-        Sequelize.fn(
-          "COUNT",
-          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
-        ),
-        "total",
-      ],
-    ],
-    include: includeModels,
-    raw: true,
-  });
-
-  const totalCount = parseInt(totalCountResult[0]?.total || 0);
-  const totalPages = Math.ceil(totalCount / limit);
-
-  // Execute query with pagination
+  // Execute query to get status breakdown for paginated x-values
   const results = await Deal.findAll({
-    where: baseWhere,
+    where: paginatedWhere,
     attributes: attributes,
-    include: includeModels,
+    include: allIncludeModels,
     group: groupBy,
     raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-    limit: limit,
-    offset: offset,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
   });
 
-  // Format the results based on whether segmentedBy is used
-  let formattedResults = [];
+  // Format the results to group by xValue and include status breakdown
+  const groupedData = {};
 
-  if (segmentedBy && segmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
-    const groupedData = {};
+  results.forEach((item) => {
+    const xValue = item.xValue || "Unknown";
+    const status = item.status || "Unknown";
+    const yValue = item.yValue || 0;
 
-    results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
-      const segmentValue = item.segmentValue || "Unknown";
-      const yValue = item.yValue || 0;
+    // Only include won and lost statuses
+    if (status !== "won" && status !== "lost") {
+      return;
+    }
 
-      if (!groupedData[xValue]) {
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
-        };
-      }
+    if (!groupedData[xValue]) {
+      groupedData[xValue] = {
+        label: xValue,
+        status: [],
+        total: 0,
+      };
+    }
 
-      // Check if this segment already exists
-      const existingSegment = groupedData[xValue].segments.find(
-        (seg) => seg.labeltype === segmentValue
-      );
-
-      if (existingSegment) {
-        existingSegment.value += yValue;
-      } else {
-        groupedData[xValue].segments.push({
-          labeltype: segmentValue,
-          value: yValue,
-        });
-      }
+    // Add status breakdown
+    groupedData[xValue].status.push({
+      labeltype: status,
+      value: yValue,
     });
 
-    // Convert to array
-    formattedResults = Object.values(groupedData);
-  } else {
-    // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value:
-        yaxis === "no of leads" ||
-        yaxis === "proposalValue" ||
-        yaxis === "value"
-          ? parseFloat(item.yValue || 0)
-          : item.yValue || 0,
-    }));
-  }
+    // Calculate total
+    groupedData[xValue].total += yValue;
+  });
+
+  // Calculate percentages for each status
+  Object.keys(groupedData).forEach((key) => {
+    const group = groupedData[key];
+    group.status.forEach((status) => {
+      status.percentage =
+        group.total > 0 ? Math.round((status.value / group.total) * 100) : 0;
+    });
+  });
+
+  // Convert to array and ensure order matches the paginated x-values
+  const formattedResults = xValues.map(xValue => {
+    return groupedData[xValue] || {
+      label: xValue,
+      status: [],
+      total: 0
+    };
+  });
 
   // Return data with pagination info
   return {

@@ -32,7 +32,7 @@ router.get("/get-default-email",verifyToken, validatePrivilege(4, "view"), email
 router.post("/update-default-email",verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateDefaultEmail);
 router.get("/archive-email/:emailId",verifyToken, validatePrivilege(4, "view"), emailSettingsController.archiveEmail);
 router.post("/fetch-sync-email",verifyToken, validatePrivilege(4, "update"), emailSettingsController.queueSyncEmails);
-router.get("/fetch-sync-data",verifyToken, validatePrivilege(4, "update"), emailSettingsController.fetchsyncdata)
+router.get("/fetch-sync-data",verifyToken, validatePrivilege(4, "view"), emailSettingsController.fetchsyncdata)
 router.post("/restore-emails",verifyToken, validatePrivilege(4, "update"), emailSettingsController.restoreEmails);
 router.post("/permanently-delete-emails",verifyToken, validatePrivilege(4, "delete"), emailSettingsController.permanentlyDeleteEmails);
 router.post("/mark-as-unread",verifyToken, validatePrivilege(4, "update"), emailSettingsController.markAsUnread);
