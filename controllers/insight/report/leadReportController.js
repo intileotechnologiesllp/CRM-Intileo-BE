@@ -299,7 +299,6 @@ async function generateExistingActivityPerformanceData(
   filters,
   page = 1,
   limit = 6,
-  type
 ) {
   let includeModels = [];
   // Calculate offset for pagination
