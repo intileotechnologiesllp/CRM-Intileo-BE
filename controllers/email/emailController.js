@@ -10,6 +10,7 @@ const amqp = require('amqplib'); // Added for auto-pagination queue system
 const {
   saveAttachments,
   saveUserUploadedAttachments,
+  fetchAndSaveInlineAttachments,
 } = require("../../services/attachmentService");
 const multer = require("multer");
 const path = require("path");
@@ -294,46 +295,164 @@ const imapConfig = {
 
 //   return cleanBody;
 // };
-const cleanEmailBody = (body, attachments = [], emailId = null, baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
+const cleanEmailBody = (body, attachments = [], baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
   if (!body) return "";
   
   let cleanedBody = body;
   
-  // Replace cid: references with our proxy endpoint URLs (only if emailId is available)
-  if (emailId) {
-    // Look for cid: references in the email body
-    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
+  console.log(`[cleanEmailBody] 🔧 Processing body with ${attachments.length} attachments`);
+  
+  // Check for base64 embedded images before processing
+  const base64ImageMatches = cleanedBody.match(/data:image\/[^;]+;base64,[^"'\s>]+/gi) || [];
+  console.log(`[cleanEmailBody] 🖼️ Found ${base64ImageMatches.length} base64 embedded images`);
+  if (base64ImageMatches.length > 0) {
+    console.log(`[cleanEmailBody] 🖼️ Base64 images preview:`, base64ImageMatches.map(img => img.substring(0, 50) + '...'));
+  }
+  
+  // Replace cid: references with actual attachment URLs (only if we have attachments)
+  if (attachments && attachments.length > 0) {
+    attachments.forEach(attachment => {
+      if (attachment.contentId) {
+        // Clean the contentId (remove < > brackets if present)
+        const contentId = attachment.contentId.replace(/[<>]/g, '');
+        
+        let attachmentUrl = '';
+        
+        // Handle both user-uploaded and fetched attachments
+        if (attachment.filePath) {
+          // User-uploaded files with filePath
+          attachmentUrl = attachment.filePath.startsWith('http') 
+            ? attachment.filePath 
+            : `${baseURL}${attachment.filePath}`;
+        } else if (attachment.path) {
+          // Attachments with path property
+          attachmentUrl = attachment.path.startsWith('http') 
+            ? attachment.path 
+            : `${baseURL}${attachment.path}`;
+        } else if (attachment.filename) {
+          // Fallback: construct path from filename
+          attachmentUrl = `${baseURL}/uploads/attachments/${attachment.filename}`;
+        }
+        
+        if (attachmentUrl) {
+          // Replace all cid: references in the email body
+          const cidPattern = new RegExp(`cid:${contentId}`, 'gi');
+          const beforeReplace = cleanedBody.includes(`cid:${contentId}`);
+          cleanedBody = cleanedBody.replace(cidPattern, attachmentUrl);
+          
+          if (beforeReplace) {
+            console.log(`[cleanEmailBody] 🔗 Replaced cid:${contentId} with ${attachmentUrl}`);
+          }
+        }
+      }
+    });
+  }
+  
+  // 🚀 PRESERVE SIGNATURES AND IMAGES: Don't remove quoted replies indiscriminately
+  // Only remove obvious quoted content, but preserve signatures and inline images
+  
+  // Instead of removing all ">" lines, only remove email thread history
+  // (usually starts with "On ... wrote:" or "From:" patterns)
+  const lines = cleanedBody.split('\n');
+  const preservedLines = [];
+  let inQuotedSection = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
     
-    if (cidMatches) {
-      cidMatches.forEach(cidMatch => {
-        // Extract the content ID (remove 'cid:' prefix)
-        const contentId = cidMatch.replace(/^cid:/i, '').replace(/[<>]/g, '');
-        
-        // Create proxy URL for the inline image
-        const proxyUrl = `${baseURL}/api/email/inline-image/${emailId}/${encodeURIComponent(contentId)}`;
-        
-        // Replace the cid: reference with the proxy URL
-        cleanedBody = cleanedBody.replace(new RegExp(cidMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), proxyUrl);
-        
-        console.log(`[cleanEmailBody] 🔗 Replaced ${cidMatch} with ${proxyUrl}`);
-      });
+    // Detect start of quoted email thread (common patterns)
+    const isQuoteStart = trimmedLine.match(/^(On .* wrote:|From:.*|Sent:.*|To:.*|Subject:.*|\*\*\* .*|>+\s*On .* wrote:|>+\s*From:)/i);
+    
+    // If we find a quote start pattern, mark as quoted section
+    if (isQuoteStart) {
+      inQuotedSection = true;
+      continue; // Skip this line
     }
-  } else {
-    // If no emailId, just log that we found CID references but can't replace them yet
-    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
-    if (cidMatches) {
-      console.log(`[cleanEmailBody] ⚠️ Found ${cidMatches.length} cid: references but no emailId available for replacement`);
+    
+    // If line doesn't start with > and we were in quoted section, we might be out
+    if (inQuotedSection && !line.startsWith('>') && trimmedLine !== '') {
+      // Check if this looks like new content (not part of quote)
+      const looksLikeNewContent = trimmedLine.length > 10 && 
+                                  !trimmedLine.match(/^(Re:|Fw:|Fwd:|\-\-|\+\+|[\*\-\=]{3,})/i);
+      if (looksLikeNewContent) {
+        inQuotedSection = false;
+      }
+    }
+    
+    // Preserve the line if not in quoted section, or if it contains important content
+    if (!inQuotedSection || 
+        trimmedLine.includes('<img') || 
+        trimmedLine.includes('data:image/') || // Preserve base64 embedded images
+        trimmedLine.includes('base64,') || // Preserve base64 content
+        trimmedLine.includes('signature') || 
+        trimmedLine.includes('cid:') ||
+        trimmedLine.match(/^[\-\*\=]{2,}/) || // Signature separators
+        (trimmedLine.startsWith('>') && trimmedLine.length < 50)) { // Short quoted lines might be signatures
+      preservedLines.push(line);
     }
   }
   
-  // Remove quoted replies (e.g., lines starting with ">")
-  cleanedBody = cleanedBody
-    .split("\n")
-    .filter((line) => !line.startsWith(">"))
-    .join("\n")
-    .trim();
-    
+  cleanedBody = preservedLines.join('\n').trim();
+  
+  // Check if base64 images are still present after cleaning
+  const finalBase64Images = cleanedBody.match(/data:image\/[^;]+;base64,[^"'\s>]+/gi) || [];
+  console.log(`[cleanEmailBody] ✅ Preserved signatures and images. Lines: ${lines.length} -> ${preservedLines.length}`);
+  console.log(`[cleanEmailBody] 🖼️ Base64 images after cleaning: ${finalBase64Images.length} (${base64ImageMatches.length - finalBase64Images.length} lost)`);
+  
+  if (base64ImageMatches.length > finalBase64Images.length) {
+    console.warn(`[cleanEmailBody] ⚠️ WARNING: ${base64ImageMatches.length - finalBase64Images.length} base64 images were lost during cleaning!`);
+  }
+  
   return cleanedBody;
+};
+
+// Minimal body processing - only replace CID references, preserve all content
+const replaceCidReferences = (body, attachments = [], baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
+  if (!body) return "";
+  
+  let processedBody = body;
+  
+  console.log(`[replaceCidReferences] 🔧 Processing body with ${attachments.length} attachments (preserve mode)`);
+  
+  // Only replace cid: references with actual attachment URLs
+  if (attachments && attachments.length > 0) {
+    attachments.forEach(attachment => {
+      if (attachment.contentId) {
+        // Clean the contentId (remove < > brackets if present)
+        const contentId = attachment.contentId.replace(/[<>]/g, '');
+        
+        let attachmentUrl = '';
+        
+        // Handle both user-uploaded and fetched attachments
+        if (attachment.filePath) {
+          attachmentUrl = attachment.filePath.startsWith('http') 
+            ? attachment.filePath 
+            : `${baseURL}${attachment.filePath}`;
+        } else if (attachment.path) {
+          attachmentUrl = attachment.path.startsWith('http') 
+            ? attachment.path 
+            : `${baseURL}${attachment.path}`;
+        } else if (attachment.filename) {
+          attachmentUrl = `${baseURL}/uploads/attachments/${attachment.filename}`;
+        }
+        
+        if (attachmentUrl) {
+          const cidPattern = new RegExp(`cid:${contentId}`, 'gi');
+          const beforeReplace = processedBody.includes(`cid:${contentId}`);
+          processedBody = processedBody.replace(cidPattern, attachmentUrl);
+          
+          if (beforeReplace) {
+            console.log(`[replaceCidReferences] 🔗 Replaced cid:${contentId} with ${attachmentUrl}`);
+          }
+        }
+      }
+    });
+  }
+  
+  console.log(`[replaceCidReferences] ✅ Preserved all content. No signatures or formatting removed.`);
+  
+  return processedBody;
 };
 
 // Helper function to create email body preview
@@ -4793,7 +4912,11 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
 
 exports.getOneEmail = async (req, res) => {
   const { emailId } = req.params;
+  const { preserveOriginal = 'false' } = req.query; // Option to preserve original content
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
+  
+  const shouldPreserveOriginal = preserveOriginal === 'true';
+  console.log(`[getOneEmail] 🔧 PRESERVE ORIGINAL CONTENT: ${shouldPreserveOriginal}`);
 
   try {
     // Fetch the main email by emailId, including attachments
@@ -4939,9 +5062,38 @@ exports.getOneEmail = async (req, res) => {
 
     // Clean the body of the main email AFTER processing attachments so we can replace cid: references
     console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments, emailId);
-    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
+    console.log(`[getOneEmail] 🔍 BODY TYPE: ${mainEmail.body && mainEmail.body.includes('<') ? 'HTML' : 'TEXT'}`);
+    console.log(`[getOneEmail] 📎 ATTACHMENTS: ${mainEmail.attachments.length} total`);
+    
+    // Check for inline images (cid references) before cleaning
+    const hasCidReferences = mainEmail.body && mainEmail.body.includes('cid:');
+    console.log(`[getOneEmail] 🖼️ HAS CID REFERENCES: ${hasCidReferences}`);
+    
+    if (hasCidReferences) {
+      const cidMatches = mainEmail.body.match(/cid:[^"'\s>]+/gi) || [];
+      console.log(`[getOneEmail] 🖼️ FOUND CID REFERENCES: ${cidMatches.join(', ')}`);
+      
+      // Log attachment contentIds for debugging
+      const attachmentCids = mainEmail.attachments
+        .filter(att => att.contentId)
+        .map(att => `cid:${att.contentId.replace(/[<>]/g, '')}`);
+      console.log(`[getOneEmail] 📎 ATTACHMENT CIDs: ${attachmentCids.join(', ')}`);
+    }
+    
+    // Store original body for comparison
+    const originalBodyLength = mainEmail.body ? mainEmail.body.length : 0;
+    
+    if (shouldPreserveOriginal) {
+      // Minimal cleaning - only replace CID references, preserve everything else
+      console.log(`[getOneEmail] 🔒 PRESERVE MODE: Only replacing CID references, keeping signatures and formatting`);
+      mainEmail.body = replaceCidReferences(mainEmail.body || '', mainEmail.attachments);
+    } else {
+      // Normal cleaning
+      mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments);
+    }
+    
+    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0} (${originalBodyLength - (mainEmail.body ? mainEmail.body.length : 0)} chars removed)`);
+    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 300) + '...' : 'No body content'}`);
 
     // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
@@ -5144,7 +5296,11 @@ exports.getOneEmail = async (req, res) => {
     }
 
     // Now clean the bodies (whether fetched or existing)
-    relatedEmails.forEach((email) => {
+    console.log(`[getOneEmail] 🧹 Cleaning bodies for ${relatedEmails.length} related emails...`);
+    
+    relatedEmails.forEach((email, index) => {
+      console.log(`[getOneEmail] 🔧 Processing related email ${index + 1}/${relatedEmails.length} (ID: ${email.emailID})`);
+      
       // First process attachments to get the paths ready
       email.attachments = email.attachments.map((attachment) => {
         const baseAttachment = { ...attachment };
@@ -5158,8 +5314,22 @@ exports.getOneEmail = async (req, res) => {
         return baseAttachment;
       });
       
+      // Log before cleaning
+      const originalLength = email.body ? email.body.length : 0;
+      const hasCids = email.body && email.body.includes('cid:');
+      console.log(`[getOneEmail] 📧 Related email ${email.emailID}: body length=${originalLength}, has CIDs=${hasCids}, attachments=${email.attachments.length}`);
+      
       // Then clean the body with attachment info to replace cid: references
-      email.body = cleanEmailBody(email.body, email.attachments, email.emailID);
+      if (shouldPreserveOriginal) {
+        // Minimal cleaning for related emails too
+        email.body = replaceCidReferences(email.body, email.attachments);
+      } else {
+        // Normal cleaning
+        email.body = cleanEmailBody(email.body, email.attachments);
+      }
+      
+      const newLength = email.body ? email.body.length : 0;
+      console.log(`[getOneEmail] ✅ Related email ${email.emailID} processed: ${originalLength} -> ${newLength} chars (preserve=${shouldPreserveOriginal})`);
     });
 
     const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];
