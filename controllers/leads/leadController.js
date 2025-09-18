@@ -609,1428 +609,6 @@ exports.unarchiveLead = async (req, res) => {
   }
 };
 
-// exports.getLeads = async (req, res) => {
-//   const {
-//     isArchived,
-//     search,
-//     page = 1,
-//     limit = 500,
-//     sortBy = "createdAt",
-//     order = "DESC",
-//     masterUserID: queryMasterUserID,
-//     filterId,
-//   } = req.query;
-//   console.log(req.role, "role of the user............");
-
-//   try {
-//     // Get user's visibility group and rules
-//     let userGroup = null;
-//     let leadVisibilityRule = null;
-
-//     if (req.role !== "admin") {
-//       const membership = await GroupMembership.findOne({
-//         where: {
-//           userId: req.adminId,
-//           isActive: true,
-//         },
-//         include: [
-//           {
-//             model: VisibilityGroup,
-//             as: "group",
-//             where: { isActive: true },
-//           },
-//         ],
-//       });
-
-//       if (membership) {
-//         userGroup = membership.group;
-//         leadVisibilityRule = await ItemVisibilityRule.findOne({
-//           where: {
-//             groupId: userGroup.groupId,
-//             entityType: "leads",
-//             isActive: true,
-//           },
-//         });
-//       }
-//     }
-
-//     // Determine masterUserID based on role
-
-//     const pref = await LeadColumnPreference.findOne();
-
-//     let leadAttributes, leadDetailsAttributes;
-//     if (pref && pref.columns) {
-//       // Parse columns if it's a string
-//       const columns =
-//         typeof pref.columns === "string"
-//           ? JSON.parse(pref.columns)
-//           : pref.columns;
-
-//       const leadFields = Object.keys(Lead.rawAttributes);
-//       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-
-//       leadAttributes = columns
-//         .filter((col) => col.check && leadFields.includes(col.key))
-//         .map((col) => col.key);
-//       // Always include leadId
-//       if (!leadAttributes.includes("leadId")) {
-//         leadAttributes.unshift("leadId");
-//       }
-//       // Always include the sortBy field for ordering
-//       if (!leadAttributes.includes(sortBy)) {
-//         leadAttributes.push(sortBy);
-//       }
-//       // Always include currency IDs for later processing
-//       if (!leadAttributes.includes("proposalValueCurrency")) {
-//         leadAttributes.push("proposalValueCurrency");
-//       }
-//       if (!leadAttributes.includes("valueCurrency")) {
-//         leadAttributes.push("valueCurrency");
-//       }
-
-//       leadDetailsAttributes = columns
-//         .filter((col) => col.check && leadDetailsFields.includes(col.key))
-//         .map((col) => col.key);
-//     }
-
-//     console.log(leadAttributes, "leadAttributes from preferences");
-
-//     let whereClause = {};
-//     let hasActivityFiltering = false; // Initialize early for use throughout the function
-//     let hasPersonFiltering = false; // Initialize for Person filtering
-//     let hasOrganizationFiltering = false; // Initialize for Organization filtering
-
-//     // let include = [
-//     //   {
-//     //     model: LeadDetails,
-//     //     as: "details",
-//     //     required: false,
-//     //     attributes: leadDetailsAttributes && leadDetailsAttributes.length > 0 ? leadDetailsAttributes : undefined
-
-//     //   },
-//     // ];
-//     let include = [];
-//     if (leadDetailsAttributes && leadDetailsAttributes.length > 0) {
-//       include.push({
-//         model: LeadDetails,
-//         as: "details",
-//         required: false,
-//         attributes: leadDetailsAttributes,
-//       });
-//     }
-
-//     // Handle masterUserID filtering based on role and query parameters
-//     if (req.role === "admin") {
-//       // Admin can filter by specific masterUserID or see all leads
-//       if (queryMasterUserID && queryMasterUserID !== "all") {
-//         whereClause[Op.or] = [
-//           { masterUserID: queryMasterUserID },
-//           { ownerId: queryMasterUserID },
-//         ];
-//       }
-//       // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
-//     } else {
-//       // Non-admin users: apply visibility filtering based on group rules
-//       let visibilityConditions = [];
-
-//       if (leadVisibilityRule) {
-//         switch (leadVisibilityRule.defaultVisibility) {
-//           case "owner_only":
-//             // User can only see their own leads
-//             visibilityConditions.push({
-//               [Op.or]: [
-//                 { masterUserID: req.adminId },
-//                 { ownerId: req.adminId },
-//               ],
-//             });
-//             break;
-
-//           case "group_only":
-//             // User can see leads from their visibility group
-//             if (userGroup) {
-//               visibilityConditions.push({
-//                 [Op.or]: [
-//                   { visibilityGroupId: userGroup.groupId },
-//                   { masterUserID: req.adminId },
-//                   { ownerId: req.adminId },
-//                 ],
-//               });
-//             }
-//             break;
-
-//           case "item_owners_visibility_group":
-//             // User can see leads based on owner's visibility group
-//             if (userGroup) {
-//               // Get all users in the same visibility group
-//               const groupMembers = await GroupMembership.findAll({
-//                 where: {
-//                   groupId: userGroup.groupId,
-//                   isActive: true,
-//                 },
-//                 attributes: ["userId"],
-//               });
-
-//               const memberIds = groupMembers.map((member) => member.userId);
-
-//               visibilityConditions.push({
-//                 [Op.or]: [
-//                   { masterUserID: { [Op.in]: memberIds } },
-//                   { ownerId: { [Op.in]: memberIds } },
-//                   // Include leads where visibility level allows group access
-//                   {
-//                     visibilityLevel: {
-//                       [Op.in]: [
-//                         "everyone",
-//                         "group_only",
-//                         "item_owners_visibility_group",
-//                       ],
-//                     },
-//                     visibilityGroupId: userGroup.groupId,
-//                   },
-//                 ],
-//               });
-//             }
-//             break;
-
-//           case "everyone":
-//             // User can see all leads (no additional filtering)
-//             break;
-
-//           default:
-//             // Default to owner only for security
-//             visibilityConditions.push({
-//               [Op.or]: [
-//                 { masterUserID: req.adminId },
-//                 { ownerId: req.adminId },
-//               ],
-//             });
-//         }
-//       } else {
-//         // No visibility rule found, default to owner only
-//         visibilityConditions.push({
-//           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
-//         });
-//       }
-
-//       // Apply visibility conditions
-//       if (visibilityConditions.length > 0) {
-//         whereClause[Op.and] = whereClause[Op.and] || [];
-//         whereClause[Op.and].push(...visibilityConditions);
-//       }
-
-//       // Handle specific user filtering for non-admin users
-//       if (queryMasterUserID && queryMasterUserID !== "all") {
-//         // Non-admin can only filter within their visible scope
-//         const userId = queryMasterUserID;
-//         whereClause[Op.and] = whereClause[Op.and] || [];
-//         whereClause[Op.and].push({
-//           [Op.or]: [{ masterUserID: userId }, { ownerId: userId }],
-//         });
-//       }
-//     }
-
-//     console.log("→ Query params:", req.query);
-//     console.log("→ queryMasterUserID:", queryMasterUserID);
-//     console.log("→ req.adminId:", req.adminId);
-//     console.log("→ req.role:", req.role);
-
-//     //................................................................//filter
-//     if (filterId) {
-//       console.log("Processing filter with filterId:", filterId);
-
-//       // Fetch the saved filter
-//       const filter = await LeadFilter.findByPk(filterId);
-//       if (!filter) {
-//         return res.status(404).json({ message: "Filter not found." });
-//       }
-
-//       console.log("Found filter:", filter.filterName);
-
-//       const filterConfig =
-//         typeof filter.filterConfig === "string"
-//           ? JSON.parse(filter.filterConfig)
-//           : filter.filterConfig;
-
-//       console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
-
-//       const { all = [], any = [] } = filterConfig;
-//       const leadFields = Object.keys(Lead.rawAttributes);
-//       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
-//       const personFields = Object.keys(Person.rawAttributes);
-//       const organizationFields = Object.keys(Organization.rawAttributes);
-//       const activityFields = Object.keys(Activity.rawAttributes);
-
-//       let filterWhere = {};
-//       let leadDetailsWhere = {};
-//       let personWhere = {};
-//       let organizationWhere = {};
-//       let activityWhere = {};
-//       let customFieldsConditions = { all: [], any: [] };
-
-//       console.log("Available lead fields:", leadFields);
-//       console.log("Available leadDetails fields:", leadDetailsFields);
-//       console.log("Available person fields:", personFields);
-//       console.log("Available organization fields:", organizationFields);
-//       console.log("Available activity fields:", activityFields);
-
-//       // --- Your new filter logic for all ---
-//       if (all.length > 0) {
-//         console.log("Processing 'all' conditions:", all);
-
-//         filterWhere[Op.and] = [];
-//         leadDetailsWhere[Op.and] = [];
-//         personWhere[Op.and] = [];
-//         organizationWhere[Op.and] = [];
-//         activityWhere[Op.and] = [];
-//         all.forEach((cond) => {
-//           console.log("Processing condition:", cond);
-
-//           // Check if entity is specified in the condition
-//           if (cond.entity) {
-//             console.log(`Condition specifies entity: ${cond.entity}`);
-
-//             // Handle both "Lead" and "Leads" entity names for backward compatibility
-//             if (
-//               (cond.entity === "Lead" || cond.entity === "Leads") &&
-//               leadFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Lead field due to entity specification`
-//               );
-//               filterWhere[Op.and].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "LeadDetails" &&
-//               leadDetailsFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as LeadDetails field due to entity specification`
-//               );
-//               leadDetailsWhere[Op.and].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Person" &&
-//               personFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Person field due to entity specification`
-//               );
-//               personWhere[Op.and].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Organization" &&
-//               organizationFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Organization field due to entity specification`
-//               );
-//               organizationWhere[Op.and].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Activity" &&
-//               activityFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Activity field due to entity specification`
-//               );
-//               const activityCondition = buildCondition(cond);
-//               console.log(
-//                 `Built Activity condition for ${cond.field}:`,
-//                 activityCondition
-//               );
-//               console.log(
-//                 `Activity condition symbols:`,
-//                 Object.getOwnPropertySymbols(activityCondition[cond.field])
-//               );
-//               if (
-//                 Object.getOwnPropertySymbols(activityCondition[cond.field])
-//                   .length > 0
-//               ) {
-//                 const symbol = Object.getOwnPropertySymbols(
-//                   activityCondition[cond.field]
-//                 )[0];
-//                 console.log(
-//                   `Activity condition value: ${
-//                     activityCondition[cond.field][symbol]
-//                   }`
-//                 );
-//               }
-//               activityWhere[Op.and].push(activityCondition);
-//             } else {
-//               console.log(
-//                 `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
-//               );
-//               customFieldsConditions.all.push(cond);
-//             }
-//           } else {
-//             // Fallback to original logic when entity is not specified
-//             if (leadFields.includes(cond.field)) {
-//               console.log(`Field '${cond.field}' found in Lead fields`);
-//               filterWhere[Op.and].push(buildCondition(cond));
-//             } else if (leadDetailsFields.includes(cond.field)) {
-//               console.log(`Field '${cond.field}' found in LeadDetails fields`);
-//               leadDetailsWhere[Op.and].push(buildCondition(cond));
-//             } else if (personFields.includes(cond.field)) {
-//               console.log(`Field '${cond.field}' found in Person fields`);
-//               personWhere[Op.and].push(buildCondition(cond));
-//             } else if (organizationFields.includes(cond.field)) {
-//               console.log(`Field '${cond.field}' found in Organization fields`);
-//               organizationWhere[Op.and].push(buildCondition(cond));
-//             } else if (activityFields.includes(cond.field)) {
-//               console.log(`Field '${cond.field}' found in Activity fields`);
-//               activityWhere[Op.and].push(buildCondition(cond));
-//             } else {
-//               console.log(
-//                 `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-//               );
-//               // Handle custom fields
-//               customFieldsConditions.all.push(cond);
-//             }
-//           }
-//         });
-//         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-//         if (leadDetailsWhere[Op.and].length === 0)
-//           delete leadDetailsWhere[Op.and];
-//         if (personWhere[Op.and].length === 0) delete personWhere[Op.and];
-//         if (organizationWhere[Op.and].length === 0)
-//           delete organizationWhere[Op.and];
-//         if (activityWhere[Op.and].length === 0) delete activityWhere[Op.and];
-//       }
-
-//       // --- Your new filter logic for any ---
-//       if (any.length > 0) {
-//         filterWhere[Op.or] = [];
-//         leadDetailsWhere[Op.or] = [];
-//         personWhere[Op.or] = [];
-//         organizationWhere[Op.or] = [];
-//         activityWhere[Op.or] = [];
-//         any.forEach((cond) => {
-//           // Check if entity is specified in the condition
-//           if (cond.entity) {
-//             console.log(`'Any' condition specifies entity: ${cond.entity}`);
-
-//             if (cond.entity === "Lead" && leadFields.includes(cond.field)) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Lead field due to entity specification`
-//               );
-//               filterWhere[Op.or].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "LeadDetails" &&
-//               leadDetailsFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as LeadDetails field due to entity specification`
-//               );
-//               leadDetailsWhere[Op.or].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Person" &&
-//               personFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Person field due to entity specification`
-//               );
-//               personWhere[Op.or].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Organization" &&
-//               organizationFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Organization field due to entity specification`
-//               );
-//               organizationWhere[Op.or].push(buildCondition(cond));
-//             } else if (
-//               cond.entity === "Activity" &&
-//               activityFields.includes(cond.field)
-//             ) {
-//               console.log(
-//                 `Field '${cond.field}' processed as Activity field due to entity specification`
-//               );
-//               const activityCondition = buildCondition(cond);
-//               console.log(
-//                 `Built Activity condition for ${cond.field}:`,
-//                 activityCondition
-//               );
-//               activityWhere[Op.or].push(activityCondition);
-//             } else {
-//               console.log(
-//                 `Field '${cond.field}' not found in specified entity '${cond.entity}', treating as custom field`
-//               );
-//               customFieldsConditions.any.push(cond);
-//             }
-//           } else {
-//             // Fallback to original logic when entity is not specified
-//             if (leadFields.includes(cond.field)) {
-//               filterWhere[Op.or].push(buildCondition(cond));
-//             } else if (leadDetailsFields.includes(cond.field)) {
-//               leadDetailsWhere[Op.or].push(buildCondition(cond));
-//             } else if (personFields.includes(cond.field)) {
-//               personWhere[Op.or].push(buildCondition(cond));
-//             } else if (organizationFields.includes(cond.field)) {
-//               organizationWhere[Op.or].push(buildCondition(cond));
-//             } else if (activityFields.includes(cond.field)) {
-//               activityWhere[Op.or].push(buildCondition(cond));
-//             } else {
-//               // Handle custom fields
-//               customFieldsConditions.any.push(cond);
-//             }
-//           }
-//         });
-//         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-//         if (leadDetailsWhere[Op.or].length === 0)
-//           delete leadDetailsWhere[Op.or];
-//         if (personWhere[Op.or].length === 0) delete personWhere[Op.or];
-//         if (organizationWhere[Op.or].length === 0)
-//           delete organizationWhere[Op.or];
-//         if (activityWhere[Op.or].length === 0) delete activityWhere[Op.or];
-//       }
-
-//       // Merge with archive/masterUserID filters
-//       if (isArchived !== undefined)
-//         filterWhere.isArchived = isArchived === "true";
-
-//       // Apply masterUserID filtering logic for filters
-//       if (req.role === "admin") {
-//         // Admin can filter by specific masterUserID or see all leads
-//         if (queryMasterUserID && queryMasterUserID !== "all") {
-//           if (filterWhere[Op.or]) {
-//             // If there's already an Op.or condition from filters, we need to combine properly
-//             filterWhere[Op.and] = [
-//               { [Op.or]: filterWhere[Op.or] },
-//               {
-//                 [Op.or]: [
-//                   { masterUserID: queryMasterUserID },
-//                   { ownerId: queryMasterUserID },
-//                 ],
-//               },
-//             ];
-//             delete filterWhere[Op.or];
-//           } else {
-//             filterWhere[Op.or] = [
-//               { masterUserID: queryMasterUserID },
-//               { ownerId: queryMasterUserID },
-//             ];
-//           }
-//         }
-//       } else {
-//         // Non-admin users: filter by their own leads or specific user if provided
-//         const userId =
-//           queryMasterUserID && queryMasterUserID !== "all"
-//             ? queryMasterUserID
-//             : req.adminId;
-//         if (filterWhere[Op.or]) {
-//           // If there's already an Op.or condition from filters, we need to combine properly
-//           filterWhere[Op.and] = [
-//             { [Op.or]: filterWhere[Op.or] },
-//             { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
-//           ];
-//           delete filterWhere[Op.or];
-//         } else {
-//           filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
-//         }
-//       }
-//       whereClause = filterWhere;
-
-//       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
-//       console.log(
-//         "→ Built leadDetailsWhere:",
-//         JSON.stringify(leadDetailsWhere)
-//       );
-//       console.log("→ Built personWhere:", JSON.stringify(personWhere));
-//       console.log(
-//         "→ Built organizationWhere:",
-//         JSON.stringify(organizationWhere)
-//       );
-//       console.log("→ Built activityWhere:", activityWhere);
-//       console.log(
-//         "→ Activity where object keys length:",
-//         Object.keys(activityWhere).length
-//       );
-//       console.log(
-//         "→ Activity where object symbols length:",
-//         Object.getOwnPropertySymbols(activityWhere).length
-//       );
-//       console.log(
-//         "→ All activity where properties:",
-//         Object.getOwnPropertyNames(activityWhere).concat(
-//           Object.getOwnPropertySymbols(activityWhere)
-//         )
-//       );
-
-//       // Fix: Check for both regular keys and Symbol properties (Sequelize operators are Symbols)
-//       hasActivityFiltering =
-//         Object.keys(activityWhere).length > 0 ||
-//         Object.getOwnPropertySymbols(activityWhere).length > 0;
-
-//       hasPersonFiltering =
-//         Object.keys(personWhere).length > 0 ||
-//         Object.getOwnPropertySymbols(personWhere).length > 0;
-
-//       hasOrganizationFiltering =
-//         Object.keys(organizationWhere).length > 0 ||
-//         Object.getOwnPropertySymbols(organizationWhere).length > 0;
-
-//       if (hasActivityFiltering) {
-//         console.log("→ Activity filtering will be applied:");
-//         if (activityWhere[Op.and]) {
-//           console.log(
-//             "  - AND conditions count:",
-//             activityWhere[Op.and].length
-//           );
-//         }
-//         if (activityWhere[Op.or]) {
-//           console.log("  - OR conditions count:", activityWhere[Op.or].length);
-//         }
-
-//         // Quick database check for debugging
-//         try {
-//           const totalActivities = await Activity.count();
-//           console.log("→ Total activities in database:", totalActivities);
-
-//           const activitiesWithType = await Activity.count({
-//             where: { type: "Meeting" },
-//           });
-//           console.log("→ Activities with type='Meeting':", activitiesWithType);
-
-//           const activitiesWithLeads = await Activity.count({
-//             where: { leadId: { [Op.not]: null } },
-//           });
-//           console.log("→ Activities linked to leads:", activitiesWithLeads);
-
-//           const leadsWithActivities = await Lead.count({
-//             include: [
-//               {
-//                 model: Activity,
-//                 as: "Activities",
-//                 required: true,
-//               },
-//             ],
-//           });
-//           console.log("→ Leads that have activities:", leadsWithActivities);
-//         } catch (debugError) {
-//           console.log("→ Debug query error:", debugError.message);
-//         }
-//       }
-
-//       if (Object.keys(leadDetailsWhere).length > 0) {
-//         include.push({
-//           model: LeadDetails,
-//           as: "details",
-//           where: leadDetailsWhere,
-//           required: true,
-//         });
-//       } else {
-//         include.push({
-//           model: LeadDetails,
-//           as: "details",
-//           required: false,
-//         });
-//       }
-
-//       if (hasPersonFiltering) {
-//         console.log("→ Person filtering will be applied:");
-//         if (personWhere[Op.and]) {
-//           console.log("  - AND conditions count:", personWhere[Op.and].length);
-//         }
-//         if (personWhere[Op.or]) {
-//           console.log("  - OR conditions count:", personWhere[Op.or].length);
-//         }
-
-//         include.push({
-//           model: Person,
-//           as: "LeadPerson",
-//           required: true,
-//           where: personWhere,
-//         });
-//       } else {
-//         include.push({
-//           model: Person,
-//           as: "LeadPerson",
-//           required: false,
-//         });
-//       }
-
-//       if (hasOrganizationFiltering) {
-//         console.log("→ Organization filtering will be applied:");
-//         if (organizationWhere[Op.and]) {
-//           console.log(
-//             "  - AND conditions count:",
-//             organizationWhere[Op.and].length
-//           );
-//         }
-//         if (organizationWhere[Op.or]) {
-//           console.log(
-//             "  - OR conditions count:",
-//             organizationWhere[Op.or].length
-//           );
-//         }
-
-//         include.push({
-//           model: Organization,
-//           as: "LeadOrganization",
-//           required: true,
-//           where: organizationWhere,
-//         });
-//       } else {
-//         include.push({
-//           model: Organization,
-//           as: "LeadOrganization",
-//           required: false,
-//         });
-//       }
-
-//       if (hasActivityFiltering) {
-//         console.log("==========================================");
-//         console.log("🔥 ACTIVITY FILTERING DETECTED!");
-//         console.log(
-//           "🔥 Activity where clause:",
-//           JSON.stringify(activityWhere, null, 2)
-//         );
-//         console.log("🔥 Activity where keys:", Object.keys(activityWhere));
-//         console.log(
-//           "🔥 Activity where symbols:",
-//           Object.getOwnPropertySymbols(activityWhere)
-//         );
-
-//         // Debug: Show the actual condition structure
-//         if (activityWhere[Op.and]) {
-//           console.log("🔥 AND conditions details:", activityWhere[Op.and]);
-//           activityWhere[Op.and].forEach((condition, index) => {
-//             console.log(
-//               `🔥 Condition ${index}:`,
-//               JSON.stringify(condition, null, 2)
-//             );
-//             console.log(`🔥 Condition ${index} keys:`, Object.keys(condition));
-//             console.log(
-//               `🔥 Condition ${index} symbols:`,
-//               Object.getOwnPropertySymbols(condition)
-//             );
-
-//             // Check each field in the condition
-//             Object.keys(condition).forEach((field) => {
-//               console.log(`🔥 Field '${field}' value:`, condition[field]);
-//               console.log(
-//                 `🔥 Field '${field}' symbols:`,
-//                 Object.getOwnPropertySymbols(condition[field])
-//               );
-
-//               // Show Symbol values
-//               Object.getOwnPropertySymbols(condition[field]).forEach(
-//                 (symbol) => {
-//                   console.log(
-//                     `🔥 Symbol ${symbol.toString()} value:`,
-//                     condition[field][symbol]
-//                   );
-//                 }
-//               );
-//             });
-//           });
-//         }
-//         console.log("==========================================");
-
-//         // NEW APPROACH: Rebuild the activity condition from scratch to avoid Symbol loss
-//         console.log("🔧 REBUILDING ACTIVITY CONDITIONS FROM SCRATCH...");
-
-//         // Find the activity conditions from the filter config and rebuild them
-//         let rebuiltActivityWhere = null;
-
-//         if (activityWhere[Op.and] && activityWhere[Op.and].length > 0) {
-//           const conditions = [];
-
-//           activityWhere[Op.and].forEach((condition, index) => {
-//             console.log(`🔧 Rebuilding condition ${index}:`, condition);
-
-//             // Extract the field name and value from the original condition
-//             Object.keys(condition).forEach((fieldName) => {
-//               const fieldCondition = condition[fieldName];
-//               console.log(
-//                 `🔧 Processing field '${fieldName}' with condition:`,
-//                 fieldCondition
-//               );
-
-//               // Find the operator and value
-//               Object.getOwnPropertySymbols(fieldCondition).forEach((symbol) => {
-//                 const value = fieldCondition[symbol];
-//                 console.log(
-//                   `🔧 Found operator ${symbol.toString()} with value: ${value}`
-//                 );
-
-//                 // Rebuild the condition with fresh Symbols
-//                 if (symbol === Op.eq) {
-//                   const rebuiltCondition = { [fieldName]: { [Op.eq]: value } };
-//                   console.log(`🔧 Rebuilt condition:`, rebuiltCondition);
-//                   console.log(
-//                     `🔧 Rebuilt condition symbols:`,
-//                     Object.getOwnPropertySymbols(rebuiltCondition[fieldName])
-//                   );
-//                   conditions.push(rebuiltCondition);
-//                 }
-//                 // Add other operators as needed (Op.ne, Op.like, etc.)
-//               });
-//             });
-//           });
-
-//           if (conditions.length > 0) {
-//             rebuiltActivityWhere = { [Op.and]: conditions };
-//             console.log("� REBUILT ACTIVITY WHERE:", rebuiltActivityWhere);
-//             console.log(
-//               "� Rebuilt symbols:",
-//               Object.getOwnPropertySymbols(rebuiltActivityWhere)
-//             );
-
-//             if (rebuiltActivityWhere[Op.and]) {
-//               console.log(
-//                 "� Rebuilt AND conditions:",
-//                 rebuiltActivityWhere[Op.and]
-//               );
-//               rebuiltActivityWhere[Op.and].forEach((condition, index) => {
-//                 console.log(`� Rebuilt condition ${index}:`, condition);
-//                 Object.keys(condition).forEach((field) => {
-//                   console.log(
-//                     `🔧 Field '${field}' symbols:`,
-//                     Object.getOwnPropertySymbols(condition[field])
-//                   );
-//                   Object.getOwnPropertySymbols(condition[field]).forEach(
-//                     (symbol) => {
-//                       console.log(
-//                         `� Rebuilt field '${field}' symbol ${symbol.toString()} = ${
-//                           condition[field][symbol]
-//                         }`
-//                       );
-//                     }
-//                   );
-//                 });
-//               });
-//             }
-//           }
-//         }
-
-//         // Use the rebuilt condition if available, otherwise try direct approach
-//         const finalActivityWhere = rebuiltActivityWhere || { type: "Meeting" };
-
-//         console.log("🔧 FINAL ACTIVITY WHERE CONDITION:", finalActivityWhere);
-//         console.log(
-//           "🔧 Final condition symbols:",
-//           Object.getOwnPropertySymbols(finalActivityWhere)
-//         );
-
-//         include.push({
-//           model: Activity,
-//           as: "Activities",
-//           required: true,
-//           where: finalActivityWhere,
-//         });
-
-//         console.log("🔥 ACTIVITY FILTERING APPLIED WITH REBUILT CONDITIONS");
-//         console.log(
-//           "🔥 This should now generate SQL: INNER JOIN activities ON activities.leadId = leads.leadId WHERE activities.type = 'Meeting'"
-//         );
-
-//         // FINAL DEBUG: Check what's actually in the include array
-//         const finalActivityInclude = include[include.length - 1];
-//         console.log("🔍 FINAL ACTIVITY INCLUDE IN ARRAY:");
-//         console.log("🔍 Model:", finalActivityInclude.model.name);
-//         console.log("🔍 As:", finalActivityInclude.as);
-//         console.log("🔍 Required:", finalActivityInclude.required);
-//         console.log("🔍 Where clause:", finalActivityInclude.where);
-//         console.log(
-//           "🔍 Where keys:",
-//           Object.keys(finalActivityInclude.where || {})
-//         );
-//         console.log(
-//           "🔍 Where symbols:",
-//           Object.getOwnPropertySymbols(finalActivityInclude.where || {})
-//         );
-
-//         if (
-//           finalActivityInclude.where &&
-//           typeof finalActivityInclude.where === "object"
-//         ) {
-//           Object.keys(finalActivityInclude.where).forEach((key) => {
-//             console.log(
-//               `🔍 Where property '${key}':`,
-//               finalActivityInclude.where[key]
-//             );
-//           });
-//           Object.getOwnPropertySymbols(finalActivityInclude.where).forEach(
-//             (symbol) => {
-//               console.log(
-//                 `🔍 Where symbol ${symbol.toString()}:`,
-//                 finalActivityInclude.where[symbol]
-//               );
-//             }
-//           );
-//         }
-
-//         console.log("==========================================");
-//       } else {
-//         console.log("==========================================");
-//         console.log(
-//           "🔵 NO ACTIVITY FILTERING - ADDING DEFAULT ACTIVITY INCLUDE"
-//         );
-//         console.log("==========================================");
-//         include.push({
-//           model: Activity,
-//           as: "Activities",
-//           required: false,
-//         });
-//       }
-
-//       console.log(
-//         "→ Updated include with LeadDetails where:",
-//         JSON.stringify(leadDetailsWhere)
-//       );
-
-//       // Handle custom field filtering
-//       if (
-//         customFieldsConditions.all.length > 0 ||
-//         customFieldsConditions.any.length > 0
-//       ) {
-//         console.log(
-//           "Processing custom field conditions:",
-//           customFieldsConditions
-//         );
-
-//         // Debug: Show all custom fields in the database
-//         const allCustomFields = await CustomField.findAll({
-//           where: {
-//             [Op.or]: [
-//               { masterUserID: req.adminId },
-//               { fieldSource: "default" },
-//               { fieldSource: "system" },
-//             ],
-//           },
-//           attributes: [
-//             "fieldId",
-//             "fieldName",
-//             "entityType",
-//             "fieldSource",
-//             "isActive",
-//           ],
-//         });
-
-//         console.log(
-//           "All custom fields in database:",
-//           allCustomFields.map((f) => ({
-//             fieldId: f.fieldId,
-//             fieldName: f.fieldName,
-//             entityType: f.entityType,
-//             fieldSource: f.fieldSource,
-//             isActive: f.isActive,
-//           }))
-//         );
-
-//         const customFieldFilters = await buildCustomFieldFilters(
-//           customFieldsConditions,
-//           req.adminId
-//         );
-
-//         console.log("Built custom field filters:", customFieldFilters);
-
-//         if (customFieldFilters.length > 0) {
-//           // Apply custom field filtering by finding leads that match the custom field conditions
-//           const matchingLeadIds = await getLeadIdsByCustomFieldFilters(
-//             customFieldFilters,
-//             req.adminId
-//           );
-
-//           console.log(
-//             "Matching lead IDs from custom field filtering:",
-//             matchingLeadIds
-//           );
-
-//           if (matchingLeadIds.length > 0) {
-//             // If we already have other conditions, combine them
-//             if (filterWhere[Op.and]) {
-//               filterWhere[Op.and].push({
-//                 leadId: { [Op.in]: matchingLeadIds },
-//               });
-//             } else if (filterWhere[Op.or]) {
-//               filterWhere[Op.and] = [
-//                 { [Op.or]: filterWhere[Op.or] },
-//                 { leadId: { [Op.in]: matchingLeadIds } },
-//               ];
-//               delete filterWhere[Op.or];
-//             } else {
-//               filterWhere.leadId = { [Op.in]: matchingLeadIds };
-//             }
-//           } else {
-//             // No leads match the custom field conditions, so return empty result
-//             console.log("No matching leads found, setting empty result");
-//             filterWhere.leadId = { [Op.in]: [] };
-//           }
-//         } else {
-//           console.log(
-//             "No custom field filters found, possibly field not found"
-//           );
-//         }
-
-//         whereClause = filterWhere;
-//       }
-//     } else {
-//       // Standard search/filter logic
-//       if (isArchived !== undefined)
-//         whereClause.isArchived = isArchived === "true";
-
-//       if (search) {
-//         whereClause[Op.or] = [
-//           { contactPerson: { [Op.like]: `%${search}%` } },
-//           { organization: { [Op.like]: `%${search}%` } },
-//           { title: { [Op.like]: `%${search}%` } },
-//           { email: { [Op.like]: `%${search}%` } },
-//           { phone: { [Op.like]: `%${search}%` } },
-//         ];
-//         console.log(
-//           "→ Search applied, whereClause[Op.or]:",
-//           whereClause[Op.or]
-//         );
-//       }
-
-//       // Add default Activity include for non-filtered queries
-//       include.push({
-//         model: Activity,
-//         as: "Activities",
-//         required: false,
-//       });
-//     }
-
-//     // Pagination
-//     const offset = (page - 1) * limit;
-//     console.log("→ Final whereClause:", JSON.stringify(whereClause));
-//     console.log("→ Final include:", JSON.stringify(include));
-//     console.log("→ Pagination: limit =", limit, "offset =", offset);
-//     console.log("→ Order:", sortBy, order);
-//     // Always include Person and Organization
-//     if (!include.some((i) => i.as === "LeadPerson")) {
-//       include.push({
-//         model: Person,
-//         as: "LeadPerson",
-//         required: false,
-//       });
-//     }
-//     if (!include.some((i) => i.as === "LeadOrganization")) {
-//       include.push({
-//         model: Organization,
-//         as: "LeadOrganization",
-//         required: false,
-//       });
-//     }
-
-//     // Activity include is now handled in the filtering section above
-//     // No need for additional Activity include logic here
-//     include.push({
-//       model: MasterUser,
-//       as: "Owner",
-//       attributes: ["name", "masterUserID"],
-//       required: false,
-//     });
-//     //   if (!leadAttributes.includes('leadOrganizationId')) {
-//     //   leadAttributes.push('leadOrganizationId');
-//     // }
-//     // if (!leadAttributes.includes('personId')) {
-//     //   leadAttributes.push('personId');
-//     // }
-
-//     // Always exclude leads that have a dealId (converted leads)
-//     whereClause.dealId = null;
-//     console.log("🔍 Applied dealId = null (excluding converted leads)");
-
-//     console.log("==========================================");
-//     console.log("🚀 FINAL QUERY EXECUTION STARTING");
-//     console.log("🚀 Total include array length:", include.length);
-
-//     // Check if Activity filtering is active
-//     console.log("🚀 Activity include details:");
-//     const activityInclude = include.find((i) => i.as === "Activities");
-//     if (activityInclude) {
-//       console.log("  🎯 Activity include found:");
-//       console.log("    - Required:", activityInclude.required);
-//       console.log("    - Has where clause:", !!activityInclude.where);
-//       if (activityInclude.where) {
-//         console.log(
-//           "    - Where clause:",
-//           JSON.stringify(activityInclude.where)
-//         );
-//       }
-//     } else {
-//       console.log("  ❌ NO Activity include found!");
-//     }
-
-//     // Check if Person filtering is active
-//     console.log("🚀 Person include details:");
-//     const personInclude = include.find((i) => i.as === "LeadPerson");
-//     if (personInclude) {
-//       console.log("  👤 Person include found:");
-//       console.log("    - Required:", personInclude.required);
-//       console.log("    - Has where clause:", !!personInclude.where);
-//       if (personInclude.where) {
-//         console.log("    - Where clause:", JSON.stringify(personInclude.where));
-//       }
-//     } else {
-//       console.log("  ❌ NO Person include found!");
-//     }
-
-//     // Check if Organization filtering is active
-//     console.log("🚀 Organization include details:");
-//     const organizationInclude = include.find(
-//       (i) => i.as === "LeadOrganization"
-//     );
-//     if (organizationInclude) {
-//       console.log("  🏢 Organization include found:");
-//       console.log("    - Required:", organizationInclude.required);
-//       console.log("    - Has where clause:", !!organizationInclude.where);
-//       if (organizationInclude.where) {
-//         console.log(
-//           "    - Where clause:",
-//           JSON.stringify(organizationInclude.where)
-//         );
-//       }
-//     } else {
-//       console.log("  ❌ NO Organization include found!");
-//     }
-//     console.log("==========================================");
-
-//     // Fetch leads with pagination, filtering, sorting, searching, and leadDetails
-//     const leads = await Lead.findAndCountAll({
-//       where: whereClause,
-//       include,
-//       limit: parseInt(limit),
-//       offset: parseInt(offset),
-//       order: [[sortBy, order.toUpperCase()]],
-//       attributes:
-//         leadAttributes && leadAttributes.length > 0
-//           ? leadAttributes
-//           : undefined,
-//     });
-
-//     console.log("==========================================");
-//     console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
-//     console.log("🎉 Total records found:", leads.count);
-
-//     // Debug Activity filtering results
-//     if (filterId && activityInclude && activityInclude.required) {
-//       console.log("🎯 ACTIVITY FILTER RESULTS:");
-//       console.log("  - Leads found with Activity filter:", leads.count);
-//       if (leads.rows.length > 0) {
-//         console.log(
-//           "  - First lead activities:",
-//           leads.rows[0].Activities
-//             ? leads.rows[0].Activities.length
-//             : "No Activities"
-//         );
-//         if (leads.rows[0].Activities && leads.rows[0].Activities.length > 0) {
-//           console.log(
-//             "  - First activity type:",
-//             leads.rows[0].Activities[0].type
-//           );
-//         }
-//       }
-//     }
-
-//     // Debug Person filtering results
-//     if (filterId && hasPersonFiltering) {
-//       console.log("👤 PERSON FILTER RESULTS:");
-//       console.log("  - Leads found with Person filter:", leads.count);
-//       if (leads.rows.length > 0) {
-//         console.log(
-//           "  - First lead person:",
-//           leads.rows[0].LeadPerson
-//             ? leads.rows[0].LeadPerson.firstName +
-//                 " " +
-//                 leads.rows[0].LeadPerson.lastName
-//             : "No Person"
-//         );
-//       }
-//     }
-
-//     // Debug Organization filtering results
-//     if (filterId && hasOrganizationFiltering) {
-//       console.log("🏢 ORGANIZATION FILTER RESULTS:");
-//       console.log("  - Leads found with Organization filter:", leads.count);
-//       if (leads.rows.length > 0) {
-//         console.log(
-//           "  - First lead organization:",
-//           leads.rows[0].LeadOrganization
-//             ? leads.rows[0].LeadOrganization.organizationName
-//             : "No Organization"
-//         );
-//       }
-//     }
-//     console.log("==========================================");
-
-//     // Get custom field values for all leads (including default/system fields and unified fields)
-//     // Only include custom fields where check is true
-//     const leadIds = leads.rows.map((lead) => lead.leadId);
-//     const customFieldValues = await CustomFieldValue.findAll({
-//       where: {
-//         entityId: leadIds,
-//         entityType: "lead",
-//       },
-//       include: [
-//         {
-//           model: CustomField,
-//           as: "CustomField",
-//           where: {
-//             isActive: true,
-//             check: true, // Only include custom fields where check is true
-//             entityType: { [Op.in]: ["lead", "both"] }, // Support unified fields
-//             [Op.or]: [
-//               { masterUserID: req.adminId },
-//               { fieldSource: "default" },
-//               { fieldSource: "system" },
-//             ],
-//           },
-//           required: true,
-//         },
-//       ],
-//     });
-
-//     // Get all currency IDs from leads
-//     const proposalCurrencyIds = leads.rows
-//       .map((lead) => lead.proposalValueCurrency)
-//       .filter(Boolean);
-//     const valueCurrencyIds = leads.rows
-//       .map((lead) => lead.valueCurrency)
-//       .filter(Boolean);
-//     const allCurrencyIds = [
-//       ...new Set([...proposalCurrencyIds, ...valueCurrencyIds]),
-//     ];
-
-//     // Fetch currency data
-//     let currencies = {};
-//     if (allCurrencyIds.length > 0) {
-//       const currencyRecords = await Currency.findAll({
-//         where: {
-//           currencyId: allCurrencyIds,
-//         },
-//         attributes: ["currencyId", "currency_desc"],
-//         raw: true,
-//       });
-
-//       // Create a map for quick lookup
-//       currencies = currencyRecords.reduce((acc, currency) => {
-//         acc[currency.currencyId] = currency.currency_desc;
-//         return acc;
-//       }, {});
-//     }
-
-//     // Group custom field values by leadId
-//     const customFieldsByLead = {};
-//     customFieldValues.forEach((value) => {
-//       if (!value.CustomField) return;
-//       if (!customFieldsByLead[value.entityId]) {
-//         customFieldsByLead[value.entityId] = {};
-//       }
-//       customFieldsByLead[value.entityId][value.CustomField.fieldName] = {
-//         fieldId: value.CustomField.fieldId,
-//         fieldName: value.CustomField.fieldName,
-//         fieldLabel: value.CustomField.fieldLabel,
-//         fieldType: value.CustomField.fieldType,
-//         isImportant: value.CustomField.isImportant,
-//         value: value.value,
-//       };
-//     });
-
-//     const flatLeads = leads.rows.map((lead) => {
-//       const leadObj = lead.toJSON();
-//       // Overwrite ownerName with the latest Owner.name if present
-//       if (leadObj.Owner && leadObj.Owner.name) {
-//         leadObj.ownerName = leadObj.Owner.name;
-//       }
-//       delete leadObj.Owner; // Remove the nested Owner object
-//       delete leadObj.LeadPerson;
-//       delete leadObj.LeadOrganization;
-
-//       // Keep Activities data for the response
-//       if (leadObj.Activities) {
-//         leadObj.activities = leadObj.Activities;
-//         delete leadObj.Activities; // Remove the nested Activities object but keep the data in activities
-//       }
-
-//       if (leadObj.details) {
-//         Object.assign(leadObj, leadObj.details);
-//         delete leadObj.details;
-//       }
-
-//       // Add currency information
-//       // For proposal value currency
-//       if (
-//         leadObj.proposalValueCurrency &&
-//         currencies[leadObj.proposalValueCurrency]
-//       ) {
-//         leadObj.proposalValueCurrencyId = leadObj.proposalValueCurrency;
-//         leadObj.proposalValueCurrency =
-//           currencies[leadObj.proposalValueCurrency];
-//       } else {
-//         leadObj.proposalValueCurrencyId = null;
-//         leadObj.proposalValueCurrency = null;
-//       }
-
-//       // For value currency
-//       if (leadObj.valueCurrency && currencies[leadObj.valueCurrency]) {
-//         leadObj.valueCurrencyId = leadObj.valueCurrency;
-//         leadObj.valueCurrency = currencies[leadObj.valueCurrency];
-//       } else {
-//         leadObj.valueCurrencyId = null;
-//         leadObj.valueCurrency = null;
-//       }
-
-//       // Add custom fields directly to the lead object (not wrapped in customFields)
-//       const customFields = customFieldsByLead[leadObj.leadId] || {};
-//       Object.entries(customFields).forEach(([fieldName, fieldData]) => {
-//         leadObj[fieldName] = fieldData.value;
-//       });
-
-//       // Keep the customFields property for backward compatibility (optional)
-//       leadObj.customFields = customFields;
-
-//       return leadObj;
-//     });
-//     // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
-
-//     let persons, organizations;
-
-//     // 1. Fetch all persons and organizations (already in your code)
-//     if (req.role === "admin") {
-//       persons = await Person.findAll({ raw: true });
-//       organizations = await Organization.findAll({ raw: true });
-//     } else {
-//       organizations = await Organization.findAll({
-//         // where: { masterUserID: req.adminId },
-//         where: {
-//           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
-//         },
-//         raw: true,
-//       });
-//     }
-//     const orgIds = organizations.map((o) => o.leadOrganizationId);
-//     persons = await Person.findAll({
-//       where: {
-//         [Op.or]: [
-//           { masterUserID: req.adminId },
-//           { leadOrganizationId: orgIds },
-//         ],
-//       },
-//       raw: true,
-//     });
-//     // console.log("flatLeads:", flatLeads); // Commented out to see Activity filtering debug messages
-
-//     // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] }
-//     const orgPersonsMap = {};
-//     persons.forEach((p) => {
-//       if (p.leadOrganizationId) {
-//         if (!orgPersonsMap[p.leadOrganizationId])
-//           orgPersonsMap[p.leadOrganizationId] = [];
-//         orgPersonsMap[p.leadOrganizationId].push({
-//           personId: p.personId,
-//           contactPerson: p.contactPerson,
-//         });
-//       }
-//     });
-
-//     // 2. Get all unique ownerIds from persons and organizations
-//     const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
-//     const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
-//     const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
-
-//     // 3. Fetch owner names from MasterUser
-//     const owners = await MasterUser.findAll({
-//       where: { masterUserID: ownerIds },
-//       attributes: ["masterUserID", "name"],
-//       raw: true,
-//     });
-//     const orgMap = {};
-//     organizations.forEach((org) => {
-//       orgMap[org.leadOrganizationId] = org;
-//     });
-//     const ownerMap = {};
-//     owners.forEach((o) => {
-//       ownerMap[o.masterUserID] = o.name;
-//     });
-//     persons = persons.map((p) => ({
-//       ...p,
-//       ownerName: ownerMap[p.ownerId] || null,
-//     }));
-
-//     organizations = organizations.map((o) => ({
-//       ...o,
-//       ownerName: ownerMap[o.ownerId] || null,
-//     }));
-
-//     // 4. Count leads for each person and organization
-//     const personIds = persons.map((p) => p.personId);
-
-//     const leadCounts = await Lead.findAll({
-//       attributes: [
-//         "personId",
-//         "leadOrganizationId",
-//         [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
-//       ],
-//       where: {
-//         [Op.or]: [
-//           { personId: personIds },
-//           { leadOrganizationId: orgIds },
-//           // { leadOrganizationId: orgIdsFromLeads } // <-- use orgIdsFromLeads here
-//         ],
-//       },
-//       group: ["personId", "leadOrganizationId"],
-//       raw: true,
-//     });
-
-//     // Build maps for quick lookup
-//     const personLeadCountMap = {};
-//     const orgLeadCountMap = {};
-//     leadCounts.forEach((lc) => {
-//       if (lc.personId)
-//         personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
-//       if (lc.leadOrganizationId)
-//         orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
-//     });
-
-//     persons = persons.map((p) => {
-//       let ownerName = null;
-//       if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
-//         const org = orgMap[p.leadOrganizationId];
-//         if (org.ownerId && ownerMap[org.ownerId]) {
-//           ownerName = ownerMap[org.ownerId];
-//           // organization=ownerMap[org.organization]
-//         }
-//       }
-//       return {
-//         ...p,
-//         ownerName,
-//         // organization,
-//         leadCount: personLeadCountMap[p.personId] || 0,
-//       };
-//     });
-
-//     organizations = organizations.map((o) => ({
-//       ...o,
-//       ownerName: ownerMap[o.ownerId] || null,
-//       leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-//       persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- add this line
-//     }));
-//     console.log(req.role, "role of the user............");
-
-//     res.status(200).json({
-//       message: "Leads fetched successfully",
-//       totalRecords: leads.count,
-//       totalPages: Math.ceil(leads.count / limit),
-//       currentPage: parseInt(page),
-//       // leads: leads.rows,
-//       leads: flatLeads, // Return flattened leads with leadDetails merged
-//       persons,
-//       organizations,
-//       role: req.role, // Include user role in the response
-//       // leadDetails
-//     });
-//   } catch (error) {
-//     await logAuditTrail(
-//       PROGRAMS.LEAD_MANAGEMENT, // Program ID for authentication
-//       "LEAD_FETCH", // Mode
-//       null, // No user ID for failed sign-in
-//       "Error fetching leads: " + error.message, // Error description
-//       null
-//     );
-//     console.error("Error fetching leads:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
 
 exports.getLeads = async (req, res) => {
   const {
@@ -2128,7 +706,7 @@ exports.getLeads = async (req, res) => {
       }
 
       leadDetailsAttributes = columns
-        .filter((col) => col.check && leadDetailsFields.includes(col.key))
+        .filter((col) => col.check && leadDetailsFields.includes(col.key) && !col.isCustomField)
         .map((col) => col.key);
     }
 
@@ -3243,9 +1821,25 @@ exports.getLeads = async (req, res) => {
       const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
       const standardFields = [...leadFields, ...leadDetailsFields];
       
-      checkedCustomFieldNames = checkedColumnKeys.filter(key => !standardFields.includes(key));
+      // Filter for custom fields - either not in standard fields OR explicitly marked as custom field
+      checkedCustomFieldNames = checkedColumnKeys.filter(key => {
+        const column = columns.find(col => col.key === key);
+        return !standardFields.includes(key) || (column && column.isCustomField);
+      });
       
-      console.log("Checked custom field names from preferences:", checkedCustomFieldNames);
+      console.log("🔍 === DEBUGGING 'source' CUSTOM FIELD ===");
+      console.log("🔍 All checked column keys:", checkedColumnKeys);
+      console.log("🔍 'source' in checked column keys:", checkedColumnKeys.includes('source'));
+      console.log("🔍 Checked custom field names from preferences:", checkedCustomFieldNames);
+      console.log("🔍 'source' in checked custom field names:", checkedCustomFieldNames.includes('source'));
+      
+      // Check specifically for 'source' column in preferences
+      const sourceColumn = columns.find(col => col.key === 'source');
+      if (sourceColumn) {
+        console.log("✅ 'source' column found in preferences:", sourceColumn);
+      } else {
+        console.log("❌ 'source' column NOT found in column preferences");
+      }
     }
     
     let customFieldValues = [];
@@ -3274,17 +1868,85 @@ exports.getLeads = async (req, res) => {
           },
         ],
       });
+      
+      console.log("🔍 Custom field values fetched:", customFieldValues.length);
+      
+      // Check specifically for 'source' field values
+      const sourceValues = customFieldValues.filter(val => val.CustomField?.fieldName === 'source');
+      console.log("🔍 'source' field values found:", sourceValues.length);
+      
+      if (sourceValues.length > 0) {
+        console.log("✅ First 'source' value:", {
+          entityId: sourceValues[0].entityId,
+          value: sourceValues[0].value,
+          fieldName: sourceValues[0].CustomField.fieldName
+        });
+      } else {
+        console.log("❌ No 'source' values found - checking why...");
+        
+        // Check if 'source' field exists in CustomField table
+        const sourceFieldExists = await CustomField.findOne({
+          where: {
+            fieldName: 'source',
+            isActive: true,
+            entityType: { [Op.in]: ["lead", "both"] }
+          },
+          attributes: ['fieldId', 'fieldName', 'fieldSource', 'masterUserID'],
+          raw: true
+        });
+        
+        if (sourceFieldExists) {
+          console.log("✅ 'source' field exists in CustomField table:", sourceFieldExists);
+          
+          // Check if 'source' values exist for ANY leads
+          const anySourceValues = await CustomFieldValue.findAll({
+            where: {
+              entityType: "lead"
+            },
+            include: [{
+              model: CustomField,
+              as: "CustomField",
+              where: { fieldName: 'source', isActive: true },
+              required: true
+            }],
+            limit: 5
+          });
+          
+          console.log("🔍 Any 'source' values in database (limit 5):", anySourceValues.length);
+          if (anySourceValues.length > 0) {
+            console.log("🔍 Sample source values:", anySourceValues.map(v => ({
+              entityId: v.entityId,
+              value: v.value
+            })));
+            
+            // Check if any match current lead IDs
+            const currentLeadIds = leadIds;
+            const matchingIds = anySourceValues.filter(v => currentLeadIds.includes(v.entityId));
+            console.log("🔍 Source values matching current lead IDs:", matchingIds.length);
+          }
+        } else {
+          console.log("❌ 'source' field does NOT exist in CustomField table");
+        }
+      }
     } else {
-      console.log("No custom fields are checked in column preferences, skipping custom field query");
+      console.log("❌ No custom fields are checked in column preferences, skipping custom field query");
     }
 
     // Group custom field values by leadId
     const customFieldsByLead = {};
+    console.log("🔍 Grouping", customFieldValues.length, "custom field values by leadId");
+    
     customFieldValues.forEach((value) => {
       if (!value.CustomField) return;
       if (!customFieldsByLead[value.entityId]) {
         customFieldsByLead[value.entityId] = {};
       }
+      
+      // Debug 'source' field specifically
+      if (value.CustomField.fieldName === 'source') {
+        console.log("✅ Processing 'source' field for leadId:", value.entityId, "value:", value.value);
+      }
+      
       customFieldsByLead[value.entityId][value.CustomField.fieldName] = {
         fieldId: value.CustomField.fieldId,
         fieldName: value.CustomField.fieldName,
@@ -3294,6 +1956,20 @@ exports.getLeads = async (req, res) => {
         value: value.value,
       };
     });
+    
+    console.log("🔍 Total leads with custom fields:", Object.keys(customFieldsByLead).length);
+    
+    // Check if any lead has 'source' field
+    const leadsWithSource = Object.entries(customFieldsByLead).filter(([leadId, fields]) => 
+      fields.hasOwnProperty('source')
+    );
+    console.log("🔍 Leads with 'source' field:", leadsWithSource.length);
+    if (leadsWithSource.length > 0) {
+      console.log("✅ First lead with source field:", {
+        leadId: leadsWithSource[0][0],
+        sourceValue: leadsWithSource[0][1].source.value
+      });
+    }
 
     // Fetch currency descriptions for valid currency IDs found in leads
     // Only collect currencies for fields that are checked in column preferences
@@ -3404,8 +2080,24 @@ exports.getLeads = async (req, res) => {
 
       // Add custom fields directly to the lead object (not wrapped in customFields)
       const customFields = customFieldsByLead[leadObj.leadId] || {};
+      
+      // Debug for first lead only
+      if (lead === leads.rows[0]) {
+        console.log("🔍 Processing first lead", leadObj.leadId);
+        console.log("🔍 Custom fields available for this lead:", Object.keys(customFields));
+        console.log("🔍 'source' field available:", customFields.hasOwnProperty('source'));
+        if (customFields.source) {
+          console.log("✅ 'source' field data:", customFields.source);
+        }
+      }
+      
       Object.entries(customFields).forEach(([fieldName, fieldData]) => {
         leadObj[fieldName] = fieldData.value;
+        
+        // Debug 'source' field addition
+        if (fieldName === 'source') {
+          console.log("✅ Adding 'source' field to lead", leadObj.leadId, "with value:", fieldData.value);
+        }
       });
 
       // Keep the customFields property for backward compatibility (optional)
@@ -3414,9 +2106,27 @@ exports.getLeads = async (req, res) => {
       return leadObj;
     });
     
-    // Debug: Check if currency fields are present in processed leads
+    // DEBUG: Final verification of 'source' field
+    console.log("🔍 === FINAL 'source' FIELD VERIFICATION ===");
     if (flatLeads.length > 0) {
       const firstLead = flatLeads[0];
+      
+      console.log("🔍 All fields in first processed lead:", Object.keys(firstLead).length, "fields");
+      console.log("🔍 'source' field in final lead object:", firstLead.hasOwnProperty('source'));
+      
+      if (firstLead.source !== undefined) {
+        console.log("✅ SUCCESS: 'source' field found in final response with value:", firstLead.source);
+      } else {
+        console.log("❌ FAIL: 'source' field NOT found in final response");
+        console.log("🔍 Available custom fields in response:", 
+          Object.keys(firstLead).filter(key => 
+            !['leadId', 'contactPerson', 'organization', 'title', 'email', 'phone', 'createdAt', 'updatedAt'].includes(key)
+          )
+        );
+      }
+      
+      console.log("🔍 === END 'source' CUSTOM FIELD DEBUG ===");
+      
       const currencyFieldsInLead = Object.keys(firstLead).filter(key => 
         key.includes('Currency') || key.includes('currency')
       );
