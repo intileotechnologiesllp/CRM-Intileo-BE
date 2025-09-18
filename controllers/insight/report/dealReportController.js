@@ -1129,6 +1129,122 @@ exports.saveDealPerformReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Deal" && type === "Performance") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Performance reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Performance") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Performance reports",
+          });
+        }
+
+        try {
+          const result = await generateExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -1143,7 +1259,6 @@ exports.saveDealPerformReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
     // If reportId is present → UPDATE
     if (reportId) {
@@ -1167,13 +1282,15 @@ exports.saveDealPerformReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+        segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData: reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -1221,6 +1338,7 @@ exports.saveDealPerformReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData,
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -1946,13 +2064,13 @@ async function generateConversionActivityPerformanceData(
       status: {
         [Op.in]: ["won", "lost"],
       },
-    }
+    },
   ];
 
   // If user is not admin, filter by ownerId
   if (role !== "admin") {
     baseWhereConditions.push({
-      masterUserID: ownerId
+      masterUserID: ownerId,
     });
   }
 
@@ -2007,9 +2125,10 @@ async function generateConversionActivityPerformanceData(
   }
 
   // Create the final where condition
-  const baseWhere = baseWhereConditions.length > 1 
-    ? { [Op.and]: baseWhereConditions }
-    : baseWhereConditions[0];
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
 
   // Handle special cases for xaxis (like Owner which needs join)
   let xaxisColumn;
@@ -2042,7 +2161,7 @@ async function generateConversionActivityPerformanceData(
   const distinctXValues = await Deal.findAll({
     where: baseWhere,
     attributes: [
-      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"]
+      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"],
     ],
     include: allIncludeModels,
     raw: true,
@@ -2052,7 +2171,7 @@ async function generateConversionActivityPerformanceData(
   });
 
   // Extract the xValues
-  const xValues = distinctXValues.map(item => item.xValue || "Unknown");
+  const xValues = distinctXValues.map((item) => item.xValue || "Unknown");
 
   if (xValues.length === 0) {
     return {
@@ -2073,7 +2192,10 @@ async function generateConversionActivityPerformanceData(
     where: baseWhere,
     attributes: [
       [
-        Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))),
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))
+        ),
         "total",
       ],
     ],
@@ -2133,9 +2255,9 @@ async function generateConversionActivityPerformanceData(
     [Op.and]: [
       baseWhere,
       Sequelize.where(Sequelize.col(xaxisColumn), {
-        [Op.in]: xValues
-      })
-    ]
+        [Op.in]: xValues,
+      }),
+    ],
   };
 
   // Execute query to get status breakdown for paginated x-values
@@ -2189,12 +2311,14 @@ async function generateConversionActivityPerformanceData(
   });
 
   // Convert to array and ensure order matches the paginated x-values
-  const formattedResults = xValues.map(xValue => {
-    return groupedData[xValue] || {
-      label: xValue,
-      status: [],
-      total: 0
-    };
+  const formattedResults = xValues.map((xValue) => {
+    return (
+      groupedData[xValue] || {
+        label: xValue,
+        status: [],
+        total: 0,
+      }
+    );
   });
 
   // Return data with pagination info
@@ -2233,13 +2357,13 @@ async function generateConversionExistingActivityPerformanceData(
       status: {
         [Op.in]: ["won", "lost"],
       },
-    }
+    },
   ];
 
   // If user is not admin, filter by ownerId
   if (role !== "admin") {
     baseWhereConditions.push({
-      masterUserID: ownerId
+      masterUserID: ownerId,
     });
   }
 
@@ -2294,9 +2418,10 @@ async function generateConversionExistingActivityPerformanceData(
   }
 
   // Create the final where condition
-  const baseWhere = baseWhereConditions.length > 1 
-    ? { [Op.and]: baseWhereConditions }
-    : baseWhereConditions[0];
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
 
   // Handle special cases for xaxis (like Owner which needs join)
   let xaxisColumn;
@@ -2329,7 +2454,7 @@ async function generateConversionExistingActivityPerformanceData(
   const distinctXValues = await Deal.findAll({
     where: baseWhere,
     attributes: [
-      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"]
+      [Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn)), "xValue"],
     ],
     include: allIncludeModels,
     raw: true,
@@ -2339,7 +2464,7 @@ async function generateConversionExistingActivityPerformanceData(
   });
 
   // Extract the xValues
-  const xValues = distinctXValues.map(item => item.xValue || "Unknown");
+  const xValues = distinctXValues.map((item) => item.xValue || "Unknown");
 
   if (xValues.length === 0) {
     return {
@@ -2360,7 +2485,10 @@ async function generateConversionExistingActivityPerformanceData(
     where: baseWhere,
     attributes: [
       [
-        Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))),
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))
+        ),
         "total",
       ],
     ],
@@ -2420,9 +2548,9 @@ async function generateConversionExistingActivityPerformanceData(
     [Op.and]: [
       baseWhere,
       Sequelize.where(Sequelize.col(xaxisColumn), {
-        [Op.in]: xValues
-      })
-    ]
+        [Op.in]: xValues,
+      }),
+    ],
   };
 
   // Execute query to get status breakdown for paginated x-values
@@ -2476,12 +2604,14 @@ async function generateConversionExistingActivityPerformanceData(
   });
 
   // Convert to array and ensure order matches the paginated x-values
-  const formattedResults = xValues.map(xValue => {
-    return groupedData[xValue] || {
-      label: xValue,
-      status: [],
-      total: 0
-    };
+  const formattedResults = xValues.map((xValue) => {
+    return (
+      groupedData[xValue] || {
+        label: xValue,
+        status: [],
+        total: 0,
+      }
+    );
   });
 
   // Return data with pagination info
@@ -2517,6 +2647,123 @@ exports.saveDealConversionReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Deal" && type === "Conversion") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Conversion reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateConversionActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal conversion data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Conversion") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for deal conversion reports",
+          });
+        }
+
+        try {
+          const result =
+            await generateConversionExistingActivityPerformanceData(
+              ownerId,
+              role,
+              existingxaxis,
+              existingyaxis,
+              existingSegmentedBy,
+              existingfilters
+            );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal conversion data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -2531,7 +2778,6 @@ exports.saveDealConversionReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
     // If reportId is present → UPDATE
     if (reportId) {
@@ -2555,13 +2801,15 @@ exports.saveDealConversionReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+        segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData: reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -2609,6 +2857,7 @@ exports.saveDealConversionReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData,
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -3897,6 +4146,120 @@ exports.saveDealProgressReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Deal" && type === "Progress") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message: "X-axis and Y-axis are required for Deal Progress reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateProgressActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating Deal Progress data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate Deal Progress data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Progress") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message: "X-axis and Y-axis are required for Deal Progress reports",
+          });
+        }
+
+        try {
+          const result = await generateProgressExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating Deal Progress data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate Deal Progress data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -3911,7 +4274,6 @@ exports.saveDealProgressReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
     // If reportId is present → UPDATE
     if (reportId) {
@@ -3935,13 +4297,17 @@ exports.saveDealProgressReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+        segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy:
+                  segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData:
+                  reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -3989,6 +4355,7 @@ exports.saveDealProgressReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -4341,7 +4708,6 @@ exports.getDealProgressReportSummary = async (req, res) => {
   }
 };
 
-
 exports.createFunnelDealConversionReport = async (req, res) => {
   try {
     const {
@@ -4350,30 +4716,43 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
-      pipelineStages = ["qualified", "contract made", "proposal made", "negotiation started", "won"],
+      pipelineStages = [
+        "qualified",
+        "contract made",
+        "proposal made",
+        "negotiation started",
+        "won",
+      ],
       filters,
       page = 1,
       limit = 10,
     } = req.body;
-    
+
     const ownerId = req.adminId;
     const role = req.role;
 
     // Define available options
-    const xaxisArray = ["qualified", "contract made", "proposal made", "negotiation started", "won"];
+    const xaxisArray = [
+      "qualified",
+      "contract made",
+      "proposal made",
+      "negotiation started",
+      "won",
+    ];
     const yaxisArray = ["no of deals", "proposalValue", "value"];
 
     // For Funnel Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    
+
     if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "FunnelConversion") {
         // Validate required fields
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
-            message: "X-axis and Y-axis are required for Deal Funnel Conversion reports",
+            message:
+              "X-axis and Y-axis are required for Deal Funnel Conversion reports",
           });
         }
 
@@ -4389,7 +4768,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             page,
             limit
           );
-          
+
           reportData = result.data;
           paginationInfo = result.pagination;
 
@@ -4451,15 +4830,15 @@ async function generateFunnelConversionData(
       pipeline: "climate change",
       [Op.or]: [
         { pipelineStage: { [Op.in]: pipelineStages } },
-        { status: { [Op.in]: pipelineStages.includes("won") ? ["won"] : [] } }
-      ]
-    }
+        { status: { [Op.in]: pipelineStages.includes("won") ? ["won"] : [] } },
+      ],
+    },
   ];
 
   // If user is not admin, filter by ownerId
   if (role !== "admin") {
     baseWhereConditions.push({
-      masterUserID: ownerId
+      masterUserID: ownerId,
     });
   }
 
@@ -4482,7 +4861,9 @@ async function generateFunnelConversionData(
 
       let combinedCondition = conditions[0];
       for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (filters.logicalOperators[i - 1] || "AND").toUpperCase();
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
         if (logicalOp === "AND") {
           combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
         } else {
@@ -4495,9 +4876,10 @@ async function generateFunnelConversionData(
   }
 
   // Create the final where condition
-  const baseWhere = baseWhereConditions.length > 1 
-    ? { [Op.and]: baseWhereConditions }
-    : baseWhereConditions[0];
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
 
   // Get data for each pipeline stage
   const stageData = {};
@@ -4505,43 +4887,39 @@ async function generateFunnelConversionData(
 
   for (const stage of pipelineStages) {
     let whereCondition;
-    
+
     if (stage === "won") {
       whereCondition = {
         ...baseWhere,
-        status: "won"
+        status: "won",
       };
     } else {
       whereCondition = {
         ...baseWhere,
-        pipelineStage: stage
+        pipelineStage: stage,
       };
     }
 
     // Select appropriate attributes based on yaxis
     let attributes;
     if (yaxis === "no of deals") {
-      attributes = [
-        [Sequelize.fn("COUNT", Sequelize.col("dealId")), "count"]
-      ];
+      attributes = [[Sequelize.fn("COUNT", Sequelize.col("dealId")), "count"]];
     } else if (yaxis === "proposalValue") {
       attributes = [
-        [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "total"]
+        [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "total"],
       ];
     } else if (yaxis === "value") {
-      attributes = [
-        [Sequelize.fn("SUM", Sequelize.col("value")), "total"]
-      ];
+      attributes = [[Sequelize.fn("SUM", Sequelize.col("value")), "total"]];
     }
 
     const result = await Deal.findAll({
       where: whereCondition,
       attributes: attributes,
-      raw: true
+      raw: true,
     });
 
     const data = result[0] || { count: 0, total: 0 };
-    
+
     if (yaxis === "no of deals") {
       stageData[stage] = parseInt(data.count) || 0;
     } else {
@@ -4550,38 +4928,45 @@ async function generateFunnelConversionData(
   }
 
   // Calculate conversion rates between stages based on selected yaxis
-  const stages = ["qualified", "contract made", "proposal made", "negotiation started", "won"];
-  
+  const stages = [
+    "qualified",
+    "contract made",
+    "proposal made",
+    "negotiation started",
+    "won",
+  ];
+
   for (let i = 0; i < stages.length - 1; i++) {
     const currentStage = stages[i];
     const nextStage = stages[i + 1];
-    
-    if (pipelineStages.includes(currentStage) && pipelineStages.includes(nextStage)) {
+
+    if (
+      pipelineStages.includes(currentStage) &&
+      pipelineStages.includes(nextStage)
+    ) {
       const currentValue = stageData[currentStage];
       const nextValue = stageData[nextStage];
-      
+
       // Calculate conversion rate based on the selected yaxis
       if (yaxis === "no of deals") {
         // For count-based conversion (next stage count / current stage count)
-        conversionRates[`${currentStage}_to_${nextStage}`] = currentValue > 0 
-          ? Math.round((nextValue / currentValue) * 100) 
-          : 0;
+        conversionRates[`${currentStage}_to_${nextStage}`] =
+          currentValue > 0 ? Math.round((nextValue / currentValue) * 100) : 0;
       } else {
         // For value-based conversion (next stage value / current stage value)
-        conversionRates[`${currentStage}_to_${nextStage}`] = currentValue > 0 
-          ? Math.round((nextValue / currentValue) * 100) 
-          : 0;
+        conversionRates[`${currentStage}_to_${nextStage}`] =
+          currentValue > 0 ? Math.round((nextValue / currentValue) * 100) : 0;
       }
     }
   }
 
   // Format the response based on yaxis selection
   let formattedData = [];
-  
+
   for (const stage of pipelineStages) {
     if (stageData[stage] !== undefined) {
       const stageObj = { stage: stage };
-      
+
       if (yaxis === "no of deals") {
         stageObj.noOfDeals = stageData[stage];
       } else if (yaxis === "proposalValue") {
@@ -4589,7 +4974,7 @@ async function generateFunnelConversionData(
       } else if (yaxis === "value") {
         stageObj.value = stageData[stage];
       }
-      
+
       formattedData.push(stageObj);
     }
   }
@@ -4597,7 +4982,7 @@ async function generateFunnelConversionData(
   // Get total count for pagination (total distinct stages)
   const totalCount = pipelineStages.length;
   const totalPages = Math.ceil(totalCount / limit);
-  
+
   // Apply pagination
   const startIndex = (page - 1) * limit;
   const endIndex = Math.min(startIndex + limit, formattedData.length);
@@ -4606,7 +4991,7 @@ async function generateFunnelConversionData(
   return {
     data: {
       stages: paginatedData,
-      conversionRates: conversionRates
+      conversionRates: conversionRates,
     },
     pagination: {
       currentPage: page,

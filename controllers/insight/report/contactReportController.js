@@ -993,6 +993,122 @@ exports.savePersonReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Contact" && type === "Person") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Contact Person reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating contact person data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate contact person data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Contact" && existingtype === "Person") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for contact person reports",
+          });
+        }
+
+        try {
+          const result = await generateExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating contact person data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate contact person data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -1007,7 +1123,6 @@ exports.savePersonReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
     // If reportId is present → UPDATE
     if (reportId) {
@@ -1031,13 +1146,17 @@ exports.savePersonReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+       segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy:
+                  segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData:
+                  reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -1085,6 +1204,7 @@ exports.savePersonReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -2629,6 +2749,122 @@ exports.saveOrganizationReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Contact" && type === "Organization") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Contact Organization reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateOrganizationPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating contact organization data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate contact organization data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Contact" && existingtype === "Organization") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for contact organization reports",
+          });
+        }
+
+        try {
+          const result = await generateExistingOrganizationPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating contact organization data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate contact organization data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -2643,7 +2879,6 @@ exports.saveOrganizationReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
     // If reportId is present → UPDATE
     if (reportId) {
@@ -2667,13 +2902,17 @@ exports.saveOrganizationReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+       segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy:
+                  segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData:
+                  reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -2721,6 +2960,7 @@ exports.saveOrganizationReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData
       };
 
       const reportName = description || `${entity} ${type}`;
