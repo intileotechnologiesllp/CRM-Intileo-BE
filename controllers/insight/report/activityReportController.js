@@ -1661,14 +1661,6 @@ exports.getActivityReportSummary = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Validate required fields
-    // if (!entity || !type) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Entity and type are required",
-    //   });
-    // }
-
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -1691,6 +1683,16 @@ exports.getActivityReportSummary = async (req, res) => {
       ];
     }
 
+    // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+    ];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -1698,32 +1700,42 @@ exports.getActivityReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -1747,16 +1759,6 @@ exports.getActivityReportSummary = async (req, res) => {
     } else {
       order.push([sortBy, sortOrder]);
     }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
 
     // Get total count
     const totalCount = await Activity.count({
@@ -1792,10 +1794,11 @@ exports.getActivityReportSummary = async (req, res) => {
       ],
     });
 
-    // Generate report data (like your existing performance report)
+    // Generate report data
     let reportData = [];
     let summary = {};
 
+    // For report generation, we need separate include handling
     if (xaxis && yaxis && !reportId) {
       const reportResult = await generateActivityPerformanceData(
         ownerId,
@@ -1833,6 +1836,13 @@ exports.getActivityReportSummary = async (req, res) => {
         where: { reportId },
       });
 
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
       const {
         entity: existingentity,
         type: existingtype,
@@ -1848,7 +1858,7 @@ exports.getActivityReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateExistingActivityPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -1936,3 +1946,290 @@ exports.getActivityReportSummary = async (req, res) => {
     });
   }
 };
+// exports.getActivityReportSummary = async (req, res) => {
+//   try {
+//     const {
+//       reportId,
+//       entity,
+//       type,
+//       xaxis,
+//       yaxis,
+//       segmentedBy = "none",
+//       filters,
+//       page = 1,
+//       limit = 200,
+//       search = "",
+//       sortBy = "createdAt",
+//       sortOrder = "DESC",
+//     } = req.body;
+
+//     const ownerId = req.adminId;
+//     const role = req.role;
+
+//     // Calculate offset for pagination
+//     const offset = (page - 1) * limit;
+
+//     // Base where condition
+//     const baseWhere = {};
+
+//     // If user is not admin, filter by ownerId
+//     if (role !== "admin") {
+//       baseWhere.masterUserID = ownerId;
+//     }
+
+//     // Handle search
+//     if (search) {
+//       baseWhere[Op.or] = [
+//         { subject: { [Op.like]: `%${search}%` } },
+//         { type: { [Op.like]: `%${search}%` } },
+//         { priority: { [Op.like]: `%${search}%` } },
+//         { status: { [Op.like]: `%${search}%` } },
+//         { "$assignedUser.name$": { [Op.like]: `%${search}%` } },
+//       ];
+//     }
+
+//     // Handle filters if provided
+//     if (filters && filters.conditions) {
+//       const validConditions = filters.conditions.filter(
+//         (cond) => cond.value !== undefined && cond.value !== ""
+//       );
+
+//       if (validConditions.length > 0) {
+//         // Start with the first condition
+//         let combinedCondition = getConditionObject(
+//           validConditions[0].column,
+//           validConditions[0].operator,
+//           validConditions[0].value
+//         );
+
+//         // Add remaining conditions with their logical operators
+//         for (let i = 1; i < validConditions.length; i++) {
+//           const currentCondition = getConditionObject(
+//             validConditions[i].column,
+//             validConditions[i].operator,
+//             validConditions[i].value
+//           );
+
+//           const logicalOp = (
+//             filters.logicalOperators[i - 1] || "AND"
+//           ).toUpperCase();
+
+//           if (logicalOp === "AND") {
+//             combinedCondition = {
+//               [Op.and]: [combinedCondition, currentCondition],
+//             };
+//           } else {
+//             combinedCondition = {
+//               [Op.or]: [combinedCondition, currentCondition],
+//             };
+//           }
+//         }
+
+//         Object.assign(baseWhere, combinedCondition);
+//       }
+//     }
+
+//     // Build order clause
+//     const order = [];
+//     if (sortBy === "assignedUser") {
+//       order.push([
+//         { model: MasterUser, as: "assignedUser" },
+//         "name",
+//         sortOrder,
+//       ]);
+//     } else if (sortBy === "dueDate") {
+//       order.push(["endDateTime", sortOrder]);
+//     } else if (sortBy === "createdAt") {
+//       order.push(["createdAt", sortOrder]);
+//     } else {
+//       order.push([sortBy, sortOrder]);
+//     }
+
+//     // Include assigned user
+//     const include = [
+//       {
+//         model: MasterUser,
+//         as: "assignedUser",
+//         attributes: ["masterUserID", "name", "email"],
+//         required: false,
+//       },
+//     ];
+
+//     // Get total count
+//     const totalCount = await Activity.count({
+//       where: baseWhere,
+//       include: include,
+//     });
+
+//     // Get paginated results
+//     const activities = await Activity.findAll({
+//       where: baseWhere,
+//       include: include,
+//       order: order,
+//       limit: parseInt(limit),
+//       offset: offset,
+//       attributes: [
+//         "activityId",
+//         "subject",
+//         "type",
+//         "priority",
+//         "location",
+//         "status",
+//         "description",
+//         "notes",
+//         "isDone",
+//         "contactPerson",
+//         "email",
+//         "organization",
+//         "dueDate",
+//         "startDateTime",
+//         "endDateTime",
+//         "createdAt",
+//         "updatedAt",
+//       ],
+//     });
+
+//     // Generate report data (like your existing performance report)
+//     let reportData = [];
+//     let summary = {};
+
+//     if (xaxis && yaxis && !reportId) {
+//       const reportResult = await generateActivityPerformanceData(
+//         ownerId,
+//         role,
+//         xaxis,
+//         yaxis,
+//         segmentedBy,
+//         filters,
+//         page,
+//         limit
+//       );
+//       reportData = reportResult.data;
+
+//       // Calculate summary statistics
+//       if (reportData.length > 0) {
+//         const totalValue = reportData.reduce(
+//           (sum, item) => sum + (item.value || 0),
+//           0
+//         );
+//         const avgValue = totalValue / reportData.length;
+//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
+//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
+
+//         summary = {
+//           totalRecords: totalCount,
+//           totalCategories: reportData.length,
+//           totalValue: totalValue,
+//           avgValue: parseFloat(avgValue.toFixed(2)),
+//           maxValue: maxValue,
+//           minValue: minValue,
+//         };
+//       }
+//     } else if (!xaxis && !yaxis && reportId) {
+//       const existingReports = await Report.findOne({
+//         where: { reportId },
+//       });
+
+//       const {
+//         entity: existingentity,
+//         type: existingtype,
+//         config: configString,
+//       } = existingReports.dataValues;
+
+//       // Parse the config JSON string
+//       const config = JSON.parse(configString);
+//       const {
+//         xaxis: existingxaxis,
+//         yaxis: existingyaxis,
+//         segmentedBy: existingSegmentedBy,
+//         filters: existingfilters,
+//       } = config;
+
+//       const reportResult = await generateExistingActivityPerformanceData(
+//         ownerId,
+//         role,
+//         existingxaxis,
+//         existingyaxis,
+//         existingSegmentedBy,
+//         existingfilters,
+//         page,
+//         limit
+//       );
+//       reportData = reportResult.data;
+
+//       // Calculate summary statistics
+//       if (reportData.length > 0) {
+//         const totalValue = reportData.reduce(
+//           (sum, item) => sum + (item.value || 0),
+//           0
+//         );
+//         const avgValue = totalValue / reportData.length;
+//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
+//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
+
+//         summary = {
+//           totalRecords: totalCount,
+//           totalCategories: reportData.length,
+//           totalValue: totalValue,
+//           avgValue: parseFloat(avgValue.toFixed(2)),
+//           maxValue: maxValue,
+//           minValue: minValue,
+//         };
+//       }
+//     }
+
+//     // Format activities for response
+//     const formattedActivities = activities.map((activity) => ({
+//       id: activity.activityId,
+//       subject: activity.subject,
+//       type: activity.type,
+//       priority: activity.priority,
+//       status: activity.status,
+//       startDateTime: activity.startDateTime,
+//       endDateTime: activity.endDateTime,
+//       createdAt: activity.createdAt,
+//       location: activity.location,
+//       description: activity.description,
+//       notes: activity.notes,
+//       isDone: activity.isDone == true ? "Yes" : "No",
+//       contactPerson: activity.contactPerson,
+//       email: activity.email,
+//       organization: activity.organization,
+//       dueDate: activity.dueDate,
+//       assignedTo: activity.assignedUser
+//         ? {
+//             id: activity.assignedUser.masterUserID,
+//             name: activity.assignedUser.name,
+//             email: activity.assignedUser.email,
+//           }
+//         : null,
+//     }));
+
+//     const totalPages = Math.ceil(totalCount / limit);
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Activities data retrieved successfully",
+//       data: {
+//         activities: formattedActivities,
+//         reportData: reportData,
+//         summary: summary,
+//       },
+//       pagination: {
+//         currentPage: parseInt(page),
+//         totalPages: totalPages,
+//         totalItems: totalCount,
+//         itemsPerPage: parseInt(limit),
+//         hasNextPage: page < totalPages,
+//         hasPrevPage: page > 1,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error retrieving activities data:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to retrieve activities data",
+//       error: error.message,
+//     });
+//   }
+// };
