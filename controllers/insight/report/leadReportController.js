@@ -109,6 +109,113 @@ exports.createLeadPerformReport = async (req, res) => {
           type: "date",
         },
       ],
+      // Deal: [
+      //   { label: "Title", value: "LeadDeals.title", type: "text" },
+      //   { label: "Value", value: "LeadDeals.value", type: "text" },
+      //   { label: "Currency", value: "LeadDeals.currency", type: "text" },
+      //   { label: "Pipeline", value: "LeadDeals.pipeline", type: "text" },
+      //   {
+      //     label: "Pipeline Stage",
+      //     value: "LeadDeals.pipelineStage",
+      //     type: "text",
+      //   },
+      //   { label: "Label", value: "LeadDeals.label", type: "text" },
+      //   {
+      //     label: "Expected Close Date",
+      //     value: "LeadDeals.expectedCloseDate",
+      //     type: "date",
+      //   },
+      //   {
+      //     label: "Source Channel",
+      //     value: "LeadDeals.sourceChannel",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Service Type",
+      //     value: "LeadDeals.serviceType",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Proposal Value",
+      //     value: "LeadDeals.proposalValue",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "Proposal Currency",
+      //     value: "LeadDeals.proposalCurrency",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "ESPL Proposal No",
+      //     value: "LeadDeals.esplProposalNo",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "Project Location",
+      //     value: "LeadDeals.projectLocation",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Organization Country",
+      //     value: "LeadDeals.organizationCountry",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Proposal Sent Date",
+      //     value: "LeadDeals.proposalSentDate",
+      //     type: "date",
+      //   },
+      //   {
+      //     label: "Source Required",
+      //     value: "LeadDeals.sourceRequired",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Questioner Shared",
+      //     value: "LeadDeals.questionerShared",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "Sectorial Sector",
+      //     value: "LeadDeals.sectorialSector",
+      //     type: "text",
+      //   },
+      //   { label: "SBU Class", value: "LeadDeals.sbuClass", type: "text" },
+      //   { label: "Phone", value: "LeadDeals.phone", type: "number" },
+      //   { label: "Email", value: "LeadDeals.email", type: "text" },
+      //   {
+      //     label: "Source Origin",
+      //     value: "LeadDeals.sourceOrgin",
+      //     type: "text",
+      //   },
+      //   { label: "Status", value: "LeadDeals.status", type: "number" },
+      //   {
+      //     label: "Product Name",
+      //     value: "LeadDeals.productName",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Weighted Value",
+      //     value: "LeadDeals.weightedValue",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "Probability",
+      //     value: "LeadDeals.probability",
+      //     type: "text",
+      //   },
+      //   { label: "Stage", value: "LeadDeals.stage", type: "text" },
+      //   {
+      //     label: "Lost Reason",
+      //     value: "LeadDeals.lostReason",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Archive Status",
+      //     value: "LeadDeals.archiveStatus",
+      //     type: "number",
+      //   },
+      // ],
       Organization: [
         {
           label: "Organization",
@@ -1087,7 +1194,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             xaxis,
             yaxis,
             segmentedBy,
-            filters,
+            filters
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1100,7 +1207,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
-            totalValue
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating lead performance data:", error);
@@ -1151,7 +1258,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             existingxaxis,
             existingyaxis,
             existingSegmentedBy,
-            existingfilters,
+            existingfilters
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1167,7 +1274,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
-            totalValue
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating lead performance data:", error);
@@ -1217,17 +1324,16 @@ exports.saveLeadPerformReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined || totalValue !== undefined
+        reportData !== undefined ||
+        totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy:
-                  segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
-                reportData:
-                  reportData ?? existingReport.config?.reportData,
-                totalValue: totalValue?? existingReport.config?.totalValue,
+                reportData: reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1276,7 +1382,7 @@ exports.saveLeadPerformReport = async (req, res) => {
         segmentedBy,
         filters: filters || {},
         reportData,
-        totalValue
+        totalValue,
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -1505,14 +1611,6 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Validate required fields
-    // if (!entity || !type) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Entity and type are required",
-    //   });
-    // }
-
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -1534,6 +1632,16 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       ];
     }
 
+    // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+    ];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -1541,32 +1649,42 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -1577,8 +1695,12 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 
     // Build order clause
     const order = [];
-    if (sortBy === "Owner") {
-      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
+    if (sortBy === "assignedUser") {
+      order.push([
+        { model: MasterUser, as: "assignedUser" },
+        "name",
+        sortOrder,
+      ]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -1586,16 +1708,6 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     } else {
       order.push([sortBy, sortOrder]);
     }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
 
     // Get total count
     const totalCount = await Lead.count({
@@ -1699,7 +1811,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateExistingActivityPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -2792,7 +2904,7 @@ exports.saveLeadConversionReport = async (req, res) => {
             xaxis,
             yaxis,
             segmentedBy,
-            filters,
+            filters
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -2805,7 +2917,7 @@ exports.saveLeadConversionReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
-            totalValue
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating Lead Conversion data:", error);
@@ -2850,14 +2962,15 @@ exports.saveLeadConversionReport = async (req, res) => {
         }
 
         try {
-          const result = await generateConversionExistingActivityPerformanceData(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingSegmentedBy,
-            existingfilters,
-          );
+          const result =
+            await generateConversionExistingActivityPerformanceData(
+              ownerId,
+              role,
+              existingxaxis,
+              existingyaxis,
+              existingSegmentedBy,
+              existingfilters
+            );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
@@ -2872,7 +2985,7 @@ exports.saveLeadConversionReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
-            totalValue
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating Lead Conversion data:", error);
@@ -2922,16 +3035,15 @@ exports.saveLeadConversionReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined || totalValue !== undefined
+        reportData !== undefined ||
+        totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy:
-                  segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
-                reportData:
-                  reportData ?? existingReport.config?.reportData,
+                reportData: reportData ?? existingReport.config?.reportData,
                 totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
@@ -2981,7 +3093,7 @@ exports.saveLeadConversionReport = async (req, res) => {
         segmentedBy,
         filters: filters || {},
         reportData,
-        totalValue
+        totalValue,
       };
 
       const reportName = description || `${entity} ${type}`;
