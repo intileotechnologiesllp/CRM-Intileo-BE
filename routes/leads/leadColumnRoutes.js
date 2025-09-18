@@ -34,5 +34,6 @@ router.post(
   validatePrivilege(2, "create"),
   leadColumnController.updateLeadColumnChecks
 );
+router.get("/sync-lead-columns", verifyToken, leadColumnController.syncCustomFieldsWithPreferences);
 
 module.exports = router;
