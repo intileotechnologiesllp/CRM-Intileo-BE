@@ -345,6 +345,7 @@ exports.createActivityReport = async (req, res) => {
             yaxis,
             segmentedBy,
             filters: filters || {},
+            reportData
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -413,6 +414,7 @@ exports.createActivityReport = async (req, res) => {
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors,
+            reportData
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -1217,6 +1219,122 @@ exports.saveActivityReport = async (req, res) => {
     } = req.body;
 
     const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Activity" && type === "Performance") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Activity Performance reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateActivityPerformanceData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating activity performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate activity performance data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colorsParsed = JSON.parse(existingcolors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingentity === "Activity" && existingtype === "Performance") {
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Activity Performance reports",
+          });
+        }
+
+        try {
+          const result = await generateExistingActivityPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters,
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating activity performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate activity performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
 
     // Validate required fields (for create only)
     if (
@@ -1231,9 +1349,8 @@ exports.saveActivityReport = async (req, res) => {
     }
 
     let reports = [];
-    let reportData = null;
 
-    // If reportId is present → UPDATE
+    // UPDATE
     if (reportId) {
       const existingReport = await Report.findOne({
         where: { reportId, ownerId },
@@ -1255,13 +1372,17 @@ exports.saveActivityReport = async (req, res) => {
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
         filters !== undefined ||
-        segmentedBy !== undefined
+        segmentedBy !== undefined ||
+        reportData !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy:
+                  segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
+                reportData:
+                  reportData ?? existingReport.config?.reportData,
               },
             }
           : {}),
@@ -1280,13 +1401,12 @@ exports.saveActivityReport = async (req, res) => {
       });
     }
 
-    // Otherwise → CREATE
+    // CREATE
     const dashboardIdsArray = Array.isArray(dashboardIds)
       ? dashboardIds
       : [dashboardIds];
 
     for (const dashboardId of dashboardIdsArray) {
-      // Verify dashboard ownership
       const dashboard = await DASHBOARD.findOne({
         where: { dashboardId, ownerId },
       });
@@ -1297,7 +1417,6 @@ exports.saveActivityReport = async (req, res) => {
         });
       }
 
-      // Find next position
       const lastReport = await Report.findOne({
         where: { dashboardId },
         order: [["position", "DESC"]],
@@ -1309,6 +1428,7 @@ exports.saveActivityReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
+        reportData, // ✅ store inside config
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -1321,7 +1441,7 @@ exports.saveActivityReport = async (req, res) => {
         description: reportName,
         name: name || reportName,
         position: nextPosition,
-        config: configObj,
+        config: configObj, // ✅ keep everything in config
         ownerId,
         graphtype,
         colors,
