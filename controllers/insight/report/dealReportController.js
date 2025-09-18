@@ -1168,6 +1168,7 @@ exports.saveDealPerformReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating deal performance data:", error);
@@ -1234,6 +1235,7 @@ exports.saveDealPerformReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating deal performance data:", error);
@@ -1283,7 +1285,7 @@ exports.saveDealPerformReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -1291,6 +1293,7 @@ exports.saveDealPerformReport = async (req, res) => {
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
                 reportData: reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1339,6 +1342,7 @@ exports.saveDealPerformReport = async (req, res) => {
         segmentedBy,
         filters: filters || {},
         reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -2686,6 +2690,7 @@ exports.saveDealConversionReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating deal conversion data:", error);
@@ -2753,6 +2758,7 @@ exports.saveDealConversionReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating deal conversion data:", error);
@@ -2802,7 +2808,7 @@ exports.saveDealConversionReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -2810,6 +2816,7 @@ exports.saveDealConversionReport = async (req, res) => {
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
                 reportData: reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -2858,6 +2865,7 @@ exports.saveDealConversionReport = async (req, res) => {
         segmentedBy,
         filters: filters || {},
         reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -4184,6 +4192,7 @@ exports.saveDealProgressReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating Deal Progress data:", error);
@@ -4249,6 +4258,7 @@ exports.saveDealProgressReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating Deal Progress data:", error);
@@ -4298,7 +4308,7 @@ exports.saveDealProgressReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -4308,6 +4318,7 @@ exports.saveDealProgressReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -4355,7 +4366,8 @@ exports.saveDealProgressReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;

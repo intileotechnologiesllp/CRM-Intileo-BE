@@ -1032,6 +1032,7 @@ exports.savePersonReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating contact person data:", error);
@@ -1098,6 +1099,7 @@ exports.savePersonReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating contact person data:", error);
@@ -1147,7 +1149,7 @@ exports.savePersonReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
        segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -1157,6 +1159,7 @@ exports.savePersonReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1204,7 +1207,8 @@ exports.savePersonReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -2788,6 +2792,7 @@ exports.saveOrganizationReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating contact organization data:", error);
@@ -2854,6 +2859,7 @@ exports.saveOrganizationReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating contact organization data:", error);
@@ -2903,7 +2909,7 @@ exports.saveOrganizationReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
        segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -2913,6 +2919,7 @@ exports.saveOrganizationReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -2960,7 +2967,8 @@ exports.saveOrganizationReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
