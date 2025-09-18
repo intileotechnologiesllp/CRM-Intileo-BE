@@ -405,3 +405,148 @@ exports.updateLeadColumnChecks = async (req, res) => {
     res.status(500).json({ message: "Error updating columns" });
   }
 };
+
+exports.syncCustomFieldsWithPreferences = async (req, res) => {
+  try {
+    // Get or create LeadColumnPreference record
+    let pref = await LeadColumnPreference.findOne();
+    if (!pref) {
+      pref = await LeadColumnPreference.create({ columns: [] });
+    }
+
+    // Parse existing columns
+    let existingColumns = 
+      typeof pref.columns === "string" 
+        ? JSON.parse(pref.columns) 
+        : pref.columns || [];
+
+    // Fetch all active custom fields for leads
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["lead", "both"] },
+            isActive: true,
+            [Op.or]: [
+              // { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+        console.log(`Fetched ${customFields.length} active custom fields for leads`);
+        
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+        return res.status(500).json({ 
+          message: "Error fetching custom fields",
+          error: customFieldError.message 
+        });
+      }
+    } else {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    // Create a set of existing column keys for quick lookup
+    const existingKeys = new Set(
+      existingColumns.map(col => col.key || col)
+    );
+
+    // Track new fields added
+    let newFieldsAdded = 0;
+    let updatedFields = 0;
+
+    // Add new custom fields that don't exist in preferences
+    customFields.forEach((field) => {
+      if (!existingKeys.has(field.fieldName)) {
+        existingColumns.push({
+          key: field.fieldName,
+          label: field.fieldLabel,
+          type: field.fieldType,
+          isCustomField: true,
+          fieldId: field.fieldId,
+          isRequired: field.isRequired,
+          isImportant: field.isImportant,
+          fieldSource: field.fieldSource,
+          entityType: field.entityType,
+          check: field.check || false,
+        });
+        newFieldsAdded++;
+      } else {
+        // Update existing custom field info if it exists
+        const existingIndex = existingColumns.findIndex(
+          col => col.key === field.fieldName
+        );
+        if (existingIndex !== -1 && existingColumns[existingIndex].isCustomField) {
+          existingColumns[existingIndex] = {
+            ...existingColumns[existingIndex],
+            label: field.fieldLabel,
+            type: field.fieldType,
+            fieldId: field.fieldId,
+            isRequired: field.isRequired,
+            isImportant: field.isImportant,
+            fieldSource: field.fieldSource,
+            entityType: field.entityType,
+          };
+          updatedFields++;
+        }
+      }
+    });
+
+    // Remove custom fields from preferences that no longer exist in CustomField table
+    const activeCustomFieldNames = new Set(
+      customFields.map(field => field.fieldName)
+    );
+
+    const filteredColumns = existingColumns.filter(col => {
+      // Keep non-custom fields
+      if (!col.isCustomField) return true;
+      
+      // For custom fields, only keep if they still exist in CustomField table
+      const stillExists = activeCustomFieldNames.has(col.key);
+      if (!stillExists) {
+        console.log(`Removing deleted custom field from preferences: ${col.key}`);
+      }
+      return stillExists;
+    });
+
+    const removedFieldsCount = existingColumns.length - filteredColumns.length;
+
+    // Update preferences with synced columns
+    pref.columns = filteredColumns;
+    await pref.save();
+
+    res.status(200).json({
+      message: "Custom fields synced with column preferences",
+      totalCustomFields: customFields.length,
+      newFieldsAdded,
+      updatedFields,
+      removedFieldsCount,
+      totalColumns: filteredColumns.length,
+      columns: filteredColumns,
+      success: true,
+    });
+
+  } catch (error) {
+    console.error("Error syncing custom fields with preferences:", error);
+    res.status(500).json({
+      message: "Error syncing custom fields",
+      error: error.message,
+      success: false,
+    });
+  }
+};
