@@ -1100,6 +1100,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating lead performance data:", error);
@@ -1166,6 +1167,7 @@ exports.saveLeadPerformReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating lead performance data:", error);
@@ -1215,7 +1217,7 @@ exports.saveLeadPerformReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -1225,6 +1227,7 @@ exports.saveLeadPerformReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1272,7 +1275,8 @@ exports.saveLeadPerformReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -2801,6 +2805,7 @@ exports.saveLeadConversionReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating Lead Conversion data:", error);
@@ -2867,6 +2872,7 @@ exports.saveLeadConversionReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating Lead Conversion data:", error);
@@ -2916,7 +2922,7 @@ exports.saveLeadConversionReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -2926,6 +2932,7 @@ exports.saveLeadConversionReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -2973,7 +2980,8 @@ exports.saveLeadConversionReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;

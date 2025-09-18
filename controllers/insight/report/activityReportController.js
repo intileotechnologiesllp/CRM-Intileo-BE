@@ -1258,6 +1258,7 @@ exports.saveActivityReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
+            totalValue
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -1324,6 +1325,7 @@ exports.saveActivityReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colorsParsed,
             reportData,
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -1373,7 +1375,7 @@ exports.saveActivityReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined
+        reportData !== undefined || totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
@@ -1383,6 +1385,7 @@ exports.saveActivityReport = async (req, res) => {
                 filters: filters ?? existingReport.config?.filters,
                 reportData:
                   reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1428,7 +1431,8 @@ exports.saveActivityReport = async (req, res) => {
         yaxis,
         segmentedBy,
         filters: filters || {},
-        reportData, // ✅ store inside config
+        reportData,
+        totalValue
       };
 
       const reportName = description || `${entity} ${type}`;
