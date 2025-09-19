@@ -1840,15 +1840,15 @@ exports.createOrganizationReport = async (req, res) => {
       Organization: [
         {
           label: "Organization",
-          value: "LeadOrganization.organization",
+          value: "organization",
           type: "text",
         },
         {
           label: "Organization Labels",
-          value: "LeadOrganization.organizationLabels",
+          value: "organizationLabels",
           type: "text",
         },
-        { label: "Address", value: "LeadOrganization.address", type: "text" },
+        { label: "Address", value: "address", type: "text" },
       ],
     };
 
