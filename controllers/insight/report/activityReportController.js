@@ -20,7 +20,7 @@ exports.createActivityReport = async (req, res) => {
       filters,
       segmentedBy = "none",
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -459,7 +459,7 @@ async function generateExistingActivityPerformanceData(
   existingSegmentedBy,
   existingfilters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   const offset = (page - 1) * limit;
@@ -771,7 +771,7 @@ async function generateActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   const offset = (page - 1) * limit;
@@ -1652,7 +1652,7 @@ exports.getActivityReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 200,
+      limit = 500,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",
