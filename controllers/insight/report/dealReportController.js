@@ -4763,6 +4763,972 @@ exports.getDealProgressReportSummary = async (req, res) => {
   }
 };
 
+exports.createDealDurationReport = async (req, res) => {
+  try {
+    const {
+      reportId,
+      entity,
+      type,
+      xaxis,
+      yaxis,
+      segmentedBy = "none",
+      filters,
+      page = 1,
+      limit = 6,
+    } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Define available options for xaxis and yaxis
+    const xaxisArray = [
+      "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "proposalSentDate",
+      //   "ownerName",
+      "sbuClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      //   "sourceOriginID",
+      "contactPerson",
+      "organization",
+      //   "proposalValueCurrency",
+      "conversionDate",
+      "createdAt",
+      "updatedAt",
+      "creator",
+      "creatorstatus",
+    ];
+
+    const yaxisArray = [
+      "no of deals",
+      "proposalValue",
+      "value",
+      "weightedValue",
+      "productQuantity",
+      "productAmount",
+    ];
+
+    // Add this to your createActivityReport function or make it available globally
+    const availableFilterColumns = {
+      Deal: [
+        { label: "ESPL Proposal No", value: "esplProposalNo", type: "number" },
+        {
+          label: "No of Reports",
+          value: "numberOfReportsPrepared",
+          type: "number",
+        },
+        {
+          label: "Organization Country",
+          value: "organizationCountry",
+          type: "text",
+        },
+        { label: "Project Location", value: "projectLocation", type: "text" },
+        {
+          label: "Proposal Sent Date",
+          value: "proposalSentDate",
+          type: "date",
+        },
+        { label: "Owner Name", value: "ownerName", type: "text" },
+        { label: "SBU Class", value: "SBUClass", type: "text" },
+        { label: "Status", value: "status", type: "text" },
+        {
+          label: "Scope Of Service Type",
+          value: "scopeOfServiceType",
+          type: "text",
+        },
+        { label: "Service Type", value: "serviceType", type: "text" },
+        { label: "Source Channel", value: "sourceChannel", type: "text" },
+        {
+          label: "Source Channel ID",
+          value: "sourceChannelID",
+          type: "number",
+        },
+        { label: "Source Origin", value: "sourceOrigin", type: "text" },
+        { label: "Source Origin Id", value: "sourceOriginID", type: "number" },
+        { label: "Contact Person", value: "contactPerson", type: "text" },
+        { label: "Organization", value: "organization", type: "text" },
+        { label: "Title", value: "title", type: "text" },
+        { label: "Proposal Value", value: "proposalValue", type: "number" },
+        { label: "Sectoral Sector", value: "sectoralSector", type: "text" },
+        { label: "Lead Quality", value: "leadQuality", type: "text" },
+        { label: "Value", value: "value", type: "number" },
+        {
+          label: "Proposal Value Currency",
+          value: "proposalValueCurrency",
+          type: "text",
+        },
+        { label: "Value Currency", value: "valueCurrency", type: "text" },
+        { label: "Value Labels", value: "valueLabels", type: "text" },
+        {
+          label: "Expected Close Date",
+          value: "expectedCloseDate",
+          type: "date",
+        },
+      ],
+      // Lead: [
+      //   { label: "Contact Person", value: "Lead.contactPerson", type: "text" },
+      //   { label: "Organization", value: "Lead.organization", type: "text" },
+      //   { label: "Title", value: "Lead.title", type: "text" },
+      //   { label: "Value Labels", value: "Lead.valueLabels", type: "text" },
+      //   {
+      //     label: "Expected Close Date",
+      //     value: "Lead.expectedCloseDate",
+      //     type: "date",
+      //   },
+      //   { label: "Source Channel", value: "Lead.sourceChannel", type: "text" },
+      //   {
+      //     label: "Source Channel ID",
+      //     value: "Lead.sourceChannelID",
+      //     type: "number",
+      //   },
+      //   { label: "Service Type", value: "Lead.serviceType", type: "text" },
+      //   {
+      //     label: "Scope Of Service Type",
+      //     value: "Lead.scopeOfServiceType",
+      //     type: "text",
+      //   },
+      //   { label: "Phone", value: "Lead.phone", type: "number" },
+      //   { label: "Email", value: "Lead.email", type: "text" },
+      //   { label: "Company", value: "Lead.company", type: "text" },
+      //   {
+      //     label: "Proposal Value",
+      //     value: "Lead.proposalValue",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "ESPL Proposal No",
+      //     value: "Lead.esplProposalNo",
+      //     type: "number",
+      //   },
+      //   {
+      //     label: "Project Location",
+      //     value: "Lead.projectLocation",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Organization Country",
+      //     value: "Lead.organizationCountry",
+      //     type: "text",
+      //   },
+      //   {
+      //     label: "Proposal Sent Date",
+      //     value: "Lead.proposalSentDate",
+      //     type: "date",
+      //   },
+      //   { label: "Status", value: "Lead.status", type: "text" },
+      //   { label: "SBU Class", value: "Lead.SBUClass", type: "text" },
+      //   {
+      //     label: "Sectoral Sector",
+      //     value: "Lead.sectoralSector",
+      //     type: "text",
+      //   },
+      //   { label: "Source Origin", value: "Lead.sourceOrigin", type: "text" },
+      //   { label: "Lead Quality", value: "Lead.leadQuality", type: "text" },
+      //   { label: "Value", value: "Lead.value", type: "number" },
+      //   {
+      //     label: "Proposal Value Currency",
+      //     value: "Lead.proposalValueCurrency",
+      //     type: "text",
+      //   },
+      //   { label: "Value Currency", value: "Lead.valueCurrency", type: "text" },
+      // ],
+      Organization: [
+        {
+          label: "Organization",
+          value: "Organization.organization",
+          type: "text",
+        },
+        {
+          label: "Organization Labels",
+          value: "Organization.organizationLabels",
+          type: "text",
+        },
+        { label: "Address", value: "Organization.address", type: "text" },
+      ],
+      Person: [
+        {
+          label: "Contact Person",
+          value: "Person.contactPerson",
+          type: "text",
+        },
+        {
+          label: "Postal Address",
+          value: "Person.postalAddress",
+          type: "text",
+        },
+        { label: "Email", value: "Person.email", type: "text" },
+        { label: "Phone", value: "Person.phone", type: "number" },
+        { label: "Job Title", value: "Person.jobTitle", type: "text" },
+        { label: "Person Labels", value: "Person.personLabels", type: "text" },
+        { label: "Organization", value: "Person.organization", type: "text" },
+      ],
+    };
+
+    // For Activity Performance reports, generate the data
+    let reportData = null;
+    let paginationInfo = null;
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Deal" && type === "Duration") {
+        // Validate required fields for performance reports
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Duration reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateDealDurationData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            segmentedBy,
+            filters: filters || {},
+          };
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    } else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Duration") {
+        // Validate required fields for performance reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Duration reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateExistingDealDurationData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors,
+          };
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: reportData,
+      totalValue: totalValue,
+      pagination: paginationInfo,
+      config: reportConfig,
+      availableOptions: {
+        xaxis: xaxisArray,
+        yaxis: yaxisArray,
+      },
+      filters: availableFilterColumns,
+    });
+  } catch (error) {
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
+};
+
+async function generateExistingDealDurationData(
+  ownerId,
+  role,
+  existingxaxis,
+  existingyaxis,
+  existingSegmentedBy,
+  filters,
+  page = 1,
+  limit = 6
+) {
+  let includeModels = [];
+  // Calculate offset for pagination
+  const offset = (page - 1) * limit;
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhere = {};
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Handle filters if provided
+  // In your generateActivityPerformanceData function, modify the filter handling:
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Handle special cases for xaxis (like Owner which needs join)
+
+  let groupBy = [];
+  let attributes = [];
+
+  // Handle existingxaxis special cases
+  if (existingxaxis === "creator") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser", // Use the correct alias
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (existingxaxis === "creatorstatus") {
+    // Assuming team information is stored in MasterUser model
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser", // Use the correct alias
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    // For regular columns, explicitly specify the Activity table
+    groupBy.push(`Deal.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
+  }
+
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo" ||
+        existingSegmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
+    }
+
+    if (
+      existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo"
+    ) {
+      groupBy.push("assignedUser.name");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Deal.${existingSegmentedBy}`);
+      attributes.push([
+        Sequelize.col(`Deal.${existingSegmentedBy}`),
+        "segmentValue",
+      ]);
+    }
+  }
+
+  // Handle existingyaxis
+  if (existingyaxis === "no of deals") {
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+  } else if (existingyaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      "yValue",
+    ]);
+  } else if (existingyaxis === "value") {
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
+  } else {
+    // For other yaxis values, explicitly specify the Activity table
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Get total count for pagination
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+        ),
+        "total",
+      ],
+    ],
+    include: includeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  const totalPages = Math.ceil(totalCount / limit);
+
+  let results;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const paginatedGroups = await Deal.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        existingyaxis === "no of deals"
+          ? [Sequelize.fn("COUNT", Sequelize.col("dealId")), "DESC"]
+          : existingyaxis === "proposalValue"
+          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          : [
+              Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
+              "DESC",
+            ],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupBy[0];
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Deal.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
+  // Format the results for the frontend
+  let formattedResults = [];
+  let totalValue = 0;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = { label: xValue, segments: [] };
+      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
+    });
+
+    formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: Number(item.yValue) || 0,
+    }));
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  // Return data with pagination info
+  return {
+    data: formattedResults,
+    totalValue: totalValue,
+    pagination: {
+      currentPage: page,
+      totalPages: totalPages,
+      totalItems: totalCount,
+      itemsPerPage: limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+// Helper function to generate activity performance data with pagination
+async function generateDealDurationData(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  segmentedBy,
+  filters,
+  page = 1,
+  limit = 6
+) {
+  let includeModels = [];
+
+  // Calculate offset for pagination
+  const offset = (page - 1) * limit;
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhere = {};
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Handle filters if provided
+  // In your generateActivityPerformanceData function, modify the filter handling:
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Handle special cases for xaxis (like Owner which needs join)
+
+  let groupBy = [];
+  let attributes = [];
+
+  if (xaxis === "creator") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser", // Use the correct alias
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (xaxis === "creatorstatus") {
+    // Assuming team information is stored in MasterUser model
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser", // Use the correct alias
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    // For regular columns, explicitly specify the Activity table
+    groupBy.push(`Deal.${xaxis}`);
+    attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
+  }
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Deal.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
+  // Handle existingyaxis
+  if (yaxis === "no of deals") {
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+  } else if (yaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      "yValue",
+    ]);
+  } else {
+    // For other yaxis values, explicitly specify the Activity table
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Get total count for pagination
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+        ),
+        "total",
+      ],
+    ],
+    include: includeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  const totalPages = Math.ceil(totalCount / limit);
+
+  let results;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const paginatedGroups = await Deal.findAll({
+      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      where: baseWhere,
+      include: includeModels,
+      group: groupBy[0],
+      order: [
+        yaxis === "no of deals"
+          ? [Sequelize.fn("COUNT", Sequelize.col("dealId")), "DESC"]
+          : yaxis === "proposalValue"
+          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          : [Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)), "DESC"],
+      ],
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+      const [groupModel, groupColumn] = groupBy[0].includes(".")
+        ? groupBy[0].split(".")
+        : ["Deal", groupBy[0]];
+      const whereColumn = groupBy[0].includes(".")
+        ? `$${groupBy[0]}$`
+        : groupColumn;
+
+      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+      const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+      const orConditions = [];
+      if (nonNullGroupKeys.length > 0) {
+        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+      }
+      if (hasNullGroupKey) {
+        orConditions.push({ [whereColumn]: { [Op.is]: null } });
+      }
+      if (orConditions.length > 0) {
+        const groupKeyCondition = { [Op.or]: orConditions };
+        finalWhere[Op.and] = finalWhere[Op.and]
+          ? [...finalWhere[Op.and], groupKeyCondition]
+          : [groupKeyCondition];
+      }
+
+      results = await Deal.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: [[Sequelize.literal("yValue"), "DESC"]],
+      });
+    }
+  } else {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+      limit: limit,
+      offset: offset,
+    });
+  }
+
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  let totalValue = 0;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
+    const groupedData = {};
+
+    results.forEach((item) => {
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = { label: xValue, segments: [] };
+      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
+    });
+
+    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    }); // Sort groups based on their total value
+
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
+  } else {
+    // Original format for non-segmented data
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: Number(item.yValue) || 0,
+    })); // Calculate the grand total
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  // Return data with pagination info
+  return {
+    data: formattedResults,
+    totalValue: totalValue,
+    pagination: {
+      currentPage: page,
+      totalPages: totalPages,
+      totalItems: totalCount,
+      itemsPerPage: limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
 exports.createFunnelDealConversionReport = async (req, res) => {
   try {
     const {
