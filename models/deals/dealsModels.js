@@ -308,6 +308,16 @@ const Deal = sequelize.define(
       allowNull: true,
       comment: "Current stage in the sales pipeline (replaces pipelineStage)",
     },
+    proposalValueCurrency: {
+    type: DataTypes.STRING,
+    allowNull: true, // Currency for the proposal value
+    defaultValue: "INR", // Default to INR
+  },
+  valueCurrency: {
+    type: DataTypes.STRING,
+    allowNull: true, // Currency for the lead value
+    defaultValue: "INR", // Default to INR
+  },
 
     // Timestamps
     createdAt: {

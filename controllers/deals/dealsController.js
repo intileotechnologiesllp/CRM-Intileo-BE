@@ -375,6 +375,8 @@ exports.createDeal = async (req, res) => {
       ownerId,
       status: "open", // Default status
       source,
+      valueCurrency: req.body.valueCurrency || "INR",
+      proposalValueCurrency: req.body.proposalValueCurrency || "INR",
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
