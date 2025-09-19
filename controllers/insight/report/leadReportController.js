@@ -294,6 +294,23 @@ exports.createLeadPerformReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating lead performance data:", error);
           return res.status(500).json({
@@ -363,6 +380,23 @@ exports.createLeadPerformReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colors || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating lead performance data:", error);
           return res.status(500).json({
@@ -379,6 +413,7 @@ exports.createLeadPerformReport = async (req, res) => {
       message: "Data generated successfully",
       data: reportData,
       totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -2093,6 +2128,23 @@ exports.createLeadConversionReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating lead Conversion data:", error);
           return res.status(500).json({
@@ -2163,6 +2215,23 @@ exports.createLeadConversionReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colors || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating lead Conversion data:", error);
           return res.status(500).json({
@@ -2179,6 +2248,7 @@ exports.createLeadConversionReport = async (req, res) => {
       message: "Data generated successfully",
       data: reportData,
       totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {

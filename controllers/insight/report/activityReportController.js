@@ -338,6 +338,23 @@ exports.createActivityReport = async (req, res) => {
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
           reportConfig = {
             entity,
             type,
@@ -345,7 +362,7 @@ exports.createActivityReport = async (req, res) => {
             yaxis,
             segmentedBy,
             filters: filters || {},
-            reportData
+            reportData,
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -414,8 +431,25 @@ exports.createActivityReport = async (req, res) => {
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colors,
-            reportData
+            reportData,
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating activity performance data:", error);
           return res.status(500).json({
@@ -431,7 +465,8 @@ exports.createActivityReport = async (req, res) => {
       success: true,
       message: "Data generated successfully",
       data: reportData,
-      totalValue : totalValue,
+      totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -1245,7 +1280,7 @@ exports.saveActivityReport = async (req, res) => {
             xaxis,
             yaxis,
             segmentedBy,
-            filters,
+            filters
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1258,7 +1293,7 @@ exports.saveActivityReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
             reportData,
-            totalValue
+            totalValue,
           };
         } catch (error) {
           console.error("Error generating activity performance data:", error);
@@ -1309,7 +1344,7 @@ exports.saveActivityReport = async (req, res) => {
             existingxaxis,
             existingyaxis,
             existingSegmentedBy,
-            existingfilters,
+            existingfilters
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -1375,17 +1410,16 @@ exports.saveActivityReport = async (req, res) => {
         yaxis !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
-        reportData !== undefined || totalValue !== undefined
+        reportData !== undefined ||
+        totalValue !== undefined
           ? {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy:
-                  segmentedBy ?? existingReport.config?.segmentedBy,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
-                reportData:
-                  reportData ?? existingReport.config?.reportData,
-                totalValue: totalValue?? existingReport.config?.totalValue,
+                reportData: reportData ?? existingReport.config?.reportData,
+                totalValue: totalValue ?? existingReport.config?.totalValue,
               },
             }
           : {}),
@@ -1432,7 +1466,7 @@ exports.saveActivityReport = async (req, res) => {
         segmentedBy,
         filters: filters || {},
         reportData,
-        totalValue
+        totalValue,
       };
 
       const reportName = description || `${entity} ${type}`;
@@ -1811,7 +1845,6 @@ exports.getActivityReportSummary = async (req, res) => {
         limit
       );
       reportData = reportResult.data;
-
       // Calculate summary statistics
       if (reportData.length > 0) {
         const totalValue = reportData.reduce(

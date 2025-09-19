@@ -104,6 +104,23 @@ exports.createPersonReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating Contact Person data:", error);
           return res.status(500).json({
@@ -172,6 +189,23 @@ exports.createPersonReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colors,
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating Contact Person data:", error);
           return res.status(500).json({
@@ -188,6 +222,7 @@ exports.createPersonReport = async (req, res) => {
       message: "Data generated successfully",
       data: reportData,
       totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
@@ -1889,6 +1924,23 @@ exports.createOrganizationReport = async (req, res) => {
             segmentedBy,
             filters: filters || {},
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating Contact Organization data:", error);
           return res.status(500).json({
@@ -1945,7 +1997,7 @@ exports.createOrganizationReport = async (req, res) => {
           );
           reportData = result.data;
           paginationInfo = result.pagination;
-           totalValue = result.totalValue;
+          totalValue = result.totalValue;
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -1957,6 +2009,23 @@ exports.createOrganizationReport = async (req, res) => {
             graphtype: existinggraphtype,
             colors: colors,
           };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
         } catch (error) {
           console.error("Error generating Contact Organization data:", error);
           return res.status(500).json({
@@ -1973,6 +2042,7 @@ exports.createOrganizationReport = async (req, res) => {
       message: "Data generated successfully",
       data: reportData,
       totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
