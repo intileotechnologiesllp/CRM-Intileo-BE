@@ -357,12 +357,6 @@ exports.queueSyncEmails = async (req, res) => {
         },
       };
     }
-    // Connect to IMAP and open INBOX (or use syncFolders if you want all folders)
-    console.debug(
-      `[queueSyncEmails] Connecting to IMAP for user: ${userEmail}`
-    );
-    const connection = await Imap.connect(imapConfig);
-    await connection.openBox("INBOX");
     // Calculate sinceDate for IMAP search
     let sinceDate;
     if (
@@ -385,70 +379,163 @@ exports.queueSyncEmails = async (req, res) => {
     }
     const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy");
     console.debug(`[queueSyncEmails] IMAP search since: ${formattedSinceDate}`);
-    // Search for all UIDs in the date range
-    const searchCriteria = [["SINCE", formattedSinceDate]];
-    const fetchOptions = { bodies: [], struct: true };
-    const messages = await connection.search(searchCriteria, fetchOptions);
-    const uids = messages.map((msg) => msg.attributes.uid);
-    console.debug(`[queueSyncEmails] Found ${uids.length} UIDs to sync.`);
+
+    // Connect to IMAP and get all folders to sync
+    console.debug(
+      `[queueSyncEmails] Connecting to IMAP for user: ${userEmail}`
+    );
+    const connection = await Imap.connect(imapConfig);
+
+    // Get user's sync folder preferences
+    const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to INBOX
+    const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
+
+    // Fetch all folders from the IMAP server
+    const mailboxes = await connection.getBoxes();
+    console.debug("[queueSyncEmails] All folders from IMAP server:", mailboxes);
+
+    // Extract all valid folder names, including nested folders
+    const validFolders = extractFolders(mailboxes);
+    console.debug("[queueSyncEmails] Valid folders from IMAP server:", validFolders);
+
+    // Determine folders to sync
+    let foldersToSync = Array.isArray(syncFolders) ? syncFolders : [syncFolders];
+    
+    if (syncAllFolders) {
+      console.debug("[queueSyncEmails] Syncing all folders...");
+      foldersToSync = validFolders; // Use all valid folders
+    } else {
+      // Filter user-specified folders to include only valid folders
+      foldersToSync = foldersToSync.filter((folder) =>
+        validFolders.includes(folder)
+      );
+      
+      // Always include common folders for better email coverage
+      const commonFolders = ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Drafts"];
+      commonFolders.forEach(folder => {
+        if (validFolders.includes(folder) && !foldersToSync.includes(folder)) {
+          foldersToSync.push(folder);
+        }
+      });
+    }
+
+    console.debug("[queueSyncEmails] Folders to sync:", foldersToSync);
+
+    if (foldersToSync.length === 0) {
+      console.debug("[queueSyncEmails] No valid folders to sync.");
+      await connection.end();
+      return res.status(400).json({ message: "No valid folders to sync." });
+    }
+
+    // Collect UIDs from all folders
+    let allUIDs = [];
+    let folderUIDMap = {}; // Track which UIDs belong to which folder
+
+    for (const folderName of foldersToSync) {
+      try {
+        console.debug(`[queueSyncEmails] Opening folder: ${folderName}...`);
+        await connection.openBox(folderName);
+
+        // Search for all UIDs in the date range for this folder
+        const searchCriteria = [["SINCE", formattedSinceDate]];
+        const fetchOptions = { bodies: [], struct: true };
+        const messages = await connection.search(searchCriteria, fetchOptions);
+        const folderUIDs = messages.map((msg) => msg.attributes.uid);
+        
+        console.debug(`[queueSyncEmails] Found ${folderUIDs.length} UIDs in folder: ${folderName}`);
+        
+        // Store folder-specific UIDs
+        if (folderUIDs.length > 0) {
+          folderUIDMap[folderName] = folderUIDs;
+          allUIDs.push(...folderUIDs.map(uid => ({ uid, folder: folderName })));
+        }
+      } catch (folderError) {
+        console.error(`[queueSyncEmails] Error processing folder ${folderName}:`, folderError);
+        // Continue with other folders even if one fails
+        continue;
+      }
+    }
+
+    console.debug(`[queueSyncEmails] Total UIDs found across all folders: ${allUIDs.length}`);
+    console.debug(`[queueSyncEmails] Folder UID breakdown:`, Object.keys(folderUIDMap).map(folder => ({
+      folder,
+      count: folderUIDMap[folder].length
+    })));
+
     await connection.end();
-    // Batching
-    const totalEmails = uids.length;
+    // Batching - now we need to handle folder-specific batching
+    const totalEmails = allUIDs.length;
     const numBatches = Math.ceil(totalEmails / batchSize);
+    
     if (numBatches === 0) {
       console.debug(`[queueSyncEmails] No emails to sync.`);
       return res.status(200).json({ message: "No emails to sync." });
     }
-    for (let i = 0; i < numBatches; i++) {
-      const startIdx = i * batchSize;
-      const endIdx = Math.min(startIdx + parseInt(batchSize), totalEmails);
-      const batchUIDs = uids.slice(startIdx, endIdx);
-      if (batchUIDs.length === 0) continue;
-      const startUID = batchUIDs[0];
-      const endUID = batchUIDs[batchUIDs.length - 1];
-      console.debug(
-        `[queueSyncEmails] Queueing batch ${
-          i + 1
-        }/${numBatches}: startUID=${startUID}, endUID=${endUID}`
-      );
 
-      // Use user-specific sync queue for parallel processing
-      const userSyncQueueName = `SYNC_EMAIL_QUEUE_${masterUserID}`;
-
-      // Additional debug logging and validation
-      console.debug(
-        `[queueSyncEmails] Queue name constructed: "${userSyncQueueName}"`
-      );
-      console.debug(
-        `[queueSyncEmails] masterUserID value: "${masterUserID}" (type: ${typeof masterUserID})`
-      );
-
-      if (!userSyncQueueName.includes(masterUserID)) {
-        console.error(
-          `[queueSyncEmails] ERROR: Queue name doesn't contain user ID!`
+    // Create folder-specific batches to maintain folder context
+    let batchCount = 0;
+    for (const [folderName, folderUIDs] of Object.entries(folderUIDMap)) {
+      const folderBatches = Math.ceil(folderUIDs.length / batchSize);
+      
+      for (let i = 0; i < folderBatches; i++) {
+        const startIdx = i * batchSize;
+        const endIdx = Math.min(startIdx + parseInt(batchSize), folderUIDs.length);
+        const batchUIDs = folderUIDs.slice(startIdx, endIdx);
+        
+        if (batchUIDs.length === 0) continue;
+        
+        batchCount++;
+        const startUID = batchUIDs[0];
+        const endUID = batchUIDs[batchUIDs.length - 1];
+        
+        console.debug(
+          `[queueSyncEmails] Queueing batch ${batchCount}: folder=${folderName}, startUID=${startUID}, endUID=${endUID}, count=${batchUIDs.length}`
         );
-        return res
-          .status(500)
-          .json({ message: "Queue name construction failed." });
-      }
 
-      console.debug(
-        `[queueSyncEmails] Publishing to queue: ${userSyncQueueName}`
-      );
-      await publishToQueue(userSyncQueueName, {
-        masterUserID,
-        syncStartDate,
-        batchSize,
-        startUID,
-        endUID,
-      });
-      console.debug(
-        `[queueSyncEmails] Successfully published batch to queue: ${userSyncQueueName}`
-      );
+        // Use user-specific sync queue for parallel processing
+        const userSyncQueueName = `SYNC_EMAIL_QUEUE_${masterUserID}`;
+
+        // Additional debug logging and validation
+        console.debug(
+          `[queueSyncEmails] Queue name constructed: "${userSyncQueueName}"`
+        );
+        console.debug(
+          `[queueSyncEmails] masterUserID value: "${masterUserID}" (type: ${typeof masterUserID})`
+        );
+
+        if (!userSyncQueueName.includes(masterUserID)) {
+          console.error(
+            `[queueSyncEmails] ERROR: Queue name doesn't contain user ID!`
+          );
+          return res
+            .status(500)
+            .json({ message: "Queue name construction failed." });
+        }
+
+        console.debug(
+          `[queueSyncEmails] Publishing to queue: ${userSyncQueueName}`
+        );
+        await publishToQueue(userSyncQueueName, {
+          masterUserID,
+          syncStartDate,
+          batchSize,
+          startUID,
+          endUID,
+          folder: folderName, // Include folder information for processing
+        });
+        console.debug(
+          `[queueSyncEmails] Successfully published batch to queue: ${userSyncQueueName} for folder: ${folderName}`
+        );
+      }
     }
 
     res.status(200).json({
-      message: `Sync jobs queued: ${numBatches} batches for ${totalEmails} emails.`,
+      message: `Sync jobs queued: ${batchCount} batches for ${totalEmails} emails across ${Object.keys(folderUIDMap).length} folders.`,
+      foldersProcessed: Object.keys(folderUIDMap),
+      folderStats: Object.keys(folderUIDMap).map(folder => ({
+        folder,
+        emailCount: folderUIDMap[folder].length
+      }))
     });
   } catch (error) {
     console.error("[queueSyncEmails] Failed to queue sync job:", error);
@@ -493,12 +580,12 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
 }
 
 exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 100, page = 1, startUID, endUID } = req.query; // Accept startUID and endUID for batching
+  const { batchSize = 100, page = 1, startUID, endUID, folder } = req.query; // Accept startUID, endUID and folder for batching
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
   const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
   try {
     console.debug(
-      `[fetchSyncEmails] masterUserID: ${masterUserID}, batchSize: ${batchSize}, page: ${page}, startUID: ${startUID}, endUID: ${endUID}`
+      `[fetchSyncEmails] masterUserID: ${masterUserID}, batchSize: ${batchSize}, page: ${page}, startUID: ${startUID}, endUID: ${endUID}, folder: ${folder}`
     );
     if (inputSyncStartDate) {
       await UserCredential.update(
@@ -597,18 +684,24 @@ exports.fetchSyncEmails = async (req, res) => {
       "[fetchSyncEmails] Valid folders from IMAP server:",
       validFolders
     );
-    // Fetch all folders if syncAllFolders is true
-    let foldersToSync = Array.isArray(syncFolders)
-      ? syncFolders
-      : [syncFolders];
-    if (syncAllFolders) {
-      console.debug("[fetchSyncEmails] Fetching all folders...");
-      foldersToSync = validFolders; // Use all valid folders
+    // Determine folders to sync - if folder is specified in queue message, use that specific folder
+    let foldersToSync;
+    if (folder) {
+      // If a specific folder is provided from the queue message, use only that folder
+      foldersToSync = [folder];
+      console.debug(`[fetchSyncEmails] Processing specific folder from queue: ${folder}`);
     } else {
-      // Filter user-specified folders to include only valid folders
-      foldersToSync = foldersToSync.filter((folder) =>
-        validFolders.includes(folder)
-      );
+      // Original logic for when no specific folder is specified
+      foldersToSync = Array.isArray(syncFolders) ? syncFolders : [syncFolders];
+      if (syncAllFolders) {
+        console.debug("[fetchSyncEmails] Fetching all folders...");
+        foldersToSync = validFolders; // Use all valid folders
+      } else {
+        // Filter user-specified folders to include only valid folders
+        foldersToSync = foldersToSync.filter((folder) =>
+          validFolders.includes(folder)
+        );
+      }
     }
     // Debugging logs
     console.debug(
@@ -776,6 +869,8 @@ exports.fetchSyncEmails = async (req, res) => {
       page: parseInt(page, 10),
       startUID,
       endUID,
+      folder, // Include the specific folder that was processed
+      foldersProcessed: foldersToSync, // Include all folders that were processed
     });
   } catch (error) {
     console.error("[fetchSyncEmails] Error fetching emails:", error);
@@ -1442,6 +1537,121 @@ exports.downloadAttachment = async (req, res) => {
 };
 
 // Diagnostic endpoint for attachment download issues
+// Test endpoint to verify queueSyncEmails functionality
+exports.testQueueSyncEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  
+  try {
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    const provider = userCredential.provider || "gmail";
+    let imapConfig;
+    
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+
+    // Connect and test folder access
+    console.debug(`[testQueueSyncEmails] Connecting to test IMAP for user: ${userCredential.email}`);
+    const connection = await Imap.connect(imapConfig);
+
+    // Get all folders from the IMAP server
+    const mailboxes = await connection.getBoxes();
+    const validFolders = extractFolders(mailboxes);
+    
+    // Test each important folder
+    const testResults = {};
+    const importantFolders = ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Drafts"];
+    
+    for (const folderName of importantFolders) {
+      if (validFolders.includes(folderName)) {
+        try {
+          await connection.openBox(folderName);
+          
+          // Count recent emails (last 7 days)
+          const sinceDate = subDays(new Date(), 7);
+          const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy");
+          const searchCriteria = [["SINCE", formattedSinceDate]];
+          const messages = await connection.search(searchCriteria, { bodies: [], struct: true });
+          
+          testResults[folderName] = {
+            accessible: true,
+            recentEmailCount: messages.length,
+            dbFolderName: folderMapping[folderName] || "inbox"
+          };
+        } catch (error) {
+          testResults[folderName] = {
+            accessible: false,
+            error: error.message
+          };
+        }
+      } else {
+        testResults[folderName] = {
+          accessible: false,
+          error: "Folder not found in server"
+        };
+      }
+    }
+
+    await connection.end();
+
+    res.status(200).json({
+      message: "queueSyncEmails test completed",
+      userEmail: userCredential.email,
+      provider,
+      validFolders,
+      folderTests: testResults,
+      syncSettings: {
+        syncFolders: userCredential.syncFolders,
+        syncAllFolders: userCredential.syncAllFolders,
+        syncStartDate: userCredential.syncStartDate
+      }
+    });
+    
+  } catch (error) {
+    console.error("[testQueueSyncEmails] Error:", error);
+    res.status(500).json({ 
+      message: "Test failed", 
+      error: error.message 
+    });
+  }
+};
+
 exports.diagnoseAttachment = async (req, res) => {
   // Use query parameters for GET endpoint
   const { emailID, filename } = req.query;
