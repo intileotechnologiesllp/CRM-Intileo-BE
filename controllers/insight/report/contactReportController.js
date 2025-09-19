@@ -1286,6 +1286,9 @@ exports.getPersonReportSummary = async (req, res) => {
       ];
     }
 
+     // Initialize include array for main query
+    const include = [];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -1293,32 +1296,42 @@ exports.getPersonReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -1328,16 +1341,22 @@ exports.getPersonReportSummary = async (req, res) => {
     }
 
     // Build order clause
-    const order = [[sortBy, sortOrder]];
+    const order = [];
+    
+      order.push([sortBy, sortOrder]);
+    
 
     // Get total count
     const totalCount = await Person.count({
       where: baseWhere,
+      include: include,
     });
+  
 
     // Get paginated results
     const persons = await Person.findAll({
       where: baseWhere,
+      include: include,
       order: order,
       limit: parseInt(limit),
       offset: offset,
@@ -1438,7 +1457,7 @@ exports.getPersonReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateExistingActivityPerformanceData(
         ownerId,
         role,
         existingxaxis,
