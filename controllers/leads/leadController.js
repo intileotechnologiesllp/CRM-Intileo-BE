@@ -413,9 +413,13 @@ exports.createLead = async (req, res) => {
     //   }
     // );
     // --- End block ---
+        const responsiblePerson = await MasterUser.findOne({
+      where: { masterUserID: req.adminId },
+    });
+    const responsiblePersonName = responsiblePerson ? responsiblePerson.name : null;
     await LeadDetails.create({
       leadId: lead.leadId,
-      responsiblePerson: req.adminId,
+      responsiblePerson: responsiblePersonName,
       sourceOrgin: sourceOrgin,
     });
 
