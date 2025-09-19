@@ -1034,8 +1034,10 @@ exports.getDeals = async (req, res) => {
     // Fetch custom field values for all deals
     const dealIds = deals.map((deal) => deal.dealId);
 
+    console.log("🔍 === CUSTOM FIELDS DEBUG START ===");
     console.log("→ Fetching custom fields for dealIds:", dealIds);
     console.log("→ Current user adminId:", req.adminId);
+    console.log("→ Number of deals to process:", dealIds.length);
 
     // First, let's check if there are any custom field values for these deals
     const allCustomFieldValues = await CustomFieldValue.findAll({
@@ -1062,31 +1064,35 @@ exports.getDeals = async (req, res) => {
       );
     });
 
-    // Now check custom fields that match our criteria and have dealCheck = true
+
+
     const allCustomFields = await CustomField.findAll({
       where: {
         isActive: true,
         entityType: { [Op.in]: ["deal", "both", "lead"] },
-        dealCheck: true, // Only include custom fields where dealCheck is true
+        check: true, // Only include custom fields where check is true
       },
       attributes: [
         "fieldId",
         "fieldName",
+        "fieldLabel",
+        "fieldType",
         "entityType",
         "fieldSource",
         "masterUserID",
         "isActive",
-        "dealCheck",
+        "isImportant",
+        "check",
       ],
     });
 
     console.log(
-      "→ Available custom fields with dealCheck=true:",
+      "→ Available custom fields with check=true:",
       allCustomFields.length
     );
     allCustomFields.forEach((field) => {
       console.log(
-        `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, dealCheck: ${field.dealCheck})`
+        `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, check: ${field.check})`
       );
     });
 
@@ -1102,14 +1108,36 @@ exports.getDeals = async (req, res) => {
           where: {
             isActive: true,
             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            dealCheck: true, // Only include custom fields where dealCheck is true
+            check: true, // Only include custom fields where check is true
           },
+          attributes: [
+            "fieldId",
+            "fieldName", 
+            "fieldLabel",
+            "fieldType",
+            "isImportant",
+            "entityType",
+            "check"
+          ],
           required: true,
         },
       ],
     });
 
     console.log("→ Found custom field values:", customFieldValues.length);
+    
+    // DEBUG: Log each custom field value found
+    customFieldValues.forEach((value, index) => {
+      console.log(`🔍 CustomFieldValue ${index + 1}:`, {
+        entityId: value.entityId,
+        fieldId: value.fieldId,
+        value: value.value,
+        fieldName: value.CustomField?.fieldName,
+        fieldLabel: value.CustomField?.fieldLabel,
+        fieldType: value.CustomField?.fieldType,
+        isImportant: value.CustomField?.isImportant
+      });
+    });
 
     // Group custom field values by dealId
     const customFieldsByDeal = {};
@@ -1150,6 +1178,9 @@ exports.getDeals = async (req, res) => {
         isImportant: field.isImportant,
       };
     });
+    
+    console.log("🔍 All active custom fields template:", Object.keys(allActiveCustomFields));
+    console.log("🔍 Deals with custom field data:", Object.keys(customFieldsByDeal));
 
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
@@ -1178,7 +1209,22 @@ exports.getDeals = async (req, res) => {
         dealObj.currency = null;
       }
 
-      // Merge all active custom fields with values for this deal
+      // DEBUG: Log for the first deal being processed
+      if (deal === deals[0]) {
+        console.log(`🔍 Processing first deal ID: ${dealObj.dealId}`);
+        console.log(`🔍 Custom fields available for deal ${dealObj.dealId}:`, customFieldsByDeal[dealObj.dealId]);
+      }
+      
+      // Add custom fields directly to the deal object (not wrapped in customFields) - same as getLeads
+      const customFieldsData = customFieldsByDeal[dealObj.dealId] || {};
+      console.log(`🔍 Deal ${dealObj.dealId} - Custom fields data:`, customFieldsData);
+      
+      Object.entries(customFieldsData).forEach(([fieldName, fieldData]) => {
+        dealObj[fieldName] = fieldData.value;
+        console.log(`🔍 Deal ${dealObj.dealId} - Added custom field: ${fieldName} = ${fieldData.value}`);
+      });
+
+      // Merge all active custom fields with values for this deal (for backward compatibility)
       const customFieldsForDeal = { ...allActiveCustomFields };
       const valuesForDeal = customFieldsByDeal[dealObj.dealId] || {};
       Object.keys(valuesForDeal).forEach((fieldName) => {
@@ -1187,7 +1233,10 @@ exports.getDeals = async (req, res) => {
           ...valuesForDeal[fieldName],
         };
       });
+      // Keep the customFields property for backward compatibility (same as getLeads)
       dealObj.customFields = customFieldsForDeal;
+      
+      console.log(`🔍 Deal ${dealObj.dealId} - Final customFields object:`, dealObj.customFields);
 
       // Ensure status is present (from deal or details)
       if (!("status" in dealObj)) {
@@ -1196,6 +1245,21 @@ exports.getDeals = async (req, res) => {
 
       return dealObj;
     });
+
+    console.log("🔍 === CUSTOM FIELDS DEBUG END ===");
+    console.log(`🔍 Processed ${dealsWithCustomFields.length} deals with custom fields`);
+    
+    // DEBUG: Show final result for first deal
+    if (dealsWithCustomFields.length > 0) {
+      const firstDeal = dealsWithCustomFields[0];
+      console.log(`🔍 First deal final result - dealId: ${firstDeal.dealId}`);
+      console.log(`🔍 First deal customFields keys:`, Object.keys(firstDeal.customFields));
+      console.log(`🔍 First deal has direct custom field properties:`, 
+        Object.keys(firstDeal).filter(key => 
+          !['dealId', 'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline', 'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo', 'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired', 'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email', 'sourceOrgin', 'status', 'source', 'createdAt', 'updatedAt', 'masterUserID', 'ownerId', 'isArchived', 'label', 'nextActivityDate', 'wonTime', 'lostTime', 'dealClosedOn', 'ownerName', 'scopeOfServiceType', 'proposalCurrencyId', 'currencyId', 'customFields'].includes(key)
+        )
+      );
+    }
 
     // --- Deal summary calculation (like getDealSummary) ---
     // Use the filtered deals for summary
