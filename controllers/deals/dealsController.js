@@ -58,6 +58,7 @@ exports.createDeal = async (req, res) => {
       email,
       sourceOrgin,
       source,
+      label
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
     // --- Enhanced validation similar to createLead ---
@@ -377,6 +378,7 @@ exports.createDeal = async (req, res) => {
       source,
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
+      label
       // Add personId, organizationId, etc. as needed
     });
     let responsiblePerson = null;
