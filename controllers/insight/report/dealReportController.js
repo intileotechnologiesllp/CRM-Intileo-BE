@@ -1429,6 +1429,16 @@ exports.getDealPerformReportSummary = async (req, res) => {
       ];
     }
 
+     // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+    ];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -1436,32 +1446,42 @@ exports.getDealPerformReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -1472,8 +1492,12 @@ exports.getDealPerformReportSummary = async (req, res) => {
 
     // Build order clause
     const order = [];
-    if (sortBy === "Owner") {
-      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
+    if (sortBy === "assignedUser") {
+      order.push([
+        { model: MasterUser, as: "assignedUser" },
+        "name",
+        sortOrder,
+      ]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -1481,16 +1505,6 @@ exports.getDealPerformReportSummary = async (req, res) => {
     } else {
       order.push([sortBy, sortOrder]);
     }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
 
     // Get total count
     const totalCount = await Deal.count({
@@ -1687,10 +1701,10 @@ exports.getDealPerformReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving leads data:", error);
+    console.error("Error retrieving deals data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve leads data",
+      message: "Failed to retrieve deals data",
       error: error.message,
     });
   }
@@ -2951,6 +2965,16 @@ exports.getDealConversionReportSummary = async (req, res) => {
       ];
     }
 
+     // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+    ];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -2958,32 +2982,42 @@ exports.getDealConversionReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -2994,8 +3028,12 @@ exports.getDealConversionReportSummary = async (req, res) => {
 
     // Build order clause
     const order = [];
-    if (sortBy === "Owner") {
-      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
+    if (sortBy === "assignedUser") {
+      order.push([
+        { model: MasterUser, as: "assignedUser" },
+        "name",
+        sortOrder,
+      ]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -3003,16 +3041,6 @@ exports.getDealConversionReportSummary = async (req, res) => {
     } else {
       order.push([sortBy, sortOrder]);
     }
-
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
 
     // Get total count
     const totalCount = await Deal.count({
@@ -3116,7 +3144,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateConversionExistingActivityPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -3193,7 +3221,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Leads data retrieved successfully",
+      message: "Deals data retrieved successfully",
       data: {
         activities: formattedActivities,
         reportData: reportData,
@@ -3209,10 +3237,10 @@ exports.getDealConversionReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving leads data:", error);
+    console.error("Error retrieving deals data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve leads data",
+      message: "Failed to retrieve deals data",
       error: error.message,
     });
   }
@@ -4453,6 +4481,16 @@ exports.getDealProgressReportSummary = async (req, res) => {
       ];
     }
 
+    // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+    ];
+
     // Handle filters if provided
     if (filters && filters.conditions) {
       const validConditions = filters.conditions.filter(
@@ -4460,32 +4498,42 @@ exports.getDealProgressReportSummary = async (req, res) => {
       );
 
       if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
         // Start with the first condition
-        let combinedCondition = getConditionObject(
-          validConditions[0].column,
-          validConditions[0].operator,
-          validConditions[0].value
-        );
+        let combinedCondition = conditions[0];
 
         // Add remaining conditions with their logical operators
-        for (let i = 1; i < validConditions.length; i++) {
-          const currentCondition = getConditionObject(
-            validConditions[i].column,
-            validConditions[i].operator,
-            validConditions[i].value
-          );
-
+        for (let i = 1; i < conditions.length; i++) {
           const logicalOp = (
             filters.logicalOperators[i - 1] || "AND"
           ).toUpperCase();
 
           if (logicalOp === "AND") {
             combinedCondition = {
-              [Op.and]: [combinedCondition, currentCondition],
+              [Op.and]: [combinedCondition, conditions[i]],
             };
           } else {
             combinedCondition = {
-              [Op.or]: [combinedCondition, currentCondition],
+              [Op.or]: [combinedCondition, conditions[i]],
             };
           }
         }
@@ -4496,8 +4544,12 @@ exports.getDealProgressReportSummary = async (req, res) => {
 
     // Build order clause
     const order = [];
-    if (sortBy === "Owner") {
-      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
+    if (sortBy === "assignedUser") {
+      order.push([
+        { model: MasterUser, as: "assignedUser" },
+        "name",
+        sortOrder,
+      ]);
     } else if (sortBy === "dueDate") {
       order.push(["endDateTime", sortOrder]);
     } else if (sortBy === "createdAt") {
@@ -4506,21 +4558,12 @@ exports.getDealProgressReportSummary = async (req, res) => {
       order.push([sortBy, sortOrder]);
     }
 
-    // Include assigned user
-    const include = [
-      {
-        model: MasterUser,
-        as: "Owner",
-        attributes: ["masterUserID", "name", "email"],
-        required: false,
-      },
-    ];
-
     // Get total count
     const totalCount = await Deal.count({
       where: baseWhere,
       include: include,
     });
+
 
     // Get paginated results
     const deals = await Deal.findAll({
@@ -4567,7 +4610,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
     let summary = {};
 
     if (xaxis && yaxis && !reportId) {
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateProgressActivityPerformanceData(
         ownerId,
         role,
         xaxis,
@@ -4618,7 +4661,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateProgressExistingActivityPerformanceData(
         ownerId,
         role,
         existingxaxis,
