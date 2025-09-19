@@ -21,7 +21,7 @@ exports.createPersonReport = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -215,7 +215,7 @@ async function generateExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -537,7 +537,7 @@ async function generateActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -1256,7 +1256,7 @@ exports.getPersonReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 200,
+      limit = 500,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",
@@ -1825,7 +1825,7 @@ exports.createOrganizationReport = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -1999,7 +1999,7 @@ async function generateExistingOrganizationPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -2313,7 +2313,7 @@ async function generateOrganizationPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -3035,7 +3035,7 @@ exports.getOrganizationReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 200,
+      limit = 500,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",

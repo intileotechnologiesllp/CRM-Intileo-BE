@@ -22,7 +22,7 @@ exports.createDealPerformReport = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -367,7 +367,7 @@ async function generateExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -684,7 +684,7 @@ async function generateActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -1390,7 +1390,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 200,
+      limit = 500,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",
@@ -1721,7 +1721,7 @@ exports.createDealConversionReport = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -2068,7 +2068,7 @@ async function generateConversionActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -2361,7 +2361,7 @@ async function generateConversionExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6,
+  limit = 8,
   type
 ) {
   let includeModels = [];
@@ -2927,7 +2927,7 @@ exports.getDealConversionReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 200,
+      limit = 500,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",
@@ -3257,7 +3257,7 @@ exports.createDealProgressReport = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -3599,7 +3599,7 @@ async function generateProgressExistingActivityPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6,
+  limit = 8,
   type
 ) {
   let includeModels = [];
@@ -3905,7 +3905,7 @@ async function generateProgressActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 6,
+  limit = 8,
   type
 ) {
   let includeModels = [];
@@ -4771,10 +4771,11 @@ exports.createDealDurationReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      durationUnit = "days", // Add durationUnit parameter with default value
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 6,
+      limit = 8,
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -4786,7 +4787,6 @@ exports.createDealDurationReport = async (req, res) => {
       "organizationCountry",
       "projectLocation",
       "proposalSentDate",
-      //   "ownerName",
       "sbuClass",
       "status",
       "scopeOfServiceType",
@@ -4794,10 +4794,8 @@ exports.createDealDurationReport = async (req, res) => {
       "sourceChannel",
       "sourceChannelID",
       "sourceOrigin",
-      //   "sourceOriginID",
       "contactPerson",
       "organization",
-      //   "proposalValueCurrency",
       "conversionDate",
       "createdAt",
       "updatedAt",
@@ -4806,14 +4804,11 @@ exports.createDealDurationReport = async (req, res) => {
     ];
 
     const yaxisArray = [
-      "no of deals",
-      "proposalValue",
-      "value",
-      "weightedValue",
-      "productQuantity",
-      "productAmount",
+      "totalDuration",
+      "averageDuration", 
     ];
 
+    // Filter columns (unchanged)
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = {
       Deal: [
@@ -4871,73 +4866,6 @@ exports.createDealDurationReport = async (req, res) => {
           type: "date",
         },
       ],
-      // Lead: [
-      //   { label: "Contact Person", value: "Lead.contactPerson", type: "text" },
-      //   { label: "Organization", value: "Lead.organization", type: "text" },
-      //   { label: "Title", value: "Lead.title", type: "text" },
-      //   { label: "Value Labels", value: "Lead.valueLabels", type: "text" },
-      //   {
-      //     label: "Expected Close Date",
-      //     value: "Lead.expectedCloseDate",
-      //     type: "date",
-      //   },
-      //   { label: "Source Channel", value: "Lead.sourceChannel", type: "text" },
-      //   {
-      //     label: "Source Channel ID",
-      //     value: "Lead.sourceChannelID",
-      //     type: "number",
-      //   },
-      //   { label: "Service Type", value: "Lead.serviceType", type: "text" },
-      //   {
-      //     label: "Scope Of Service Type",
-      //     value: "Lead.scopeOfServiceType",
-      //     type: "text",
-      //   },
-      //   { label: "Phone", value: "Lead.phone", type: "number" },
-      //   { label: "Email", value: "Lead.email", type: "text" },
-      //   { label: "Company", value: "Lead.company", type: "text" },
-      //   {
-      //     label: "Proposal Value",
-      //     value: "Lead.proposalValue",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "ESPL Proposal No",
-      //     value: "Lead.esplProposalNo",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Project Location",
-      //     value: "Lead.projectLocation",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Organization Country",
-      //     value: "Lead.organizationCountry",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Proposal Sent Date",
-      //     value: "Lead.proposalSentDate",
-      //     type: "date",
-      //   },
-      //   { label: "Status", value: "Lead.status", type: "text" },
-      //   { label: "SBU Class", value: "Lead.SBUClass", type: "text" },
-      //   {
-      //     label: "Sectoral Sector",
-      //     value: "Lead.sectoralSector",
-      //     type: "text",
-      //   },
-      //   { label: "Source Origin", value: "Lead.sourceOrigin", type: "text" },
-      //   { label: "Lead Quality", value: "Lead.leadQuality", type: "text" },
-      //   { label: "Value", value: "Lead.value", type: "number" },
-      //   {
-      //     label: "Proposal Value Currency",
-      //     value: "Lead.proposalValueCurrency",
-      //     type: "text",
-      //   },
-      //   { label: "Value Currency", value: "Lead.valueCurrency", type: "text" },
-      // ],
       Organization: [
         {
           label: "Organization",
@@ -4973,6 +4901,9 @@ exports.createDealDurationReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
+    let totalValue = 0;
+    let reportConfig = {};
+
     if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "Duration") {
         // Validate required fields for performance reports
@@ -4991,6 +4922,7 @@ exports.createDealDurationReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            durationUnit, // Pass durationUnit parameter
             segmentedBy,
             filters,
             page,
@@ -5005,6 +4937,7 @@ exports.createDealDurationReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
+            durationUnit,
             segmentedBy,
             filters: filters || {},
           };
@@ -5036,6 +4969,7 @@ exports.createDealDurationReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        durationUnit: existingDurationUnit = "days", // Default to days
         segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
@@ -5057,6 +4991,7 @@ exports.createDealDurationReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingDurationUnit,
             existingSegmentedBy,
             existingfilters,
             page,
@@ -5072,6 +5007,7 @@ exports.createDealDurationReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
+            durationUnit: existingDurationUnit,
             segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
@@ -5116,10 +5052,11 @@ async function generateExistingDealDurationData(
   role,
   existingxaxis,
   existingyaxis,
+  durationUnit,
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
   // Calculate offset for pagination
@@ -5134,7 +5071,6 @@ async function generateExistingDealDurationData(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -5251,22 +5187,38 @@ async function generateExistingDealDurationData(
     }
   }
 
-  // Handle existingyaxis
+  // Handle existingyaxis - Duration calculations
   if (existingyaxis === "no of deals") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
       "yValue",
     ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   } else if (existingyaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.value")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
+  } else if (existingyaxis === "totalDuration" || existingyaxis === "averageDuration") {
+    // Calculate duration in hours or days based on durationUnit
+    const durationFunction = durationUnit === "hours" 
+      ? Sequelize.literal(`TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)`)
+      : Sequelize.literal(`TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`);
+    
+    if (existingyaxis === "totalDuration") {
+      attributes.push([Sequelize.fn("SUM", durationFunction), "yValue"]);
+    } else {
+      attributes.push([Sequelize.fn("AVG", durationFunction), "yValue"]);
+    }
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
+    // For other yaxis values, explicitly specify the Deal table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
       "yValue",
     ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   }
 
   // Get total count for pagination
@@ -5298,9 +5250,19 @@ async function generateExistingDealDurationData(
       group: groupBy[0],
       order: [
         existingyaxis === "no of deals"
-          ? [Sequelize.fn("COUNT", Sequelize.col("dealId")), "DESC"]
+          ? [Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "DESC"]
           : existingyaxis === "proposalValue"
-          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          ? [Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")), "DESC"]
+          : existingyaxis === "value"
+          ? [Sequelize.fn("SUM", Sequelize.col("Deal.value")), "DESC"]
+          : existingyaxis === "totalDuration"
+          ? [Sequelize.fn("SUM", Sequelize.literal(durationUnit === "hours" 
+              ? `TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)` 
+              : `TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`)), "DESC"]
+          : existingyaxis === "averageDuration"
+          ? [Sequelize.fn("AVG", Sequelize.literal(durationUnit === "hours" 
+              ? `TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)` 
+              : `TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`)), "DESC"]
           : [
               Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
               "DESC",
@@ -5373,6 +5335,7 @@ async function generateExistingDealDurationData(
       const xValue = item.xValue || "Unknown";
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
+      const dealCount = Number(item.dealCount) || 0;
 
       if (!groupedData[xValue]) {
         groupedData[xValue] = { label: xValue, segments: [] };
@@ -5380,6 +5343,7 @@ async function generateExistingDealDurationData(
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
         value: yValue,
+        deals: dealCount,
       });
     });
 
@@ -5389,6 +5353,10 @@ async function generateExistingDealDurationData(
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
+        0
+      );
+      group.totalDeals = group.segments.reduce(
+        (sum, seg) => sum + seg.deals,
         0
       );
     });
@@ -5402,10 +5370,11 @@ async function generateExistingDealDurationData(
       0
     );
   } else {
-    // Original format for non-segmented data
+    // Format for non-segmented data with deal count
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
       value: Number(item.yValue) || 0,
+      deals: Number(item.dealCount) || 0,
     }));
 
     // Calculate the grand total
@@ -5433,10 +5402,11 @@ async function generateDealDurationData(
   role,
   xaxis,
   yaxis,
+  durationUnit,
   segmentedBy,
   filters,
   page = 1,
-  limit = 6
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -5452,7 +5422,6 @@ async function generateDealDurationData(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -5561,20 +5530,38 @@ async function generateDealDurationData(
     }
   }
 
-  // Handle existingyaxis
+  // Handle yaxis - Duration calculations
   if (yaxis === "no of deals") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   } else if (yaxis === "proposalValue") {
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
       "yValue",
     ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
+  } else if (yaxis === "value") {
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("Deal.value")), "yValue"]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
+  } else if (yaxis === "totalDuration" || yaxis === "averageDuration") {
+    // Calculate duration in hours or days based on durationUnit
+    const durationFunction = durationUnit === "hours" 
+      ? Sequelize.literal(`TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)`)
+      : Sequelize.literal(`TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`);
+    
+    if (yaxis === "totalDuration") {
+      attributes.push([Sequelize.fn("SUM", durationFunction), "yValue"]);
+    } else {
+      attributes.push([Sequelize.fn("AVG", durationFunction), "yValue"]);
+    }
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
+    // For other yaxis values, explicitly specify the Deal table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
       "yValue",
     ]);
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "dealCount"]);
   }
 
   // Get total count for pagination
@@ -5606,9 +5593,19 @@ async function generateDealDurationData(
       group: groupBy[0],
       order: [
         yaxis === "no of deals"
-          ? [Sequelize.fn("COUNT", Sequelize.col("dealId")), "DESC"]
+          ? [Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")), "DESC"]
           : yaxis === "proposalValue"
-          ? [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "DESC"]
+          ? [Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")), "DESC"]
+          : yaxis === "value"
+          ? [Sequelize.fn("SUM", Sequelize.col("Deal.value")), "DESC"]
+          : yaxis === "totalDuration"
+          ? [Sequelize.fn("SUM", Sequelize.literal(durationUnit === "hours" 
+              ? `TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)` 
+              : `TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`)), "DESC"]
+          : yaxis === "averageDuration"
+          ? [Sequelize.fn("AVG", Sequelize.literal(durationUnit === "hours" 
+              ? `TIMESTAMPDIFF(HOUR, Deal.proposalSentDate, Deal.expectedCloseDate)` 
+              : `TIMESTAMPDIFF(DAY, Deal.proposalSentDate, Deal.expectedCloseDate)`)), "DESC"]
           : [Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)), "DESC"],
       ],
       limit: limit,
@@ -5680,6 +5677,7 @@ async function generateDealDurationData(
       const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
+      const dealCount = Number(item.dealCount) || 0;
 
       if (!groupedData[xValue]) {
         groupedData[xValue] = { label: xValue, segments: [] };
@@ -5687,6 +5685,7 @@ async function generateDealDurationData(
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
         value: yValue,
+        deals: dealCount,
       });
     });
 
@@ -5695,6 +5694,10 @@ async function generateDealDurationData(
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
+        0
+      );
+      group.totalDeals = group.segments.reduce(
+        (sum, seg) => sum + seg.deals,
         0
       );
     }); // Sort groups based on their total value
@@ -5706,10 +5709,11 @@ async function generateDealDurationData(
       0
     );
   } else {
-    // Original format for non-segmented data
+    // Format for non-segmented data with deal count
     formattedResults = results.map((item) => ({
       label: item.xValue || "Unknown",
       value: Number(item.yValue) || 0,
+      deals: Number(item.dealCount) || 0,
     })); // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
@@ -5746,7 +5750,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       ],
       filters,
       page = 1,
-      limit = 10,
+      limit = 8,
     } = req.body;
 
     const ownerId = req.adminId;
@@ -5843,7 +5847,7 @@ async function generateFunnelConversionData(
   pipelineStages,
   filters,
   page = 1,
-  limit = 10
+  limit = 8
 ) {
   // Base where condition
   const baseWhereConditions = [
