@@ -9,6 +9,7 @@ const ActivityColumnPreference = require("../../models/activity/activityColumnMo
 const Lead = require("../../models/leads/leadsModel");
 const LeadDetails = require("../../models/leads/leadDetailsModel");
 const Deal = require("../../models/deals/dealsModels");
+const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
@@ -306,7 +307,23 @@ exports.getActivities = async (req, res) => {
         { description: { [Op.like]: `%${search}%` } },
       ];
     }
-    if (type) where.type = type;
+    if (type) {
+      // Handle multiple types in different formats:
+      // 1. Multiple query params: ?type=Meeting&type=Task
+      // 2. Comma-separated string: ?type=Meeting,Task
+      // 3. Single type: ?type=Meeting
+      if (Array.isArray(type)) {
+        // Multiple query parameters (?type=Meeting&type=Task) - Express automatically creates array
+        where.type = { [Op.in]: type };
+      } else if (typeof type === 'string' && type.includes(',')) {
+        // Comma-separated string (?type=Meeting,Task)
+        const typeArray = type.split(',').map(t => t.trim()).filter(t => t);
+        where.type = { [Op.in]: typeArray };
+      } else {
+        // Single type (?type=Meeting)
+        where.type = type;
+      }
+    }
     if (typeof isDone !== "undefined") where.isDone = isDone === "true";
     if (personId) where.personId = personId;
     if (leadOrganizationId) where.leadOrganizationId = leadOrganizationId;
@@ -1756,43 +1773,78 @@ exports.updateActivity = async (req, res) => {
 };
 
 exports.saveAllActivityFieldsWithCheck = async (req, res) => {
-  // Get all field names from Activity model
-  const activityFields = Object.keys(Activity.rawAttributes);
-
-  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
-  const filteredFieldNames = activityFields.filter(
-    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
-  );
-
-  // Accept array of { value, check } from req.body
+  // Accept checked fields from req.body
   const { checkedFields } = req.body || {};
 
-  // Build columns to save: always include all fields, set check from checkedFields if provided
-  let columnsToSave = filteredFieldNames.map((field) => {
-    let check = false;
-    if (Array.isArray(checkedFields)) {
-      const found = checkedFields.find((item) => item.value === field);
-      check = found ? !!found.check : false;
-    }
-    return { key: field, check };
-  });
-
   try {
-    let pref = await ActivityColumnPreference.findOne();
-    if (!pref) {
+    // Get all field names from Activity model
+    const activityFields = Object.keys(Activity.rawAttributes);
+    
+    // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+    const filteredActivityFields = activityFields.filter(
+      (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+    );
+
+    // Build activity columns to save
+    const activityColumnsToSave = filteredActivityFields.map((field) => {
+      let check = false;
+      if (Array.isArray(checkedFields)) {
+        const found = checkedFields.find((item) => item.value === field);
+        check = found ? !!found.check : false;
+      }
+      return { key: field, check, entityType: 'Activity' };
+    });
+
+    // Get deal columns from DealColumn table
+    let dealColumnsToSave = [];
+    const existingDealPref = await DealColumn.findOne();
+    if (existingDealPref && existingDealPref.columns) {
+      const dealColumns = Array.isArray(existingDealPref.columns) 
+        ? existingDealPref.columns 
+        : JSON.parse(existingDealPref.columns);
+      
+      // Add entityType to existing deal columns
+      dealColumnsToSave = dealColumns.map(col => ({
+        ...col,
+        entityType: 'Deal'
+      }));
+    } else {
+      // If no existing deal columns, get all Deal model fields
+      const dealFields = Object.keys(Deal.rawAttributes);
+      const filteredDealFields = dealFields.filter(
+        (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+      );
+
+      dealColumnsToSave = filteredDealFields.map((field) => {
+        return { key: field, check: false, entityType: 'Deal' };
+      });
+    }
+
+    // Combine both arrays into a single columns array
+    const allColumnsToSave = [...activityColumnsToSave, ...dealColumnsToSave];
+
+    // Save everything in ActivityColumnPreference
+    let activityPref = await ActivityColumnPreference.findOne();
+    if (!activityPref) {
       // Create the record if it doesn't exist
-      pref = await ActivityColumnPreference.create({ columns: columnsToSave });
+      activityPref = await ActivityColumnPreference.create({ columns: allColumnsToSave });
     } else {
       // Update the existing record
-      pref.columns = columnsToSave;
-      await pref.save();
+      activityPref.columns = allColumnsToSave;
+      await activityPref.save();
     }
-    res
-      .status(200)
-      .json({ message: "All activity columns saved", columns: pref.columns });
+
+    res.status(200).json({
+      message: "All columns saved in ActivityColumnPreference in single array",
+      columns: activityPref.columns
+    });
+
   } catch (error) {
-    console.log("Error saving all activity columns:", error);
-    res.status(500).json({ message: "Error saving all activity columns" });
+    console.log("Error saving all columns:", error);
+    res.status(500).json({ 
+      message: "Error saving all columns", 
+      error: error.message 
+    });
   }
 };
 
@@ -1835,40 +1887,48 @@ exports.updateActivityColumnChecks = async (req, res) => {
   }
 };
 
-exports.getActivityFields = (req, res) => {
-  const fields = [
-    // { key: "activityId", label: "Activity ID", check: false }, // removed
-    { key: "type", label: "Type", check: false },
-    { key: "subject", label: "Subject", check: false },
-    { key: "startDateTime", label: "Start Date & Time", check: false },
-    { key: "endDateTime", label: "End Date & Time", check: false },
-    { key: "priority", label: "Priority", check: false },
-    { key: "guests", label: "Guests", check: false },
-    { key: "location", label: "Location", check: false },
-    {
-      key: "videoCallIntegration",
-      label: "Video Call Integration",
-      check: false,
-    },
-    { key: "description", label: "Description", check: false },
-    { key: "status", label: "Status", check: false },
-    { key: "notes", label: "Notes", check: false },
-    { key: "assignedTo", label: "Assigned To", check: false }, // keep
-    // { key: "dealId", label: "Deal ID", check: false }, // removed
-    // { key: "leadId", label: "Lead ID", check: false }, // removed
-    // { key: "personId", label: "Person ID", check: false }, // removed
-    // { key: "leadOrganizationId", label: "Organization ID", check: false }, // removed
-    { key: "isDone", label: "Is Done", check: false },
-    // { key: "masterUserID", label: "Master User ID", check: false }, // removed
-    { key: "contactPerson", label: "Contact Person", check: false },
-    { key: "email", label: "Email", check: false },
-    { key: "organization", label: "Organization", check: false },
-    { key: "dueDate", label: "Due Date", check: false },
-    { key: "createdAt", label: "Created At", check: false },
-    { key: "updatedAt", label: "Updated At", check: false },
-  ];
+exports.getActivityFields = async (req, res) => {
+  try {
+    // Fetch data from ActivityColumnPreference table
+    const pref = await ActivityColumnPreference.findOne();
+    
+    if (!pref || !pref.columns) {
+      return res.status(404).json({ 
+        message: "No column preferences found",
+        fields: []
+      });
+    }
 
-  res.status(200).json({ fields });
+    // Parse columns data if it's stored as JSON string
+    const columns = typeof pref.columns === "string" 
+      ? JSON.parse(pref.columns) 
+      : pref.columns;
+
+    // Transform the data to include labels for better display
+    const fieldsWithLabels = columns.map(column => ({
+      key: column.key,
+      label: column.key
+        .replace(/([A-Z])/g, " $1") // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()), // Capitalize first letter
+      check: column.check,
+      entityType: column.entityType
+    }));
+
+    res.status(200).json({ 
+      success: true,
+      fields: fieldsWithLabels,
+      totalFields: fieldsWithLabels.length,
+      activityFields: fieldsWithLabels.filter(field => field.entityType === 'Activity').length,
+      dealFields: fieldsWithLabels.filter(field => field.entityType === 'Deal').length
+    });
+  } catch (error) {
+    console.error("Error fetching activity fields:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching activity fields",
+      error: error.message 
+    });
+  }
 };
 
 exports.getAllLeadsAndDeals = async (req, res) => {
