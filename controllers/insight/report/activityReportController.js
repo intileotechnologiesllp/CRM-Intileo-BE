@@ -1095,7 +1095,7 @@ async function generateActivityPerformanceData(
   };
 }
 
-// Helper function to convert operator strings to Sequelize operators
+// Enhanced helper function to handle related table conditions and date filtering
 // Enhanced helper function to handle related table conditions and date filtering
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
@@ -1134,7 +1134,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     };
   } else if (isDateColumn) {
     // Handle single date filtering (e.g., "2025-06-23")
-    if (operator === "=") {
+    if (operator === "=" || operator === "is") {
       // For exact date match, create a range for the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
@@ -1219,12 +1219,35 @@ function getConditionObject(column, operator, value, includeModels = []) {
       includeModels.push(modelConfig);
     }
 
-    // Return the condition with proper table reference
-    return Sequelize.where(
-      Sequelize.col(`${modelConfig.as}.${fieldName}`),
-      getSequelizeOperator(operator),
-      conditionValue
-    );
+    // FIX: Return a plain object instead of Sequelize.where()
+    // This creates a condition object that can be properly combined
+    const op = getSequelizeOperator(operator);
+    
+    // Handle special operators for related tables
+    switch (operator) {
+      case "contains":
+        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+      case "startsWith":
+        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+      case "endsWith":
+        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+      case "isEmpty":
+        return {
+          [Op.or]: [
+            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.is]: null } },
+            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.eq]: "" } },
+          ],
+        };
+      case "isNotEmpty":
+        return {
+          [Op.and]: [
+            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.not]: null } },
+            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.ne]: "" } },
+          ],
+        };
+      default:
+        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: conditionValue } };
+    }
   } else {
     // Regular activity table column
     return getOperatorCondition(column, operator, conditionValue);
@@ -1239,6 +1262,8 @@ function getSequelizeOperator(operator) {
     case "<":
       return Op.lt;
     case "=":
+      return Op.eq;
+    case "is":
       return Op.eq;
     case "≠":
       return Op.ne;
