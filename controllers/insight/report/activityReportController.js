@@ -58,6 +58,7 @@ exports.createActivityReport = async (req, res) => {
         { label: "Start Date Time", value: "startDateTime", type: "date" },
         { label: "End Date Time", value: "endDateTime", type: "date" },
         { label: "Created At", value: "createdAt", type: "date" },
+        { label: "Add on", value: "daterange", type: "daterange" },
       ],
       Deal: [
         { label: "Title", value: "ActivityDeal.title", type: "text" },
@@ -1095,7 +1096,7 @@ async function generateActivityPerformanceData(
 }
 
 // Helper function to convert operator strings to Sequelize operators
-// Enhanced helper function to handle related table conditions
+// Enhanced helper function to handle related table conditions and date filtering
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
@@ -1108,11 +1109,62 @@ function getConditionObject(column, operator, value, includeModels = []) {
     [tableAlias, fieldName] = column.split(".");
   }
 
-  // Handle different data types
-  if (fieldName === "isDone") {
+  // Handle date filtering for specific date columns
+  const isDateColumn =
+    fieldName.includes("Date") ||
+    fieldName.includes("Time") ||
+    fieldName === "startDateTime" ||
+    fieldName === "endDateTime" ||
+    fieldName === "dueDate" ||
+    fieldName === "createdAt" ||
+    fieldName === "updatedAt";
+
+  // Handle date range filtering for "Add on" (daterange type)
+  const isDateRangeFilter = fieldName === "daterange" && operator === "between";
+
+  if (isDateRangeFilter && Array.isArray(value)) {
+    // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
+    const [fromDate, toDate] = value;
+
+    return {
+      [Op.and]: [
+        { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+        { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+      ],
+    };
+  } else if (isDateColumn) {
+    // Handle single date filtering (e.g., "2025-06-23")
+    if (operator === "=") {
+      // For exact date match, create a range for the entire day
+      const startOfDay = new Date(value + " 00:00:00");
+      const endOfDay = new Date(value + " 23:59:59");
+
+      return {
+        [column]: {
+          [Op.between]: [startOfDay, endOfDay],
+        },
+      };
+    } else if (operator === ">") {
+      conditionValue = new Date(value + " 23:59:59");
+    } else if (operator === "<") {
+      conditionValue = new Date(value + " 00:00:00");
+    } else if (operator === "≠") {
+      // For not equal, exclude the entire day
+      const startOfDay = new Date(value + " 00:00:00");
+      const endOfDay = new Date(value + " 23:59:59");
+
+      return {
+        [column]: {
+          [Op.notBetween]: [startOfDay, endOfDay],
+        },
+      };
+    } else {
+      conditionValue = new Date(value);
+    }
+  }
+  // Handle other data types
+  else if (fieldName === "isDone") {
     conditionValue = value === "true" || value === true;
-  } else if (fieldName.includes("Date") || fieldName.includes("Time")) {
-    conditionValue = new Date(value);
   } else if (!isNaN(value) && value !== "" && typeof value === "string") {
     conditionValue = parseFloat(value);
   }
@@ -1126,7 +1178,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
         modelConfig = {
           model: Deal,
           as: "ActivityDeal",
-          required: false, // Use false to avoid INNER JOIN issues
+          required: false,
           attributes: [],
         };
         break;
@@ -1200,6 +1252,8 @@ function getSequelizeOperator(operator) {
       return Op.or;
     case "isNotEmpty":
       return Op.and;
+    case "between":
+      return Op.between; // For date range filtering
     default:
       return Op.eq;
   }
@@ -1230,6 +1284,9 @@ function getOperatorCondition(column, operator, value) {
           { [column]: { [Op.ne]: "" } },
         ],
       };
+    case "between":
+      // This case is handled in the main function above
+      return value; // Return the pre-built condition
     default:
       return { [column]: { [op]: value } };
   }

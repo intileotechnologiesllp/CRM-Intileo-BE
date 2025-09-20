@@ -3349,7 +3349,7 @@ exports.createDealProgressReport = async (req, res) => {
       "productAmount",
     ];
 
-    // Add this to your createActivityReport function or make it available globally
+    // Filter columns definition
     const availableFilterColumns = {
       Deal: [
         { label: "ESPL Proposal No", value: "esplProposalNo", type: "number" },
@@ -3412,73 +3412,6 @@ exports.createDealProgressReport = async (req, res) => {
           type: "text",
         },
       ],
-      // Lead: [
-      //   { label: "Contact Person", value: "Lead.contactPerson", type: "text" },
-      //   { label: "Organization", value: "Lead.organization", type: "text" },
-      //   { label: "Title", value: "Lead.title", type: "text" },
-      //   { label: "Value Labels", value: "Lead.valueLabels", type: "text" },
-      //   {
-      //     label: "Expected Close Date",
-      //     value: "Lead.expectedCloseDate",
-      //     type: "date",
-      //   },
-      //   { label: "Source Channel", value: "Lead.sourceChannel", type: "text" },
-      //   {
-      //     label: "Source Channel ID",
-      //     value: "Lead.sourceChannelID",
-      //     type: "number",
-      //   },
-      //   { label: "Service Type", value: "Lead.serviceType", type: "text" },
-      //   {
-      //     label: "Scope Of Service Type",
-      //     value: "Lead.scopeOfServiceType",
-      //     type: "text",
-      //   },
-      //   { label: "Phone", value: "Lead.phone", type: "number" },
-      //   { label: "Email", value: "Lead.email", type: "text" },
-      //   { label: "Company", value: "Lead.company", type: "text" },
-      //   {
-      //     label: "Proposal Value",
-      //     value: "Lead.proposalValue",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "ESPL Proposal No",
-      //     value: "Lead.esplProposalNo",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Project Location",
-      //     value: "Lead.projectLocation",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Organization Country",
-      //     value: "Lead.organizationCountry",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Proposal Sent Date",
-      //     value: "Lead.proposalSentDate",
-      //     type: "date",
-      //   },
-      //   { label: "Status", value: "Lead.status", type: "text" },
-      //   { label: "SBU Class", value: "Lead.SBUClass", type: "text" },
-      //   {
-      //     label: "Sectoral Sector",
-      //     value: "Lead.sectoralSector",
-      //     type: "text",
-      //   },
-      //   { label: "Source Origin", value: "Lead.sourceOrigin", type: "text" },
-      //   { label: "Lead Quality", value: "Lead.leadQuality", type: "text" },
-      //   { label: "Value", value: "Lead.value", type: "number" },
-      //   {
-      //     label: "Proposal Value Currency",
-      //     value: "Lead.proposalValueCurrency",
-      //     type: "text",
-      //   },
-      //   { label: "Value Currency", value: "Lead.valueCurrency", type: "text" },
-      // ],
       Organization: [
         {
           label: "Organization",
@@ -3515,6 +3448,8 @@ exports.createDealProgressReport = async (req, res) => {
     let reportData = null;
     let paginationInfo = null;
     let reportConfig = null;
+    let totalValue = 0;
+    let summary = {};
 
     if ((entity && type && !reportId) || (entity && type && reportId)) {
       if (entity === "Deal" && type === "Progress") {
@@ -3536,12 +3471,12 @@ exports.createDealProgressReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
+
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
             const maxValue = Math.max(
@@ -3559,6 +3494,7 @@ exports.createDealProgressReport = async (req, res) => {
               minValue: minValue,
             };
           }
+
           reportConfig = {
             entity,
             type,
@@ -3580,6 +3516,13 @@ exports.createDealProgressReport = async (req, res) => {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
+
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
 
       const {
         entity: existingentity,
@@ -3618,12 +3561,12 @@ exports.createDealProgressReport = async (req, res) => {
             existingSegmentedBy,
             existingfilters,
             page,
-            limit,
-            type
+            limit
           );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
+
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
             const maxValue = Math.max(
@@ -3641,6 +3584,7 @@ exports.createDealProgressReport = async (req, res) => {
               minValue: minValue,
             };
           }
+
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -3706,20 +3650,14 @@ function formatResultsWithPipelineBreakdown(results) {
       };
     }
 
-    // Add to the pipeline stage breakdown
+    // Add to the pipeline stage breakdown - accumulate values for same stage
     if (!groupedByXValue[xValue].breakdown[pipelineStage]) {
       groupedByXValue[xValue].breakdown[pipelineStage] = 0;
     }
     groupedByXValue[xValue].breakdown[pipelineStage] += yValue;
-  });
 
-  // Second pass: calculate the total value for each xValue
-  Object.keys(groupedByXValue).forEach((xValue) => {
-    const breakdown = groupedByXValue[xValue].breakdown;
-    groupedByXValue[xValue].value = Object.values(breakdown).reduce(
-      (sum, stageValue) => sum + stageValue,
-      0
-    );
+    // Also accumulate to the total value
+    groupedByXValue[xValue].value += yValue;
   });
 
   // Convert to array and sort by total value descending
@@ -3799,7 +3737,6 @@ async function generateProgressExistingActivityPerformanceData(
   }
 
   // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
 
@@ -3807,17 +3744,16 @@ async function generateProgressExistingActivityPerformanceData(
   if (existingxaxis === "creator") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "name"],
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
   } else if (existingxaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "creatorstatus"],
       required: true,
     });
@@ -3857,9 +3793,9 @@ async function generateProgressExistingActivityPerformanceData(
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${existingSegmentedBy}`);
+      groupBy.push(`Deal.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`Activity.${existingSegmentedBy}`),
+        Sequelize.col(`Deal.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
@@ -3897,7 +3833,6 @@ async function generateProgressExistingActivityPerformanceData(
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the Deal table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
       "yValue",
@@ -4068,7 +4003,7 @@ async function generateProgressActivityPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8,
+  limit = 8
 ) {
   let includeModels = [];
 
@@ -4134,24 +4069,22 @@ async function generateProgressActivityPerformanceData(
   }
 
   // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
 
   if (xaxis === "creator") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "name"],
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
   } else if (xaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "creatorstatus"],
       required: true,
     });
@@ -4188,11 +4121,8 @@ async function generateProgressActivityPerformanceData(
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`Activity.${segmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Activity.${segmentedBy}`),
-        "segmentValue",
-      ]);
+      groupBy.push(`Deal.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
     }
   }
 
@@ -4228,7 +4158,6 @@ async function generateProgressActivityPerformanceData(
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the Deal table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
       "yValue",
@@ -4348,16 +4277,16 @@ async function generateProgressActivityPerformanceData(
       });
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+    formattedResults = Object.values(groupedData);
 
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
         0
       );
-    }); // Sort groups based on their total value
+    });
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -5456,7 +5385,7 @@ async function generateExistingDealDurationData(
 
     if (existingyaxis === "totalDuration") {
       attributes.push([Sequelize.fn("SUM", durationFunction), "yValue"]);
-    } else {
+    } else if (existingyaxis === "averageDuration") {
       attributes.push([Sequelize.fn("AVG", durationFunction), "yValue"]);
     }
     attributes.push([
@@ -5841,7 +5770,7 @@ async function generateDealDurationData(
 
     if (yaxis === "totalDuration") {
       attributes.push([Sequelize.fn("SUM", durationFunction), "yValue"]);
-    } else {
+    } else if (yaxis === "averageDuration") {
       attributes.push([Sequelize.fn("AVG", durationFunction), "yValue"]);
     }
     attributes.push([
