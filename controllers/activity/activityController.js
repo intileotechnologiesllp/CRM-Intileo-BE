@@ -133,17 +133,33 @@ exports.getActivities = async (req, res) => {
 
     const pref = await ActivityColumnPreference.findOne();
     let attributes = [];
+    let dealColumns = [];
+    let hasDealColumns = false;
+    
     if (pref) {
       const columns =
         typeof pref.columns === "string"
           ? JSON.parse(pref.columns)
           : pref.columns;
+      
       const activityFields = Object.keys(Activity.rawAttributes);
+      const dealFields = Object.keys(Deal.rawAttributes);
+      
+      // Filter Activity columns that are checked
       columns
-        .filter((col) => col.check && activityFields.includes(col.key))
+        .filter((col) => col.check && col.entityType === 'Activity' && activityFields.includes(col.key))
         .forEach((col) => {
           attributes.push(col.key);
         });
+      
+      // Filter Deal columns that are checked
+      columns
+        .filter((col) => col.check && col.entityType === 'Deal' && dealFields.includes(col.key))
+        .forEach((col) => {
+          dealColumns.push(col.key);
+          hasDealColumns = true;
+        });
+      
       if (attributes.length === 0) attributes = undefined;
     }
 
@@ -385,7 +401,7 @@ exports.getActivities = async (req, res) => {
         {
           model: Deal,
           as: "ActivityDeal", // Use the alias here
-          attributes: Object.keys(Deal.rawAttributes),
+          attributes: hasDealColumns ? dealColumns : ["dealId", "title"], // Include checked Deal columns or default
           required: entityType === "Deal", // Apply filter only for Deal
           where:
             entityType === "Deal" &&
@@ -424,13 +440,25 @@ exports.getActivities = async (req, res) => {
       const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
         data;
       let title = null;
+      let result = { ...rest };
+      
       if (rest.leadId && ActivityLead) {
         title = ActivityLead.title;
       } else if (rest.dealId && ActivityDeal) {
         title = ActivityDeal.title;
+        
+        // If activity is connected to deal and we have checked deal columns, add them to result
+        if (hasDealColumns && dealColumns.length > 0) {
+          dealColumns.forEach(column => {
+            if (ActivityDeal[column] !== undefined) {
+              result[`deal_${column}`] = ActivityDeal[column];
+            }
+          });
+        }
       }
+      
       return {
-        ...rest,
+        ...result,
         title,
         organization: ActivityOrganization
           ? ActivityOrganization.organization
