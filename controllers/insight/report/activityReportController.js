@@ -1096,7 +1096,6 @@ async function generateActivityPerformanceData(
 }
 
 // Enhanced helper function to handle related table conditions and date filtering
-// Enhanced helper function to handle related table conditions and date filtering
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
@@ -1120,18 +1119,29 @@ function getConditionObject(column, operator, value, includeModels = []) {
     fieldName === "updatedAt";
 
   // Handle date range filtering for "Add on" (daterange type)
-  const isDateRangeFilter = fieldName === "daterange" && operator === "between";
-
+  const isDateRangeFilter = fieldName === "daterange";
+  
   if (isDateRangeFilter && Array.isArray(value)) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
 
-    return {
-      [Op.and]: [
-        { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-        { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
-      ],
-    };
+    if (operator === "between" || operator === "=" || operator === "is") {
+      // Include records within the date range
+      return {
+        [Op.and]: [
+          { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+          { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+        ],
+      };
+    } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      // Exclude records within the date range (records NOT between the dates)
+      return {
+        [Op.or]: [
+          { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
+          { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
+        ],
+      };
+    }
   } else if (isDateColumn) {
     // Handle single date filtering (e.g., "2025-06-23")
     if (operator === "=" || operator === "is") {
@@ -1148,7 +1158,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
       conditionValue = new Date(value + " 23:59:59");
     } else if (operator === "<") {
       conditionValue = new Date(value + " 00:00:00");
-    } else if (operator === "≠") {
+    } else if (operator === "≠" || operator === "is not") {
       // For not equal, exclude the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
@@ -1267,6 +1277,8 @@ function getSequelizeOperator(operator) {
       return Op.eq;
     case "≠":
       return Op.ne;
+    case "is not":
+      return Op.ne;
     case "contains":
       return Op.like;
     case "startsWith":
@@ -1278,7 +1290,9 @@ function getSequelizeOperator(operator) {
     case "isNotEmpty":
       return Op.and;
     case "between":
-      return Op.between; // For date range filtering
+      return Op.between;
+    case "notBetween":
+      return Op.notBetween;
     default:
       return Op.eq;
   }
@@ -1310,7 +1324,8 @@ function getOperatorCondition(column, operator, value) {
         ],
       };
     case "between":
-      // This case is handled in the main function above
+    case "notBetween":
+      // These cases are handled in the main function above
       return value; // Return the pre-built condition
     default:
       return { [column]: { [op]: value } };
