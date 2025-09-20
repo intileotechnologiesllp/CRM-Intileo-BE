@@ -27,6 +27,10 @@ router.post("/save-dealprogressreport", verifyToken, dealReportController.saveDe
 
 router.post("/create-dealdurationreport", verifyToken, dealReportController.createDealDurationReport);
 
+router.post("/save-dealdurationreport", verifyToken, dealReportController.saveDealDurationReport);
+
+router.post("/get-summarydealdurationreport", verifyToken, dealReportController.getDealDurationReportSummary);
+
 router.post("/create-funneldealconversionreport", verifyToken, dealReportController.createFunnelDealConversionReport);
 
 module.exports = router;
