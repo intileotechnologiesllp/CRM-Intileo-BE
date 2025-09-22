@@ -2845,49 +2845,126 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
     };
 
     const performEmailFetch = async () => {
-      console.log("Opening INBOX...");
-      await connection.openBox("INBOX");
+      // Get provider-specific folder configuration
+      const provider = userCredential.provider;
+      const folderMap = PROVIDER_FOLDER_MAP[provider] || PROVIDER_FOLDER_MAP["gmail"];
+      
+      console.log(`[fetchRecentEmail] Fetching from both INBOX and SENT folders for provider: ${provider}`);
 
-      console.log("Fetching the most recent email...");
-
-      // // Fetch all emails, then get the most recent one
-      // const fetchOptions = { bodies: "", struct: true };
-      // const messages = await connection.search(["ALL"], fetchOptions);
-
-      // if (!messages.length) {
-      //   connection.end();
-      //   return { message: "No emails found." };
-      // }
-
-      //...................optimized for Gmail performance.................
-      // For better Gmail performance, fetch only recent emails (last 2 days instead of 7)
+      // For better performance, fetch only recent emails (last 2 days)
       const sinceDate = formatDateForIMAP(
         new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
       );
-      console.log(`Using optimized SINCE date for Gmail: ${sinceDate}`);
+      console.log(`Using optimized SINCE date: ${sinceDate}`);
 
-      const searchCriteria = [["SINCE", sinceDate]];
       const fetchOptions = {
         bodies: "HEADER", // Only fetch headers first for better performance
         struct: true,
-        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
+        envelope: true  // ADD ENVELOPE for proper email metadata
       };
 
-      console.log("Searching for recent emails (headers only)...");
-      const messages = await connection.search(searchCriteria, fetchOptions);
+      let allMessages = [];
+      let folderResults = {};
 
-      console.log(`Total recent emails found: ${messages.length}`);
-
-      if (messages.length === 0) {
-        console.log("No recent emails found.");
-        return { message: "No recent emails found." };
+      // Fetch from INBOX folder
+      try {
+        console.log(`[fetchRecentEmail] Opening INBOX folder: ${folderMap.inbox}`);
+        await connection.openBox(folderMap.inbox);
+        
+        const searchCriteria = [["SINCE", sinceDate]];
+        console.log("Searching for recent emails in INBOX (headers only)...");
+        const inboxMessages = await connection.search(searchCriteria, fetchOptions);
+        
+        // Add folder information to each message
+        const inboxMessagesWithFolder = inboxMessages.map(msg => ({
+          ...msg,
+          folderType: 'inbox',
+          folderName: folderMap.inbox
+        }));
+        
+        allMessages.push(...inboxMessagesWithFolder);
+        folderResults.inbox = {
+          count: inboxMessages.length,
+          folderName: folderMap.inbox,
+          status: 'success'
+        };
+        
+        console.log(`[fetchRecentEmail] Found ${inboxMessages.length} recent emails in INBOX`);
+      } catch (inboxError) {
+        console.error(`[fetchRecentEmail] Error fetching from INBOX: ${inboxError.message}`);
+        folderResults.inbox = {
+          count: 0,
+          folderName: folderMap.inbox,
+          status: 'error',
+          error: inboxError.message
+        };
       }
 
-      // Get the most recent email UID
-      const recentHeaderMessage = messages[messages.length - 1];
+      // Fetch from SENT folder
+      try {
+        console.log(`[fetchRecentEmail] Opening SENT folder: ${folderMap.sent}`);
+        await connection.openBox(folderMap.sent);
+        
+        const searchCriteria = [["SINCE", sinceDate]];
+        console.log("Searching for recent emails in SENT (headers only)...");
+        const sentMessages = await connection.search(searchCriteria, fetchOptions);
+        
+        // Add folder information to each message
+        const sentMessagesWithFolder = sentMessages.map(msg => ({
+          ...msg,
+          folderType: 'sent',
+          folderName: folderMap.sent
+        }));
+        
+        allMessages.push(...sentMessagesWithFolder);
+        folderResults.sent = {
+          count: sentMessages.length,
+          folderName: folderMap.sent,
+          status: 'success'
+        };
+        
+        console.log(`[fetchRecentEmail] Found ${sentMessages.length} recent emails in SENT`);
+      } catch (sentError) {
+        console.error(`[fetchRecentEmail] Error fetching from SENT: ${sentError.message}`);
+        folderResults.sent = {
+          count: 0,
+          folderName: folderMap.sent,
+          status: 'error',
+          error: sentError.message
+        };
+      }
+
+      console.log(`[fetchRecentEmail] Total recent emails found across folders: ${allMessages.length}`);
+      console.log(`[fetchRecentEmail] Folder results:`, folderResults);
+
+      if (allMessages.length === 0) {
+        console.log("No recent emails found in any folder.");
+        return { 
+          message: "No recent emails found in any folder.",
+          folderResults: folderResults
+        };
+      }
+
+      // Sort all messages by date to get the most recent one across all folders
+      const sortedMessages = allMessages.sort((a, b) => {
+        const dateA = a.attributes?.envelope?.date || a.envelope?.date || new Date(0);
+        const dateB = b.attributes?.envelope?.date || b.envelope?.date || new Date(0);
+        return new Date(dateB) - new Date(dateA); // Most recent first
+      });
+
+      // Get the most recent email from all folders
+      const recentHeaderMessage = sortedMessages[0];
       const recentUID = recentHeaderMessage.attributes.uid;
+      const recentFolder = recentHeaderMessage.folderType;
+      const recentFolderName = recentHeaderMessage.folderName;
       
-      console.log(`Fetching full body for most recent email UID: ${recentUID}`);
+      console.log(`[fetchRecentEmail] Most recent email found in ${recentFolder} folder (${recentFolderName}) with UID: ${recentUID}`);
+      
+      // Re-open the folder where the most recent email was found
+      console.log(`[fetchRecentEmail] Re-opening ${recentFolder} folder to fetch full body`);
+      await connection.openBox(recentFolderName);
+      
+      console.log(`Fetching full body for most recent email UID: ${recentUID} from ${recentFolder} folder`);
       
       // Now fetch only the full body of the most recent email
       const fullMessages = await connection.search(
@@ -2900,7 +2977,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
         return { message: "Could not fetch full message body." };
       }
 
-      console.log(`Total emails found: ${messages.length}`);
+      console.log(`Found full message data for email in ${recentFolder} folder`);
 
       // Get the full message data
       const recentMessage = fullMessages[0];
@@ -2977,7 +3054,7 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
         subject: parsedEmail.subject || null,
         // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
         body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-        folder: "inbox", // Add folder field
+        folder: recentFolder, // Use the actual folder where email was found (inbox or sent)
         // threadId,
         createdAt: parsedEmail.date || new Date(),
         isRead: isRead, // Save read/unread status
@@ -3098,9 +3175,15 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
       console.log("IMAP connection closed.");
 
       return {
-        message: "Fetched and saved the most recent email.",
+        message: `Fetched and saved the most recent email from ${recentFolder} folder.`,
         email: emailData,
         relatedEmails,
+        folderResults: folderResults,
+        sourceFolder: {
+          type: recentFolder,
+          name: recentFolderName,
+          uid: recentUID
+        }
       };
     }; // End of performEmailFetch function
 
