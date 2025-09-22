@@ -290,17 +290,64 @@ const folderMapping = {
   "[Gmail]/Drafts": "drafts",
   "[Gmail]/Sent Mail": "sent",
   "[Gmail]/Trash": "archive",
-  "[Gmail]/All Mail": "inbox", // Map "All Mail" to "archive"
+  "[Gmail]/All Mail": "inbox", // Map "All Mail" to "inbox" for broader coverage
+  "Sent": "sent", // Standard sent folder for most providers
+  "Sent Items": "sent", // Outlook sent folder
+  "Drafts": "drafts", // Standard drafts folder
+  "Trash": "archive", // Standard trash folder
+  "Deleted Items": "archive", // Outlook trash folder
+  "Archive": "archive", // Standard archive folder
 };
 
 exports.queueSyncEmails = async (req, res) => {
   const masterUserID = req.adminId;
-  const { syncStartDate, batchSize = 100 } = req.body;
+  const { syncStartDate, batchSize = 50 } = req.body; // Reduced default batch size for efficiency
 
   try {
     console.debug(
       `[queueSyncEmails] masterUserID: ${masterUserID} (type: ${typeof masterUserID}), syncStartDate: ${syncStartDate}, batchSize: ${batchSize}`
     );
+
+    // Calculate and log how many days will be fetched
+    let daysToFetch = 0;
+    const finalSyncStartDate = syncStartDate || "3 days ago";
+    
+    try {
+      let calculatedSinceDate;
+      if (typeof finalSyncStartDate === "string" && finalSyncStartDate.includes("T")) {
+        // If syncStartDate is an ISO date string
+        calculatedSinceDate = new Date(finalSyncStartDate);
+      } else if (finalSyncStartDate.includes("days ago")) {
+        const days = parseInt(finalSyncStartDate.split(" ")[0], 10);
+        calculatedSinceDate = subDays(new Date(), days);
+        daysToFetch = days;
+      } else if (finalSyncStartDate.includes("month")) {
+        const months = parseInt(finalSyncStartDate.split(" ")[0], 10);
+        calculatedSinceDate = subMonths(new Date(), months);
+        daysToFetch = months * 30; // Approximate days
+      } else if (finalSyncStartDate.includes("year")) {
+        const years = parseInt(finalSyncStartDate.split(" ")[0], 10);
+        calculatedSinceDate = subYears(new Date(), years);
+        daysToFetch = years * 365; // Approximate days
+      } else {
+        calculatedSinceDate = new Date(finalSyncStartDate);
+      }
+      
+      if (!isNaN(calculatedSinceDate.getTime())) {
+        const now = new Date();
+        const timeDiff = now.getTime() - calculatedSinceDate.getTime();
+        daysToFetch = Math.ceil(timeDiff / (1000 * 3600 * 24)); // Convert milliseconds to days
+        
+        console.log(
+          `[queueSyncEmails] 📅 Email sync range: ${daysToFetch} days (from ${calculatedSinceDate.toDateString()} to ${now.toDateString()})`
+        );
+        console.log(
+          `[queueSyncEmails] 📊 Sync parameters: syncStartDate="${finalSyncStartDate}", calculated range=${daysToFetch} days, lightweight mode=true`
+        );
+      }
+    } catch (dateError) {
+      console.warn(`[queueSyncEmails] Could not calculate days to fetch: ${dateError.message}`);
+    }
 
     // Early validation of masterUserID
     if (!masterUserID) {
@@ -309,6 +356,7 @@ exports.queueSyncEmails = async (req, res) => {
       );
       return res.status(400).json({ message: "User ID is required." });
     }
+    
     // Fetch user credentials
     const userCredential = await UserCredential.findOne({
       where: { masterUserID },
@@ -319,223 +367,52 @@ exports.queueSyncEmails = async (req, res) => {
       );
       return res.status(404).json({ message: "User credentials not found." });
     }
-    const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
     const provider = userCredential.provider || "gmail";
-    let imapConfig;
-    if (provider === "custom") {
-      if (!userCredential.imapHost || !userCredential.imapPort) {
-        console.debug(
-          `[queueSyncEmails] Custom IMAP settings missing for masterUserID: ${masterUserID}`
-        );
-        return res.status(400).json({
-          message: "Custom IMAP settings are missing in user credentials.",
-        });
-      }
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    } else {
-      const providerConfig = PROVIDER_CONFIG[provider];
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
+    
+    // Update sync start date in user credentials if provided
+    if (syncStartDate) {
+      await userCredential.update({ syncStartDate });
+      console.debug(`[queueSyncEmails] Updated syncStartDate for user: ${syncStartDate}`);
     }
-    // Calculate sinceDate for IMAP search
-    let sinceDate;
-    if (
-      syncStartDate &&
-      typeof syncStartDate === "string" &&
-      syncStartDate.includes("T")
-    ) {
-      sinceDate = new Date(syncStartDate);
-    } else if (syncStartDate && syncStartDate.includes("days ago")) {
-      const days = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subDays(new Date(), days);
-    } else if (syncStartDate && syncStartDate.includes("month")) {
-      const months = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subMonths(new Date(), months);
-    } else if (syncStartDate && syncStartDate.includes("year")) {
-      const years = parseInt(syncStartDate.split(" ")[0], 10);
-      sinceDate = subYears(new Date(), years);
-    } else {
-      sinceDate = subDays(new Date(), 3); // Default to 3 days ago
-    }
-    const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy");
-    console.debug(`[queueSyncEmails] IMAP search since: ${formattedSinceDate}`);
-
-    // Connect to IMAP and get all folders to sync
-    console.debug(
-      `[queueSyncEmails] Connecting to IMAP for user: ${userEmail}`
+    console.log(
+      `[queueSyncEmails] Queuing lightweight email sync job for masterUserID: ${masterUserID} (no body data)`
     );
-    const connection = await Imap.connect(imapConfig);
+    // Use user-specific sync queue for parallel processing similar to queueFetchInboxEmails
+    const userSyncQueueName = `SYNC_EMAIL_QUEUE_${masterUserID}`;
 
-    // Get user's sync folder preferences
-    const syncFolders = userCredential.syncFolders || ["INBOX"]; // Default to INBOX
-    const syncAllFolders = userCredential.syncAllFolders; // Check if all folders should be synced
+    // Send a lightweight job to workers - let them handle all IMAP operations and batching
+    await publishToQueue(userSyncQueueName, {
+      masterUserID,
+      email: userCredential.email,
+      appPassword: userCredential.appPassword,
+      batchSize: Math.min(parseInt(batchSize), 25), // Align with worker limits for efficiency
+      syncStartDate: syncStartDate || userCredential.syncStartDate || "3 days ago",
+      provider,
+      imapHost: userCredential.imapHost,
+      imapPort: userCredential.imapPort,
+      imapTLS: userCredential.imapTLS,
+      lightweightSync: true, // Flag to exclude body data during sync
+      includeSentFolders: true, // Ensure sent folders are processed
+      dynamicFetch: true, // Let workers handle all IMAP operations
+      skipBodyData: true, // Explicitly skip loading email body content
+    });
 
-    // Fetch all folders from the IMAP server
-    const mailboxes = await connection.getBoxes();
-    console.debug("[queueSyncEmails] All folders from IMAP server:", mailboxes);
+    console.log(
+      `[queueSyncEmails] Successfully queued lightweight sync job to ${userSyncQueueName} - workers will process without body data`
+    );
 
-    // Extract all valid folder names, including nested folders
-    const validFolders = extractFolders(mailboxes);
-    console.debug("[queueSyncEmails] Valid folders from IMAP server:", validFolders);
-
-    // Determine folders to sync
-    let foldersToSync = Array.isArray(syncFolders) ? syncFolders : [syncFolders];
-    
-    if (syncAllFolders) {
-      console.debug("[queueSyncEmails] Syncing all folders...");
-      foldersToSync = validFolders; // Use all valid folders
-    } else {
-      // Filter user-specified folders to include only valid folders
-      foldersToSync = foldersToSync.filter((folder) =>
-        validFolders.includes(folder)
-      );
-      
-      // Always include common folders for better email coverage
-      const commonFolders = ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Drafts"];
-      commonFolders.forEach(folder => {
-        if (validFolders.includes(folder) && !foldersToSync.includes(folder)) {
-          foldersToSync.push(folder);
-        }
-      });
-    }
-
-    console.debug("[queueSyncEmails] Folders to sync:", foldersToSync);
-
-    if (foldersToSync.length === 0) {
-      console.debug("[queueSyncEmails] No valid folders to sync.");
-      await connection.end();
-      return res.status(400).json({ message: "No valid folders to sync." });
-    }
-
-    // Collect UIDs from all folders
-    let allUIDs = [];
-    let folderUIDMap = {}; // Track which UIDs belong to which folder
-
-    for (const folderName of foldersToSync) {
-      try {
-        console.debug(`[queueSyncEmails] Opening folder: ${folderName}...`);
-        await connection.openBox(folderName);
-
-        // Search for all UIDs in the date range for this folder
-        const searchCriteria = [["SINCE", formattedSinceDate]];
-        const fetchOptions = { bodies: [], struct: true };
-        const messages = await connection.search(searchCriteria, fetchOptions);
-        const folderUIDs = messages.map((msg) => msg.attributes.uid);
-        
-        console.debug(`[queueSyncEmails] Found ${folderUIDs.length} UIDs in folder: ${folderName}`);
-        
-        // Store folder-specific UIDs
-        if (folderUIDs.length > 0) {
-          folderUIDMap[folderName] = folderUIDs;
-          allUIDs.push(...folderUIDs.map(uid => ({ uid, folder: folderName })));
-        }
-      } catch (folderError) {
-        console.error(`[queueSyncEmails] Error processing folder ${folderName}:`, folderError);
-        // Continue with other folders even if one fails
-        continue;
-      }
-    }
-
-    console.debug(`[queueSyncEmails] Total UIDs found across all folders: ${allUIDs.length}`);
-    console.debug(`[queueSyncEmails] Folder UID breakdown:`, Object.keys(folderUIDMap).map(folder => ({
-      folder,
-      count: folderUIDMap[folder].length
-    })));
-
-    await connection.end();
-    // Batching - now we need to handle folder-specific batching
-    const totalEmails = allUIDs.length;
-    const numBatches = Math.ceil(totalEmails / batchSize);
-    
-    if (numBatches === 0) {
-      console.debug(`[queueSyncEmails] No emails to sync.`);
-      return res.status(200).json({ message: "No emails to sync." });
-    }
-
-    // Create folder-specific batches to maintain folder context
-    let batchCount = 0;
-    for (const [folderName, folderUIDs] of Object.entries(folderUIDMap)) {
-      const folderBatches = Math.ceil(folderUIDs.length / batchSize);
-      
-      for (let i = 0; i < folderBatches; i++) {
-        const startIdx = i * batchSize;
-        const endIdx = Math.min(startIdx + parseInt(batchSize), folderUIDs.length);
-        const batchUIDs = folderUIDs.slice(startIdx, endIdx);
-        
-        if (batchUIDs.length === 0) continue;
-        
-        batchCount++;
-        const startUID = batchUIDs[0];
-        const endUID = batchUIDs[batchUIDs.length - 1];
-        
-        console.debug(
-          `[queueSyncEmails] Queueing batch ${batchCount}: folder=${folderName}, startUID=${startUID}, endUID=${endUID}, count=${batchUIDs.length}`
-        );
-
-        // Use user-specific sync queue for parallel processing
-        const userSyncQueueName = `SYNC_EMAIL_QUEUE_${masterUserID}`;
-
-        // Additional debug logging and validation
-        console.debug(
-          `[queueSyncEmails] Queue name constructed: "${userSyncQueueName}"`
-        );
-        console.debug(
-          `[queueSyncEmails] masterUserID value: "${masterUserID}" (type: ${typeof masterUserID})`
-        );
-
-        if (!userSyncQueueName.includes(masterUserID)) {
-          console.error(
-            `[queueSyncEmails] ERROR: Queue name doesn't contain user ID!`
-          );
-          return res
-            .status(500)
-            .json({ message: "Queue name construction failed." });
-        }
-
-        console.debug(
-          `[queueSyncEmails] Publishing to queue: ${userSyncQueueName}`
-        );
-        await publishToQueue(userSyncQueueName, {
-          masterUserID,
-          syncStartDate,
-          batchSize,
-          startUID,
-          endUID,
-          folder: folderName, // Include folder information for processing
-        });
-        console.debug(
-          `[queueSyncEmails] Successfully published batch to queue: ${userSyncQueueName} for folder: ${folderName}`
-        );
-      }
-    }
-
-    res.status(200).json({
-      message: `Sync jobs queued: ${batchCount} batches for ${totalEmails} emails across ${Object.keys(folderUIDMap).length} folders.`,
-      foldersProcessed: Object.keys(folderUIDMap),
-      folderStats: Object.keys(folderUIDMap).map(folder => ({
-        folder,
-        emailCount: folderUIDMap[folder].length
-      }))
+    return res.status(200).json({
+      message: "Lightweight email sync job queued successfully. Workers will process emails from all folders without body data for improved performance.",
+      queueName: userSyncQueueName,
+      masterUserID,
+      syncMode: "lightweight",
+      bodyDataExcluded: true,
+      sentFoldersIncluded: true,
+      batchSize: Math.min(parseInt(batchSize), 25),
+      folders: ["inbox", "sent", "drafts", "archive"], // Will be determined dynamically by workers
+      syncStartDate: syncStartDate || userCredential.syncStartDate || "3 days ago",
+      daysToFetch: daysToFetch > 0 ? daysToFetch : "Unable to calculate",
+      estimatedDateRange: daysToFetch > 0 ? `${daysToFetch} days of email history` : "Date range calculation failed",
     });
   } catch (error) {
     console.error("[queueSyncEmails] Failed to queue sync job:", error);
@@ -580,9 +457,9 @@ async function getFullThread(messageId, EmailModel, collected = new Set()) {
 }
 
 exports.fetchSyncEmails = async (req, res) => {
-  const { batchSize = 100, page = 1, startUID, endUID, folder } = req.query; // Accept startUID, endUID and folder for batching
+  const { batchSize = 100, page = 1, startUID, endUID, folder, skipBodyData = false } = req.query; // Accept startUID, endUID and folder for batching
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { syncStartDate: inputSyncStartDate } = req.body; // or req.query.syncStartDate if you prefer
+  const { syncStartDate: inputSyncStartDate, lightweightSync = false } = req.body; // or req.query.syncStartDate if you prefer
   try {
     console.debug(
       `[fetchSyncEmails] masterUserID: ${masterUserID}, batchSize: ${batchSize}, page: ${page}, startUID: ${startUID}, endUID: ${endUID}, folder: ${folder}`
@@ -631,8 +508,17 @@ exports.fetchSyncEmails = async (req, res) => {
     }
     const formattedSinceDate = format(sinceDate, "dd-MMM-yyyy"); // Format as "dd-MMM-yyyy" for IMAP
     const humanReadableSinceDate = `${format(sinceDate, "MMMM dd, yyyy")}`;
+    
+    // Calculate and log how many days of emails will be fetched
+    const now = new Date();
+    const timeDiff = now.getTime() - sinceDate.getTime();
+    const daysToFetch = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    
+    console.log(
+      `[fetchSyncEmails] 📅 Email fetch range: ${daysToFetch} days (from ${humanReadableSinceDate} to ${format(now, "MMMM dd, yyyy")})`
+    );
     console.debug(
-      `[fetchSyncEmails] Fetching emails since ${humanReadableSinceDate}`
+      `[fetchSyncEmails] Fetching emails since ${humanReadableSinceDate} (${daysToFetch} days of history)`
     );
     // Connect to IMAP server
     const provider = userCredential.provider || "gmail"; // default to gmail
@@ -701,6 +587,37 @@ exports.fetchSyncEmails = async (req, res) => {
         foldersToSync = foldersToSync.filter((folder) =>
           validFolders.includes(folder)
         );
+        
+        // Always ensure important folders are included for comprehensive email sync
+        // Support multiple providers with different folder naming conventions
+        const providerImportantFolders = {
+          gmail: ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/Drafts"],
+          yandex: ["INBOX", "Sent", "Drafts", "Sent Items"], // Yandex uses these folder names
+          outlook: ["INBOX", "Sent Items", "Drafts"],
+          custom: ["INBOX", "Sent", "Drafts", "Sent Items", "[Gmail]/Sent Mail"] // Support multiple possibilities for custom
+        };
+        
+        const currentProvider = userCredential.provider || "gmail";
+        const importantFolders = providerImportantFolders[currentProvider] || providerImportantFolders.gmail;
+        
+        console.log(`[fetchSyncEmails] 📂 SENT FOLDER DEBUG - Provider: ${currentProvider}`);
+        console.log(`[fetchSyncEmails] 📂 SENT FOLDER DEBUG - Available folders on IMAP server:`, validFolders);
+        console.log(`[fetchSyncEmails] 📂 SENT FOLDER DEBUG - User configured syncFolders:`, syncFolders);
+        console.log(`[fetchSyncEmails] 📂 SENT FOLDER DEBUG - Current foldersToSync before auto-add:`, foldersToSync);
+        console.log(`[fetchSyncEmails] 📂 SENT FOLDER DEBUG - Important folders for ${currentProvider}:`, importantFolders);
+        
+        for (const importantFolder of importantFolders) {
+          if (validFolders.includes(importantFolder)) {
+            if (!foldersToSync.includes(importantFolder)) {
+              foldersToSync.push(importantFolder);
+              console.log(`[fetchSyncEmails] ✅ SENT FOLDER DEBUG - Auto-added important folder for ${currentProvider}: ${importantFolder}`);
+            } else {
+              console.log(`[fetchSyncEmails] ℹ️ SENT FOLDER DEBUG - Important folder already included: ${importantFolder}`);
+            }
+          } else {
+            console.log(`[fetchSyncEmails] ❌ SENT FOLDER DEBUG - Important folder NOT FOUND on IMAP server: ${importantFolder}`);
+          }
+        }
       }
     }
     // Debugging logs
@@ -716,8 +633,19 @@ exports.fetchSyncEmails = async (req, res) => {
     console.debug("[fetchSyncEmails] Valid folders to sync:", foldersToSync);
     // Helper function to fetch emails from a specific folder
     const fetchEmailsFromFolder = async (folderName) => {
-      console.debug(`[fetchSyncEmails] Opening folder: ${folderName}...`);
-      await connection.openBox(folderName);
+      const isSentFolder = folderName.toLowerCase().includes('sent');
+      const folderLogPrefix = isSentFolder ? '📤 SENT FOLDER' : '📁';
+      
+      console.log(`[fetchSyncEmails] ${folderLogPrefix} Opening folder: ${folderName}...`);
+      
+      try {
+        await connection.openBox(folderName);
+        console.log(`[fetchSyncEmails] ${folderLogPrefix} Successfully opened folder: ${folderName}`);
+      } catch (openError) {
+        console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ Failed to open folder ${folderName}:`, openError.message);
+        return; // Skip this folder if we can't open it
+      }
+      
       let searchCriteria;
       if (startUID && endUID) {
         // Use UID range for this batch
@@ -725,27 +653,169 @@ exports.fetchSyncEmails = async (req, res) => {
       } else {
         searchCriteria = [["SINCE", formattedSinceDate]];
       }
-      const fetchOptions = {
-        bodies: "",
-        struct: true,
-      };
-      const messages = await connection.search(searchCriteria, fetchOptions);
-      console.debug(
-        `[fetchSyncEmails] Total emails found in ${folderName}: ${messages.length}`
-      );
+      
+      console.log(`[fetchSyncEmails] ${folderLogPrefix} Search criteria for ${folderName}:`, searchCriteria);
+      
+      // Configure fetch options based on whether body data should be excluded
+      const shouldSkipBodyData = skipBodyData === 'true' || lightweightSync === true;
+      const fetchOptions = shouldSkipBodyData ? 
+        { bodies: ['HEADER'], struct: true } :  // Only fetch headers for lightweight sync
+        { bodies: "", struct: true };           // Fetch full body for normal sync
+      
+      console.log(`[fetchSyncEmails] ${folderLogPrefix} Lightweight sync mode: ${shouldSkipBodyData ? 'enabled' : 'disabled'}`);
+      
+      let messages = [];
+      try {
+        messages = await connection.search(searchCriteria, fetchOptions);
+        console.log(`[fetchSyncEmails] ${folderLogPrefix} ✅ Search successful - Total emails found in ${folderName}: ${messages.length}`);
+      } catch (searchError) {
+        console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ Search failed in folder ${folderName}:`, searchError.message);
+        return; // Skip this folder if search fails
+      }
       // No need for further pagination here, as batching is handled by UID range
       for (const message of messages) {
-        const rawBodyPart = message.parts.find((part) => part.which === "");
-        const rawBody = rawBodyPart ? rawBodyPart.body : null;
-        if (!rawBody) {
-          console.debug(
-            `[fetchSyncEmails] No body found for email in folder: ${folderName}.`
-          );
-          continue;
+        let parsedEmail;
+        
+        if (shouldSkipBodyData) {
+          // For lightweight sync, only parse headers
+          const headerPart = message.parts.find((part) => part.which === "HEADER");
+          if (!headerPart || !headerPart.body) {
+            console.debug(
+              `[fetchSyncEmails] No header found for email in folder: ${folderName}.`
+            );
+            continue;
+          }
+          // Handle different IMAP response formats for header data
+          let headerData;
+          if (Buffer.isBuffer(headerPart.body)) {
+            headerData = headerPart.body;
+          } else if (typeof headerPart.body === 'string') {
+            headerData = Buffer.from(headerPart.body, 'utf8');
+          } else if (headerPart.body && typeof headerPart.body === 'object') {
+            // Header is already parsed as an object by IMAP library - extract fields directly
+            const headers = headerPart.body;
+            console.debug(`[fetchSyncEmails] Processing parsed header object with keys: ${Object.keys(headers).join(', ')}`);
+            
+            // Create a parsed email object manually from the header fields
+            parsedEmail = {
+              messageId: Array.isArray(headers['message-id']) ? headers['message-id'][0] : headers['message-id'] || null,
+              subject: Array.isArray(headers.subject) ? headers.subject[0] : headers.subject || null,
+              date: Array.isArray(headers.date) ? new Date(headers.date[0]) : (headers.date ? new Date(headers.date) : new Date()),
+              from: null,
+              to: null,
+              cc: null,
+              bcc: null,
+              headers: {
+                get: (key) => {
+                  const value = headers[key.toLowerCase()];
+                  return Array.isArray(value) ? value[0] : value;
+                }
+              }
+            };
+            
+            // Parse FROM field
+            if (headers.from) {
+              const fromValue = Array.isArray(headers.from) ? headers.from[0] : headers.from;
+              // Extract email and name from "Name <email>" format
+              const fromMatch = fromValue.match(/^(.+?)\s*<(.+?)>$/) || [null, fromValue, fromValue];
+              parsedEmail.from = {
+                value: [{
+                  name: fromMatch[1] ? fromMatch[1].replace(/"/g, '').trim() : null,
+                  address: fromMatch[2] || fromValue
+                }]
+              };
+            }
+            
+            // Parse TO field
+            if (headers.to) {
+              const toValue = Array.isArray(headers.to) ? headers.to : [headers.to];
+              parsedEmail.to = {
+                value: toValue.map(email => {
+                  const match = email.match(/^(.+?)\s*<(.+?)>$/) || [null, email, email];
+                  return {
+                    name: match[1] ? match[1].replace(/"/g, '').trim() : null,
+                    address: match[2] || email
+                  };
+                })
+              };
+            }
+            
+            // Parse CC field
+            if (headers.cc) {
+              const ccValue = Array.isArray(headers.cc) ? headers.cc : [headers.cc];
+              parsedEmail.cc = {
+                value: ccValue.map(email => {
+                  const match = email.match(/^(.+?)\s*<(.+?)>$/) || [null, email, email];
+                  return {
+                    name: match[1] ? match[1].replace(/"/g, '').trim() : null,
+                    address: match[2] || email
+                  };
+                })
+              };
+            }
+            
+            // Parse BCC field
+            if (headers.bcc) {
+              const bccValue = Array.isArray(headers.bcc) ? headers.bcc : [headers.bcc];
+              parsedEmail.bcc = {
+                value: bccValue.map(email => {
+                  const match = email.match(/^(.+?)\s*<(.+?)>$/) || [null, email, email];
+                  return {
+                    name: match[1] ? match[1].replace(/"/g, '').trim() : null,
+                    address: match[2] || email
+                  };
+                })
+              };
+            }
+            
+            console.debug(`[fetchSyncEmails] Successfully parsed header object for messageId: ${parsedEmail.messageId}, subject: ${parsedEmail.subject}`);
+          } else {
+            console.debug(`[fetchSyncEmails] Invalid header body type: ${typeof headerPart.body}`);
+            continue;
+          }
+          
+          // Skip simpleParser call when we already have parsed email from header object
+          if (!parsedEmail) {
+            parsedEmail = await simpleParser(headerData);
+          }
+        } else {
+          // For normal sync, parse full body
+          const rawBodyPart = message.parts.find((part) => part.which === "");
+          const rawBody = rawBodyPart ? rawBodyPart.body : null;
+          if (!rawBody) {
+            console.debug(
+              `[fetchSyncEmails] No body found for email in folder: ${folderName}.`
+            );
+            continue;
+          }
+          // Properly convert to Buffer for simpleParser
+          console.debug(`[fetchSyncEmails] rawBody type: ${typeof rawBody}, isBuffer: ${Buffer.isBuffer(rawBody)}, constructor: ${rawBody?.constructor?.name}`);
+          let bodyBuffer;
+          if (Buffer.isBuffer(rawBody)) {
+            bodyBuffer = rawBody;
+          } else if (typeof rawBody === 'string') {
+            bodyBuffer = Buffer.from(rawBody, 'utf8');
+          } else if (rawBody && typeof rawBody === 'object') {
+            // Try to convert object to string first, then to Buffer
+            try {
+              const bodyString = rawBody.toString();
+              bodyBuffer = Buffer.from(bodyString, 'utf8');
+            } catch (err) {
+              console.debug(`[fetchSyncEmails] Failed to convert object to buffer: ${err.message}, object:`, rawBody);
+              continue;
+            }
+          } else {
+            console.debug(`[fetchSyncEmails] Invalid body type: ${typeof rawBody}`);
+            continue;
+          }
+          parsedEmail = await simpleParser(bodyBuffer);
         }
-        const parsedEmail = await simpleParser(rawBody);
         // Map IMAP folder name to database folder name
         const dbFolderName = folderMapping[folderName] || "inbox"; // Default to "inbox" if no mapping exists
+        
+        if (isSentFolder) {
+          console.log(`[fetchSyncEmails] ${folderLogPrefix} 💾 Folder mapping: IMAP "${folderName}" -> DB "${dbFolderName}"`);
+        }
         // Extract inReplyTo and references headers
         const referencesHeader = parsedEmail.headers.get("references");
         const references = Array.isArray(referencesHeader)
@@ -757,8 +827,15 @@ exports.fetchSyncEmails = async (req, res) => {
           isRead = message.attributes.flags.includes("\\Seen");
         }
 
+        // Truncate messageId if it's too long for database column (typically 255 chars)
+        let messageIdForDb = parsedEmail.messageId || null;
+        if (messageIdForDb && messageIdForDb.length > 255) {
+          messageIdForDb = messageIdForDb.substring(0, 255);
+          console.debug(`[fetchSyncEmails] Truncated long messageId: ${parsedEmail.messageId.substring(0, 50)}...`);
+        }
+
         const emailData = {
-          messageId: parsedEmail.messageId || null,
+          messageId: messageIdForDb,
           inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
           references,
           sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
@@ -774,7 +851,7 @@ exports.fetchSyncEmails = async (req, res) => {
             : null,
           masterUserID: masterUserID,
           subject: parsedEmail.subject || null,
-          body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
+          body: shouldSkipBodyData ? "" : cleanEmailBody(parsedEmail.html || parsedEmail.text || ""), // Skip body processing for lightweight sync
           folder: dbFolderName, // Use mapped folder name
           createdAt: parsedEmail.date || new Date(),
           isRead: isRead, // Save read/unread status
@@ -787,25 +864,50 @@ exports.fetchSyncEmails = async (req, res) => {
         if (!existingEmail) {
           try {
             savedEmail = await Email.create(emailData);
-            console.debug(
-              `[fetchSyncEmails] Email saved: ${emailData.messageId}`
-            );
+            if (isSentFolder) {
+              console.log(`[fetchSyncEmails] ${folderLogPrefix} ✅ SENT EMAIL SAVED: ${emailData.messageId} | Subject: "${emailData.subject}" | Folder: "${emailData.folder}" | From: ${emailData.sender} | To: ${emailData.recipient}`);
+            } else {
+              console.debug(`[fetchSyncEmails] Email saved: ${emailData.messageId}`);
+            }
           } catch (createError) {
-            console.error(
-              `[fetchSyncEmails] Error creating email ${emailData.messageId}:`,
-              createError
-            );
+            if (isSentFolder) {
+              console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ FAILED TO SAVE SENT EMAIL ${emailData.messageId}:`, createError.message);
+              console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ Email data that failed:`, {
+                messageId: emailData.messageId,
+                subject: emailData.subject,
+                folder: emailData.folder,
+                sender: emailData.sender,
+                recipient: emailData.recipient,
+                masterUserID: emailData.masterUserID
+              });
+            } else {
+              console.error(`[fetchSyncEmails] Error creating email ${emailData.messageId}:`, createError);
+            }
             continue; // Skip this email and continue with the next one
           }
         } else {
-          console.debug(
-            `[fetchSyncEmails] Email already exists: ${emailData.messageId}`
-          );
-          savedEmail = existingEmail;
+          // Email already exists - check if we need to update the folder for sent emails
+          if (isSentFolder && existingEmail.folder !== dbFolderName) {
+            try {
+              await existingEmail.update({ folder: dbFolderName });
+              console.log(`[fetchSyncEmails] ${folderLogPrefix} 🔄 SENT EMAIL FOLDER UPDATED: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Updated from "${existingEmail.folder}" to "${dbFolderName}"`);
+              savedEmail = existingEmail;
+            } catch (updateError) {
+              console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ FAILED TO UPDATE SENT EMAIL FOLDER ${emailData.messageId}:`, updateError.message);
+              savedEmail = existingEmail;
+            }
+          } else {
+            if (isSentFolder) {
+              console.log(`[fetchSyncEmails] ${folderLogPrefix} ℹ️ SENT EMAIL ALREADY EXISTS: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Current folder: "${existingEmail.folder}"`);
+            } else {
+              console.debug(`[fetchSyncEmails] Email already exists: ${emailData.messageId}`);
+            }
+            savedEmail = existingEmail;
+          }
         }
 
-        // Save attachments if they exist
-        if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
+        // Save attachments if they exist and not in lightweight sync mode
+        if (!shouldSkipBodyData && parsedEmail.attachments && parsedEmail.attachments.length > 0) {
           try {
             const savedAttachments = await saveAttachments(
               parsedEmail.attachments,
@@ -821,10 +923,14 @@ exports.fetchSyncEmails = async (req, res) => {
             );
             // Continue processing even if attachment saving fails
           }
+        } else if (shouldSkipBodyData) {
+          console.debug(
+            `[fetchSyncEmails] Skipped attachment processing for lightweight sync: ${emailData.messageId}`
+          );
         }
 
-        // Fetch the full thread recursively
-        if (emailData.messageId) {
+        // Fetch the full thread recursively (skip for lightweight sync)
+        if (!shouldSkipBodyData && emailData.messageId) {
           try {
             const fullThread = await getFullThread(emailData.messageId, Email);
             // Remove duplicates by messageId
@@ -853,17 +959,42 @@ exports.fetchSyncEmails = async (req, res) => {
             );
             // Continue processing even if thread processing fails
           }
+        } else if (shouldSkipBodyData) {
+          console.debug(
+            `[fetchSyncEmails] Skipped thread processing for lightweight sync: ${emailData.messageId}`
+          );
         }
       }
     };
     // Fetch emails from specified folders
+    console.log(`[fetchSyncEmails] 📂 FINAL FOLDERS TO PROCESS: ${foldersToSync.length} folders`);
+    console.log(`[fetchSyncEmails] 📂 FOLDERS LIST:`, foldersToSync);
+    
     for (const folder of foldersToSync) {
+      const isSentFolder = folder.toLowerCase().includes('sent');
+      if (isSentFolder) {
+        console.log(`[fetchSyncEmails] 📤 ⚡ PROCESSING SENT FOLDER: ${folder}`);
+      }
       await fetchEmailsFromFolder(folder);
+      if (isSentFolder) {
+        console.log(`[fetchSyncEmails] 📤 ✅ COMPLETED PROCESSING SENT FOLDER: ${folder}`);
+      }
     }
     connection.end();
     console.debug("[fetchSyncEmails] IMAP connection closed.");
+    
+    // Summary of processed folders
+    const sentFoldersProcessed = foldersToSync.filter(f => f.toLowerCase().includes('sent'));
+    console.log(`[fetchSyncEmails] 📊 PROCESSING SUMMARY:`);
+    console.log(`[fetchSyncEmails] 📊 Total folders processed: ${foldersToSync.length}`);
+    console.log(`[fetchSyncEmails] 📊 Sent folders processed: ${sentFoldersProcessed.length} - ${sentFoldersProcessed.join(', ')}`);
+    console.log(`[fetchSyncEmails] 📊 All folders: ${foldersToSync.join(', ')}`);
+    
+    const shouldSkipBodyData = skipBodyData === 'true' || lightweightSync === true;
     res.status(200).json({
-      message: "Fetched and saved emails from specified folders.",
+      message: shouldSkipBodyData ? 
+        "Fetched and saved email metadata from specified folders (lightweight sync - body data excluded)." :
+        "Fetched and saved emails from specified folders.",
       sinceDate: humanReadableSinceDate, // Include the human-readable date in the response
       batchSize: parseInt(batchSize, 10),
       page: parseInt(page, 10),
@@ -871,6 +1002,10 @@ exports.fetchSyncEmails = async (req, res) => {
       endUID,
       folder, // Include the specific folder that was processed
       foldersProcessed: foldersToSync, // Include all folders that were processed
+      lightweightSync: shouldSkipBodyData,
+      bodyDataExcluded: shouldSkipBodyData,
+      attachmentsSkipped: shouldSkipBodyData,
+      threadingSkipped: shouldSkipBodyData,
     });
   } catch (error) {
     console.error("[fetchSyncEmails] Error fetching emails:", error);
@@ -1537,6 +1672,94 @@ exports.downloadAttachment = async (req, res) => {
 };
 
 // Diagnostic endpoint for attachment download issues
+// Test endpoint to verify sent folder detection
+exports.testSentFolderDetection = async (req, res) => {
+  const masterUserID = req.adminId;
+  
+  try {
+    // Fetch user credentials
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+
+    const provider = userCredential.provider || "gmail";
+    let imapConfig;
+    
+    if (provider === "custom") {
+      if (!userCredential.imapHost || !userCredential.imapPort) {
+        return res.status(400).json({
+          message: "Custom IMAP settings are missing in user credentials.",
+        });
+      }
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: userCredential.imapHost,
+          port: userCredential.imapPort,
+          tls: userCredential.imapTLS,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    } else {
+      const providerConfig = PROVIDER_CONFIG[provider];
+      imapConfig = {
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+        },
+      };
+    }
+
+    // Connect and get all folders
+    console.debug(`[testSentFolderDetection] Connecting to IMAP for user: ${userCredential.email}`);
+    const connection = await Imap.connect(imapConfig);
+
+    // Get all folders from the IMAP server
+    const mailboxes = await connection.getBoxes();
+    const validFolders = extractFolders(mailboxes);
+    
+    // Identify sent folders
+    const sentFolders = validFolders.filter(folder => 
+      folder.toLowerCase().includes('sent') || 
+      folder === '[Gmail]/Sent Mail' ||
+      folder === 'Sent Items'
+    );
+    
+    await connection.end();
+
+    res.status(200).json({
+      message: "Sent folder detection test completed",
+      userEmail: userCredential.email,
+      provider,
+      allFolders: validFolders,
+      sentFolders: sentFolders,
+      sentFoldersCount: sentFolders.length,
+      folderMapping: sentFolders.reduce((acc, folder) => {
+        acc[folder] = folderMapping[folder] || "sent";
+        return acc;
+      }, {})
+    });
+    
+  } catch (error) {
+    console.error("[testSentFolderDetection] Error:", error);
+    res.status(500).json({ 
+      message: "Test failed", 
+      error: error.message 
+    });
+  }
+};
+
 // Test endpoint to verify queueSyncEmails functionality
 exports.testQueueSyncEmails = async (req, res) => {
   const masterUserID = req.adminId;

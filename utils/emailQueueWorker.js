@@ -1026,11 +1026,11 @@ async function startUserSpecificSyncWorkers() {
         userSyncQueueName,
         async (msg) => {
           if (msg !== null) {
-            const { masterUserID, syncStartDate, startUID, endUID } =
+            const { masterUserID, syncStartDate, startUID, endUID, lightweightSync } =
               JSON.parse(msg.content.toString());
 
             console.log(
-              `[SyncWorker] Processing sync batch for user ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}`
+              `[SyncWorker] Processing sync batch for user ${masterUserID}, startUID: ${startUID}, endUID: ${endUID}, lightweightSync: ${lightweightSync}`
             );
 
             try {
@@ -1056,7 +1056,10 @@ async function startUserSpecificSyncWorkers() {
                 await fetchSyncEmails(
                   {
                     adminId: masterUserID,
-                    body: { syncStartDate }, // syncStartDate goes in body
+                    body: { 
+                      syncStartDate,
+                      lightweightSync: lightweightSync || false // Pass lightweight sync flag
+                    }, 
                     query: { batchSize: 10, startUID, endUID }, // startUID and endUID go in query
                   },
                   { status: () => ({ json: () => {} }) }
