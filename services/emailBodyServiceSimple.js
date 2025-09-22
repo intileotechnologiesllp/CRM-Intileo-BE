@@ -98,7 +98,7 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
     // Get email from database
     const email = await Email.findOne({
       where: { emailID: emailId },
-      attributes: ['emailID', 'uid', 'subject', 'body', 'body_fetch_status', 'folder'] // 🔧 RE-ENABLED body_fetch_status
+      attributes: ['emailID', 'uid', 'messageId', 'subject', 'body', 'body_fetch_status', 'folder'] // Added messageId for fallback
     });
 
     if (!email) {
@@ -123,9 +123,17 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
       };
     }
 
+    // ⚠️ FALLBACK: Handle emails without UID by searching with messageId
     if (!email.uid) {
-      console.log(`❌ Email ${emailId} has no UID`);
-      return { success: false, error: 'Email has no UID' };
+      console.log(`⚠️ Email ${emailId} has no UID, will try messageId fallback`);
+      
+      // Check if we have messageId for fallback search
+      if (!email.messageId) {
+        console.log(`❌ Email ${emailId} has no UID and no messageId - cannot fetch`);
+        return { success: false, error: 'Email has no UID and no messageId' };
+      }
+      
+      console.log(`🔍 Using messageId fallback: ${email.messageId}`);
     }
 
     console.log(`🔍 No body found, fetching from IMAP using WORKING METHOD...`);
@@ -174,17 +182,31 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
     // Use the EXACT working method from fetchRecentEmail
     console.log(`🎯 Using proven working method: { bodies: "", struct: true }`);
     
-    const searchCriteria = [['UID', email.uid]];
+    let searchCriteria;
+    let searchType;
+    
+    if (email.uid) {
+      // Primary method: Search by UID
+      searchCriteria = [['UID', email.uid]];
+      searchType = 'UID';
+      console.log(`🔍 Searching by UID: ${email.uid}`);
+    } else {
+      // Fallback method: Search by messageId (header)
+      searchCriteria = [['HEADER', 'MESSAGE-ID', email.messageId]];
+      searchType = 'MESSAGE-ID';
+      console.log(`🔍 Fallback: Searching by MESSAGE-ID: ${email.messageId}`);
+    }
+    
     const fetchOptions = { bodies: "", struct: true }; // YOUR WORKING METHOD
     
     const messages = await connection.search(searchCriteria, fetchOptions);
     
     if (!messages || messages.length === 0) {
-      console.log(`❌ No messages found for UID ${email.uid}`);
-      return { success: false, error: 'No messages found for UID' };
+      console.log(`❌ No messages found for ${searchType}: ${email.uid || email.messageId}`);
+      return { success: false, error: `No messages found for ${searchType}` };
     }
     
-    console.log(`✅ Found ${messages.length} message(s) for UID ${email.uid}`);
+    console.log(`✅ Found ${messages.length} message(s) for ${searchType}: ${email.uid || email.messageId}`);
     
     // Extract raw body using YOUR EXACT METHOD
     const message = messages[0];
@@ -192,17 +214,17 @@ const fetchEmailBodyOnDemand = async (emailId, masterUserID, provider = 'gmail')
     const rawBody = rawBodyPart ? rawBodyPart.body : null;
     
     if (!rawBody) {
-      console.log(`❌ No raw body found in message parts for UID ${email.uid}`);
+      console.log(`❌ No raw body found in message parts for ${searchType}: ${email.uid || email.messageId}`);
       console.log(`🔍 Available parts:`, message.parts.map(p => ({ which: p.which, size: p.body ? p.body.length : 0 })));
       return { success: false, error: 'No raw body found in message' };
     }
     
-    console.log(`✅ Raw body found for UID ${email.uid}, length: ${rawBody.length}`);
+    console.log(`✅ Raw body found for ${searchType}: ${email.uid || email.messageId}, length: ${rawBody.length}`);
     
     // Parse using simpleParser (YOUR EXACT METHOD)
     const parsedEmail = await simpleParser(rawBody);
     
-    console.log(`✅ Email parsed successfully for UID ${email.uid}`);
+    console.log(`✅ Email parsed successfully for ${searchType}: ${email.uid || email.messageId}`);
     console.log(`📝 Parsed text length: ${parsedEmail.text ? parsedEmail.text.length : 0}`);
     console.log(`🌐 Parsed HTML length: ${parsedEmail.html ? parsedEmail.html.length : 0}`);
     
