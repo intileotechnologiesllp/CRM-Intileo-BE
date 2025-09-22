@@ -911,9 +911,6 @@ function getConditionObject(column, operator, value, includeModels = []) {
   const isDateColumn =
     fieldName.includes("Date") ||
     fieldName.includes("Time") ||
-    fieldName === "startDateTime" ||
-    fieldName === "endDateTime" ||
-    fieldName === "dueDate" ||
     fieldName === "createdAt" ||
     fieldName === "updatedAt";
 
@@ -928,16 +925,16 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // Include records within the date range
       return {
         [Op.and]: [
-          { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.lte]: new Date(toDate + " 23:59:59") } },
         ],
       };
     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
       // Exclude records within the date range (records NOT between the dates)
       return {
         [Op.or]: [
-          { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.gt]: new Date(toDate + " 23:59:59") } },
         ],
       };
     }
@@ -1678,274 +1675,6 @@ exports.getPersonReportSummary = async (req, res) => {
     });
   }
 };
-// exports.getPersonReportSummary = async (req, res) => {
-//   try {
-//     const {
-//       reportId,
-//       entity,
-//       type,
-//       xaxis,
-//       yaxis,
-//       filters,
-//       page = 1,
-//       limit = 200,
-//       search = "",
-//       sortBy = "createdAt",
-//       sortOrder = "DESC",
-//     } = req.body;
-
-//     const ownerId = req.adminId;
-//     const role = req.role;
-
-//     // Validate required fields
-//     // if (!entity || !type) {
-//     //   return res.status(400).json({
-//     //     success: false,
-//     //     message: "Entity and type are required",
-//     //   });
-//     // }
-
-//     // Calculate offset for pagination
-//     const offset = (page - 1) * limit;
-
-//     // Base where condition
-//     const baseWhere = {};
-
-//     // If user is not admin, filter by ownerId
-//     if (role !== "admin") {
-//       baseWhere.masterUserID = ownerId;
-//     }
-
-//     // Handle search
-//     if (search) {
-//       baseWhere[Op.or] = [
-//         { contactPerson: { [Op.like]: `%${search}%` } },
-//         { organization: { [Op.like]: `%${search}%` } },
-//         { jobTitle: { [Op.like]: `%${search}%` } },
-//         { postalAddress: { [Op.like]: `%${search}%` } },
-//         // { "$assignedUser.name$": { [Op.like]: `%${search}%` } },
-//       ];
-//     }
-
-//     // Handle filters if provided
-//     if (filters && filters.conditions) {
-//       const validConditions = filters.conditions.filter(
-//         (cond) => cond.value !== undefined && cond.value !== ""
-//       );
-
-//       if (validConditions.length > 0) {
-//         // Start with the first condition
-//         let combinedCondition = getConditionObject(
-//           validConditions[0].column,
-//           validConditions[0].operator,
-//           validConditions[0].value
-//         );
-
-//         // Add remaining conditions with their logical operators
-//         for (let i = 1; i < validConditions.length; i++) {
-//           const currentCondition = getConditionObject(
-//             validConditions[i].column,
-//             validConditions[i].operator,
-//             validConditions[i].value
-//           );
-
-//           const logicalOp = (
-//             filters.logicalOperators[i - 1] || "AND"
-//           ).toUpperCase();
-
-//           if (logicalOp === "AND") {
-//             combinedCondition = {
-//               [Op.and]: [combinedCondition, currentCondition],
-//             };
-//           } else {
-//             combinedCondition = {
-//               [Op.or]: [combinedCondition, currentCondition],
-//             };
-//           }
-//         }
-
-//         Object.assign(baseWhere, combinedCondition);
-//       }
-//     }
-
-//     // Build order clause
-//     const order = [];
-//     if (sortBy === "assignedUser") {
-//       order.push([
-//         { model: MasterUser, as: "assignedUser" },
-//         "name",
-//         sortOrder,
-//       ]);
-//     } else if (sortBy === "dueDate") {
-//       order.push(["endDateTime", sortOrder]);
-//     } else if (sortBy === "createdAt") {
-//       order.push(["createdAt", sortOrder]);
-//     } else {
-//       order.push([sortBy, sortOrder]);
-//     }
-
-//     // Include assigned user
-//     const include = [
-//       {
-//         model: MasterUser,
-//         as: "assignedUser",
-//         attributes: ["masterUserID", "name", "email"],
-//         required: false,
-//       },
-//     ];
-
-//     // Get total count
-//     const totalCount = await Person.count({
-//       where: baseWhere,
-//       include: include,
-//     });
-
-//     // Get paginated results
-//     const persons = await Person.findAll({
-//       where: baseWhere,
-//       include: include,
-//       order: order,
-//       limit: parseInt(limit),
-//       offset: offset,
-//       attributes: [
-//         "personId",
-//         "contactPerson",
-//         "organization",
-//         "createdAt",
-//         "updatedAt",
-//       ],
-//     });
-
-//     // Generate report data (like your existing performance report)
-//     let reportData = [];
-//     let summary = {};
-
-//     if (xaxis && yaxis && !reportId) {
-//       const reportResult = await generateActivityPerformanceData(
-//         ownerId,
-//         role,
-//         xaxis,
-//         yaxis,
-//         filters,
-//         page,
-//         limit
-//       );
-//       reportData = reportResult.data;
-
-//       // Calculate summary statistics
-//       if (reportData.length > 0) {
-//         const totalValue = reportData.reduce(
-//           (sum, item) => sum + (item.value || 0),
-//           0
-//         );
-//         const avgValue = totalValue / reportData.length;
-//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
-
-//         summary = {
-//           totalRecords: totalCount,
-//           totalCategories: reportData.length,
-//           totalValue: totalValue,
-//           avgValue: parseFloat(avgValue.toFixed(2)),
-//           maxValue: maxValue,
-//           minValue: minValue,
-//         };
-//       }
-//     } else if (!xaxis && !yaxis && reportId) {
-//       const existingReports = await Report.findOne({
-//         where: { reportId },
-//       });
-
-//       const {
-//         entity: existingentity,
-//         type: existingtype,
-//         config: configString,
-//       } = existingReports.dataValues;
-
-//       // Parse the config JSON string
-//       const config = JSON.parse(configString);
-//       const {
-//         xaxis: existingxaxis,
-//         yaxis: existingyaxis,
-//         filters: existingfilters,
-//       } = config;
-
-//       const reportResult = await generateActivityPerformanceData(
-//         ownerId,
-//         role,
-//         existingxaxis,
-//         existingyaxis,
-//         existingfilters,
-//         page,
-//         limit
-//       );
-//       reportData = reportResult.data;
-
-//       // Calculate summary statistics
-//       if (reportData.length > 0) {
-//         const totalValue = reportData.reduce(
-//           (sum, item) => sum + (item.value || 0),
-//           0
-//         );
-//         const avgValue = totalValue / reportData.length;
-//         const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-//         const minValue = Math.min(...reportData.map((item) => item.value || 0));
-
-//         summary = {
-//           totalRecords: totalCount,
-//           totalCategories: reportData.length,
-//           totalValue: totalValue,
-//           avgValue: parseFloat(avgValue.toFixed(2)),
-//           maxValue: maxValue,
-//           minValue: minValue,
-//         };
-//       }
-//     }
-
-//     // Format activities for response
-//     const formattedPersons = persons.map((person) => ({
-//       id: person.personId,
-//       contactPerson: person.contactPerson,
-//       organization: person.organization,
-//       updatedAt: person.updatedAt,
-//       createdAt: person.createdAt,
-//       assignedTo: person.assignedUser
-//         ? {
-//             id: person.assignedUser.masterUserID,
-//             name: person.assignedUser.name,
-//             email: person.assignedUser.email,
-//           }
-//         : null,
-//     }));
-
-//     const totalPages = Math.ceil(totalCount / limit);
-
-//     res.status(200).json({
-//       success: true,
-//       message: "Persons data retrieved successfully",
-//       data: {
-//         activities: formattedPersons,
-//         reportData: reportData,
-//         summary: summary,
-//       },
-//       pagination: {
-//         currentPage: parseInt(page),
-//         totalPages: totalPages,
-//         totalItems: totalCount,
-//         itemsPerPage: parseInt(limit),
-//         hasNextPage: page < totalPages,
-//         hasPrevPage: page > 1,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error retrieving Persons data:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to retrieve Persons data",
-//       error: error.message,
-//     });
-//   }
-// };
 
 exports.createOrganizationReport = async (req, res) => {
   try {
@@ -2823,9 +2552,6 @@ function getConditionObject(column, operator, value, includeModels = []) {
   const isDateColumn =
     fieldName.includes("Date") ||
     fieldName.includes("Time") ||
-    fieldName === "startDateTime" ||
-    fieldName === "endDateTime" ||
-    fieldName === "dueDate" ||
     fieldName === "createdAt" ||
     fieldName === "updatedAt";
 
@@ -2840,16 +2566,16 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // Include records within the date range
       return {
         [Op.and]: [
-          { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.lte]: new Date(toDate + " 23:59:59") } },
         ],
       };
     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
       // Exclude records within the date range (records NOT between the dates)
       return {
         [Op.or]: [
-          { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.gt]: new Date(toDate + " 23:59:59") } },
         ],
       };
     }

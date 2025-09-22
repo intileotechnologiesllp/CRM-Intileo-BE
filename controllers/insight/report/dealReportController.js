@@ -9,7 +9,6 @@ const MasterUser = require("../../../models/master/masterUserModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 const { Pipeline } = require("../../../models");
-const { pipeline } = require("nodemailer/lib/xoauth2");
 
 exports.createDealPerformReport = async (req, res) => {
   try {
@@ -1036,9 +1035,8 @@ function getConditionObject(column, operator, value, includeModels = []) {
   const isDateColumn =
     fieldName.includes("Date") ||
     fieldName.includes("Time") ||
-    fieldName === "startDateTime" ||
-    fieldName === "endDateTime" ||
-    fieldName === "dueDate" ||
+    fieldName === "expectedCloseDate" ||
+    fieldName === "proposalSentDate" ||
     fieldName === "createdAt" ||
     fieldName === "updatedAt";
 
@@ -1053,16 +1051,16 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // Include records within the date range
       return {
         [Op.and]: [
-          { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.lte]: new Date(toDate + " 23:59:59") } },
         ],
       };
     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
       // Exclude records within the date range (records NOT between the dates)
       return {
         [Op.or]: [
-          { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
+          { createdAt: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
+          { createdAt: { [Op.gt]: new Date(toDate + " 23:59:59") } },
         ],
       };
     }
