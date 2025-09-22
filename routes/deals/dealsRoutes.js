@@ -84,5 +84,19 @@ router.get(
 // router.post("/import-deals", verifyToken,upload.single('file'), dealsController.bulkImportDeals);
 // router.post("/import-deals-without-linking", verifyToken, upload.single('file'), dealsController.bulkImportDealsNoCrosslink);
 
+// ================ DUPLICATE DEAL ROUTES ================
+router.post(
+  "/duplicate/:dealId",
+  verifyToken,
+  validatePrivilege(3, "create"),
+  dealsController.duplicateDeal
+);
+router.post(
+  "/duplicate-batch",
+  verifyToken,
+  validatePrivilege(3, "create"),
+  dealsController.duplicateDealsInBatch
+);
+
 module.exports = router;
 

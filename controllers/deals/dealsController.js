@@ -6,6 +6,7 @@ const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const { Op } = require("sequelize");
 const { fn, col, literal } = require("sequelize");
+// const sequelize = require("../../config/db");
 const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const DealParticipant = require("../../models/deals/dealPartcipentsModel");
@@ -6038,6 +6039,332 @@ exports.bulkEditDeals = async (req, res) => {
 
     res.status(500).json({
       message: "Internal server error during bulk edit",
+      error: error.message,
+    });
+  }
+};
+
+// ================ DUPLICATE DEAL FUNCTIONALITY ================
+
+/**
+ * Duplicate an existing deal with all its custom field values
+ * POST /api/deals/duplicate/:dealId
+ */
+exports.duplicateDeal = async (req, res) => {
+  const { dealId } = req.params;
+  const masterUserID = req.adminId;
+  const entityType = "deal";
+
+  if (!dealId) {
+    return res.status(400).json({
+      message: "Deal ID is required.",
+    });
+  }
+
+  try {
+    console.log(`[DUPLICATE] Starting duplication of deal ${dealId} for user ${masterUserID} with role ${req.role}`);
+    
+    // Debug: Check if deal exists at all
+    const dealExists = await Deal.findOne({
+      where: { dealId: dealId },
+      attributes: ['dealId', 'title', 'masterUserID']
+    });
+    
+    if (!dealExists) {
+      console.log(`[DUPLICATE] ❌ Deal ${dealId} does not exist in database`);
+      return res.status(404).json({
+        message: `Deal with ID ${dealId} not found.`,
+      });
+    }
+    
+    console.log(`[DUPLICATE] 🔍 Deal ${dealId} exists: "${dealExists.title}" (Owner: ${dealExists.masterUserID})`);
+
+    // Start a transaction
+    const transaction = await sequelize.transaction();
+
+    try {
+      // 1. Get the original deal with admin permission check
+      let whereCondition = { dealId: dealId };
+      
+      // If user is not admin, restrict to their own deals only
+      if (req.role !== 'admin') {
+        whereCondition.masterUserID = masterUserID;
+      }
+      
+      const originalDeal = await Deal.findOne({
+        where: whereCondition,
+        transaction
+      });
+
+      if (!originalDeal) {
+        await transaction.rollback();
+        return res.status(404).json({
+          message: "Deal not found or you don't have permission to access it.",
+        });
+      }
+
+      console.log(`[DUPLICATE] Original deal found: ${originalDeal.title} (Owner: ${originalDeal.masterUserID}, Requester: ${masterUserID}, Role: ${req.role})`);
+      
+      // Log admin access if applicable
+      if (req.role === 'admin' && originalDeal.masterUserID !== masterUserID) {
+        console.log(`[DUPLICATE] Admin ${masterUserID} duplicating deal owned by user ${originalDeal.masterUserID}`);
+      }
+
+      console.log(`[DUPLICATE] Original deal found: ${originalDeal.title}`);
+
+      // 2. Prepare data for the new deal (exclude unique fields)
+      const originalData = originalDeal.toJSON();
+      const {
+        dealId: _dealId,
+        createdAt: _createdAt,
+        updatedAt: _updatedAt,
+        ...duplicateData
+      } = originalData;
+
+      // 3. Generate unique title with "Copy of" prefix
+      let newTitle = `Copy of ${originalDeal.title}`;
+      
+      // Check if a deal with this title already exists and add counter if needed
+      let counter = 1;
+      let titleExists = await Deal.findOne({
+        where: { title: newTitle, masterUserID },
+        transaction
+      });
+
+      while (titleExists) {
+        counter++;
+        newTitle = `Copy of ${originalDeal.title} (${counter})`;
+        titleExists = await Deal.findOne({
+          where: { title: newTitle, masterUserID },
+          transaction
+        });
+      }
+
+      duplicateData.title = newTitle;
+      duplicateData.masterUserID = masterUserID;
+
+      console.log(`[DUPLICATE] New deal title: ${newTitle}`);
+
+      // 4. Create the duplicate deal
+      const newDeal = await Deal.create(duplicateData, { transaction });
+      console.log(`[DUPLICATE] New deal created with ID: ${newDeal.dealId}`);
+
+      // 5. Get all custom field values from the original deal
+      const originalCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: dealId.toString(),
+          entityType: entityType,
+          masterUserID: masterUserID,
+        },
+        include: [
+          {
+            model: CustomField,
+            as: "CustomField",
+            attributes: ["fieldName", "fieldLabel", "fieldType"],
+          },
+        ],
+        transaction
+      });
+
+      console.log(`[DUPLICATE] Found ${originalCustomFieldValues.length} custom field values to copy`);
+
+      // 6. Duplicate all custom field values
+      const duplicatedCustomFieldValues = [];
+      
+      for (const originalValue of originalCustomFieldValues) {
+        const duplicatedValue = await CustomFieldValue.create({
+          fieldId: originalValue.fieldId,
+          entityId: newDeal.dealId.toString(),
+          entityType: entityType,
+          value: originalValue.value,
+          masterUserID: masterUserID,
+        }, { transaction });
+
+        duplicatedCustomFieldValues.push({
+          fieldId: duplicatedValue.fieldId,
+          fieldName: originalValue.CustomField?.fieldName || 'unknown',
+          fieldLabel: originalValue.CustomField?.fieldLabel || 'Unknown Field',
+          fieldType: originalValue.CustomField?.fieldType || 'text',
+          value: duplicatedValue.value,
+        });
+      }
+
+      console.log(`[DUPLICATE] Successfully duplicated ${duplicatedCustomFieldValues.length} custom field values`);
+
+      // 7. Log audit trail (if available)
+      try {
+        const { logAuditTrail } = require("../../utils/auditTrailLogger");
+        const PROGRAMS = require("../../utils/programConstants");
+        
+        await logAuditTrail(
+          masterUserID,
+          PROGRAMS.DEAL_MANAGEMENT || "DEAL_MANAGEMENT",
+          `Duplicated deal: "${originalDeal.title}" → "${newTitle}"`,
+          "create",
+          "Deal",
+          newDeal.dealId.toString(),
+          null,
+          transaction
+        );
+      } catch (auditError) {
+        console.log(`[DUPLICATE] Audit logging not available: ${auditError.message}`);
+      }
+
+      // 8. Log history (if available)
+      try {
+        const historyLogger = require("../../utils/historyLogger").logHistory;
+        
+        await historyLogger(
+          "Deal",
+          "create",
+          newDeal.dealId,
+          masterUserID,
+          `Deal duplicated from "${originalDeal.title}"`,
+          null,
+          duplicateData,
+          transaction
+        );
+      } catch (historyError) {
+        console.log(`[DUPLICATE] History logging not available: ${historyError.message}`);
+      }
+
+      // Commit the transaction
+      await transaction.commit();
+
+      console.log(`[DUPLICATE] ✅ Successfully duplicated deal ${dealId} → ${newDeal.dealId}`);
+
+      // 9. Return the new deal with its custom field values
+      res.status(201).json({
+        message: `Deal "${originalDeal.title}" duplicated successfully as "${newTitle}"`,
+        originalDeal: {
+          dealId: originalDeal.dealId,
+          title: originalDeal.title,
+        },
+        newDeal: {
+          dealId: newDeal.dealId,
+          title: newDeal.title,
+          value: newDeal.value,
+          currency: newDeal.currency,
+          pipeline: newDeal.pipeline,
+          pipelineStage: newDeal.pipelineStage,
+          expectedCloseDate: newDeal.expectedCloseDate,
+          status: newDeal.status,
+          createdAt: newDeal.createdAt,
+        },
+        duplicatedFields: duplicatedCustomFieldValues,
+        summary: {
+          totalCustomFields: duplicatedCustomFieldValues.length,
+          duplicationTime: new Date().toISOString(),
+        },
+      });
+
+    } catch (error) {
+      await transaction.rollback();
+      throw error;
+    }
+
+  } catch (error) {
+    console.error(`[DUPLICATE] ❌ Error duplicating deal ${dealId}:`, error);
+    res.status(500).json({
+      message: "Failed to duplicate deal.",
+      error: error.message,
+      dealId: dealId,
+    });
+  }
+};
+
+/**
+ * Batch duplicate multiple deals
+ * POST /api/deals/duplicate-batch
+ */
+exports.duplicateDealsInBatch = async (req, res) => {
+  const { dealIds } = req.body;
+  const masterUserID = req.adminId;
+
+  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+    return res.status(400).json({
+      message: "Array of deal IDs is required.",
+      example: { dealIds: [1, 2, 3] }
+    });
+  }
+
+  if (dealIds.length > 10) {
+    return res.status(400).json({
+      message: "Maximum 10 deals can be duplicated at once.",
+    });
+  }
+
+  try {
+    console.log(`[BATCH-DUPLICATE] Starting batch duplication of ${dealIds.length} deals for user ${masterUserID}`);
+
+    const results = {
+      successful: [],
+      failed: [],
+      summary: {
+        total: dealIds.length,
+        successCount: 0,
+        failCount: 0,
+      }
+    };
+
+    // Process each deal individually to avoid transaction conflicts
+    for (const dealId of dealIds) {
+      try {
+        // Create a mock request/response for the single duplicate function
+        const mockReq = { params: { dealId }, adminId: masterUserID, role: req.role };
+        let duplicateResult = null;
+        
+        const mockRes = {
+          status: (code) => ({
+            json: (data) => {
+              duplicateResult = { statusCode: code, data };
+              return mockRes;
+            }
+          })
+        };
+
+        // Call the single duplicate function
+        await exports.duplicateDeal(mockReq, mockRes);
+
+        if (duplicateResult && duplicateResult.statusCode === 201) {
+          results.successful.push({
+            originalDealId: dealId,
+            newDeal: duplicateResult.data.newDeal,
+            customFieldsCount: duplicateResult.data.duplicatedFields.length,
+          });
+          results.summary.successCount++;
+        } else {
+          results.failed.push({
+            dealId: dealId,
+            error: duplicateResult?.data?.message || "Unknown error",
+          });
+          results.summary.failCount++;
+        }
+
+      } catch (dealError) {
+        console.error(`[BATCH-DUPLICATE] Error duplicating deal ${dealId}:`, dealError.message);
+        results.failed.push({
+          dealId: dealId,
+          error: dealError.message,
+        });
+        results.summary.failCount++;
+      }
+    }
+
+    console.log(`[BATCH-DUPLICATE] ✅ Batch duplication completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed`);
+
+    const statusCode = results.summary.successCount > 0 ? 200 : 400;
+    
+    res.status(statusCode).json({
+      message: `Batch duplication completed. ${results.summary.successCount} deals duplicated successfully, ${results.summary.failCount} failed.`,
+      results: results,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error) {
+    console.error(`[BATCH-DUPLICATE] ❌ Batch duplication error:`, error);
+    res.status(500).json({
+      message: "Failed to duplicate deals in batch.",
       error: error.message,
     });
   }
