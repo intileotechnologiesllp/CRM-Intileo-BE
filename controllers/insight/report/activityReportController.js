@@ -58,6 +58,7 @@ exports.createActivityReport = async (req, res) => {
         { label: "Start Date Time", value: "startDateTime", type: "date" },
         { label: "End Date Time", value: "endDateTime", type: "date" },
         { label: "Created At", value: "createdAt", type: "date" },
+        { label: "Updated At", value: "updatedAt", type: "date" },
         { label: "Add on", value: "daterange", type: "daterange" },
       ],
       Deal: [
@@ -166,6 +167,9 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityDeal.archiveStatus",
           type: "number",
         },
+        { label: "Created At", value: "ActivityDeal.createdAt", type: "date" },
+        { label: "Updated At", value: "ActivityDeal.updatedAt", type: "date" },
+        { label: "Add on", value: "ActivityDeal.daterange", type: "daterange" },
       ],
       Lead: [
         {
@@ -265,6 +269,9 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityLead.valueCurrency",
           type: "text",
         },
+        { label: "Created At", value: "ActivityLead.createdAt", type: "date" },
+        { label: "Updated At", value: "ActivityLead.updatedAt", type: "date" },
+        { label: "Add on", value: "ActivityLead.daterange", type: "daterange" },
       ],
       Organization: [
         {
@@ -282,6 +289,9 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityOrganization.address",
           type: "text",
         },
+        { label: "Created At", value: "ActivityOrganization.createdAt", type: "date" },
+        { label: "Updated At", value: "ActivityOrganization.updatedAt", type: "date" },
+        { label: "Add on", value: "ActivityOrganization.daterange", type: "daterange" },
       ],
       Person: [
         {
@@ -307,6 +317,9 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityPerson.organization",
           type: "text",
         },
+        { label: "Created At", value: "ActivityPerson.createdAt", type: "date" },
+        { label: "Updated At", value: "ActivityPerson.updatedAt", type: "date" },
+        { label: "Add on", value: "ActivityPerson.daterange", type: "daterange" },
       ],
     };
 
@@ -1096,6 +1109,174 @@ async function generateActivityPerformanceData(
 }
 
 // Enhanced helper function to handle related table conditions and date filtering
+// function getConditionObject(column, operator, value, includeModels = []) {
+//   let conditionValue = value;
+
+//   // Check if column contains a dot (indicating a related table field)
+//   const hasRelation = column.includes(".");
+//   let tableAlias = "Activity";
+//   let fieldName = column;
+
+//   if (hasRelation) {
+//     [tableAlias, fieldName] = column.split(".");
+//   }
+
+//   // Handle date filtering for specific date columns
+//   const isDateColumn =
+//     fieldName.includes("Date") ||
+//     fieldName.includes("Time") ||
+//     fieldName === "startDateTime" ||
+//     fieldName === "endDateTime" ||
+//     fieldName === "dueDate" ||
+//     fieldName === "createdAt" ||
+//     fieldName === "updatedAt";
+
+//   // Handle date range filtering for "Add on" (daterange type)
+//   const isDateRangeFilter = fieldName === "daterange";
+  
+//   if (isDateRangeFilter && Array.isArray(value)) {
+//     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
+//     const [fromDate, toDate] = value;
+
+//     if (operator === "between" || operator === "=" || operator === "is") {
+//       // Include records within the date range
+//       return {
+//         [Op.and]: [
+//           { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
+//           { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
+//         ],
+//       };
+//     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+//       // Exclude records within the date range (records NOT between the dates)
+//       return {
+//         [Op.or]: [
+//           { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
+//           { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
+//         ],
+//       };
+//     }
+//   } else if (isDateColumn) {
+//     // Handle single date filtering (e.g., "2025-06-23")
+//     if (operator === "=" || operator === "is") {
+//       // For exact date match, create a range for the entire day
+//       const startOfDay = new Date(value + " 00:00:00");
+//       const endOfDay = new Date(value + " 23:59:59");
+
+//       return {
+//         [column]: {
+//           [Op.between]: [startOfDay, endOfDay],
+//         },
+//       };
+//     } else if (operator === ">") {
+//       conditionValue = new Date(value + " 23:59:59");
+//     } else if (operator === "<") {
+//       conditionValue = new Date(value + " 00:00:00");
+//     } else if (operator === "≠" || operator === "is not") {
+//       // For not equal, exclude the entire day
+//       const startOfDay = new Date(value + " 00:00:00");
+//       const endOfDay = new Date(value + " 23:59:59");
+
+//       return {
+//         [column]: {
+//           [Op.notBetween]: [startOfDay, endOfDay],
+//         },
+//       };
+//     } else {
+//       conditionValue = new Date(value);
+//     }
+//   }
+//   // Handle other data types
+//   else if (fieldName === "isDone") {
+//     conditionValue = value === "true" || value === true;
+//   } else if (!isNaN(value) && value !== "" && typeof value === "string") {
+//     conditionValue = parseFloat(value);
+//   }
+
+//   // Handle related table joins
+//   if (hasRelation) {
+//     let modelConfig;
+
+//     switch (tableAlias) {
+//       case "ActivityDeal":
+//         modelConfig = {
+//           model: Deal,
+//           as: "ActivityDeal",
+//           required: false,
+//           attributes: [],
+//         };
+//         break;
+//       case "ActivityLead":
+//         modelConfig = {
+//           model: Lead,
+//           as: "ActivityLead",
+//           required: false,
+//           attributes: [],
+//         };
+//         break;
+//       case "ActivityOrganization":
+//         modelConfig = {
+//           model: Organization,
+//           as: "ActivityOrganization",
+//           required: false,
+//           attributes: [],
+//         };
+//         break;
+//       case "ActivityPerson":
+//         modelConfig = {
+//           model: Person,
+//           as: "ActivityPerson",
+//           required: false,
+//           attributes: [],
+//         };
+//         break;
+//       default:
+//         // If it's not a recognized table, treat it as Activity column
+//         return getOperatorCondition(column, operator, conditionValue);
+//     }
+
+//     // Check if this include already exists to avoid duplicates
+//     const existingInclude = includeModels.find(
+//       (inc) => inc.as === modelConfig.as
+//     );
+//     if (!existingInclude) {
+//       includeModels.push(modelConfig);
+//     }
+
+//     // FIX: Return a plain object instead of Sequelize.where()
+//     // This creates a condition object that can be properly combined
+//     const op = getSequelizeOperator(operator);
+    
+//     // Handle special operators for related tables
+//     switch (operator) {
+//       case "contains":
+//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+//       case "startsWith":
+//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+//       case "endsWith":
+//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+//       case "isEmpty":
+//         return {
+//           [Op.or]: [
+//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.is]: null } },
+//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.eq]: "" } },
+//           ],
+//         };
+//       case "isNotEmpty":
+//         return {
+//           [Op.and]: [
+//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.not]: null } },
+//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.ne]: "" } },
+//           ],
+//         };
+//       default:
+//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: conditionValue } };
+//     }
+//   } else {
+//     // Regular activity table column
+//     return getOperatorCondition(column, operator, conditionValue);
+//   }
+// }
+
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
@@ -1116,7 +1297,9 @@ function getConditionObject(column, operator, value, includeModels = []) {
     fieldName === "endDateTime" ||
     fieldName === "dueDate" ||
     fieldName === "createdAt" ||
-    fieldName === "updatedAt";
+    fieldName === "updatedAt" ||
+    fieldName === "expectedCloseDate" ||
+    fieldName === "proposalSentDate";
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
@@ -1124,23 +1307,54 @@ function getConditionObject(column, operator, value, includeModels = []) {
   if (isDateRangeFilter && Array.isArray(value)) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
-
-    if (operator === "between" || operator === "=" || operator === "is") {
-      // Include records within the date range
-      return {
-        [Op.and]: [
-          { startDateTime: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.lte]: new Date(toDate + " 23:59:59") } },
-        ],
-      };
-    } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
-      // Exclude records within the date range (records NOT between the dates)
-      return {
-        [Op.or]: [
-          { startDateTime: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-          { startDateTime: { [Op.gt]: new Date(toDate + " 23:59:59") } },
-        ],
-      };
+    
+    // Determine which date field to filter based on the table alias
+    let dateField;
+    switch(tableAlias) {
+      case "ActivityDeal":
+      case "ActivityLead":
+      case "ActivityOrganization":
+      case "ActivityPerson":
+        dateField = "createdAt";
+        break;
+      default:
+        dateField = "startDateTime";
+    }
+    
+    // For related tables, use the proper Sequelize syntax
+    if (tableAlias !== "Activity") {
+      // Add the required include model
+      addIncludeModel(tableAlias, includeModels);
+      
+      // Return the condition with proper nested syntax
+      if (operator === "between" || operator === "=" || operator === "is") {
+        return {
+          [`$${tableAlias}.${dateField}$`]: {
+            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
+          }
+        };
+      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+        return {
+          [`$${tableAlias}.${dateField}$`]: {
+            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
+          }
+        };
+      }
+    } else {
+      // For Activity table
+      if (operator === "between" || operator === "=" || operator === "is") {
+        return {
+          [dateField]: {
+            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
+          }
+        };
+      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+        return {
+          [dateField]: {
+            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
+          }
+        };
+      }
     }
   } else if (isDateColumn) {
     // Handle single date filtering (e.g., "2025-06-23")
@@ -1149,11 +1363,21 @@ function getConditionObject(column, operator, value, includeModels = []) {
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
 
-      return {
-        [column]: {
-          [Op.between]: [startOfDay, endOfDay],
-        },
-      };
+      // For related tables
+      if (hasRelation) {
+        addIncludeModel(tableAlias, includeModels);
+        return {
+          [`$${tableAlias}.${fieldName}$`]: {
+            [Op.between]: [startOfDay, endOfDay]
+          }
+        };
+      } else {
+        return {
+          [fieldName]: {
+            [Op.between]: [startOfDay, endOfDay]
+          }
+        };
+      }
     } else if (operator === ">") {
       conditionValue = new Date(value + " 23:59:59");
     } else if (operator === "<") {
@@ -1162,12 +1386,22 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // For not equal, exclude the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
-
-      return {
-        [column]: {
-          [Op.notBetween]: [startOfDay, endOfDay],
-        },
-      };
+      
+      // For related tables
+      if (hasRelation) {
+        addIncludeModel(tableAlias, includeModels);
+        return {
+          [`$${tableAlias}.${fieldName}$`]: {
+            [Op.notBetween]: [startOfDay, endOfDay]
+          }
+        };
+      } else {
+        return {
+          [fieldName]: {
+            [Op.notBetween]: [startOfDay, endOfDay]
+          }
+        };
+      }
     } else {
       conditionValue = new Date(value);
     }
@@ -1181,86 +1415,154 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle related table joins
   if (hasRelation) {
-    let modelConfig;
-
-    switch (tableAlias) {
-      case "ActivityDeal":
-        modelConfig = {
-          model: Deal,
-          as: "ActivityDeal",
-          required: false,
-          attributes: [],
-        };
-        break;
-      case "ActivityLead":
-        modelConfig = {
-          model: Lead,
-          as: "ActivityLead",
-          required: false,
-          attributes: [],
-        };
-        break;
-      case "ActivityOrganization":
-        modelConfig = {
-          model: Organization,
-          as: "ActivityOrganization",
-          required: false,
-          attributes: [],
-        };
-        break;
-      case "ActivityPerson":
-        modelConfig = {
-          model: Person,
-          as: "ActivityPerson",
-          required: false,
-          attributes: [],
-        };
-        break;
-      default:
-        // If it's not a recognized table, treat it as Activity column
-        return getOperatorCondition(column, operator, conditionValue);
-    }
-
-    // Check if this include already exists to avoid duplicates
-    const existingInclude = includeModels.find(
-      (inc) => inc.as === modelConfig.as
-    );
-    if (!existingInclude) {
-      includeModels.push(modelConfig);
-    }
-
-    // FIX: Return a plain object instead of Sequelize.where()
-    // This creates a condition object that can be properly combined
+    addIncludeModel(tableAlias, includeModels);
+    
     const op = getSequelizeOperator(operator);
     
-    // Handle special operators for related tables
+    // Use proper Sequelize syntax for related table conditions
     switch (operator) {
       case "contains":
-        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
       case "startsWith":
-        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
       case "endsWith":
-        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
       case "isEmpty":
         return {
           [Op.or]: [
-            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.is]: null } },
-            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.eq]: "" } },
+            { [`$${tableAlias}.${fieldName}$`]: { [Op.is]: null } },
+            { [`$${tableAlias}.${fieldName}$`]: { [Op.eq]: "" } },
           ],
         };
       case "isNotEmpty":
         return {
           [Op.and]: [
-            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.not]: null } },
-            { [`$${modelConfig.as}.${fieldName}$`]: { [Op.ne]: "" } },
+            { [`$${tableAlias}.${fieldName}$`]: { [Op.not]: null } },
+            { [`$${tableAlias}.${fieldName}$`]: { [Op.ne]: "" } },
           ],
         };
       default:
-        return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: conditionValue } };
+        return { [`$${tableAlias}.${fieldName}$`]: { [op]: conditionValue } };
     }
   } else {
     // Regular activity table column
     return getOperatorCondition(column, operator, conditionValue);
+  }
+}
+
+// Helper function to add include models
+function addIncludeModel(tableAlias, includeModels) {
+  let modelConfig;
+
+  switch (tableAlias) {
+    case "ActivityDeal":
+      modelConfig = {
+        model: Deal,
+        as: "ActivityDeal",
+        required: false,
+        attributes: [],
+      };
+      break;
+    case "ActivityLead":
+      modelConfig = {
+        model: Lead,
+        as: "ActivityLead",
+        required: false,
+        attributes: [],
+      };
+      break;
+    case "ActivityOrganization":
+      modelConfig = {
+        model: Organization,
+        as: "ActivityOrganization",
+        required: false,
+        attributes: [],
+      };
+      break;
+    case "ActivityPerson":
+      modelConfig = {
+        model: Person,
+        as: "ActivityPerson",
+        required: false,
+        attributes: [],
+      };
+      break;
+    default:
+      return; // No include needed for Activity table
+  }
+
+  // Check if this include already exists to avoid duplicates
+  const existingInclude = includeModels.find(
+    (inc) => inc.as === modelConfig.as
+  );
+  if (!existingInclude) {
+    includeModels.push(modelConfig);
+  }
+}
+
+// Helper function for operator conditions
+function getOperatorCondition(column, operator, value) {
+  const op = getSequelizeOperator(operator);
+
+  switch (operator) {
+    case "contains":
+      return { [column]: { [op]: `%${value}%` } };
+    case "startsWith":
+      return { [column]: { [op]: `${value}%` } };
+    case "endsWith":
+      return { [column]: { [op]: `%${value}` } };
+    case "isEmpty":
+      return {
+        [Op.or]: [
+          { [column]: { [Op.is]: null } },
+          { [column]: { [Op.eq]: "" } },
+        ],
+      };
+    case "isNotEmpty":
+      return {
+        [Op.and]: [
+          { [column]: { [Op.not]: null } },
+          { [column]: { [Op.ne]: "" } },
+        ],
+      };
+    case "between":
+    case "notBetween":
+      return value; // Return the pre-built condition
+    default:
+      return { [column]: { [op]: value } };
+  }
+}
+
+// Helper function for operator conditions
+function getOperatorCondition(column, operator, value) {
+  const op = getSequelizeOperator(operator);
+
+  switch (operator) {
+    case "contains":
+      return { [column]: { [op]: `%${value}%` } };
+    case "startsWith":
+      return { [column]: { [op]: `${value}%` } };
+    case "endsWith":
+      return { [column]: { [op]: `%${value}` } };
+    case "isEmpty":
+      return {
+        [Op.or]: [
+          { [column]: { [Op.is]: null } },
+          { [column]: { [Op.eq]: "" } },
+        ],
+      };
+    case "isNotEmpty":
+      return {
+        [Op.and]: [
+          { [column]: { [Op.not]: null } },
+          { [column]: { [Op.ne]: "" } },
+        ],
+      };
+    case "between":
+    case "notBetween":
+      return value; // Return the pre-built condition
+    default:
+      return { [column]: { [op]: value } };
   }
 }
 
@@ -1299,38 +1601,38 @@ function getSequelizeOperator(operator) {
 }
 
 // Helper function for operator conditions
-function getOperatorCondition(column, operator, value) {
-  const op = getSequelizeOperator(operator);
+// function getOperatorCondition(column, operator, value) {
+//   const op = getSequelizeOperator(operator);
 
-  switch (operator) {
-    case "contains":
-      return { [column]: { [op]: `%${value}%` } };
-    case "startsWith":
-      return { [column]: { [op]: `${value}%` } };
-    case "endsWith":
-      return { [column]: { [op]: `%${value}` } };
-    case "isEmpty":
-      return {
-        [Op.or]: [
-          { [column]: { [Op.is]: null } },
-          { [column]: { [Op.eq]: "" } },
-        ],
-      };
-    case "isNotEmpty":
-      return {
-        [Op.and]: [
-          { [column]: { [Op.not]: null } },
-          { [column]: { [Op.ne]: "" } },
-        ],
-      };
-    case "between":
-    case "notBetween":
-      // These cases are handled in the main function above
-      return value; // Return the pre-built condition
-    default:
-      return { [column]: { [op]: value } };
-  }
-}
+//   switch (operator) {
+//     case "contains":
+//       return { [column]: { [op]: `%${value}%` } };
+//     case "startsWith":
+//       return { [column]: { [op]: `${value}%` } };
+//     case "endsWith":
+//       return { [column]: { [op]: `%${value}` } };
+//     case "isEmpty":
+//       return {
+//         [Op.or]: [
+//           { [column]: { [Op.is]: null } },
+//           { [column]: { [Op.eq]: "" } },
+//         ],
+//       };
+//     case "isNotEmpty":
+//       return {
+//         [Op.and]: [
+//           { [column]: { [Op.not]: null } },
+//           { [column]: { [Op.ne]: "" } },
+//         ],
+//       };
+//     case "between":
+//     case "notBetween":
+//       // These cases are handled in the main function above
+//       return value; // Return the pre-built condition
+//     default:
+//       return { [column]: { [op]: value } };
+//   }
+// }
 
 exports.saveActivityReport = async (req, res) => {
   try {
