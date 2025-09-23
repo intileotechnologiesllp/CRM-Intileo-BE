@@ -55,6 +55,7 @@ exports.createDealPerformReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
+      "none",
      "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
@@ -70,7 +71,6 @@ exports.createDealPerformReport = async (req, res) => {
       "organization",
       "pipeline",
       "pipelineStage",
-      "none"
     ];
 
     const yaxisArray = [
@@ -1996,7 +1996,8 @@ exports.createDealConversionReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
-     "esplProposalNo",
+      "none",
+      "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
       "projectLocation",
@@ -2011,16 +2012,12 @@ exports.createDealConversionReport = async (req, res) => {
       "organization",
       "pipeline",
       "pipelineStage",
-      "none"
     ];
 
     const yaxisArray = [
       "no of deals",
       "proposalValue",
       "value",
-      "weightedValue",
-      "productQuantity",
-      "productAmount",
     ];
 
     // Add this to your createActivityReport function or make it available globally
@@ -3559,7 +3556,8 @@ exports.createDealProgressReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
-     "esplProposalNo",
+      "none",
+      "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
       "projectLocation",
@@ -3574,7 +3572,6 @@ exports.createDealProgressReport = async (req, res) => {
       "organization",
       "pipeline",
       "pipelineStage",
-      "none"
     ];
 
     const yaxisArray = [
@@ -5192,7 +5189,8 @@ exports.createDealDurationReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
-     "esplProposalNo",
+      "none",
+      "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
       "projectLocation",
@@ -5207,7 +5205,6 @@ exports.createDealDurationReport = async (req, res) => {
       "organization",
       "pipeline",
       "pipelineStage",
-      "none"
     ];
 
     const yaxisArray = ["totalDuration", "averageDuration"];

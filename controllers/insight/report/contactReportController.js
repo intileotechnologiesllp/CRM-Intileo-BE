@@ -39,6 +39,7 @@ exports.createPersonReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
+      "none",
       "contactPerson",
       "organization",
       "email",
@@ -47,7 +48,6 @@ exports.createPersonReport = async (req, res) => {
       "postalAddress",
       "jobTitle",
       "personLabels",
-      "none"
     ];
 
     const yaxisArray = ["no of people"];
@@ -1940,10 +1940,10 @@ exports.createOrganizationReport = async (req, res) => {
     // Define available options for xaxis and yaxis
     const xaxisArray = ["organization", "organizationLabels", "address"];
     const segmentedByOptions = [
+      "none",
       "organization",
       "organizationLabels",
       "address",
-      "none"
     ];
     const yaxisArray = ["no of organizations"];
 
