@@ -62,60 +62,61 @@ cron.schedule("*/2 * * * *", async () => {
   }
 });
 
-cron.schedule("* * * * *", async () => {
-  // Every minute
-  console.log("Running cron job to queue scheduled outbox emails...");
-  const now = new Date();
-  console.log("Current server time:", now.toISOString());
+// COMMENTED OUT: Scheduled email queue cron job
+// cron.schedule("* * * * *", async () => {
+//   // Every minute
+//   console.log("Running cron job to queue scheduled outbox emails...");
+//   const now = new Date();
+//   console.log("Current server time:", now.toISOString());
 
-  try {
-    // Find all outbox emails that should be sent now or earlier
-    const emails = await Email.findAll({
-      where: {
-        folder: "outbox",
-        scheduledAt: { [Sequelize.Op.lte]: now },
-      },
-      attributes: ["emailID", "scheduledAt", "folder"],
-    });
+//   try {
+//     // Find all outbox emails that should be sent now or earlier
+//     const emails = await Email.findAll({
+//       where: {
+//         folder: "outbox",
+//         scheduledAt: { [Sequelize.Op.lte]: now },
+//       },
+//       attributes: ["emailID", "scheduledAt", "folder"],
+//     });
 
-    console.log(
-      "Found scheduled outbox emails:",
-      emails.map((e) => ({
-        emailID: e.emailID,
-        scheduledAt: e.scheduledAt,
-        folder: e.folder,
-      }))
-    );
+//     console.log(
+//       "Found scheduled outbox emails:",
+//       emails.map((e) => ({
+//         emailID: e.emailID,
+//         scheduledAt: e.scheduledAt,
+//         folder: e.folder,
+//       }))
+//     );
 
-    if (!emails.length) {
-      console.log("No scheduled outbox emails to queue at this time.");
-      return;
-    }
+//     if (!emails.length) {
+//       console.log("No scheduled outbox emails to queue at this time.");
+//       return;
+//     }
 
-    // Connect to RabbitMQ and queue each email for sending
-    const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
-    const connection = await amqp.connect(amqpUrl);
-    const channel = await connection.createChannel();
-    await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
+//     // Connect to RabbitMQ and queue each email for sending
+//     const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+//     const connection = await amqp.connect(amqpUrl);
+//     const channel = await connection.createChannel();
+//     await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
 
-    for (const email of emails) {
-      console.log(
-        `Queueing emailID ${email.emailID} (scheduledAt: ${email.scheduledAt}) to RabbitMQ...`
-      );
-      channel.sendToQueue(
-        SCHEDULED_QUEUE,
-        Buffer.from(JSON.stringify({ emailID: email.emailID })),
-        { persistent: true }
-      );
-    }
-    console.log(`Queued ${emails.length} scheduled outbox emails for sending.`);
+//     for (const email of emails) {
+//       console.log(
+//         `Queueing emailID ${email.emailID} (scheduledAt: ${email.scheduledAt}) to RabbitMQ...`
+//       );
+//       channel.sendToQueue(
+//         SCHEDULED_QUEUE,
+//         Buffer.from(JSON.stringify({ emailID: email.emailID })),
+//         { persistent: true }
+//       );
+//     }
+//     console.log(`Queued ${emails.length} scheduled outbox emails for sending.`);
 
-    await channel.close();
-    await connection.close();
-  } catch (error) {
-    console.error("Error queueing scheduled outbox emails:", error);
-  }
-});
+//     await channel.close();
+//     await connection.close();
+//   } catch (error) {
+//     console.error("Error queueing scheduled outbox emails:", error);
+//   }
+// });
 
 // cron.schedule("*/2 * * * *", async () => {
 //   console.log("Running combined cron job to fetch recent and sent emails for all users...");
