@@ -28,7 +28,6 @@ exports.createActivityReport = async (req, res) => {
     // Define available options for xaxis and yaxis
     const xaxisArray = [
       "Owner",
-      "Team",
       "status",
       "type",
       "subject",
@@ -36,10 +35,21 @@ exports.createActivityReport = async (req, res) => {
       "priority",
       "contactPerson",
       "organization",
-      "isDone",
       "startDateTime",
       "endDateTime",
       "createdAt",
+    ];
+
+    const segmentedByOptions = [
+      "Owner",
+      "status",
+      "type",
+      "subject",
+      "location",
+      "priority",
+      "contactPerson",
+      "organization",
+      "none"
     ];
 
     const yaxisArray = ["no of activities", "duration"];
@@ -486,7 +496,7 @@ exports.createActivityReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedBy: xaxisArray,
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });

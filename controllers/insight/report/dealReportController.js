@@ -54,13 +54,29 @@ exports.createDealPerformReport = async (req, res) => {
       "pipelineStage",
     ];
 
+    const segmentedByOptions = [
+     "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "sbuClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "contactPerson",
+      "organization",
+      "pipeline",
+      "pipelineStage",
+      "none"
+    ];
+
     const yaxisArray = [
       "no of deals",
       "proposalValue",
-      "value",
-      "weightedValue",
-      "productQuantity",
-      "productAmount",
+      "value"
     ];
 
     // Add this to your createActivityReport function or make it available globally
@@ -396,6 +412,7 @@ exports.createDealPerformReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
+        segmentedByOptions: segmentedByOptions
       },
       filters: availableFilterColumns,
     });
@@ -1978,6 +1995,25 @@ exports.createDealConversionReport = async (req, res) => {
       "pipelineStage",
     ];
 
+    const segmentedByOptions = [
+     "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "sbuClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "contactPerson",
+      "organization",
+      "pipeline",
+      "pipelineStage",
+      "none"
+    ];
+
     const yaxisArray = [
       "no of deals",
       "proposalValue",
@@ -2278,7 +2314,7 @@ exports.createDealConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedBy: xaxisArray,
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -3522,13 +3558,29 @@ exports.createDealProgressReport = async (req, res) => {
       "pipelineStage",
     ];
 
+    const segmentedByOptions = [
+     "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "sbuClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "contactPerson",
+      "organization",
+      "pipeline",
+      "pipelineStage",
+      "none"
+    ];
+
     const yaxisArray = [
       "no of deals",
       "proposalValue",
       "value",
-      "weightedValue",
-      "productQuantity",
-      "productAmount",
     ];
 
     // Filter columns definition
@@ -3801,7 +3853,7 @@ exports.createDealProgressReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedBy: xaxisArray,
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -5139,6 +5191,25 @@ exports.createDealDurationReport = async (req, res) => {
       "pipelineStage",
     ];
 
+    const segmentedByOptions = [
+     "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "sbuClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "contactPerson",
+      "organization",
+      "pipeline",
+      "pipelineStage",
+      "none"
+    ];
+
     const yaxisArray = ["totalDuration", "averageDuration"];
 
     // Filter columns (unchanged)
@@ -5372,6 +5443,7 @@ exports.createDealDurationReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
+        segmentedByOptions: segmentedByOptions
       },
       filters: availableFilterColumns,
     });
