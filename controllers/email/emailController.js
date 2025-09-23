@@ -1086,8 +1086,8 @@ const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider
           console.log(`[Batch ${page}] 🗑️ GARBAGE COLLECTION: Forced cleanup at ${allChunkedMessages.length} emails`);
         }
         
-        // For massive inboxes, break into stages
-        if (strategy === "MASSIVE_INBOX" && allChunkedMessages.length > 3000) {
+        // For massive inboxes, break into stages - increased limit for larger inboxes
+        if (strategy === "MASSIVE_INBOX" && allChunkedMessages.length > 10000) {
           console.log(`[Batch ${page}] 🏁 MASSIVE INBOX STAGE COMPLETE: ${allChunkedMessages.length} emails collected, will continue in next session`);
           break;
         }
@@ -1193,7 +1193,7 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       }
       
       // Memory protection - progressive strategy for very large inboxes
-      if (allChunkedMessages.length > 10000) {
+      if (allChunkedMessages.length > 15000) {
         console.log(`[Batch ${page}] 🛡️ USER ${userID} ${provider} STAGE 1 COMPLETE: ${allChunkedMessages.length} emails collected, will continue in next session`);
         break;
       } else if (allChunkedMessages.length > 5000) {
