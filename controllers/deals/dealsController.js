@@ -3284,46 +3284,66 @@ exports.updateDeal = async (req, res) => {
     console.log("req.adminId:", req.adminId);
     console.log("dealId:", dealId);
 
-    // Get all available custom fields for this user
+    // First, let's check ALL custom fields in database
+    const allCustomFields = await CustomField.findAll({
+      attributes: ['fieldId', 'fieldName', 'entityType', 'isActive', 'dealCheck', 'fieldSource', 'masterUserID']
+    });
+    
+    console.log("🔍 ALL CUSTOM FIELDS IN DATABASE:", allCustomFields.length);
+    allCustomFields.forEach(field => {
+      console.log(`  - ${field.fieldName} | entityType: ${field.entityType} | isActive: ${field.isActive} | dealCheck: ${field.dealCheck} | source: ${field.fieldSource}`);
+    });
+
+    // Check specifically for your field
+    const targetField = allCustomFields.find(f => f.fieldName === 'espl_proposal_no');
+    if (targetField) {
+      console.log("🎯 FOUND TARGET FIELD 'espl_proposal_no':", {
+        fieldId: targetField.fieldId,
+        fieldName: targetField.fieldName,
+        entityType: targetField.entityType,
+        isActive: targetField.isActive,
+        dealCheck: targetField.dealCheck,
+        fieldSource: targetField.fieldSource,
+        masterUserID: targetField.masterUserID
+      });
+    } else {
+      console.log("❌ TARGET FIELD 'espl_proposal_no' NOT FOUND in database");
+    }
+
+    // Get all available custom fields (minimal restrictions)
     const availableCustomFields = await CustomField.findAll({
       where: {
-        entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
         isActive: true,
-        [Op.or]: [
-          { masterUserID: req.adminId },
-          { fieldSource: "default" },
-          { fieldSource: "system" },
-        ],
+        // No entityType restriction - all entity types allowed
+        // No dealCheck restriction - all active custom fields can be updated
+        // No masterUserID restriction - all users can update any custom field
       },
     });
 
     console.log(
-      "Available custom fields:",
-      availableCustomFields.map((f) => f.fieldName)
+      "Available custom fields with dealCheck=true:",
+      availableCustomFields.map((f) => ({
+        fieldId: f.fieldId,
+        fieldName: f.fieldName,
+        entityType: f.entityType,
+        dealCheck: f.dealCheck,
+        masterUserID: f.masterUserID,
+        fieldSource: f.fieldSource
+      }))
     );
 
-    // Debug: Check for the specific field you're trying to update
-    console.log("Looking for field: no._of_reports_prepared_for_the_project");
     console.log("Request body keys:", Object.keys(req.body));
-    console.log("Field exists in request:", "no._of_reports_prepared_for_the_project" in req.body);
-    if ("no._of_reports_prepared_for_the_project" in req.body) {
-      console.log("Field value:", req.body["no._of_reports_prepared_for_the_project"]);
-    }
-
-    // Check if the field exists in available custom fields
-    const targetField = availableCustomFields.find(f => f.fieldName === "no._of_reports_prepared_for_the_project");
-    console.log("Field found in available custom fields:", !!targetField);
-    if (targetField) {
-      console.log("Target field details:", {
-        fieldId: targetField.fieldId,
-        fieldName: targetField.fieldName,
-        fieldType: targetField.fieldType,
-        entityType: targetField.entityType,
-        isActive: targetField.isActive,
-        masterUserID: targetField.masterUserID,
-        fieldSource: targetField.fieldSource,
-      });
-    }
+    console.log("Matching fields in request body:");
+    
+    // Check which request body keys match available custom fields
+    Object.keys(req.body).forEach(bodyKey => {
+      const matchingField = availableCustomFields.find(f => f.fieldName === bodyKey);
+      if (matchingField) {
+        console.log(`✅ MATCH FOUND: ${bodyKey} = ${req.body[bodyKey]} (fieldId: ${matchingField.fieldId})`);
+      } else {
+        console.log(`❌ NO MATCH: ${bodyKey} not found in custom fields`);
+      }
+    });
 
     if (availableCustomFields.length > 0) {
       try {
@@ -3383,18 +3403,28 @@ exports.updateDeal = async (req, res) => {
                 fieldId: customField.fieldId,
                 fieldName: customField.fieldName,
                 dealId: dealId,
+                entityId: dealId, // dealId should match entityId
                 processedValue: processedValue,
                 originalValue: value,
               });
 
-              // Find or create the field value
+              // Find or create the field value - ensure dealId matches entityId
               let fieldValue = await CustomFieldValue.findOne({
                 where: {
                   fieldId: customField.fieldId,
-                  entityId: dealId,
+                  entityId: parseInt(dealId), // Ensure dealId is integer to match entityId
                   entityType: "deal",
                 },
               });
+
+              console.log(`🔍 Looking for existing CustomFieldValue: fieldId=${customField.fieldId}, entityId=${dealId}, entityType=deal`);
+              console.log(`🔍 Found existing value:`, fieldValue ? {
+                id: fieldValue.id,
+                fieldId: fieldValue.fieldId,
+                entityId: fieldValue.entityId,
+                entityType: fieldValue.entityType,
+                currentValue: fieldValue.value
+              } : 'None');
 
               if (fieldValue) {
                 // Update existing value
@@ -3417,9 +3447,9 @@ exports.updateDeal = async (req, res) => {
                 }
               } else if (processedValue !== null && processedValue !== "") {
                 // Create new value only if it's not empty
-                await CustomFieldValue.create({
+                const newFieldValue = await CustomFieldValue.create({
                   fieldId: customField.fieldId,
-                  entityId: dealId,
+                  entityId: parseInt(dealId), // Ensure dealId is integer
                   entityType: "deal",
                   value:
                     typeof processedValue === "object"
@@ -3428,7 +3458,13 @@ exports.updateDeal = async (req, res) => {
                   masterUserID: req.adminId,
                 });
                 console.log(
-                  `✅ Created new custom field value for: ${customField.fieldName}`
+                  `✅ Created new custom field value for: ${customField.fieldName}`,
+                  {
+                    id: newFieldValue.id,
+                    fieldId: newFieldValue.fieldId,
+                    entityId: newFieldValue.entityId,
+                    value: newFieldValue.value
+                  }
                 );
               }
 
