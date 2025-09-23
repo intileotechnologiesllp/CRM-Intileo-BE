@@ -38,6 +38,18 @@ exports.createPersonReport = async (req, res) => {
       "personLabels",
     ];
 
+    const segmentedByOptions = [
+      "contactPerson",
+      "organization",
+      "email",
+      "phone",
+      "notes",
+      "postalAddress",
+      "jobTitle",
+      "personLabels",
+      "none"
+    ];
+
     const yaxisArray = ["no of people"];
 
     // Add this to your createActivityReport function or make it available globally
@@ -234,7 +246,7 @@ exports.createPersonReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedBy: xaxisArray,
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -1927,7 +1939,12 @@ exports.createOrganizationReport = async (req, res) => {
 
     // Define available options for xaxis and yaxis
     const xaxisArray = ["organization", "organizationLabels", "address"];
-
+    const segmentedByOptions = [
+      "organization",
+      "organizationLabels",
+      "address",
+      "none"
+    ];
     const yaxisArray = ["no of organizations"];
 
     // Add this to your createActivityReport function or make it available globally
@@ -2109,6 +2126,7 @@ exports.createOrganizationReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
+        segmentedByOptions: segmentedByOptions
       },
       filters: availableFilterColumns,
     });

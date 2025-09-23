@@ -49,6 +49,28 @@ exports.createLeadPerformReport = async (req, res) => {
       "creator",
       "creatorstatus",
     ];
+    
+     const segmentedByOptions = [
+      "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "ownerName",
+      "SBUClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "sourceOriginID",
+      "contactPerson",
+      "organization",
+      "proposalValueCurrency",
+      "creator",
+      "creatorstatus",
+      "none"
+    ];
 
     const yaxisArray = ["no of leads", "proposalValue", "value"];
 
@@ -428,7 +450,7 @@ exports.createLeadPerformReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedBy: xaxisArray,
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -2332,6 +2354,28 @@ exports.createLeadConversionReport = async (req, res) => {
       "creatorstatus",
     ];
 
+    const segmentedByOptions = [
+      "esplProposalNo",
+      "numberOfReportsPrepared",
+      "organizationCountry",
+      "projectLocation",
+      "ownerName",
+      "SBUClass",
+      "status",
+      "scopeOfServiceType",
+      "serviceType",
+      "sourceChannel",
+      "sourceChannelID",
+      "sourceOrigin",
+      "sourceOriginID",
+      "contactPerson",
+      "organization",
+      "proposalValueCurrency",
+      "creator",
+      "creatorstatus",
+      "none"
+    ];
+
     const yaxisArray = ["no of leads", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
@@ -2596,6 +2640,7 @@ exports.createLeadConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
+        segmentedByOptions: segmentedByOptions
       },
       filters: availableFilterColumns,
     });
