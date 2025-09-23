@@ -51,6 +51,7 @@ exports.createLeadPerformReport = async (req, res) => {
     ];
     
      const segmentedByOptions = [
+      "none",
       "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
@@ -69,7 +70,6 @@ exports.createLeadPerformReport = async (req, res) => {
       "proposalValueCurrency",
       "creator",
       "creatorstatus",
-      "none"
     ];
 
     const yaxisArray = ["no of leads", "proposalValue", "value"];
@@ -2355,6 +2355,7 @@ exports.createLeadConversionReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
+      "none",
       "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
@@ -2372,8 +2373,7 @@ exports.createLeadConversionReport = async (req, res) => {
       "organization",
       "proposalValueCurrency",
       "creator",
-      "creatorstatus",
-      "none"
+      "creatorstatus",  
     ];
 
     const yaxisArray = ["no of leads", "proposalValue", "value"];

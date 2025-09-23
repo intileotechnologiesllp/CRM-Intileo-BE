@@ -41,6 +41,7 @@ exports.createActivityReport = async (req, res) => {
     ];
 
     const segmentedByOptions = [
+      "none",
       "Owner",
       "status",
       "type",
@@ -49,7 +50,6 @@ exports.createActivityReport = async (req, res) => {
       "priority",
       "contactPerson",
       "organization",
-      "none"
     ];
 
     const yaxisArray = ["no of activities", "duration"];
