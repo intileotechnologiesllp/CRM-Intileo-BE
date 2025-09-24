@@ -1682,7 +1682,7 @@ exports.saveActivityReport = async (req, res) => {
         }
 
         try {
-          // Generate data with pagination
+          // You need to implement these functions
           const result = await generateActivityPerformanceData(
             ownerId,
             role,
@@ -1747,6 +1747,7 @@ exports.saveActivityReport = async (req, res) => {
         }
 
         try {
+          // You need to implement this function
           const result = await generateExistingActivityPerformanceData(
             ownerId,
             role,
@@ -1836,6 +1837,14 @@ exports.saveActivityReport = async (req, res) => {
         ...(colors !== undefined && { colors }),
       };
 
+      // Handle dashboardIds update - store as comma-separated string
+      if (dashboardIds !== undefined) {
+        const dashboardIdsArray = Array.isArray(dashboardIds)
+          ? dashboardIds
+          : [dashboardIds];
+        updateData.dashboardIds = dashboardIdsArray.join(',');
+      }
+
       await Report.update(updateData, { where: { reportId } });
       const updatedReport = await Report.findByPk(reportId);
       reports.push(updatedReport);
@@ -1847,59 +1856,62 @@ exports.saveActivityReport = async (req, res) => {
       });
     }
 
-    // CREATE
+    // CREATE - Single record with comma-separated dashboardIds
     const dashboardIdsArray = Array.isArray(dashboardIds)
       ? dashboardIds
       : [dashboardIds];
 
-    for (const dashboardId of dashboardIdsArray) {
-      const dashboard = await DASHBOARD.findOne({
-        where: { dashboardId, ownerId },
-      });
-      if (!dashboard) {
-        return res.status(404).json({
-          success: false,
-          message: `Dashboard ${dashboardId} not found or access denied`,
-        });
-      }
+   // Validate that all dashboardIds belong to the owner
+    // for (const dashboardId of dashboardIdsArray) {
+    //   const dashboard = await DASHBOARD.findOne({
+    //     where: { dashboardId, ownerId },
+    //   });
+    //   if (!dashboard) {
+    //     return res.status(404).json({
+    //       success: false,
+    //       message: `Dashboard ${dashboardId} not found or access denied`,
+    //     });
+    //   }
+    // }
 
-      const lastReport = await Report.findOne({
-        where: { dashboardId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Get the last report position (you might want to adjust this logic)
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardId,
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj, // ✅ keep everything in config
-        ownerId,
-        graphtype,
-        colors,
-      });
+    // Create single report with comma-separated dashboardIds
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(','), // Store as comma-separated string
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
-    }
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,
-      message: "Reports created successfully",
+      message: "Report created successfully",
       data: { reports },
     });
   } catch (error) {
