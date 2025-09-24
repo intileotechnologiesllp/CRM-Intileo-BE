@@ -2028,6 +2028,9 @@ exports.getGoalData = async (req, res) => {
       } else if (entity === "Organization") {
         model = require("../../models/leads/leadOrganizationModel");
         entityType = "Organization";
+      } else if (entity === "Activity") {
+        model = require("../../models/activity/activityModel");
+        entityType = "Activity";
       }
       const modelCols = getModelColumns(model);
       const customCols = await getCustomFields(entityType);
@@ -2057,6 +2060,9 @@ exports.getGoalData = async (req, res) => {
     const selectedOrganization = Array.isArray(selectedColumns.Organization)
       ? selectedColumns.Organization
       : [];
+    const selectedActivity = Array.isArray(selectedColumns.Activity)
+      ? selectedColumns.Activity
+      : [];
 
     // Process each goal to get detailed data
     const goalsWithData = await Promise.all(
@@ -2066,6 +2072,8 @@ exports.getGoalData = async (req, res) => {
         else if (goal.entity === "Person") entityColumns = selectedPerson;
         else if (goal.entity === "Organization")
           entityColumns = selectedOrganization;
+        else if (goal.entity === "Activity")
+          entityColumns = selectedActivity;
         if (!entityColumns || entityColumns.length === 0) {
           entityColumns = await getDefaultColumns(goal.entity);
         }
