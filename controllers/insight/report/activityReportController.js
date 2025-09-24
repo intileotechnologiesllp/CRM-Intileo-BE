@@ -1862,24 +1862,24 @@ exports.saveActivityReport = async (req, res) => {
       : [dashboardIds];
 
    // Validate that all dashboardIds belong to the owner
-    // for (const dashboardId of dashboardIdsArray) {
-    //   const dashboard = await DASHBOARD.findOne({
-    //     where: { dashboardId, ownerId },
-    //   });
-    //   if (!dashboard) {
-    //     return res.status(404).json({
-    //       success: false,
-    //       message: `Dashboard ${dashboardId} not found or access denied`,
-    //     });
-    //   }
-    // }
+    for (const dashboardId of dashboardIdsArray) {
+      const dashboard = await DASHBOARD.findOne({
+        where: { dashboardId, ownerId },
+      });
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: `Dashboard ${dashboardId} not found or access denied`,
+        });
+      }
+    }
 
     // Get the last report position (you might want to adjust this logic)
     const lastReport = await Report.findOne({
       where: { ownerId },
       order: [["position", "DESC"]],
     });
-    const nextPosition = lastReport ? lastReport.position : 0;
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
     const configObj = {
       xaxis,
