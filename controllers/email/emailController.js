@@ -6954,4 +6954,113 @@ exports.bulkMoveEmails = async (req, res) => {
 // Export the processEmailsLightweight function for testing
 exports.processEmailsLightweight = (emails, userID, provider, strategy = 'NORMAL', page = 1, folderType = 'inbox') => 
   processEmailsLightweight(emails, userID, provider, strategy, page, folderType);
+
+/**
+ * Gmail Inbox Count Checker API
+ * GET /emails/inbox-count
+ * 
+ * Query Parameters:
+ * - email: Gmail address
+ * - appPassword: Gmail App Password
+ * 
+ * Returns total inbox message count via IMAP
+ */
+exports.checkGmailInboxCount = async (req, res) => {
+  let connection;
+  
+  try {
+    const { email, appPassword } = req.query;
+    
+    if (!email || !appPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Gmail email and appPassword are required as query parameters"
+      });
+    }
+    
+    console.log(`[INBOX COUNT] Connecting to Gmail IMAP for: ${email}`);
+    
+    // Gmail IMAP configuration
+    const config = {
+      imap: {
+        user: email,
+        password: appPassword,
+        host: 'imap.gmail.com',
+        port: 993,
+        tls: true,
+        authTimeout: 30000,
+        tlsOptions: {
+          rejectUnauthorized: false,
+        },
+      },
+    };
+    
+    // Connect to IMAP with timeout
+    const connectPromise = Imap.connect(config);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Connection timeout after 60 seconds')), 60000)
+    );
+    
+    connection = await Promise.race([connectPromise, timeoutPromise]);
+    console.log('[INBOX COUNT] ✅ Connected to Gmail IMAP');
+    
+    // Open INBOX and get status
+    const box = await connection.openBox('INBOX');
+    console.log('[INBOX COUNT] ✅ Opened INBOX folder');
+    
+    // Get total message count from mailbox status
+    const totalMessages = box.messages?.total || 0;
+    const unseenMessages = box.messages?.unseen || 0;
+    
+    console.log(`[INBOX COUNT] 📊 Total messages: ${totalMessages}`);
+    console.log(`[INBOX COUNT] 📧 Unseen messages: ${unseenMessages}`);
+    
+    // Also get some additional useful info
+    const recentMessages = box.messages?.recent || 0;
+    const uidvalidity = box.uidvalidity || 'N/A';
+    const uidnext = box.uidnext || 'N/A';
+    
+    // Close IMAP connection
+    connection.end();
+    console.log('[INBOX COUNT] ✅ IMAP connection closed');
+    
+    // Return response
+    res.json({
+      success: true,
+      message: `Successfully connected to Gmail INBOX for ${email}`,
+      data: {
+        email: email,
+        totalMessages: totalMessages,
+        unseenMessages: unseenMessages,
+        recentMessages: recentMessages,
+        uidvalidity: uidvalidity,
+        uidnext: uidnext,
+        timestamp: new Date().toISOString(),
+        instructions: {
+          webCheck: "Go to Gmail → Search 'in:inbox' → Check bottom for '1-50 of XXXX'",
+          comparison: `IMAP count: ${totalMessages} messages`
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('[INBOX COUNT] ❌ Error:', error);
+    
+    // Ensure connection is closed on error
+    if (connection) {
+      try {
+        connection.end();
+      } catch (closeError) {
+        console.error('[INBOX COUNT] Error closing connection:', closeError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check Gmail inbox count',
+      error: error.message,
+      details: error.stack
+    });
+  }
+};
 //hello

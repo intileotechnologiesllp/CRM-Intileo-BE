@@ -4273,7 +4273,7 @@ exports.getDealDetail = async (req, res) => {
       dealId: deal.dealId,
       title: deal.title,
       value: deal.value,
-      valueCurrency: deal.currency,
+      valueCurrency: deal.valueCurrency || deal.currency, // Use newer field first, fallback to legacy
       pipeline: deal.pipeline,
       ownerId: deal.ownerId,
       pipelineStage: deal.pipelineStage,
@@ -4282,7 +4282,7 @@ exports.getDealDetail = async (req, res) => {
       expectedCloseDate: deal.expectedCloseDate,
       serviceType: deal.serviceType,
       proposalValue: deal.proposalValue,
-      proposalValueCurrency: deal.proposalCurrency,
+      proposalValueCurrency: deal.proposalValueCurrency || deal.proposalCurrency, // Use newer field first, fallback to legacy
       esplProposalNo: deal.esplProposalNo,
       projectLocation: deal.projectLocation,
       organizationCountry: deal.organizationCountry,
@@ -4303,16 +4303,20 @@ exports.getDealDetail = async (req, res) => {
         let valueCurrencyDetails = null;
         let proposalValueCurrencyDetails = null;
     
-        if (dealObj.valueCurrency) {
+        // Check for value currency (prioritize newer field, fallback to older field)
+        const valueCurrencyCode = deal.valueCurrency || deal.currency;
+        if (valueCurrencyCode) {
           valueCurrencyDetails = await Currency.findOne({
-            where: { currencyId: dealObj.valueCurrency },
+            where: { currency_desc: valueCurrencyCode },
             attributes: ['currencyId', 'currency_desc']
           });
         }
     
-        if (dealObj.proposalValueCurrency) {
+        // Check for proposal currency (prioritize newer field, fallback to older field)
+        const proposalCurrencyCode = deal.proposalValueCurrency || deal.proposalCurrency;
+        if (proposalCurrencyCode) {
           proposalValueCurrencyDetails = await Currency.findOne({
-            where: { currencyId: dealObj.proposalValueCurrency },
+            where: { currency_desc: proposalCurrencyCode },
             attributes: ['currencyId', 'currency_desc']
           });
         }
