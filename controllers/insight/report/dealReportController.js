@@ -1577,7 +1577,7 @@ exports.saveDealPerformReport = async (req, res) => {
           message: `Dashboard ${dashboardId} not found or access denied`,
         });
       }
-
+    }
       // Find next position
       const lastReport = await Report.findOne({
         where: { ownerId },
@@ -1611,7 +1611,7 @@ exports.saveDealPerformReport = async (req, res) => {
       });
 
       reports.push(newReport);
-    }
+    
 
     return res.status(201).json({
       success: true,
@@ -1818,15 +1818,29 @@ exports.getDealPerformReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -1869,15 +1883,29 @@ exports.getDealPerformReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -3148,7 +3176,7 @@ exports.saveDealConversionReport = async (req, res) => {
           message: `Dashboard ${dashboardId} not found or access denied`,
         });
       }
-
+    }
       // Find next position
       const lastReport = await Report.findOne({
         where: { ownerId },
@@ -3182,7 +3210,6 @@ exports.saveDealConversionReport = async (req, res) => {
       });
 
       reports.push(newReport);
-    }
 
     return res.status(201).json({
       success: true,
@@ -3388,15 +3415,29 @@ exports.getDealConversionReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -3440,15 +3481,29 @@ exports.getDealConversionReportSummary = async (req, res) => {
         );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -4788,7 +4843,7 @@ exports.saveDealProgressReport = async (req, res) => {
           message: `Dashboard ${dashboardId} not found or access denied`,
         });
       }
-
+    }
       // Find next position
       const lastReport = await Report.findOne({
         where: { ownerId },
@@ -4822,7 +4877,6 @@ exports.saveDealProgressReport = async (req, res) => {
       });
 
       reports.push(newReport);
-    }
 
     return res.status(201).json({
       success: true,
@@ -5028,15 +5082,29 @@ exports.getDealProgressReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
-      if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+     if (reportData.length > 0) {
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -5080,15 +5148,29 @@ exports.getDealProgressReportSummary = async (req, res) => {
         );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
-      if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+     if (reportData.length > 0) {
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -6479,6 +6561,7 @@ exports.saveDealDurationReport = async (req, res) => {
           message: `Dashboard ${dashboardId} not found or access denied`,
         });
       }
+    }
 
       // Find next position
       const lastReport = await Report.findOne({
@@ -6513,7 +6596,6 @@ exports.saveDealDurationReport = async (req, res) => {
       });
 
       reports.push(newReport);
-    }
 
     return res.status(201).json({
       success: true,
@@ -6722,15 +6804,29 @@ exports.getDealDurationReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -6774,15 +6870,29 @@ exports.getDealDurationReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-      // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
