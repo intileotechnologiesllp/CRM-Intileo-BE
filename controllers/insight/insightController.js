@@ -240,14 +240,11 @@ exports.getDashboards = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
     let dashboards;
+
+    // First, get dashboards without including Reports
     if (role === "admin") {
       dashboards = await DASHBOARD.findAll({
         include: [
-          {
-            model: Report,
-            as: "Reports",
-            required: false,
-          },
           {
             model: Goal,
             as: "Goals",
@@ -261,11 +258,6 @@ exports.getDashboards = async (req, res) => {
         where: { ownerId },
         include: [
           {
-            model: Report,
-            as: "Reports",
-            required: false,
-          },
-          {
             model: Goal,
             as: "Goals",
             required: false,
@@ -275,11 +267,48 @@ exports.getDashboards = async (req, res) => {
       });
     }
 
-    // Group dashboards by folder for backward compatibility
-    const dashboardsByFolder = {};
-    console.log("[DEBUG] Grouping dashboards, total count:", dashboards.length);
+    // Get all reports separately
+    const reportWhereCondition = role === "admin" ? {} : { ownerId };
+    const allReports = await Report.findAll({
+      where: reportWhereCondition,
+      attributes: [
+        "reportId", "dashboardIds", "ownerId", "name", "description", 
+        "entity", "type", "config", "graphtype", "colors", "createdAt"
+      ],
+    });
 
-    dashboards.forEach((dashboard) => {
+    // Manually associate reports with dashboards
+    const dashboardsWithReports = dashboards.map(dashboard => {
+      const dashboardData = dashboard.toJSON();
+      
+      // Find reports that belong to this dashboard
+      const dashboardReports = allReports.filter(report => {
+        if (!report.dashboardIds) return false;
+        const idsArray = report.dashboardIds.split(',').map(id => id.trim());
+        return idsArray.includes(dashboard.dashboardId.toString());
+      });
+
+      // Parse JSON fields for reports
+      const parsedReports = dashboardReports.map(report => {
+        const reportData = report.toJSON();
+        return {
+          ...reportData,
+          config: typeof reportData.config === 'string' ? JSON.parse(reportData.config) : reportData.config,
+          colors: typeof reportData.colors === 'string' ? JSON.parse(reportData.colors) : reportData.colors,
+        };
+      });
+
+      return {
+        ...dashboardData,
+        Reports: parsedReports
+      };
+    });
+
+    // Group dashboards by folder (your existing logic)
+    const dashboardsByFolder = {};
+    console.log("[DEBUG] Grouping dashboards, total count:", dashboardsWithReports.length);
+
+    dashboardsWithReports.forEach((dashboard) => {
       let folder;
 
       console.log(
@@ -287,14 +316,11 @@ exports.getDashboards = async (req, res) => {
       );
 
       if (dashboard.type === "folder") {
-        // Folders should appear as their own categories, not under "My dashboards"
-        // Skip folders - they don't get grouped anywhere, they ARE the groups
         console.log(
           `[DEBUG] Skipping folder "${dashboard.name}" - folders are categories, not items`
         );
-        return; // Skip processing folders
+        return;
       } else {
-        // Dashboards use their folder field value
         folder =
           dashboard.folder === null ||
           dashboard.folder === undefined ||
@@ -333,18 +359,13 @@ exports.getDashboard = async (req, res) => {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
 
+    // First, get the dashboard
     const dashboard = await DASHBOARD.findOne({
       where: {
         dashboardId,
         ownerId,
       },
       include: [
-        {
-          model: Report,
-          as: "Reports",
-          required: false,
-          order: [["position", "ASC"]],
-        },
         {
           model: Goal,
           as: "Goals",
@@ -362,9 +383,50 @@ exports.getDashboard = async (req, res) => {
       });
     }
 
+    // Then, manually get reports that belong to this dashboard
+    const reports = await Report.findAll({
+      where: {
+        // Filter reports that have this dashboardId in their dashboardIds string
+        dashboardIds: {
+          [Op.or]: [
+            { [Op.like]: `%,${dashboardId},%` }, // DashboardId in the middle
+            { [Op.like]: `%,${dashboardId}` },   // DashboardId at the end
+            { [Op.like]: `${dashboardId},%` },   // DashboardId at the beginning
+            { [Op.eq]: dashboardId }             // Exact match (only one dashboardId)
+          ]
+        }
+      },
+      order: [["position", "ASC"]],
+    });
+
+    // More precise filtering to avoid partial matches
+    const preciseReports = reports.filter(report => {
+      if (!report.dashboardIds) return false;
+      
+      const idsArray = report.dashboardIds.split(',').map(id => id.trim());
+      return idsArray.includes(dashboardId.toString());
+    });
+
+    // Parse JSON fields for reports
+    const parsedReports = preciseReports.map(report => {
+      const reportData = report.toJSON();
+      return {
+        ...reportData,
+        config: typeof reportData.config === 'string' ? JSON.parse(reportData.config) : reportData.config,
+        colors: typeof reportData.colors === 'string' ? JSON.parse(reportData.colors) : reportData.colors,
+      };
+    });
+
+    // Combine dashboard data with manually fetched reports
+    const dashboardData = dashboard.toJSON();
+    const responseData = {
+      ...dashboardData,
+      Reports: parsedReports
+    };
+
     res.status(200).json({
       success: true,
-      data: dashboard,
+      data: responseData,
     });
   } catch (error) {
     console.error("Error fetching dashboard:", error);
