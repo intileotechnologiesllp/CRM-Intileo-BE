@@ -402,7 +402,7 @@ exports.getActivities = async (req, res) => {
           model: Deal,
           as: "ActivityDeal", // Use the alias here
           attributes: hasDealColumns ? dealColumns : ["dealId", "title"], // Include checked Deal columns or default
-          required: entityType === "Deal", // Apply filter only for Deal
+          required: entityType === "Deal", // Apply filter only for Deal entity type
           where:
             entityType === "Deal" &&
             Object.keys(filterWhere).length > 0 &&
@@ -446,15 +446,19 @@ exports.getActivities = async (req, res) => {
         title = ActivityLead.title;
       } else if (rest.dealId && ActivityDeal) {
         title = ActivityDeal.title;
-        
-        // If activity is connected to deal and we have checked deal columns, add them to result
-        if (hasDealColumns && dealColumns.length > 0) {
-          dealColumns.forEach(column => {
-            if (ActivityDeal[column] !== undefined) {
-              result[`deal_${column}`] = ActivityDeal[column];
-            }
-          });
-        }
+      }
+      
+      // Add deal columns to ALL activities if columns are checked (show null if no deal linked)
+      if (hasDealColumns && dealColumns.length > 0) {
+        dealColumns.forEach(column => {
+          if (rest.dealId && ActivityDeal && ActivityDeal[column] !== undefined) {
+            // Activity has deal and column has value
+            result[`deal_${column}`] = ActivityDeal[column];
+          } else {
+            // Activity has no deal or column has no value - show null
+            result[`deal_${column}`] = null;
+          }
+        });
       }
       
       return {
