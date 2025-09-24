@@ -299,9 +299,21 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityOrganization.address",
           type: "text",
         },
-        { label: "Created At", value: "ActivityOrganization.createdAt", type: "date" },
-        { label: "Updated At", value: "ActivityOrganization.updatedAt", type: "date" },
-        { label: "Add on", value: "ActivityOrganization.daterange", type: "daterange" },
+        {
+          label: "Created At",
+          value: "ActivityOrganization.createdAt",
+          type: "date",
+        },
+        {
+          label: "Updated At",
+          value: "ActivityOrganization.updatedAt",
+          type: "date",
+        },
+        {
+          label: "Add on",
+          value: "ActivityOrganization.daterange",
+          type: "daterange",
+        },
       ],
       Person: [
         {
@@ -327,9 +339,21 @@ exports.createActivityReport = async (req, res) => {
           value: "ActivityPerson.organization",
           type: "text",
         },
-        { label: "Created At", value: "ActivityPerson.createdAt", type: "date" },
-        { label: "Updated At", value: "ActivityPerson.updatedAt", type: "date" },
-        { label: "Add on", value: "ActivityPerson.daterange", type: "daterange" },
+        {
+          label: "Created At",
+          value: "ActivityPerson.createdAt",
+          type: "date",
+        },
+        {
+          label: "Updated At",
+          value: "ActivityPerson.updatedAt",
+          type: "date",
+        },
+        {
+          label: "Add on",
+          value: "ActivityPerson.daterange",
+          type: "daterange",
+        },
       ],
     };
 
@@ -1143,7 +1167,7 @@ async function generateActivityPerformanceData(
 
 //   // Handle date range filtering for "Add on" (daterange type)
 //   const isDateRangeFilter = fieldName === "daterange";
-  
+
 //   if (isDateRangeFilter && Array.isArray(value)) {
 //     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
 //     const [fromDate, toDate] = value;
@@ -1255,7 +1279,7 @@ async function generateActivityPerformanceData(
 //     // FIX: Return a plain object instead of Sequelize.where()
 //     // This creates a condition object that can be properly combined
 //     const op = getSequelizeOperator(operator);
-    
+
 //     // Handle special operators for related tables
 //     switch (operator) {
 //       case "contains":
@@ -1313,14 +1337,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
-  
+
   if (isDateRangeFilter && Array.isArray(value)) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
-    
+
     // Determine which date field to filter based on the table alias
     let dateField;
-    switch(tableAlias) {
+    switch (tableAlias) {
       case "ActivityDeal":
       case "ActivityLead":
       case "ActivityOrganization":
@@ -1330,24 +1354,34 @@ function getConditionObject(column, operator, value, includeModels = []) {
       default:
         dateField = "startDateTime";
     }
-    
+
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "Activity") {
       // Add the required include model
       addIncludeModel(tableAlias, includeModels);
-      
+
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     } else {
@@ -1355,14 +1389,24 @@ function getConditionObject(column, operator, value, includeModels = []) {
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [dateField]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [dateField]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     }
@@ -1378,14 +1422,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       }
     } else if (operator === ">") {
@@ -1396,20 +1440,20 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // For not equal, exclude the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
-      
+
       // For related tables
       if (hasRelation) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       }
     } else {
@@ -1426,17 +1470,23 @@ function getConditionObject(column, operator, value, includeModels = []) {
   // Handle related table joins
   if (hasRelation) {
     addIncludeModel(tableAlias, includeModels);
-    
+
     const op = getSequelizeOperator(operator);
-    
+
     // Use proper Sequelize syntax for related table conditions
     switch (operator) {
       case "contains":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
+        };
       case "startsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` },
+        };
       case "endsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` },
+        };
       case "isEmpty":
         return {
           [Op.or]: [
@@ -1842,7 +1892,7 @@ exports.saveActivityReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -1861,7 +1911,7 @@ exports.saveActivityReport = async (req, res) => {
       ? dashboardIds
       : [dashboardIds];
 
-   // Validate that all dashboardIds belong to the owner
+    // Validate that all dashboardIds belong to the owner
     for (const dashboardId of dashboardIdsArray) {
       const dashboard = await DASHBOARD.findOne({
         where: { dashboardId, ownerId },
@@ -1894,7 +1944,7 @@ exports.saveActivityReport = async (req, res) => {
 
     // Create single report with comma-separated dashboardIds
     const newReport = await Report.create({
-      dashboardIds: dashboardIdsArray.join(','), // Store as comma-separated string
+      dashboardIds: dashboardIdsArray.join(","), // Store as comma-separated string
       folderId: folderId || null,
       entity,
       type,
@@ -2268,13 +2318,28 @@ exports.getActivityReportSummary = async (req, res) => {
       reportData = reportResult.data;
       // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
@@ -2326,13 +2391,28 @@ exports.getActivityReportSummary = async (req, res) => {
 
       // Calculate summary statistics
       if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
+        let totalValue, avgValue, maxValue, minValue;
+
+        if (segmentedBy === "none") {
+          // Non-segmented data structure
+          const values = reportData.map((item) => item.value || 0);
+          totalValue = values.reduce((sum, value) => sum + value, 0);
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...values);
+          minValue = Math.min(...values);
+        } else {
+          // Segmented data structure - use totalSegmentValue for calculations
+          const totalSegmentValues = reportData.map(
+            (item) => item.totalSegmentValue || 0
+          );
+          totalValue = totalSegmentValues.reduce(
+            (sum, value) => sum + value,
+            0
+          );
+          avgValue = totalValue / reportData.length;
+          maxValue = Math.max(...totalSegmentValues);
+          minValue = Math.min(...totalSegmentValues);
+        }
 
         summary = {
           totalRecords: totalCount,
