@@ -9,13 +9,9 @@ const Report = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
-    dashboardId: {
-      type: DataTypes.INTEGER,
+    dashboardIds: {
+      type: DataTypes.STRING,
       allowNull: true,
-      references: { 
-        model: "Dashboards", // Changed to match actual table name
-        key: "dashboardId" 
-      },
     },
     name: {
       type: DataTypes.STRING,

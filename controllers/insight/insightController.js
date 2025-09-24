@@ -6527,8 +6527,25 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Build where condition
-    const whereCondition = { dashboardId };
+    // Validate dashboardId
+    if (!dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID is required",
+      });
+    }
+
+    // Build where condition to check if dashboardId exists in dashboardIds string
+    const whereCondition = {
+      dashboardIds: {
+        [Op.or]: [
+          { [Op.like]: `%${dashboardId}%` }, // Simple LIKE match
+          { [Op.eq]: dashboardId } // Exact match if it's the only ID
+        ]
+      }
+    };
+
+    // Add owner filter for non-admin users
     if (role !== "admin") {
       whereCondition.ownerId = ownerId;
     }
@@ -6538,6 +6555,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       where: whereCondition,
       attributes: [
         "reportId",
+        "dashboardIds", // Include this to see the actual values
         "ownerId",
         "name",
         "description",
@@ -6551,13 +6569,21 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       order: [["createdAt", "ASC"]],
     });
 
+    // Filter more precisely to avoid partial matches (e.g., "20" matching "200")
+    const preciseFilteredReports = reports.filter(report => {
+      if (!report.dashboardIds) return false;
+      
+      const idsArray = report.dashboardIds.split(',').map(id => id.trim());
+      return idsArray.includes(dashboardId.toString());
+    });
+
     // Parse JSON fields (config & colors)
-    const formattedReports = reports.map((r) => {
+    const formattedReports = preciseFilteredReports.map((r) => {
       const data = r.toJSON();
       return {
         ...data,
-        config: data.config ? JSON.parse(data.config) : {},
-        colors: data.colors ? JSON.parse(data.colors) : {},
+        config: typeof data.config === 'string' ? JSON.parse(data.config) : data.config,
+        colors: typeof data.colors === 'string' ? JSON.parse(data.colors) : data.colors,
       };
     });
 
