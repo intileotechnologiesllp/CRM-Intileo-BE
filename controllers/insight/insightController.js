@@ -6500,84 +6500,65 @@ exports.GetAllReports = async (req, res) => {
 exports.GetReportsDataReportWise = async (req, res) => {
   try {
     const { reportId } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
 
-    let reportConfig = {};
-    let xaxisArray = [];
-    let yaxisArray = [];
-    let availableFilterColumns = [];
-    let entity, type, existingReportId, dashboardId, folderId, name;
-
-    if (reportId) {
-      const existingReports = await Report.findOne({
-        where: { reportId },
+    if (!reportId) {
+      return res.status(400).json({
+        success: false,
+        message: "Report ID is required",
       });
-
-      if (!existingReports) {
-        return res.status(404).json({
-          success: false,
-          message: "Report not found",
-        });
-      }
-
-      const {
-        entity: existingentity,
-        type: existingtype,
-        config: configString,
-        graphtype: existinggraphtype,
-        colors: existingcolors,
-        reportId: reportIdValue,
-        dashboardId: existingDashboardId,
-        folderId: existingFolderId,
-        name: existingname
-      } = existingReports.dataValues;
-
-      // Set the variables for response
-      entity = existingentity;
-      type = existingtype;
-      existingReportId = reportIdValue;
-      dashboardId = existingDashboardId;
-      folderId = existingFolderId;
-      name = existingname
-
-      const colors = JSON.parse(existingcolors);
-      // Parse the config JSON string
-      const config = JSON.parse(configString);
-      const {
-        xaxis: existingxaxis,
-        yaxis: existingyaxis,
-        filters: existingfilters,
-      } = config;
-
-      // Set the response values
-      reportConfig = config;
-      xaxisArray = existingxaxis || [];
-      yaxisArray = existingyaxis || [];
-      availableFilterColumns = existingfilters || [];
     }
+
+    const existingReport = await Report.findOne({
+      where: { reportId },
+    });
+
+    if (!existingReport) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found",
+      });
+    }
+
+    const reportData = existingReport.toJSON();
+    
+    // Parse dashboardIds from string to array
+    const dashboardIdsArray = reportData.dashboardIds 
+      ? reportData.dashboardIds.split(',').map(id => {
+          const trimmedId = id.trim();
+          return isNaN(trimmedId) ? trimmedId : parseInt(trimmedId);
+        })
+      : [];
+
+    // Parse config and colors
+    const config = typeof reportData.config === 'string' 
+      ? JSON.parse(reportData.config) 
+      : reportData.config || {};
+      
+    const colors = typeof reportData.colors === 'string'
+      ? JSON.parse(reportData.colors)
+      : reportData.colors || {};
 
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
       saved: true,
-      entity: entity,
-      type: type,
-      reportId: existingReportId,
-      dashboardId: dashboardId,
-      name: name,
-      folderId: folderId,
+      entity: reportData.entity,
+      type: reportData.type,
+      reportId: reportData.reportId,
+      dashboardIds: dashboardIdsArray, // Now returns as array
+      name: reportData.name,
+      folderId: reportData.folderId,
       availableOptions: {
-        xaxis: xaxisArray,
-        yaxis: yaxisArray,
+        xaxis: config.xaxis || [],
+        yaxis: config.yaxis || [],
       },
-      filters: availableFilterColumns
+      filters: config.filters || []
     });
   } catch (error) {
-    console.error("Error creating reports:", error);
+    console.error("Error fetching report data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to create reports",
+      message: "Failed to fetch report data",
       error: error.message,
     });
   }
