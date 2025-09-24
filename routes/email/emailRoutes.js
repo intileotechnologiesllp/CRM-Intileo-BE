@@ -48,4 +48,7 @@ router.post("/bulk-move", verifyToken, validatePrivilege(4, "edit"), emailContro
 
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 
+// Gmail IMAP test routes (no auth for testing)
+router.get("/inbox-count", emailController.checkGmailInboxCount);
+
 module.exports = router;
