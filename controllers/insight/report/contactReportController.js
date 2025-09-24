@@ -1366,7 +1366,7 @@ exports.savePersonReport = async (req, res) => {
       graphtype,
       colors,
     } = req.body;
-
+   
     const ownerId = req.adminId;
     const role = req.role;
 
@@ -1542,6 +1542,14 @@ exports.savePersonReport = async (req, res) => {
         ...(colors !== undefined && { colors }),
       };
 
+      // Handle dashboardIds update - store as comma-separated string
+      if (dashboardIds !== undefined) {
+        const dashboardIdsArray = Array.isArray(dashboardIds)
+          ? dashboardIds
+          : [dashboardIds];
+        updateData.dashboardIds = dashboardIdsArray.join(',');
+      }
+
       await Report.update(updateData, { where: { reportId } });
       const updatedReport = await Report.findByPk(reportId);
       reports.push(updatedReport);
@@ -1572,7 +1580,7 @@ exports.savePersonReport = async (req, res) => {
 
       // Find next position
       const lastReport = await Report.findOne({
-        where: { dashboardId },
+        where: { ownerId },
         order: [["position", "DESC"]],
       });
       const nextPosition = lastReport ? lastReport.position || 0 : 0;
@@ -1589,7 +1597,7 @@ exports.savePersonReport = async (req, res) => {
       const reportName = description || `${entity} ${type}`;
 
       const newReport = await Report.create({
-        dashboardId,
+        dashboardIds: dashboardIdsArray.join(','),
         folderId: folderId || null,
         entity,
         type,
@@ -3189,6 +3197,14 @@ exports.saveOrganizationReport = async (req, res) => {
         ...(colors !== undefined && { colors }),
       };
 
+      // Handle dashboardIds update - store as comma-separated string
+      if (dashboardIds !== undefined) {
+        const dashboardIdsArray = Array.isArray(dashboardIds)
+          ? dashboardIds
+          : [dashboardIds];
+        updateData.dashboardIds = dashboardIdsArray.join(',');
+      }
+
       await Report.update(updateData, { where: { reportId } });
       const updatedReport = await Report.findByPk(reportId);
       reports.push(updatedReport);
@@ -3219,7 +3235,7 @@ exports.saveOrganizationReport = async (req, res) => {
 
       // Find next position
       const lastReport = await Report.findOne({
-        where: { dashboardId },
+        where: { ownerId },
         order: [["position", "DESC"]],
       });
       const nextPosition = lastReport ? lastReport.position || 0 : 0;
@@ -3236,7 +3252,7 @@ exports.saveOrganizationReport = async (req, res) => {
       const reportName = description || `${entity} ${type}`;
 
       const newReport = await Report.create({
-        dashboardId,
+        dashboardIds: dashboardIdsArray.join(','), 
         folderId: folderId || null,
         entity,
         type,
