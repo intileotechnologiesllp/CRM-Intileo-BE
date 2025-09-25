@@ -29,6 +29,11 @@ router.get(
   verifyToken,
   insightController.getDashboard
 );
+router.get(
+  "/getsingledashboard/:dashboardId",
+  verifyToken,
+  insightController.getSingleDashboard
+);
 router.put(
   "/update-dashboards/:dashboardId",
   verifyToken,
@@ -113,6 +118,7 @@ router.post(
 );
 
 
+router.post("/deletesinglereport/:reportId", verifyToken, insightController.deleteSingleReport);
 router.post("/bulkdelete-report", verifyToken, insightController.bulkDeleteReports);
 router.get("/get-allreports", verifyToken, insightController.GetAllReports);
 router.post("/get-reportsdata-reportwise", verifyToken, insightController.GetReportsDataReportWise);
