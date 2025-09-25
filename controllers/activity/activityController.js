@@ -2449,13 +2449,71 @@ exports.bulkEditActivities = async (req, res) => {
           }
         }
 
+        // Fetch the updated activity with related data to return in response
+        const updatedActivityWithDetails = await Activity.findByPk(activity.activityId, {
+          include: [
+            {
+              model: Deal,
+              as: "ActivityDeal",
+              required: false,
+              attributes: ["dealId", "title", "value", "currency", "status", "pipelineStage"]
+            },
+            {
+              model: Lead,
+              as: "ActivityLead",
+              required: false,
+              attributes: ["leadId", "title"]
+            },
+            {
+              model: Person,
+              as: "ActivityPerson",
+              required: false,
+              attributes: ["personId", "contactPerson", "email"]
+            },
+            {
+              model: Organizations,
+              as: "ActivityOrganization",
+              required: false,
+              attributes: ["leadOrganizationId", "organization"]
+            }
+          ]
+        });
+
         updateResults.successful.push({
           activityId: activity.activityId,
-          type: activity.type,
-          subject: activity.subject,
-          startDateTime: activity.startDateTime,
-          endDateTime: activity.endDateTime,
-          assignedTo: activity.assignedTo,
+          type: updatedActivityWithDetails.type,
+          subject: updatedActivityWithDetails.subject,
+          startDateTime: updatedActivityWithDetails.startDateTime,
+          endDateTime: updatedActivityWithDetails.endDateTime,
+          assignedTo: updatedActivityWithDetails.assignedTo,
+          isDone: updatedActivityWithDetails.isDone,
+          priority: updatedActivityWithDetails.priority,
+          status: updatedActivityWithDetails.status,
+          description: updatedActivityWithDetails.description,
+          // Include related entity data
+          deal: updatedActivityWithDetails.ActivityDeal ? {
+            dealId: updatedActivityWithDetails.ActivityDeal.dealId,
+            title: updatedActivityWithDetails.ActivityDeal.title,
+            value: updatedActivityWithDetails.ActivityDeal.value,
+            currency: updatedActivityWithDetails.ActivityDeal.currency,
+            status: updatedActivityWithDetails.ActivityDeal.status
+          } : null,
+          lead: updatedActivityWithDetails.ActivityLead ? {
+            leadId: updatedActivityWithDetails.ActivityLead.leadId,
+            title: updatedActivityWithDetails.ActivityLead.title
+          } : null,
+          person: updatedActivityWithDetails.ActivityPerson ? {
+            personId: updatedActivityWithDetails.ActivityPerson.personId,
+            contactPerson: updatedActivityWithDetails.ActivityPerson.contactPerson,
+            email: updatedActivityWithDetails.ActivityPerson.email
+          } : null,
+          organization: updatedActivityWithDetails.ActivityOrganization ? {
+            leadOrganizationId: updatedActivityWithDetails.ActivityOrganization.leadOrganizationId,
+            organization: updatedActivityWithDetails.ActivityOrganization.organization
+          } : null,
+          // Include all updated fields for reference
+          updatedFields: Object.keys(finalUpdateData),
+          dealUpdated: !!activity.dealId
         });
 
         console.log(`Updated activity ${activity.activityId}`);
