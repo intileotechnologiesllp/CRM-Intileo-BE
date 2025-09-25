@@ -354,6 +354,40 @@ exports.getDashboards = async (req, res) => {
   }
 };
 
+exports.getSingleDashboard = async (req, res) => {
+  try {
+    const { dashboardId } = req.params;
+    const ownerId = req.adminId;
+
+    // First, get the dashboard
+    const dashboard = await DASHBOARD.findOne({
+      where: {
+        dashboardId,
+        ownerId,
+      },
+    });
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        message: "Dashboard not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: dashboard,
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard",
+      error: error.message,
+    });
+  }
+};
+
 exports.getDashboard = async (req, res) => {
   try {
     const { dashboardId } = req.params;
@@ -6648,6 +6682,41 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to get reports for dashboard",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteSingleReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const ownerId = req.adminId;
+
+    const report = await Report.findOne({
+      where: {
+        reportId,
+        ownerId,
+      },
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    await report.destroy();
+
+    res.status(200).json({
+      success: true,
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
       error: error.message,
     });
   }
