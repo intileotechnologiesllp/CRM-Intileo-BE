@@ -1769,6 +1769,52 @@ exports.updateActivity = async (req, res) => {
       );
     }
 
+    // Update Deal if activity is connected to deal and deal fields are provided
+    if (activity.dealId || updateFields.dealId) {
+      const targetDealId = updateFields.dealId || activity.dealId;
+      
+      // Extract deal-related fields from updateFields (fields that start with 'deal_')
+      const dealFields = {};
+      Object.keys(updateFields).forEach(key => {
+        if (key.startsWith('deal_')) {
+          // Remove 'deal_' prefix to get actual deal field name
+          const dealFieldName = key.replace('deal_', '');
+          dealFields[dealFieldName] = updateFields[key];
+          // Remove from updateFields so it doesn't get saved to activity
+          delete updateFields[key];
+        }
+      });
+
+      // Also check for direct deal field names (without deal_ prefix)
+      const dealModelFields = Object.keys(Deal.rawAttributes);
+      dealModelFields.forEach(field => {
+        if (updateFields.hasOwnProperty(field) && field !== 'dealId') {
+          dealFields[field] = updateFields[field];
+          // Keep in updateFields as it might also be an activity field
+        }
+      });
+
+      // Update the deal if we have fields to update
+      if (Object.keys(dealFields).length > 0) {
+        console.log(`Updating deal ${targetDealId} with fields:`, dealFields);
+        
+        try {
+          const dealUpdateResult = await Deal.update(dealFields, {
+            where: { dealId: targetDealId }
+          });
+          
+          if (dealUpdateResult[0] > 0) {
+            console.log(`Successfully updated deal ${targetDealId}`);
+          } else {
+            console.log(`Deal ${targetDealId} not found or no changes made`);
+          }
+        } catch (dealUpdateError) {
+          console.error(`Error updating deal ${targetDealId}:`, dealUpdateError.message);
+          // Don't fail the entire request, just log the error
+        }
+      }
+    }
+
     // If guests is present and is an array, stringify it
     if (updateFields.guests && Array.isArray(updateFields.guests)) {
       updateFields.guests = JSON.stringify(updateFields.guests);
@@ -1795,9 +1841,23 @@ exports.updateActivity = async (req, res) => {
       }
     }
 
-    res
-      .status(200)
-      .json({ message: "Activity updated successfully", activity });
+    // Fetch updated activity with related deal information if connected
+    const updatedActivity = await Activity.findByPk(activityId, {
+      include: [
+        {
+          model: Deal,
+          as: "ActivityDeal",
+          required: false,
+          attributes: ["dealId", "title", "value", "currency", "status", "pipelineStage"]
+        }
+      ]
+    });
+
+    res.status(200).json({ 
+      message: "Activity updated successfully", 
+      activity: updatedActivity,
+      dealUpdated: !!(activity.dealId || req.body.dealId)
+    });
   } catch (error) {
     console.error("Error updating activity:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -2324,6 +2384,54 @@ exports.bulkEditActivities = async (req, res) => {
 
         // Update the activity
         await activity.update(finalUpdateData);
+
+        // Update related deal if activity is connected to a deal
+        if (activity.dealId) {
+          console.log(`Processing deal updates for activity ${activity.activityId} connected to deal ${activity.dealId}`);
+          
+          const dealUpdateData = {};
+          
+          // Check for deal_ prefixed fields
+          Object.keys(updateData).forEach((key) => {
+            if (key.startsWith("deal_")) {
+              const dealField = key.substring(5); // Remove "deal_" prefix
+              dealUpdateData[dealField] = updateData[key];
+              console.log(`Found deal field update: ${dealField} = ${updateData[key]}`);
+            }
+          });
+          
+          // Check for direct deal fields (without deal_ prefix)
+          const dealFields = ['title', 'value', 'currency', 'status', 'stage_id', 'probability', 'expected_close_date', 
+                            'lost_reason', 'visible_to', 'add_time', 'update_time', 'stage_change_time', 
+                            'active', 'deleted', 'won_time', 'lost_time', 'close_time', 'pipeline_id', 
+                            'next_activity_date', 'next_activity_time', 'next_activity_id', 'last_activity_id',
+                            'last_activity_date', 'label', 'org_hidden', 'person_hidden'];
+          
+          dealFields.forEach(field => {
+            if (updateData.hasOwnProperty(field) && !dealUpdateData.hasOwnProperty(field)) {
+              dealUpdateData[field] = updateData[field];
+              console.log(`Found direct deal field update: ${field} = ${updateData[field]}`);
+            }
+          });
+          
+          // Update the deal if we have deal updates
+          if (Object.keys(dealUpdateData).length > 0) {
+            try {
+              const deal = await Deal.findByPk(activity.dealId);
+              if (deal) {
+                console.log(`Updating deal ${activity.dealId} with data:`, dealUpdateData);
+                await deal.update(dealUpdateData);
+                console.log(`Successfully updated deal ${activity.dealId}`);
+              } else {
+                console.log(`Deal ${activity.dealId} not found`);
+              }
+            } catch (dealError) {
+              console.error(`Error updating deal ${activity.dealId}:`, dealError);
+            }
+          } else {
+            console.log(`No deal field updates found for activity ${activity.activityId}`);
+          }
+        }
 
         // Update next activity date for the lead if this activity is linked to a lead
         // and if the update affects scheduling
