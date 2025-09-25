@@ -4943,7 +4943,97 @@ exports.getDealFields = async (req, res) => {
           : pref.columns;
     }
 
-    // Optionally: parse filterConfig for each column if needed
+    // Define labels for deal fields
+    const dealFieldLabels = {
+      // Basic Deal Information
+      dealId: "Deal ID",
+      title: "Deal Title",
+      value: "Deal Value",
+      currency: "Currency",
+      valueCurrency: "Value Currency",
+      proposalValue: "Proposal Value",
+      proposalCurrency: "Proposal Currency",
+      proposalValueCurrency: "Proposal Value Currency",
+      
+      // Pipeline & Status
+      pipeline: "Pipeline",
+      pipelineStage: "Pipeline Stage",
+      status: "Deal Status",
+      probability: "Probability",
+      
+      // Dates
+      createdAt: "Created Date",
+      updatedAt: "Last Updated",
+      expectedCloseDate: "Expected Close Date",
+      proposalSentDate: "Proposal Sent Date",
+      rfpReceivedDate: "RFP Received Date",
+      wonTime: "Won Date",
+      lostTime: "Lost Date",
+      dealClosedOn: "Deal Closed Date",
+      closeTime: "Close Time",
+      archiveTime: "Archive Time",
+      nextActivityDate: "Next Activity Date",
+      nextActivityTime: "Next Activity Time",
+      addTime: "Add Time",
+      updateTime: "Update Time",
+      stageChangeTime: "Stage Change Time",
+      lastActivityDate: "Last Activity Date",
+      
+      // Ownership & Visibility
+      ownerId: "Owner ID",
+      ownerName: "Owner Name",
+      masterUserID: "Creator",
+      visibleTo: "Visible To",
+      assignedTo: "Assigned To",
+      responsiblePerson: "Responsible Person",
+      
+      // Service & Project Details
+      serviceType: "Service Type",
+      scopeOfServiceType: "Scope of Service Type",
+      projectLocation: "Project Location",
+      organizationCountry: "Organization Country",
+      stateAndCountryProjectLocation: "State & Country Project Location",
+      
+      // References & External IDs
+      esplProposalNo: "ESPL Proposal No",
+      leadId: "Lead ID",
+      personId: "Person ID",
+      organizationId: "Organization ID",
+      sourceOrgin: "Source Origin",
+      sourceChannel: "Source Channel",
+      sourceChannelId: "Source Channel ID",
+      
+      // Activities
+      nextActivityId: "Next Activity ID",
+      lastActivityId: "Last Activity ID",
+      
+      // Status & Tracking
+      statusSummary: "Status Summary",
+      lostReason: "Lost Reason",
+      label: "Label",
+      active: "Active",
+      deleted: "Deleted",
+      isArchived: "Archived",
+      
+      // Display Options
+      orgHidden: "Organization Hidden",
+      personHidden: "Person Hidden",
+      
+      // Additional Fields
+      ccEmail: "CC Email",
+      bccEmail: "BCC Email",
+      description: "Description",
+      notes: "Notes",
+      tags: "Tags",
+      priority: "Priority",
+      dealSource: "Deal Source",
+      competitorInfo: "Competitor Info",
+      budgetRange: "Budget Range",
+      decisionMaker: "Decision Maker",
+      timeline: "Timeline"
+    };
+
+    // Parse filterConfig and add labels for each column
     columns = columns.map((col) => {
       if (col.filterConfig) {
         col.filterConfig =
@@ -4951,6 +5041,22 @@ exports.getDealFields = async (req, res) => {
             ? JSON.parse(col.filterConfig)
             : col.filterConfig;
       }
+      
+      // Add label if not already present
+      if (!col.label && dealFieldLabels[col.key]) {
+        col.label = dealFieldLabels[col.key];
+      }
+      
+      // Fallback: generate label from key if no predefined label exists
+      if (!col.label) {
+        col.label = col.key
+          .replace(/([A-Z])/g, " $1") // Add space before capital letters
+          .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+          .replace(/Id/g, "ID") // Replace "Id" with "ID"
+          .replace(/Url/g, "URL") // Replace "Url" with "URL"
+          .replace(/Api/g, "API"); // Replace "Api" with "API"
+      }
+      
       return col;
     });
 
@@ -5025,14 +5131,93 @@ exports.getDealFields = async (req, res) => {
     allColumns.forEach((col) => {
       if (!seenKeys.has(col.key)) {
         seenKeys.add(col.key);
-        uniqueColumns.push(col);
+        
+        // Ensure all columns have proper structure with labels
+        const enhancedCol = {
+          ...col,
+          // Ensure label exists
+          label: col.label || col.key
+            .replace(/([A-Z])/g, " $1")
+            .replace(/^./, str => str.toUpperCase())
+            .replace(/Id/g, "ID")
+            .replace(/Url/g, "URL")
+            .replace(/Api/g, "API"),
+          // Add additional metadata for better frontend handling
+          isStandardField: !col.isCustomField,
+          fieldCategory: col.isCustomField ? 'custom' : 'standard',
+          displayOrder: col.displayOrder || 999,
+          isVisible: col.check !== undefined ? col.check : true,
+          isDealVisible: col.dealCheck !== undefined ? col.dealCheck : true
+        };
+        
+        uniqueColumns.push(enhancedCol);
       }
     });
 
+    // Sort columns for better organization
+    const sortedColumns = uniqueColumns.sort((a, b) => {
+      // Custom fields at the end
+      if (a.isCustomField !== b.isCustomField) {
+        return a.isCustomField ? 1 : -1;
+      }
+      // Sort by display order, then by label
+      if (a.displayOrder !== b.displayOrder) {
+        return (a.displayOrder || 999) - (b.displayOrder || 999);
+      }
+      return (a.label || '').localeCompare(b.label || '');
+    });
+
+    // Create categorized columns for better UI organization
+    const categorizedColumns = {
+      basic: sortedColumns.filter(col => 
+        ['dealId', 'title', 'value', 'currency', 'status', 'pipeline', 'pipelineStage'].includes(col.key)
+      ),
+      dates: sortedColumns.filter(col => 
+        ['createdAt', 'updatedAt', 'expectedCloseDate', 'proposalSentDate', 'wonTime', 'lostTime'].includes(col.key)
+      ),
+      financial: sortedColumns.filter(col => 
+        ['value', 'proposalValue', 'currency', 'valueCurrency', 'proposalValueCurrency'].includes(col.key)
+      ),
+      ownership: sortedColumns.filter(col => 
+        ['ownerId', 'masterUserID', 'assignedTo', 'responsiblePerson', 'visibleTo'].includes(col.key)
+      ),
+      project: sortedColumns.filter(col => 
+        ['serviceType', 'projectLocation', 'organizationCountry', 'esplProposalNo'].includes(col.key)
+      ),
+      custom: sortedColumns.filter(col => col.isCustomField),
+      other: sortedColumns.filter(col => 
+        !['dealId', 'title', 'value', 'currency', 'status', 'pipeline', 'pipelineStage',
+          'createdAt', 'updatedAt', 'expectedCloseDate', 'proposalSentDate', 'wonTime', 'lostTime',
+          'value', 'proposalValue', 'currency', 'valueCurrency', 'proposalValueCurrency',
+          'ownerId', 'masterUserID', 'assignedTo', 'responsiblePerson', 'visibleTo',
+          'serviceType', 'projectLocation', 'organizationCountry', 'esplProposalNo'].includes(col.key) 
+        && !col.isCustomField
+      )
+    };
+
     res.status(200).json({
-      columns: uniqueColumns,
+      success: true,
+      columns: sortedColumns,
+      categorizedColumns,
+      metadata: {
+        customFieldsCount: customFields.length,
+        totalColumns: sortedColumns.length,
+        regularColumns: columns.length,
+        standardFieldsCount: sortedColumns.filter(col => !col.isCustomField).length,
+        visibleColumns: sortedColumns.filter(col => col.isDealVisible).length,
+        categories: {
+          basic: categorizedColumns.basic.length,
+          dates: categorizedColumns.dates.length,
+          financial: categorizedColumns.financial.length,
+          ownership: categorizedColumns.ownership.length,
+          project: categorizedColumns.project.length,
+          custom: categorizedColumns.custom.length,
+          other: categorizedColumns.other.length
+        }
+      },
+      // Backward compatibility
       customFieldsCount: customFields.length,
-      totalColumns: uniqueColumns.length,
+      totalColumns: sortedColumns.length,
       regularColumns: columns.length,
     });
   } catch (error) {
