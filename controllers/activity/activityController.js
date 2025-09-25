@@ -9,6 +9,7 @@ const ActivityColumnPreference = require("../../models/activity/activityColumnMo
 const Lead = require("../../models/leads/leadsModel");
 const LeadDetails = require("../../models/leads/leadDetailsModel");
 const Deal = require("../../models/deals/dealsModels");
+const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
@@ -96,6 +97,11 @@ exports.createActivity = async (req, res) => {
     // Update nextActivity in Lead if leadId is present
     if (leadId) {
       await updateNextActivityForLead(leadId);
+    }
+
+    // Update nextActivity in Deal if dealId is present
+    if (dealId) {
+      await updateNextActivityForDeal(dealId);
     }
 
     res
@@ -1702,6 +1708,11 @@ exports.markActivityAsDone = async (req, res) => {
       await updateNextActivityForLead(activity.leadId);
     }
 
+    // Update next activity date for the deal if this activity was linked to a deal
+    if (activity.dealId) {
+      await updateNextActivityForDeal(activity.dealId);
+    }
+
     // --- Activity popup settings logic ---
     let showSchedulePopup = false;
     if (req.activityPopupSettings) {
@@ -1837,6 +1848,25 @@ exports.updateActivity = async (req, res) => {
         const originalLeadId = activity.getDataValue("leadId"); // Get original value before update
         if (originalLeadId) {
           await updateNextActivityForLead(originalLeadId);
+        }
+      }
+    }
+
+    // Update next activity date for the deal if this activity is linked to a deal
+    // and if the update affects scheduling (startDateTime, isDone, etc.)
+    if (
+      activity.dealId &&
+      (updateFields.startDateTime ||
+        updateFields.isDone !== undefined ||
+        updateFields.dealId)
+    ) {
+      await updateNextActivityForDeal(activity.dealId);
+
+      // If dealId was changed, also update the previous deal
+      if (updateFields.dealId && updateFields.dealId !== activity.dealId) {
+        const originalDealId = activity.getDataValue("dealId"); // Get original value before update
+        if (originalDealId) {
+          await updateNextActivityForDeal(originalDealId);
         }
       }
     }
@@ -2237,6 +2267,71 @@ const updateNextActivityForLead = async (leadId) => {
   }
 };
 
+// Helper function to update next activity date for a deal
+const updateNextActivityForDeal = async (dealId) => {
+  try {
+    // Find the earliest upcoming activity for this deal that is not done
+    const nextActivity = await Activity.findOne({
+      where: {
+        dealId,
+        isDone: false,
+        startDateTime: { [Op.gte]: new Date() }, // Only future activities
+      },
+      order: [["startDateTime", "ASC"]], // Get the earliest one
+      attributes: ["startDateTime", "activityId"],
+    });
+
+    let nextActivityDate = null;
+    let nextActivityStatus = null;
+
+    if (nextActivity) {
+      nextActivityDate = nextActivity.startDateTime;
+
+      // Calculate status based on how close the activity is
+      const now = new Date();
+      const activityDate = new Date(nextActivity.startDateTime);
+      const timeDiff = activityDate.getTime() - now.getTime();
+      const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+      if (daysDiff < 0) {
+        nextActivityStatus = "overdue"; // Red - Past due
+      } else if (daysDiff <= 1) {
+        nextActivityStatus = "today"; // Red/Orange - Due today or tomorrow
+      } else if (daysDiff <= 3) {
+        nextActivityStatus = "upcoming"; // Yellow - Due within 3 days
+      } else {
+        nextActivityStatus = "normal"; // Default color
+      }
+    }
+
+    // Update the deal's nextActivityDate field
+    await Deal.update(
+      {
+        nextActivityDate,
+        lastActivityDate: nextActivity ? nextActivity.startDateTime : null,
+      },
+      { where: { dealId } }
+    );
+
+    // Also update DealDetails if it exists
+    const dealDetails = await DealDetails.findOne({ where: { dealId } });
+    if (dealDetails) {
+      await DealDetails.update(
+        {
+          nextActivityDate,
+        },
+        { where: { dealId } }
+      );
+    }
+
+    console.log(
+      `Updated next activity for deal ${dealId}: ${nextActivityDate} (${nextActivityStatus})`
+    );
+  } catch (error) {
+    console.error(`Error updating next activity for deal ${dealId}:`, error);
+  }
+};
+
 // Utility function to update next activity dates for all leads (can be called via API)
 exports.updateAllLeadsNextActivity = async (req, res) => {
   try {
@@ -2264,6 +2359,37 @@ exports.updateAllLeadsNextActivity = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating all leads next activity:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Utility function to update next activity dates for all deals (can be called via API)
+exports.updateAllDealsNextActivity = async (req, res) => {
+  try {
+    // Get all deals that have activities
+    const dealsWithActivities = await Activity.findAll({
+      attributes: ["dealId"],
+      where: {
+        dealId: { [Op.ne]: null },
+      },
+      group: ["dealId"],
+      raw: true,
+    });
+
+    const dealIds = dealsWithActivities.map((item) => item.dealId);
+    let updatedCount = 0;
+
+    for (const dealId of dealIds) {
+      await updateNextActivityForDeal(dealId);
+      updatedCount++;
+    }
+
+    res.status(200).json({
+      message: `Updated next activity dates for ${updatedCount} deals`,
+      updatedDeals: updatedCount,
+    });
+  } catch (error) {
+    console.error("Error updating all deals next activity:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -2449,6 +2575,22 @@ exports.bulkEditActivities = async (req, res) => {
           }
         }
 
+        // Update next activity date for the deal if this activity is linked to a deal
+        // and if the update affects scheduling
+        if (
+          activity.dealId &&
+          (updateData.startDateTime ||
+            updateData.isDone !== undefined ||
+            updateData.dealId)
+        ) {
+          await updateNextActivityForDeal(activity.dealId);
+
+          // If dealId was changed, also update the previous deal
+          if (updateData.dealId && updateData.dealId !== activity.dealId) {
+            await updateNextActivityForDeal(activity.dealId);
+          }
+        }
+
         // Fetch the updated activity with related data to return in response
         const updatedActivityWithDetails = await Activity.findByPk(activity.activityId, {
           include: [
@@ -2626,6 +2768,7 @@ exports.bulkDeleteActivities = async (req, res) => {
         console.log(`Deleting activity ${activity.activityId}`);
 
         const leadId = activity.leadId;
+        const dealId = activity.dealId;
 
         // Delete the activity
         await Activity.destroy({
@@ -2635,6 +2778,11 @@ exports.bulkDeleteActivities = async (req, res) => {
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
           await updateNextActivityForLead(leadId);
+        }
+
+        // Update next activity date for the deal if this activity was linked to a deal
+        if (dealId) {
+          await updateNextActivityForDeal(dealId);
         }
 
         deleteResults.successful.push({
@@ -2770,6 +2918,7 @@ exports.bulkMarkActivities = async (req, res) => {
         );
 
         const leadId = activity.leadId;
+        const dealId = activity.dealId;
 
         // Update the activity done status
         await Activity.update(
@@ -2780,6 +2929,11 @@ exports.bulkMarkActivities = async (req, res) => {
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
           await updateNextActivityForLead(leadId);
+        }
+
+        // Update next activity date for the deal if this activity was linked to a deal
+        if (dealId) {
+          await updateNextActivityForDeal(dealId);
         }
 
         markResults.successful.push({
@@ -2916,6 +3070,7 @@ exports.bulkReassignActivities = async (req, res) => {
         );
 
         const leadId = activity.leadId;
+        const dealId = activity.dealId;
 
         // Update the activity assigned user
         await Activity.update(
@@ -2926,6 +3081,11 @@ exports.bulkReassignActivities = async (req, res) => {
         // Update next activity date for the lead if this activity was linked to a lead
         if (leadId) {
           await updateNextActivityForLead(leadId);
+        }
+
+        // Update next activity date for the deal if this activity was linked to a deal
+        if (dealId) {
+          await updateNextActivityForDeal(dealId);
         }
 
         reassignResults.successful.push({
