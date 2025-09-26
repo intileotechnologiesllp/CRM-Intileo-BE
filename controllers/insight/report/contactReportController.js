@@ -88,7 +88,7 @@ exports.createPersonReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Contact" && type === "Person") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -148,7 +148,7 @@ exports.createPersonReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -2003,7 +2003,7 @@ exports.createOrganizationReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Contact" && type === "Organization") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -2063,7 +2063,7 @@ exports.createOrganizationReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
