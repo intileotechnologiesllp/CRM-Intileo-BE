@@ -3001,16 +3001,70 @@ exports.updateLead = async (req, res) => {
       if (orgRecord) {
         await orgRecord.update(organizationData);
         console.log("Organization updated:", orgRecord.toJSON());
+        
+        // Sync organization data to Lead table if fields are present
+        if (organizationData.organization && leadFields.includes('organization')) {
+          leadData.organization = organizationData.organization;
+        }
+        if (organizationData.address && leadFields.includes('address')) {
+          leadData.address = organizationData.address;
+        }
+        if (organizationData.phone && leadFields.includes('phone')) {
+          leadData.phone = organizationData.phone;
+        }
+        
+        // Sync organization data to LeadDetails table if fields are present
+        if (organizationData.organization && leadDetailsFields.includes('organizationName')) {
+          leadDetailsData.organizationName = organizationData.organization;
+        }
+        if (organizationData.address && leadDetailsFields.includes('address')) {
+          leadDetailsData.address = organizationData.address;
+        }
+        if (organizationData.postalAddress && leadDetailsFields.includes('postalAddress')) {
+          leadDetailsData.postalAddress = organizationData.postalAddress;
+        }
+        
       } else {
         orgRecord = await Organization.create(organizationData);
         console.log("Organization created:", orgRecord.toJSON());
         leadData.leadOrganizationId = orgRecord.leadOrganizationId;
+        
+        // Sync organization data to Lead table for new organization
+        if (organizationData.organization && leadFields.includes('organization')) {
+          leadData.organization = organizationData.organization;
+        }
+        if (organizationData.address && leadFields.includes('address')) {
+          leadData.address = organizationData.address;
+        }
+        if (organizationData.phone && leadFields.includes('phone')) {
+          leadData.phone = organizationData.phone;
+        }
+        
+        // Sync organization data to LeadDetails table for new organization
+        if (organizationData.organization && leadDetailsFields.includes('organizationName')) {
+          leadDetailsData.organizationName = organizationData.organization;
+        }
+        if (organizationData.address && leadDetailsFields.includes('address')) {
+          leadDetailsData.address = organizationData.address;
+        }
+        if (organizationData.postalAddress && leadDetailsFields.includes('postalAddress')) {
+          leadDetailsData.postalAddress = organizationData.postalAddress;
+        }
+        
         await lead.update({ leadOrganizationId: orgRecord.leadOrganizationId });
         console.log(
           "Lead updated with new leadOrganizationId:",
           orgRecord.leadOrganizationId
         );
       }
+      
+      // Log the synced data
+      console.log("Organization data synced to Lead table:", Object.keys(leadData).filter(key => 
+        ['organization', 'address', 'phone'].includes(key)
+      ));
+      console.log("Organization data synced to LeadDetails table:", Object.keys(leadDetailsData).filter(key => 
+        ['organizationName', 'address', 'postalAddress'].includes(key)
+      ));
     }
 
     // Update or create Person
@@ -3026,18 +3080,84 @@ exports.updateLead = async (req, res) => {
       if (personRecord) {
         await personRecord.update(personData);
         console.log("Person updated:", personRecord.toJSON());
+        
+        // Sync person data to Lead table if fields are present
+        if (personData.contactPerson && leadFields.includes('contactPerson')) {
+          leadData.contactPerson = personData.contactPerson;
+        }
+        if (personData.email && leadFields.includes('email')) {
+          leadData.email = personData.email;
+        }
+        if (personData.phone && leadFields.includes('phone')) {
+          leadData.phone = personData.phone;
+        }
+        if (personData.jobTitle && leadFields.includes('jobTitle')) {
+          leadData.jobTitle = personData.jobTitle;
+        }
+        if (personData.birthday && leadFields.includes('birthday')) {
+          leadData.birthday = personData.birthday;
+        }
+        
+        // Sync person data to LeadDetails table if fields are present
+        if (personData.contactPerson && leadDetailsFields.includes('personName')) {
+          leadDetailsData.personName = personData.contactPerson;
+        }
+        if (personData.jobTitle && leadDetailsFields.includes('jobTitle')) {
+          leadDetailsData.jobTitle = personData.jobTitle;
+        }
+        if (personData.notes && leadDetailsFields.includes('notes')) {
+          leadDetailsData.notes = personData.notes;
+        }
+        
       } else {
         if (orgRecord)
           personData.leadOrganizationId = orgRecord.leadOrganizationId;
         personRecord = await Person.create(personData);
         console.log("Person created:", personRecord.toJSON());
         leadData.personId = personRecord.personId;
+        
+        // Sync person data to Lead table for new person
+        if (personData.contactPerson && leadFields.includes('contactPerson')) {
+          leadData.contactPerson = personData.contactPerson;
+        }
+        if (personData.email && leadFields.includes('email')) {
+          leadData.email = personData.email;
+        }
+        if (personData.phone && leadFields.includes('phone')) {
+          leadData.phone = personData.phone;
+        }
+        if (personData.jobTitle && leadFields.includes('jobTitle')) {
+          leadData.jobTitle = personData.jobTitle;
+        }
+        if (personData.birthday && leadFields.includes('birthday')) {
+          leadData.birthday = personData.birthday;
+        }
+        
+        // Sync person data to LeadDetails table for new person
+        if (personData.contactPerson && leadDetailsFields.includes('personName')) {
+          leadDetailsData.personName = personData.contactPerson;
+        }
+        if (personData.jobTitle && leadDetailsFields.includes('jobTitle')) {
+          leadDetailsData.jobTitle = personData.jobTitle;
+        }
+        if (personData.notes && leadDetailsFields.includes('notes')) {
+          leadDetailsData.notes = personData.notes;
+        }
+        
         await lead.update({ personId: personRecord.personId });
         console.log("Lead updated with new personId:", personRecord.personId);
       }
+      
+      // Log the synced data
+      console.log("Person data synced to Lead table:", Object.keys(leadData).filter(key => 
+        ['contactPerson', 'email', 'phone', 'jobTitle', 'birthday'].includes(key)
+      ));
+      console.log("Person data synced to LeadDetails table:", Object.keys(leadDetailsData).filter(key => 
+        ['personName', 'jobTitle', 'notes'].includes(key)
+      ));
     }
 
-    // Update Lead
+    // Update Lead (includes synced data from Person and Organization updates)
     if (Object.keys(leadData).length > 0) {
       // Sanitize numeric fields - convert empty strings to null
       const numericFields = ['proposalValue', 'valueCurrency', 'proposalValueCurrency'];
@@ -3047,9 +3167,37 @@ exports.updateLead = async (req, res) => {
         }
       });
       
-      console.log("Sanitized leadData:", leadData);
+      console.log("Final leadData to update (includes synced Person/Organization fields):", leadData);
       await lead.update(leadData);
       console.log("Lead updated:", lead.toJSON());
+      
+      // Synchronize relevant Lead fields to LeadDetails table
+      const leadDetailsSync = {};
+      const syncedDetailFields = [];
+      
+      // Map Lead fields to LeadDetails fields
+      if (leadData.contactPerson !== undefined) {
+        leadDetailsSync.personName = leadData.contactPerson;
+        syncedDetailFields.push('personName');
+      }
+      if (leadData.organization !== undefined) {
+        leadDetailsSync.organizationName = leadData.organization;
+        syncedDetailFields.push('organizationName');
+      }
+      
+      // Update LeadDetails if there are fields to sync and LeadDetails exists
+      if (Object.keys(leadDetailsSync).length > 0) {
+        let leadDetailsForSync = await LeadDetails.findOne({ where: { leadId } });
+        if (leadDetailsForSync) {
+          await leadDetailsForSync.update(leadDetailsSync);
+          console.log(`Synced Lead to LeadDetails fields: ${syncedDetailFields.join(', ')}`, leadDetailsSync);
+        } else if (leadDetailsSync.personName || leadDetailsSync.organizationName) {
+          // Create LeadDetails if it doesn't exist and we have important fields to sync
+          leadDetailsSync.leadId = leadId;
+          leadDetailsForSync = await LeadDetails.create(leadDetailsSync);
+          console.log(`Created LeadDetails with synced Lead fields: ${syncedDetailFields.join(', ')}`, leadDetailsSync);
+        }
+      }
     }
 
     // --- Send email if owner changed ---
@@ -3099,11 +3247,51 @@ exports.updateLead = async (req, res) => {
       if (Object.keys(leadDetailsData).length > 0) {
         await leadDetails.update(leadDetailsData);
         console.log("LeadDetails updated:", leadDetails.toJSON());
+        
+        // Synchronize relevant LeadDetails fields to Lead table
+        const leadSyncData = {};
+        const syncedFields = [];
+        
+        // Map LeadDetails fields to Lead fields
+        if (leadDetailsData.personName && leadDetailsData.personName !== lead.contactPerson) {
+          leadSyncData.contactPerson = leadDetailsData.personName;
+          syncedFields.push('contactPerson');
+        }
+        if (leadDetailsData.organizationName && leadDetailsData.organizationName !== lead.organization) {
+          leadSyncData.organization = leadDetailsData.organizationName;
+          syncedFields.push('organization');
+        }
+        
+        // Update Lead table if there are fields to sync
+        if (Object.keys(leadSyncData).length > 0) {
+          await lead.update(leadSyncData);
+          console.log(`Synced LeadDetails to Lead fields: ${syncedFields.join(', ')}`, leadSyncData);
+        }
       }
     } else if (Object.keys(leadDetailsData).length > 0) {
       leadDetailsData.leadId = leadId;
       leadDetails = await LeadDetails.create(leadDetailsData);
       console.log("LeadDetails created:", leadDetails.toJSON());
+      
+      // Synchronize relevant LeadDetails fields to Lead table for newly created LeadDetails
+      const leadSyncData = {};
+      const syncedFields = [];
+      
+      // Map LeadDetails fields to Lead fields
+      if (leadDetailsData.personName && leadDetailsData.personName !== lead.contactPerson) {
+        leadSyncData.contactPerson = leadDetailsData.personName;
+        syncedFields.push('contactPerson');
+      }
+      if (leadDetailsData.organizationName && leadDetailsData.organizationName !== lead.organization) {
+        leadSyncData.organization = leadDetailsData.organizationName;
+        syncedFields.push('organization');
+      }
+      
+      // Update Lead table if there are fields to sync
+      if (Object.keys(leadSyncData).length > 0) {
+        await lead.update(leadSyncData);
+        console.log(`Synced new LeadDetails to Lead fields: ${syncedFields.join(', ')}`, leadSyncData);
+      }
     }
 
     // Handle custom fields if provided
@@ -3846,6 +4034,8 @@ exports.getAllLeadDetails = async (req, res) => {
       "title",
       "proposalValue", // Added
       "proposalValueCurrency", // Added
+      "valueLabels",
+      "proposalSentDate",
     ];
 
     const filteredLead = {};
