@@ -266,7 +266,7 @@ exports.createDealPerformReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result = await generateActivityPerformanceData(
+          const result = await generateDealPerformanceData(
             ownerId,
             role,
             xaxis,
@@ -348,7 +348,7 @@ exports.createDealPerformReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result = await generateExistingActivityPerformanceData(
+          const result = await generateExistingDealPerformanceData(
             ownerId,
             role,
             existingxaxis,
@@ -426,7 +426,7 @@ exports.createDealPerformReport = async (req, res) => {
   }
 };
 
-async function generateExistingActivityPerformanceData(
+async function generateExistingDealPerformanceData(
   ownerId,
   role,
   existingxaxis,
@@ -743,7 +743,7 @@ async function generateExistingActivityPerformanceData(
 }
 
 // Helper function to generate activity performance data with pagination
-async function generateActivityPerformanceData(
+async function generateDealPerformanceData(
   ownerId,
   role,
   xaxis,
@@ -1350,6 +1350,487 @@ function getSequelizeOperator(operator) {
 //   }
 // }
 
+async function generateExistingDealPerformanceDataForSave(
+  ownerId,
+  role,
+  existingxaxis,
+  existingyaxis,
+  existingSegmentedBy,
+  filters
+) {
+  let includeModels = [];
+  
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhere = {};
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Handle special cases for xaxis (like Owner which needs join)
+  let groupBy = [];
+  let attributes = [];
+
+  // Handle existingxaxis special cases
+  if (existingxaxis === "creator") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (existingxaxis === "creatorstatus") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    groupBy.push(`Deal.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
+  }
+
+  // Handle segmentedBy if not "none"
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo" ||
+        existingSegmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
+    }
+
+    if (
+      existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo"
+    ) {
+      groupBy.push("assignedUser.name");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (existingSegmentedBy === "Team") {
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Deal.${existingSegmentedBy}`);
+      attributes.push([
+        Sequelize.col(`Deal.${existingSegmentedBy}`),
+        "segmentValue",
+      ]);
+    }
+  }
+
+  // Handle existingyaxis
+  if (existingyaxis === "no of deals") {
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+  } else if (existingyaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      "yValue",
+    ]);
+  } else if (existingyaxis === "value") {
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
+  } else {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Get total count
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+        ),
+        "total",
+      ],
+    ],
+    include: includeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+
+  // Get all results without pagination
+  let results;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+    });
+  } else {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+    });
+  }
+
+  // Format the results for the frontend
+  let formattedResults = [];
+  let totalValue = 0;
+
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    const groupedData = {};
+    results.forEach((item) => {
+      const xValue = item.xValue || "Unknown";
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = { label: xValue, segments: [] };
+      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
+    });
+
+    formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
+  } else {
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: Number(item.yValue) || 0,
+    }));
+
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  // Return all data without pagination info
+  return {
+    data: formattedResults,
+    totalValue: totalValue,
+    totalCount: totalCount,
+  };
+}
+
+// Helper function to generate deal performance data without pagination
+async function generateDealPerformanceDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  segmentedBy,
+  filters
+) {
+  let includeModels = [];
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhere = {};
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      Object.assign(baseWhere, combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Handle special cases for xaxis (like Owner which needs join)
+  let groupBy = [];
+  let attributes = [];
+
+  if (xaxis === "creator") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (xaxis === "creatorstatus") {
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    groupBy.push(`Deal.${xaxis}`);
+    attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
+  }
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const assignedUserIncludeExists = includeModels.some(
+      (inc) => inc.as === "assignedUser"
+    );
+    if (
+      (segmentedBy === "Owner" ||
+        segmentedBy === "assignedTo" ||
+        segmentedBy === "Team") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
+    }
+
+    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+      groupBy.push("assignedUser.name");
+      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+    } else if (segmentedBy === "Team") {
+      groupBy.push("assignedUser.team");
+      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else {
+      groupBy.push(`Deal.${segmentedBy}`);
+      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
+    }
+  }
+
+  // Handle yaxis
+  if (yaxis === "no of deals") {
+    attributes.push([Sequelize.fn("COUNT", Sequelize.col("dealId")), "yValue"]);
+  } else if (yaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
+      "yValue",
+    ]);
+  } else {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Get total count
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+        ),
+        "total",
+      ],
+    ],
+    include: includeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+
+  // Get all results without pagination
+  let results;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+    });
+  } else {
+    results = await Deal.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
+    });
+  }
+
+  // Format the results based on whether segmentedBy is used
+  let formattedResults = [];
+  let totalValue = 0;
+
+  if (segmentedBy && segmentedBy !== "none") {
+    const groupedData = {};
+    results.forEach((item) => {
+      const xValue = item.xValue === null ? "Unknown" : item.xValue;
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
+      if (!groupedData[xValue]) {
+        groupedData[xValue] = { label: xValue, segments: [] };
+      }
+      groupedData[xValue].segments.push({
+        labeltype: segmentValue,
+        value: yValue,
+      });
+    });
+
+    formattedResults = Object.values(groupedData);
+
+    // Calculate total for each segment group
+    formattedResults.forEach((group) => {
+      group.totalSegmentValue = group.segments.reduce(
+        (sum, seg) => sum + seg.value,
+        0
+      );
+    });
+
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+    // Calculate the grand total
+    totalValue = formattedResults.reduce(
+      (sum, group) => sum + group.totalSegmentValue,
+      0
+    );
+  } else {
+    formattedResults = results.map((item) => ({
+      label: item.xValue || "Unknown",
+      value: Number(item.yValue) || 0,
+    }));
+
+    totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+  }
+
+  // Return all data without pagination info
+  return {
+    data: formattedResults,
+    totalValue: totalValue,
+    totalCount: totalCount,
+  };
+}
+
 exports.saveDealPerformReport = async (req, res) => {
   try {
     const {
@@ -1389,7 +1870,7 @@ exports.saveDealPerformReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result = await generateActivityPerformanceData(
+          const result = await generateDealPerformanceDataForSave(
             ownerId,
             role,
             xaxis,
@@ -1453,7 +1934,7 @@ exports.saveDealPerformReport = async (req, res) => {
         }
 
         try {
-          const result = await generateExistingActivityPerformanceData(
+          const result = await generateExistingDealPerformanceDataForSave(
             ownerId,
             role,
             existingxaxis,
@@ -1806,7 +2287,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
     let summary = {};
 
     if (xaxis && yaxis && !reportId) {
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateDealPerformanceData(
         ownerId,
         role,
         xaxis,
@@ -1871,7 +2352,7 @@ exports.getDealPerformReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateActivityPerformanceData(
+      const reportResult = await generateExistingDealPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -2948,6 +3429,469 @@ async function generateConversionExistingActivityPerformanceData(
   };
 }
 
+async function generateDealConversionDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  segmentedBy,
+  filters
+) {
+  let includeModels = [];
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhereConditions = [
+    {
+      // Only include won or lost deals
+      status: {
+        [Op.in]: ["won", "lost"],
+      },
+    },
+  ];
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhereConditions.push({
+      masterUserID: ownerId,
+    });
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      baseWhereConditions.push(combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Create the final where condition
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
+
+  // Handle special cases for xaxis (like Owner which needs join)
+  let xaxisColumn;
+  let xaxisIncludeModels = [];
+
+  if (xaxis === "creator") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.name";
+  } else if (xaxis === "creatorstatus") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.creatorstatus";
+  } else {
+    xaxisColumn = `Deal.${xaxis}`;
+  }
+
+  // Combine all include models
+  const allIncludeModels = [...includeModels, ...xaxisIncludeModels];
+
+  // Get total count of distinct x-axis values
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))
+        ),
+        "total",
+      ],
+    ],
+    include: allIncludeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+
+  // Now get the status breakdown for all x-axis values
+  let groupBy = [];
+  let attributes = [];
+
+  if (xaxis === "creator") {
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (xaxis === "creatorstatus") {
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    groupBy.push(`Deal.${xaxis}`);
+    attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
+  }
+
+  // Always group by status to get the breakdown
+  groupBy.push("Deal.status");
+  attributes.push([Sequelize.col("Deal.status"), "status"]);
+
+  // Handle yaxis
+  if (yaxis === "no of deals") {
+    attributes.push([
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
+      "yValue",
+    ]);
+  } else if (yaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
+      "yValue",
+    ]);
+  } else if (yaxis === "value") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
+      "yValue",
+    ]);
+  } else {
+    // For other yaxis values
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${yaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Execute query to get status breakdown for all x-values
+  const results = await Deal.findAll({
+    where: baseWhere,
+    attributes: attributes,
+    include: allIncludeModels,
+    group: groupBy,
+    raw: true,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
+  });
+
+  // Format the results to group by xValue and include status breakdown
+  const groupedData = {};
+
+  results.forEach((item) => {
+    const xValue = item.xValue || "Unknown";
+    const status = item.status || "Unknown";
+    const yValue = item.yValue || 0;
+
+    // Only include won and lost statuses
+    if (status !== "won" && status !== "lost") {
+      return;
+    }
+
+    if (!groupedData[xValue]) {
+      groupedData[xValue] = {
+        label: xValue,
+        status: [],
+        total: 0,
+      };
+    }
+
+    // Add status breakdown
+    groupedData[xValue].status.push({
+      labeltype: status,
+      value: yValue,
+    });
+
+    // Calculate total
+    groupedData[xValue].total += yValue;
+  });
+
+  // Calculate percentages for each status
+  Object.keys(groupedData).forEach((key) => {
+    const group = groupedData[key];
+    group.status.forEach((status) => {
+      status.percentage =
+        group.total > 0 ? Math.round((status.value / group.total) * 100) : 0;
+    });
+  });
+
+  // Convert to array
+  const formattedResults = Object.values(groupedData);
+
+  // Return all data without pagination info
+  return {
+    data: formattedResults,
+    totalCount: totalCount,
+  };
+}
+
+async function generateExistingDealConversionDataForSave(
+  ownerId,
+  role,
+  existingxaxis,
+  existingyaxis,
+  existingSegmentedBy,
+  filters,
+  type
+) {
+  let includeModels = [];
+
+  // Base where condition - only show activities owned by the user if not admin
+  const baseWhereConditions = [
+    {
+      // Only include won or lost deals
+      status: {
+        [Op.in]: ["won", "lost"],
+      },
+    },
+  ];
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhereConditions.push({
+      masterUserID: ownerId,
+    });
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      // Array to track include models for filtering
+      const filterIncludeModels = [];
+
+      // Process all conditions first to collect include models
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      // Build combined condition with logical operators
+      let combinedCondition = conditions[0];
+
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      baseWhereConditions.push(combinedCondition);
+
+      // Add filter-related include models to the main includeModels array
+      // Avoid duplicates
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  // Create the final where condition
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
+
+  // Handle special cases for xaxis (like Owner which needs join)
+  let xaxisColumn;
+  let xaxisIncludeModels = [];
+
+  if (existingxaxis === "creator") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.name";
+  } else if (existingxaxis === "creatorstatus") {
+    xaxisIncludeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "creatorstatus"],
+      required: true,
+    });
+    xaxisColumn = "assignedUser.creatorstatus";
+  } else {
+    xaxisColumn = `Deal.${existingxaxis}`;
+  }
+
+  // Combine all include models
+  const allIncludeModels = [...includeModels, ...xaxisIncludeModels];
+
+  // Get total count of distinct x-axis values
+  const totalCountResult = await Deal.findAll({
+    where: baseWhere,
+    attributes: [
+      [
+        Sequelize.fn(
+          "COUNT",
+          Sequelize.fn("DISTINCT", Sequelize.col(xaxisColumn))
+        ),
+        "total",
+      ],
+    ],
+    include: allIncludeModels,
+    raw: true,
+  });
+
+  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+
+  // Now get the status breakdown for all x-axis values
+  let groupBy = [];
+  let attributes = [];
+
+  if (existingxaxis === "creator") {
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (existingxaxis === "creatorstatus") {
+    groupBy.push("assignedUser.creatorstatus");
+    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else {
+    groupBy.push(`Deal.${existingxaxis}`);
+    attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
+  }
+
+  // Always group by status to get the breakdown
+  groupBy.push("Deal.status");
+  attributes.push([Sequelize.col("Deal.status"), "status"]);
+
+  // Handle existingyaxis
+  if (existingyaxis === "no of deals") {
+    attributes.push([
+      Sequelize.fn("COUNT", Sequelize.col("Deal.dealId")),
+      "yValue",
+    ]);
+  } else if (existingyaxis === "proposalValue") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.proposalValue")),
+      "yValue",
+    ]);
+  } else if (existingyaxis === "value") {
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col("Deal.value")),
+      "yValue",
+    ]);
+  } else {
+    // For other yaxis values
+    attributes.push([
+      Sequelize.fn("SUM", Sequelize.col(`Deal.${existingyaxis}`)),
+      "yValue",
+    ]);
+  }
+
+  // Execute query to get status breakdown for all x-values
+  const results = await Deal.findAll({
+    where: baseWhere,
+    attributes: attributes,
+    include: allIncludeModels,
+    group: groupBy,
+    raw: true,
+    order: [[Sequelize.col(xaxisColumn), "ASC"]],
+  });
+
+  // Format the results to group by xValue and include status breakdown
+  const groupedData = {};
+
+  results.forEach((item) => {
+    const xValue = item.xValue || "Unknown";
+    const status = item.status || "Unknown";
+    const yValue = item.yValue || 0;
+
+    // Only include won and lost statuses
+    if (status !== "won" && status !== "lost") {
+      return;
+    }
+
+    if (!groupedData[xValue]) {
+      groupedData[xValue] = {
+        label: xValue,
+        status: [],
+        total: 0,
+      };
+    }
+
+    // Add status breakdown
+    groupedData[xValue].status.push({
+      labeltype: status,
+      value: yValue,
+    });
+
+    // Calculate total
+    groupedData[xValue].total += yValue;
+  });
+
+  // Calculate percentages for each status
+  Object.keys(groupedData).forEach((key) => {
+    const group = groupedData[key];
+    group.status.forEach((status) => {
+      status.percentage =
+        group.total > 0 ? Math.round((status.value / group.total) * 100) : 0;
+    });
+  });
+
+  // Convert to array
+  const formattedResults = Object.values(groupedData);
+
+  // Return all data without pagination info
+  return {
+    data: formattedResults,
+    totalCount: totalCount,
+  };
+}
+
 exports.saveDealConversionReport = async (req, res) => {
   try {
     const {
@@ -2987,7 +3931,7 @@ exports.saveDealConversionReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result = await generateConversionActivityPerformanceData(
+          const result = await generateDealConversionDataForSave(
             ownerId,
             role,
             xaxis,
@@ -3052,7 +3996,7 @@ exports.saveDealConversionReport = async (req, res) => {
 
         try {
           const result =
-            await generateConversionExistingActivityPerformanceData(
+            await generateExistingDealConversionDataForSave(
               ownerId,
               role,
               existingxaxis,
