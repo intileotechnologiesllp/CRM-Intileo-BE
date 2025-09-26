@@ -22,6 +22,7 @@ const DealColumnPreference = require("../../models/deals/dealColumnModel"); // A
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const { sendEmail } = require("../../utils/emailSend"); // Add email service import
+const UserCredential = require("../../models/email/userCredentialModel"); // Add UserCredential model
 const sequelize = require("../../config/db");
 const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
@@ -3230,14 +3231,109 @@ exports.updateDeal = async (req, res) => {
       });
     }
     await deal.update({ ...updateFields });
+    console.log("Deal updated:", deal.toJSON());
+    
+    // Synchronize Deal updates to Person and Organization tables
+    if (Object.keys(updateFields).length > 0) {
+      // Synchronize to Person if Person exists and relevant fields were updated
+      if (deal.personId) {
+        const person = await Person.findByPk(deal.personId);
+        if (person) {
+          const personSyncData = {};
+          const syncedPersonFields = [];
+          
+          // Map Deal fields to Person fields
+          if (updateFields.contactPerson !== undefined && updateFields.contactPerson !== person.contactPerson) {
+            personSyncData.contactPerson = updateFields.contactPerson;
+            syncedPersonFields.push('contactPerson');
+          }
+          if (updateFields.email !== undefined && updateFields.email !== person.email) {
+            personSyncData.email = updateFields.email;
+            syncedPersonFields.push('email');
+          }
+          if (updateFields.phone !== undefined && updateFields.phone !== person.phone) {
+            personSyncData.phone = updateFields.phone;
+            syncedPersonFields.push('phone');
+          }
+          
+          // Update Person if there are fields to sync
+          if (Object.keys(personSyncData).length > 0) {
+            await person.update(personSyncData);
+            console.log(`Synced Deal to Person fields: ${syncedPersonFields.join(', ')}`, personSyncData);
+          }
+        }
+      }
+      
+      // Synchronize to Organization if Organization exists and relevant fields were updated
+      if (deal.leadOrganizationId) {
+        const org = await Organization.findByPk(deal.leadOrganizationId);
+        if (org) {
+          const orgSyncData = {};
+          const syncedOrgFields = [];
+          
+          // Map Deal fields to Organization fields
+          if (updateFields.organization !== undefined && updateFields.organization !== org.organization) {
+            orgSyncData.organization = updateFields.organization;
+            syncedOrgFields.push('organization');
+          }
+          if (updateFields.email !== undefined && updateFields.email !== org.email) {
+            orgSyncData.email = updateFields.email;
+            syncedOrgFields.push('email');
+          }
+          if (updateFields.phone !== undefined && updateFields.phone !== org.phone) {
+            orgSyncData.phone = updateFields.phone;
+            syncedOrgFields.push('phone');
+          }
+          if (updateFields.address !== undefined && updateFields.address !== org.address) {
+            orgSyncData.address = updateFields.address;
+            syncedOrgFields.push('address');
+          }
+          
+          // Update Organization if there are fields to sync
+          if (Object.keys(orgSyncData).length > 0) {
+            await org.update(orgSyncData);
+            console.log(`Synced Deal to Organization fields: ${syncedOrgFields.join(', ')}`, orgSyncData);
+          }
+        }
+      }
+    }
 
     // Update or create DealDetails
     if (Object.keys(dealDetailsFields).length > 0) {
       let dealDetails = await DealDetails.findOne({ where: { dealId } });
       if (dealDetails) {
         await dealDetails.update(dealDetailsFields);
+        console.log("DealDetails updated:", dealDetails.toJSON());
+        
+        // Synchronize relevant DealDetails fields to Deal table
+        const dealSyncData = {};
+        const syncedFields = [];
+        
+        // Map DealDetails fields to Deal fields (if any overlapping fields exist)
+        // Note: Add specific field mappings based on your schema requirements
+        // Example: if dealDetailsFields has fields that should sync to Deal table
+        
+        // Update Deal table if there are fields to sync
+        if (Object.keys(dealSyncData).length > 0) {
+          await deal.update(dealSyncData);
+          console.log(`Synced DealDetails to Deal fields: ${syncedFields.join(', ')}`, dealSyncData);
+        }
       } else {
-        await DealDetails.create({ dealId, ...dealDetailsFields });
+        dealDetails = await DealDetails.create({ dealId, ...dealDetailsFields });
+        console.log("DealDetails created:", dealDetails.toJSON());
+        
+        // Synchronize relevant DealDetails fields to Deal table for newly created DealDetails
+        const dealSyncData = {};
+        const syncedFields = [];
+        
+        // Map DealDetails fields to Deal fields (if any overlapping fields exist)
+        // Note: Add specific field mappings based on your schema requirements
+        
+        // Update Deal table if there are fields to sync
+        if (Object.keys(dealSyncData).length > 0) {
+          await deal.update(dealSyncData);
+          console.log(`Synced new DealDetails to Deal fields: ${syncedFields.join(', ')}`, dealSyncData);
+        }
       }
     }
 
@@ -3255,6 +3351,31 @@ exports.updateDeal = async (req, res) => {
         }
         if (Object.keys(personUpdate).length > 0) {
           await person.update(personUpdate);
+          console.log("Person updated:", person.toJSON());
+          
+          // Synchronize Person updates to Deal table
+          const dealSyncData = {};
+          const syncedFields = [];
+          
+          // Map Person fields to Deal fields
+          if (personUpdate.contactPerson !== undefined && personUpdate.contactPerson !== deal.contactPerson) {
+            dealSyncData.contactPerson = personUpdate.contactPerson;
+            syncedFields.push('contactPerson');
+          }
+          if (personUpdate.email !== undefined && personUpdate.email !== deal.email) {
+            dealSyncData.email = personUpdate.email;
+            syncedFields.push('email');
+          }
+          if (personUpdate.phone !== undefined && personUpdate.phone !== deal.phone) {
+            dealSyncData.phone = personUpdate.phone;
+            syncedFields.push('phone');
+          }
+          
+          // Update Deal table if there are fields to sync
+          if (Object.keys(dealSyncData).length > 0) {
+            await deal.update(dealSyncData);
+            console.log(`Synced Person to Deal fields: ${syncedFields.join(', ')}`, dealSyncData);
+          }
         }
       }
     }
@@ -3273,6 +3394,35 @@ exports.updateDeal = async (req, res) => {
         }
         if (Object.keys(orgUpdate).length > 0) {
           await org.update(orgUpdate);
+          console.log("Organization updated:", org.toJSON());
+          
+          // Synchronize Organization updates to Deal table
+          const dealSyncData = {};
+          const syncedFields = [];
+          
+          // Map Organization fields to Deal fields
+          if (orgUpdate.organization !== undefined && orgUpdate.organization !== deal.organization) {
+            dealSyncData.organization = orgUpdate.organization;
+            syncedFields.push('organization');
+          }
+          if (orgUpdate.email !== undefined && orgUpdate.email !== deal.email) {
+            dealSyncData.email = orgUpdate.email;
+            syncedFields.push('email');
+          }
+          if (orgUpdate.phone !== undefined && orgUpdate.phone !== deal.phone) {
+            dealSyncData.phone = orgUpdate.phone;
+            syncedFields.push('phone');
+          }
+          if (orgUpdate.address !== undefined && orgUpdate.address !== deal.address) {
+            dealSyncData.address = orgUpdate.address;
+            syncedFields.push('address');
+          }
+          
+          // Update Deal table if there are fields to sync
+          if (Object.keys(dealSyncData).length > 0) {
+            await deal.update(dealSyncData);
+            console.log(`Synced Organization to Deal fields: ${syncedFields.join(', ')}`, dealSyncData);
+          }
         }
       }
     }
@@ -5566,10 +5716,27 @@ exports.markDealAsLost = async (req, res) => {
   try {
     const { dealId } = req.params;
     const { lostReason } = req.body; // Accept lostReason from request body
+    const adminId = req.adminId;
 
-    const deal = await Deal.findByPk(dealId);
+    // Fetch deal with associated person to get email - no permission restrictions
+    const deal = await Deal.findOne({
+      where: { dealId },
+      include: [
+        {
+          model: Person,
+          as: "Person",
+          attributes: ["contactPerson", "email"],
+        },
+      ],
+    });
+    
     if (!deal) {
       return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Check if deal is already lost
+    if (deal.status === 'lost') {
+      return res.status(400).json({ message: "Deal is already marked as lost." });
     }
 
     await deal.update({ status: "lost" });
@@ -5590,11 +5757,91 @@ exports.markDealAsLost = async (req, res) => {
       });
     }
 
-    res.status(200).json({ message: "Deal marked as lost", deal });
-  } catch (error) {
-    console.log(error);
+    // Add a new entry to DealStageHistory
+    await DealStageHistory.create({
+      dealId,
+      stageName: deal.pipelineStage, // keep current stage
+      enteredAt: now,
+      note: "Marked as lost",
+    });
 
-    res.status(500).json({ message: "Internal server error" });
+    // Get admin email for sending feedback request
+    const adminUser = await MasterUser.findOne({ 
+      where: { masterUserID: adminId },
+      attributes: ['email']
+    });
+
+    // Check if admin user has email credentials configured for sending emails
+    let userCredential = null;
+    if (adminUser && adminUser.email) {
+      userCredential = await UserCredential.findOne({ 
+        where: { email: adminUser.email },
+        attributes: ['email', 'smtpHost', 'smtpPort', 'appPassword']
+      });
+    }
+
+    // Send feedback request email if all conditions are met
+    if (deal.Person && deal.Person.email && adminUser && adminUser.email && userCredential && userCredential.appPassword) {
+      const personFirstName = deal.Person.contactPerson || "Valued Client";
+      
+      const emailSubject = "Request for Feedback on Recent Contract Bid";
+      
+      const emailBody = `Dear ${personFirstName},
+
+We hope you're well. We recently received the notification that our bid for the contract was unsuccessful. Could you kindly provide feedback on our proposal? Your insights are valuable for us.
+
+Please share your feedback using this link: https://forms.gle/9NYTeVogMHaGeNdj9
+
+Thank you for your consideration.
+
+Best Regards,
+Earthood Team`;
+
+      try {
+        await sendEmail(adminUser.email, {
+          from: adminUser.email,
+          to: deal.Person.email,
+          subject: emailSubject,
+          text: emailBody,
+        });
+        console.log(`Feedback request email sent to ${deal.Person.email} for lost deal ${dealId}`);
+      } catch (emailError) {
+        console.error(`Failed to send feedback email for deal ${dealId}:`, emailError);
+        // Continue with the response even if email fails
+      }
+    } else {
+      // Log specific reasons why email wasn't sent
+      if (!deal.Person || !deal.Person.email) {
+        console.log(`No contact person email found for deal ${dealId}, skipping feedback email`);
+      }
+      if (!adminUser || !adminUser.email) {
+        console.log(`No admin email found for user ${adminId}, skipping feedback email`);
+      }
+      if (!userCredential) {
+        console.log(`No email credentials found for admin email ${adminUser?.email}, skipping feedback email`);
+      }
+      if (userCredential && !userCredential.appPassword) {
+        console.log(`No app password configured for admin email ${adminUser?.email}, skipping feedback email`);
+      }
+    }
+
+    res.status(200).json({ 
+      message: "Deal marked as lost", 
+      deal,
+      emailSent: !!(deal.Person && deal.Person.email && adminUser && adminUser.email && userCredential && userCredential.appPassword),
+      emailStatus: {
+        hasContactEmail: !!(deal.Person && deal.Person.email),
+        hasAdminEmail: !!(adminUser && adminUser.email),
+        hasCredentials: !!userCredential,
+        hasAppPassword: !!(userCredential && userCredential.appPassword)
+      }
+    });
+  } catch (error) {
+    console.error("Error in markDealAsLost:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
