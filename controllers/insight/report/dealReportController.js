@@ -253,7 +253,7 @@ exports.createDealPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Deal" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -313,7 +313,7 @@ exports.createDealPerformReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -2222,7 +2222,7 @@ exports.createDealConversionReport = async (req, res) => {
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Deal" && type === "Conversion") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -2266,7 +2266,7 @@ exports.createDealConversionReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -3754,7 +3754,7 @@ exports.createDealProgressReport = async (req, res) => {
     let totalValue = 0;
     let summary = {};
 
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Deal" && type === "Progress") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -3815,7 +3815,7 @@ exports.createDealProgressReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -5418,7 +5418,7 @@ exports.createDealDurationReport = async (req, res) => {
     let totalValue = 0;
     let reportConfig = {};
 
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Deal" && type === "Duration") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -5463,7 +5463,7 @@ exports.createDealDurationReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });

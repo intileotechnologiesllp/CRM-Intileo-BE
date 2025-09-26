@@ -290,7 +290,7 @@ exports.createLeadPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Lead" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -351,7 +351,7 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -2533,7 +2533,7 @@ exports.createLeadConversionReport = async (req, res) => {
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Lead" && type === "Conversion") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -2594,7 +2594,7 @@ exports.createLeadConversionReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });

@@ -360,7 +360,7 @@ exports.createActivityReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Activity" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -421,7 +421,7 @@ exports.createActivityReport = async (req, res) => {
           });
         }
       }
-    } else if (!entity && !type && reportId) {
+    } else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
