@@ -407,7 +407,7 @@ exports.getActivities = async (req, res) => {
         {
           model: Deal,
           as: "ActivityDeal", // Use the alias here
-          attributes: hasDealColumns ? dealColumns : ["dealId", "title"], // Include checked Deal columns or default
+          attributes: hasDealColumns ? dealColumns : ["dealId"], // Include checked Deal columns or default
           required: entityType === "Deal", // Apply filter only for Deal entity type
           where:
             entityType === "Deal" &&
@@ -445,13 +445,17 @@ exports.getActivities = async (req, res) => {
       const data = activity.get ? activity.get({ plain: true }) : activity;
       const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
         data;
-      let title = null;
       let result = { ...rest };
       
-      if (rest.leadId && ActivityLead) {
-        title = ActivityLead.title;
-      } else if (rest.dealId && ActivityDeal) {
-        title = ActivityDeal.title;
+      // Only add title if it's in the selected attributes or no preferences are set
+      if (!attributes || attributes.includes('title')) {
+        let title = null;
+        if (rest.leadId && ActivityLead) {
+          title = ActivityLead.title;
+        } else if (rest.dealId && ActivityDeal) {
+          title = ActivityDeal.title;
+        }
+        result.title = title;
       }
       
       // Add deal columns to ALL activities if columns are checked (show null if no deal linked)
@@ -467,15 +471,24 @@ exports.getActivities = async (req, res) => {
         });
       }
       
-      return {
-        ...result,
-        title,
-        organization: ActivityOrganization
+      // Only add organization if it's in the selected attributes or no preferences are set
+      if (!attributes || attributes.includes('organization')) {
+        result.organization = ActivityOrganization
           ? ActivityOrganization.organization
-          : null,
-        contactPerson: ActivityPerson ? ActivityPerson.contactPerson : null,
-        email: ActivityPerson ? ActivityPerson.email : null,
-      };
+          : null;
+      }
+      
+      // Only add contactPerson if it's in the selected attributes or no preferences are set
+      if (!attributes || attributes.includes('contactPerson')) {
+        result.contactPerson = ActivityPerson ? ActivityPerson.contactPerson : null;
+      }
+      
+      // Only add email if it's in the selected attributes or no preferences are set
+      if (!attributes || attributes.includes('email')) {
+        result.email = ActivityPerson ? ActivityPerson.email : null;
+      }
+      
+      return result;
     });
 
     res.status(200).json({
