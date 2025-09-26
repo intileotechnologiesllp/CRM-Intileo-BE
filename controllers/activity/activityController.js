@@ -370,13 +370,13 @@ exports.getActivities = async (req, res) => {
     const alwaysInclude = [
       "dealId",
       "leadId",
-      "assignedTo",
+      // "assignedTo",
       "leadOrganizationId",
       "personId",
       "activityId",
-      "type",
-      "startDateTime",
-      "endDateTime",
+      // "type",
+      // "startDateTime",
+      // "endDateTime",
       "priority",
       "status"
     ];
