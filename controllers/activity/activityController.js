@@ -377,8 +377,8 @@ exports.getActivities = async (req, res) => {
       // "type",
       // "startDateTime",
       // "endDateTime",
-      "priority",
-      "status"
+      // "priority",
+      // "status"
     ];
     if (attributes) {
       alwaysInclude.forEach((field) => {
