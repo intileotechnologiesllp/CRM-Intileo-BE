@@ -60,7 +60,9 @@ exports.createDeal = async (req, res) => {
       email,
       sourceOrgin,
       source,
-      label
+      label,
+      // Activity ID to link existing activity (similar to emailID)
+      activityId
       // Custom fields will be processed from remaining req.body fields
     } = req.body;
     // --- Enhanced validation similar to createLead ---
@@ -404,6 +406,40 @@ exports.createDeal = async (req, res) => {
         { where: { emailID: req.body.emailID } }
       );
     }
+
+    // Link activity to deal if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to deal ${deal.dealId}`);
+        const activityUpdateResult = await Activity.update(
+          { dealId: deal.dealId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        } else {
+          // Log the activity linking in history
+          await historyLogger(
+            dealProgramId,
+            "ACTIVITY_LINKING",
+            req.adminId,
+            activityId,
+            req.adminId,
+            `Activity ${activityId} linked to deal ${deal.dealId} by ${req.role}`,
+            {
+              dealId: deal.dealId,
+              activityId: activityId,
+            }
+          );
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to deal:", activityError);
+        // Don't fail the deal creation, just log the error
+      }
+    }
+
     await DealDetails.create({
       dealId: deal.dealId, // or deal.id depending on your PK
       responsiblePerson,
@@ -636,11 +672,23 @@ exports.createDeal = async (req, res) => {
       customFields: savedCustomFields,
     };
 
-    res.status(201).json({
-      message: "deal created successfully",
+    const response = {
+      message: activityId 
+        ? "Deal created and linked to activity successfully" 
+        : "Deal created successfully",
       deal: dealResponse,
       customFieldsSaved: Object.keys(savedCustomFields).length,
-    });
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     console.log("Error creating deal:", error);
 
