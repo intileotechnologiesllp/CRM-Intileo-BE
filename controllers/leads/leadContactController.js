@@ -2809,6 +2809,8 @@ exports.createPerson = async (req, res) => {
       jobTitle,
       personLabels,
       organization, // may be undefined or empty
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
       ...rest
     } = req.body;
 
@@ -2927,6 +2929,25 @@ exports.createPerson = async (req, res) => {
       }
     }
 
+    // Link activity to person if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to person ${person.personId}`);
+        const activityUpdateResult = await Activities.update(
+          { personId: person.personId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to person:", activityError);
+        // Don't fail the person creation, just log the error
+      }
+    }
+
     // Prepare response with multiple emails and phones
     const personResponse = {
       ...person.toJSON(),
@@ -2934,10 +2955,22 @@ exports.createPerson = async (req, res) => {
       phones: phoneList, // Include all phones in response
     };
 
-    res.status(201).json({ 
-      message: "Person created successfully", 
-      person: personResponse 
-    });
+    const response = {
+      message: activityId 
+        ? "Person created and linked to activity successfully" 
+        : "Person created successfully",
+      person: personResponse
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     console.error("Error creating person:", error);
 
@@ -3027,8 +3060,15 @@ exports.createOrganization = async (req, res) => {
         .status(400)
         .json({ message: "Organization name is required." });
     }
-    const { organization, organizationLabels, address, visibleTo, ...rest } =
-      req.body;
+    const { 
+      organization, 
+      organizationLabels, 
+      address, 
+      visibleTo, 
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
+      ...rest 
+    } = req.body;
 
     // Check if organization already exists
     const existingOrg = await Organization.findOne({ where: { organization } });
@@ -3085,10 +3125,41 @@ exports.createOrganization = async (req, res) => {
       }
     }
 
-    res.status(201).json({
-      message: "Organization created successfully",
+    // Link activity to organization if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to organization ${org.leadOrganizationId}`);
+        const activityUpdateResult = await Activities.update(
+          { leadOrganizationId: org.leadOrganizationId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to organization:", activityError);
+        // Don't fail the organization creation, just log the error
+      }
+    }
+
+    const response = {
+      message: activityId 
+        ? "Organization created and linked to activity successfully" 
+        : "Organization created successfully",
       organization: org,
-    });
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     console.error("Error creating organization:", error);
     res.status(500).json({ message: "Internal server error" });

@@ -750,7 +750,7 @@ exports.updateActivity = async (req, res) => {
       await Person.update(
         {
           ...(updateFields.contactPerson && {
-            name: updateFields.contactPerson,
+            contactPerson: updateFields.contactPerson,
           }),
           ...(updateFields.email && { email: updateFields.email }),
         },
@@ -761,7 +761,7 @@ exports.updateActivity = async (req, res) => {
     // Update Organizations if needed
     if (updateFields.leadOrganizationId && updateFields.organization) {
       await Organizations.update(
-        { name: updateFields.organization },
+        { organization: updateFields.organization },
         { where: { leadOrganizationId: updateFields.leadOrganizationId } }
       );
     }

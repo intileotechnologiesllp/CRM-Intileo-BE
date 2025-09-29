@@ -153,6 +153,8 @@ exports.createLead = async (req, res) => {
     stage,
     productName,
     sourceOriginID,
+    // Activity ID to link existing activity (similar to emailID)
+    activityId,
   } = req.body;
 
   // Collect custom fields from root level (not in standardFields)
@@ -423,6 +425,39 @@ exports.createLead = async (req, res) => {
       sourceOrgin: sourceOrgin,
     });
 
+    // Link activity to lead if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to lead ${lead.leadId}`);
+        const activityUpdateResult = await Activity.update(
+          { leadId: lead.leadId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        } else {
+          // Log the activity linking in history
+          await historyLogger(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "ACTIVITY_LINKING",
+            req.adminId,
+            activityId,
+            req.adminId,
+            `Activity ${activityId} linked to lead ${lead.leadId} by ${req.role}`,
+            {
+              leadId: lead.leadId,
+              activityId: activityId,
+            }
+          );
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to lead:", activityError);
+        // Don't fail the lead creation, just log the error
+      }
+    }
+
     // Handle custom fields if provided
     const savedCustomFields = {};
     if (customFields && Object.keys(customFields).length > 0) {
@@ -511,11 +546,23 @@ exports.createLead = async (req, res) => {
       customFields: savedCustomFields,
     };
 
-    res.status(201).json({
-      message: "Lead created successfully",
+    const response = {
+      message: activityId 
+        ? "Lead created and linked to activity successfully" 
+        : "Lead created successfully",
       lead: leadResponse,
       customFieldsSaved: Object.keys(savedCustomFields).length,
-    });
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
     console.error("Error creating lead:", error);
 
