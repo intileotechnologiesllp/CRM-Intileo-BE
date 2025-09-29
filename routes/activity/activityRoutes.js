@@ -7,6 +7,7 @@ const activitySettingsMiddleware = require("../../middlewares/activitySettingsMi
 
 router.post("/create-activity", verifyToken, activityController.createActivity);
 router.get("/get-activities", verifyToken,activityController.getActivities);
+router.get("/get-activity/:activityId", verifyToken, activityController.getActivityById);
 router.delete("/delete-activity/:activityId", verifyToken, activityController.deleteActivity);
 router.get(
   "/mark-as-done/:activityId",

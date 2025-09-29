@@ -503,6 +503,122 @@ exports.getActivities = async (req, res) => {
   }
 };
 
+exports.getActivityById = async (req, res) => {
+  try {
+    const { activityId } = req.params;
+    const masterUserID = req.adminId;
+    const role = req.role;
+
+    // Build the where condition based on role
+    const whereCondition = { activityId: activityId };
+    
+    // Only include masterUserID if role is not admin
+    if (role !== 'admin') {
+      whereCondition[Op.or] = [
+        { masterUserID: masterUserID },
+        { assignedTo: masterUserID },
+      ];
+    }
+
+    // Fetch the activity with all related data
+    const activity = await Activity.findOne({
+      where: whereCondition,
+      include: [
+        {
+          model: Lead,
+          as: "ActivityLead",
+          required: false,
+          attributes: ["leadId", "title", "contactPerson", "organization", "value"]
+        },
+        {
+          model: Deal,
+          as: "ActivityDeal",
+          required: false,
+          attributes: ["dealId", "title", "value", "currency", "status", "pipelineStage"]
+        },
+        {
+          model: Organizations,
+          as: "ActivityOrganization",
+          required: false,
+          attributes: ["leadOrganizationId", "organization", "address", "organizationLabels"]
+        },
+        {
+          model: Person,
+          as: "ActivityPerson",
+          required: false,
+          attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"]
+        }
+      ]
+    });
+
+    if (!activity) {
+      return res.status(404).json({
+        message: "Activity not found or you don't have permission to view it"
+      });
+    }
+
+    // Format the response
+    const activityData = activity.get ? activity.get({ plain: true }) : activity;
+    const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...activityFields } = activityData;
+
+    // Parse guests if it's a JSON string
+    if (activityFields.guests && typeof activityFields.guests === 'string') {
+      try {
+        activityFields.guests = JSON.parse(activityFields.guests);
+      } catch (e) {
+        // Keep as string if parsing fails
+      }
+    }
+
+    // Build the formatted response
+    const formattedActivity = {
+      ...activityFields,
+      // Related entities data
+      lead: ActivityLead ? {
+        leadId: ActivityLead.leadId,
+        title: ActivityLead.title,
+        contactPerson: ActivityLead.contactPerson,
+        organization: ActivityLead.organization,
+        value: ActivityLead.value,
+        // currency: ActivityLead.currency
+      } : null,
+      deal: ActivityDeal ? {
+        dealId: ActivityDeal.dealId,
+        title: ActivityDeal.title,
+        value: ActivityDeal.value,
+        // currency: ActivityDeal.currency,
+        status: ActivityDeal.status,
+        pipelineStage: ActivityDeal.pipelineStage
+      } : null,
+      organization: ActivityOrganization ? {
+        leadOrganizationId: ActivityOrganization.leadOrganizationId,
+        organization: ActivityOrganization.organization,
+        address: ActivityOrganization.address,
+        organizationLabels: ActivityOrganization.organizationLabels
+      } : null,
+      person: ActivityPerson ? {
+        personId: ActivityPerson.personId,
+        contactPerson: ActivityPerson.contactPerson,
+        email: ActivityPerson.email,
+        phone: ActivityPerson.phone,
+        jobTitle: ActivityPerson.jobTitle
+      } : null
+    };
+
+    res.status(200).json({
+      message: "Activity retrieved successfully",
+      activity: formattedActivity
+    });
+
+  } catch (error) {
+    console.error("Error fetching activity:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
 
 
 const operatorMap = {
@@ -2186,3 +2302,4 @@ exports.getActivityFilterFields = async (req, res) => {
       .json({ message: "Internal server error", error: error.message });
   }
 };
+
