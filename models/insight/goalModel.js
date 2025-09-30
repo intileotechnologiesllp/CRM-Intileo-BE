@@ -94,6 +94,21 @@ const Goal = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    colors: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null,
+    },
+    graphType: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: "bar",
+    },
+    config: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null,
+    },
   },
   {
     tableName: "Goals",
