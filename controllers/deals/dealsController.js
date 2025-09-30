@@ -4758,10 +4758,37 @@ exports.getDealDetail = async (req, res) => {
       limit: 40, // fetch more to cover both
       order: [["startDateTime", "DESC"]],
     });
-    // Deduplicate activities by activityId or id
+    
+    // Deduplicate activities by activityId or id and add assignedToName
     if (activities.length > 0) {
       const actMap = new Map();
-      activities.forEach((a) => actMap.set(a.activityId || a.id, a));
+      
+      // Get unique assignedTo IDs to fetch user names in bulk
+      const assignedToIds = [...new Set(activities.map(a => a.assignedTo).filter(id => id))];
+      
+      // Fetch all assigned users in one query
+      const assignedUsers = await MasterUser.findAll({
+        where: {
+          masterUserID: { [Op.in]: assignedToIds }
+        },
+        attributes: ["masterUserID", "name"],
+        raw: true
+      });
+      
+      // Create a map for quick lookup
+      const userMap = new Map();
+      assignedUsers.forEach(user => {
+        userMap.set(user.masterUserID, user.name);
+      });
+      
+      // Process activities and add assignedToName
+      activities.forEach((a) => {
+        const activityData = a.toJSON();
+        // Add assignedToName using the user map
+        activityData.assignedToName = userMap.get(a.assignedTo) || null;
+        actMap.set(a.activityId || a.id, activityData);
+      });
+      
       activities = Array.from(actMap.values());
     }
 

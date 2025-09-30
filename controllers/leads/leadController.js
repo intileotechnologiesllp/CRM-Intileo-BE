@@ -3991,10 +3991,41 @@ exports.getAllLeadDetails = async (req, res) => {
     });
 
     const leadDetails = await LeadDetails.findOne({ where: { leadId } });
-    const activities = await Activity.findAll({
+    
+    // Fetch activities with assigned user names
+    let activities = await Activity.findAll({
       where: { leadId },
       order: [["startDateTime", "DESC"]],
     });
+    
+    // Add assignedToName to activities
+    if (activities.length > 0) {
+      // Get unique assignedTo IDs to fetch user names in bulk
+      const assignedToIds = [...new Set(activities.map(a => a.assignedTo).filter(id => id))];
+      
+      // Fetch all assigned users in one query
+      const assignedUsers = await MasterUser.findAll({
+        where: {
+          masterUserID: { [Op.in]: assignedToIds }
+        },
+        attributes: ["masterUserID", "name"],
+        raw: true
+      });
+      
+      // Create a map for quick lookup
+      const userMap = new Map();
+      assignedUsers.forEach(user => {
+        userMap.set(user.masterUserID, user.name);
+      });
+      
+      // Process activities and add assignedToName
+      activities = activities.map(a => {
+        const activityData = a.toJSON();
+        // Add assignedToName using the user map
+        activityData.assignedToName = userMap.get(a.assignedTo) || null;
+        return activityData;
+      });
+    }
 
     // Fetch all active custom fields for leads
     const allCustomFields = await CustomField.findAll({
