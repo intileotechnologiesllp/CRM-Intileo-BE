@@ -70,6 +70,7 @@ router.post("/bulk-edit", verifyToken,  validatePrivilege(2, "edit"), leadContro
 router.post("/bulk-delete", verifyToken,  validatePrivilege(2, "delete"), leadController.bulkDeleteLeads);
 router.post("/bulk-archive", verifyToken,  validatePrivilege(2, "create"), leadController.bulkArchiveLeads);
 router.post("/bulk-unarchive", verifyToken,  validatePrivilege(2, "create"), leadController.bulkUnarchiveLeads);
+router.post("/bulk-convert-to-deals", verifyToken, validatePrivilege(2, "create"), leadController.convertBulkLeadsToDeals);
 // router.post('/bulk-import', verifyToken,upload.single('file'), leadController.bulkImportLeads);
 
 module.exports = router;
