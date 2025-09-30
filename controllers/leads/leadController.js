@@ -3,6 +3,7 @@ const LeadFilter = require("../../models/leads/leadFiltersModel");
 //const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import LeadDetails model
 const { Op } = require("sequelize"); // Import Sequelize operators
 const Sequelize = require("sequelize");
+const sequelize = require("../../config/db"); // Import sequelize instance for transactions
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
@@ -19,6 +20,8 @@ const UserCredential = require("../../models/email/userCredentialModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadNote = require("../../models/leads/leadNoteModel"); // Import LeadNote model
 const Deal = require("../../models/deals/dealsModels"); // Import Deal model
+const DealDetails = require("../../models/deals/dealsDetailModel"); // Import DealDetails model
+const DealNote = require("../../models/deals/delasNoteModel"); // Import DealNote model
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const {
@@ -666,7 +669,7 @@ exports.getLeads = async (req, res) => {
     isArchived,
     search,
     page = 1,
-    limit = 500,
+    limit = 300,
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
@@ -801,7 +804,7 @@ exports.getLeads = async (req, res) => {
       });
     } else if (pref && pref.columns) {
       // If preferences exist but no LeadDetails columns are checked, include minimal LeadDetails with currency
-      const minimalAttributes = ['id'];
+      const minimalAttributes = ['leadDetailsId'];
       if (Object.keys(LeadDetails.rawAttributes).includes("currency")) {
         minimalAttributes.push("currency");
       }
@@ -5748,6 +5751,405 @@ exports.bulkUnarchiveLeads = async (req, res) => {
 
     res.status(500).json({
       message: "Internal server error during bulk unarchive",
+      error: error.message,
+    });
+  }
+};
+
+// Convert multiple leads to deals
+exports.convertBulkLeadsToDeals = async (req, res) => {
+  const { leadIds, dealData = {} } = req.body;
+
+  // Validation
+  if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message: "leadIds array is required and must contain at least one lead ID.",
+    });
+  }
+
+  // Limit bulk operations to reasonable size
+  if (leadIds.length > 100) {
+    return res.status(400).json({
+      message: "Maximum 100 leads can be converted at once.",
+    });
+  }
+
+  try {
+    // Check if user has permission to convert leads
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "BULK_LEAD_CONVERSION",
+        req.adminId,
+        "Access denied. You do not have permission to convert leads to deals.",
+        null
+      );
+      return res.status(403).json({
+        message: "Access denied. You do not have permission to convert leads to deals.",
+      });
+    }
+
+    // Get user's visibility permissions for validation
+    const userPermissions = await getUserLeadVisibilityPermissions(req.adminId, req.role);
+
+    // Fetch all leads to be converted with related data
+    let whereClause = {
+      leadId: { [Op.in]: leadIds },
+      isArchived: false, // Only convert non-archived leads
+      dealId: null // Only convert leads that haven't been converted yet
+    };
+
+    // Apply visibility filtering for non-admin users
+    if (req.role !== "admin") {
+      if (userPermissions.canEdit === "owner_only") {
+        whereClause[Op.or] = [
+          { masterUserID: req.adminId },
+          { ownerId: req.adminId }
+        ];
+      } else if (userPermissions.canEdit === "group_only" && userPermissions.userGroup) {
+        // Get group members
+        const groupMembers = await GroupMembership.findAll({
+          where: {
+            groupId: userPermissions.userGroup.groupId,
+            isActive: true,
+          },
+          attributes: ["userId"],
+        });
+        const memberIds = groupMembers.map((member) => member.userId);
+        
+        whereClause[Op.or] = [
+          { masterUserID: { [Op.in]: memberIds } },
+          { ownerId: { [Op.in]: memberIds } }
+        ];
+      }
+    }
+
+    const leads = await Lead.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: LeadDetails,
+          as: "details",
+          required: false,
+        },
+        {
+          model: Person,
+          as: "LeadPerson",
+          required: false,
+        },
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          required: false,
+        },
+      ],
+    });
+
+    if (leads.length === 0) {
+      return res.status(404).json({
+        message: "No eligible leads found for conversion. Leads may already be converted, archived, or you may not have permission to access them.",
+        requestedIds: leadIds,
+      });
+    }
+
+    if (leads.length < leadIds.length) {
+      const foundIds = leads.map(lead => lead.leadId);
+      const notFoundIds = leadIds.filter(id => !foundIds.includes(id));
+      console.warn(`Some leads were not found or not eligible: ${notFoundIds.join(', ')}`);
+    }
+
+    // Get owner information
+    const owner = await MasterUser.findOne({
+      where: { masterUserID: req.adminId },
+    });
+    const ownerName = owner ? owner.name : null;
+
+    const convertedDeals = [];
+    const failedConversions = [];
+    const transaction = await sequelize.transaction();
+
+    try {
+      // Process each lead conversion
+      for (const lead of leads) {
+        try {
+          // Prepare deal data by mapping lead fields to deal fields
+          const dealPayload = {
+            // Core identification
+            leadId: lead.leadId,
+            personId: lead.personId,
+            leadOrganizationId: lead.leadOrganizationId,
+            
+            // Contact information (from lead)
+            contactPerson: lead.contactPerson,
+            organization: lead.organization,
+            phone: lead.phone,
+            email: lead.email,
+            
+            // Deal-specific information
+            title: dealData.title || lead.title || `Deal: ${lead.title}`,
+            value: dealData.value || lead.value || lead.proposalValue || 0,
+            currency: dealData.currency || lead.valueCurrency || lead.proposalValueCurrency || "INR",
+            
+            // Pipeline information
+            pipeline: dealData.pipeline || lead.pipeline || "Default Pipeline",
+            stage: dealData.stage || lead.stage || "New Deal",
+            pipelineStage: dealData.pipelineStage || lead.stage || "New Deal",
+            
+            // Dates
+            expectedCloseDate: dealData.expectedCloseDate || lead.expectedCloseDate,
+            
+            // Source information
+            sourceChannel: lead.sourceChannel,
+            sourceChannelId: lead.sourceChannelID,
+            sourceOrgin: lead.sourceOrgin,
+            source: dealData.source || lead.sourceChannel,
+            
+            // Business information
+            serviceType: lead.serviceType,
+            proposalValue: lead.proposalValue,
+            proposalCurrency: lead.proposalValueCurrency || "INR",
+            esplProposalNo: lead.esplProposalNo,
+            projectLocation: lead.projectLocation,
+            organizationCountry: lead.organizationCountry,
+            proposalSentDate: lead.proposalSentDate,
+            sbuClass: lead.SBUClass,
+            
+            // System fields
+            masterUserID: req.adminId,
+            ownerId: dealData.ownerId || lead.ownerId || req.adminId,
+            
+            // Additional deal fields
+            label: dealData.label,
+            productName: dealData.productName || lead.productName,
+            probability: dealData.probability || 50, // Default probability
+            
+            // Currency fields
+            valueCurrency: dealData.valueCurrency || lead.valueCurrency || "INR",
+            proposalValueCurrency: dealData.proposalValueCurrency || lead.proposalValueCurrency || "INR",
+            
+            // Status
+            status: dealData.status || "Open",
+            isArchived: false,
+          };
+
+          // Create the deal
+          const newDeal = await Deal.create(dealPayload, { transaction });
+
+          // Create deal details if lead has details
+          if (lead.details) {
+            await DealDetails.create({
+              dealId: newDeal.dealId,
+              responsiblePerson: lead.details.responsiblePerson || ownerName,
+              sourceOrgin: lead.details.sourceOrgin || lead.sourceOrgin,
+              currency: lead.details.currency || dealPayload.currency,
+            }, { transaction });
+          }
+
+          // Update the lead to mark it as converted
+          await Lead.update(
+            { 
+              dealId: newDeal.dealId,
+              status: "Converted to Deal",
+            },
+            { 
+              where: { leadId: lead.leadId },
+              transaction 
+            }
+          );
+
+          // Copy custom fields from lead to deal
+          try {
+            const leadCustomFields = await CustomFieldValue.findAll({
+              where: {
+                entityId: lead.leadId,
+                entityType: "lead",
+              },
+              include: [
+                {
+                  model: CustomField,
+                  as: "CustomField",
+                  where: {
+                    isActive: true,
+                    entityType: { [Op.in]: ["lead", "deal", "both"] }, // Fields that can be applied to deals
+                  },
+                  required: true,
+                },
+              ],
+              transaction,
+            });
+
+            // Create corresponding deal custom fields
+            for (const leadCustomField of leadCustomFields) {
+              // Check if a similar custom field exists for deals
+              let dealCustomField = await CustomField.findOne({
+                where: {
+                  fieldName: leadCustomField.CustomField.fieldName,
+                  entityType: { [Op.in]: ["deal", "both"] },
+                  isActive: true,
+                  [Op.or]: [
+                    { masterUserID: req.adminId },
+                    { fieldSource: "default" },
+                    { fieldSource: "system" },
+                  ],
+                },
+                transaction,
+              });
+
+              if (dealCustomField) {
+                await CustomFieldValue.create({
+                  fieldId: dealCustomField.fieldId,
+                  entityId: newDeal.dealId,
+                  entityType: "deal",
+                  value: leadCustomField.value,
+                  masterUserID: req.adminId,
+                }, { transaction });
+              }
+            }
+          } catch (customFieldError) {
+            console.warn(`Failed to copy custom fields for lead ${lead.leadId}:`, customFieldError.message);
+            // Don't fail the conversion, just log the warning
+          }
+
+          // Link activities from lead to deal
+          try {
+            await Activity.update(
+              { dealId: newDeal.dealId },
+              { 
+                where: { leadId: lead.leadId },
+                transaction 
+              }
+            );
+          } catch (activityError) {
+            console.warn(`Failed to link activities for lead ${lead.leadId}:`, activityError.message);
+          }
+
+          // Link emails from lead to deal
+          try {
+            await Email.update(
+              { dealId: newDeal.dealId },
+              { 
+                where: { leadId: lead.leadId },
+                transaction 
+              }
+            );
+          } catch (emailError) {
+            console.warn(`Failed to link emails for lead ${lead.leadId}:`, emailError.message);
+          }
+
+          // Copy lead notes to deal notes
+          try {
+            const leadNotes = await LeadNote.findAll({
+              where: { leadId: lead.leadId },
+              transaction,
+            });
+
+            for (const note of leadNotes) {
+              await DealNote.create({
+                dealId: newDeal.dealId,
+                note: note.note,
+                masterUserID: note.masterUserID,
+                createdAt: note.createdAt,
+              }, { transaction });
+            }
+          } catch (noteError) {
+            console.warn(`Failed to copy notes for lead ${lead.leadId}:`, noteError.message);
+          }
+
+          convertedDeals.push({
+            leadId: lead.leadId,
+            dealId: newDeal.dealId,
+            title: newDeal.title,
+            contactPerson: newDeal.contactPerson,
+            organization: newDeal.organization,
+            value: newDeal.value,
+            currency: newDeal.currency,
+            stage: newDeal.stage,
+          });
+
+          // Log the successful conversion
+          await historyLogger(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "LEAD_TO_DEAL_CONVERSION",
+            req.adminId,
+            lead.leadId,
+            newDeal.dealId,
+            `Lead "${lead.title}" converted to deal by ${req.role}`,
+            {
+              leadId: lead.leadId,
+              dealId: newDeal.dealId,
+              convertedBy: req.adminId,
+              conversionDate: new Date(),
+            },
+            transaction
+          );
+
+        } catch (individualError) {
+          console.error(`Failed to convert lead ${lead.leadId}:`, individualError);
+          failedConversions.push({
+            leadId: lead.leadId,
+            title: lead.title,
+            error: individualError.message,
+          });
+        }
+      }
+
+      // Commit the transaction if at least one conversion succeeded
+      if (convertedDeals.length > 0) {
+        await transaction.commit();
+
+        // Log the bulk conversion audit trail
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "BULK_LEAD_TO_DEAL_CONVERSION",
+          req.adminId,
+          `Bulk conversion completed: ${convertedDeals.length} leads converted to deals, ${failedConversions.length} failed`,
+          {
+            convertedCount: convertedDeals.length,
+            failedCount: failedConversions.length,
+            convertedLeadIds: convertedDeals.map(d => d.leadId),
+            failedLeadIds: failedConversions.map(f => f.leadId),
+          }
+        );
+
+        return res.status(200).json({
+          message: `Bulk lead conversion completed successfully`,
+          summary: {
+            totalRequested: leadIds.length,
+            totalEligible: leads.length,
+            successfulConversions: convertedDeals.length,
+            failedConversions: failedConversions.length,
+          },
+          convertedDeals,
+          failedConversions: failedConversions.length > 0 ? failedConversions : undefined,
+        });
+
+      } else {
+        // Rollback if no conversions succeeded
+        await transaction.rollback();
+        return res.status(400).json({
+          message: "No leads were successfully converted to deals",
+          failedConversions,
+        });
+      }
+
+    } catch (transactionError) {
+      await transaction.rollback();
+      throw transactionError;
+    }
+
+  } catch (error) {
+    console.error("Error during bulk lead to deal conversion:", error);
+
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "BULK_LEAD_TO_DEAL_CONVERSION",
+      req.adminId,
+      "Error during bulk lead to deal conversion: " + error.message,
+      null
+    );
+
+    res.status(500).json({
+      message: "Internal server error during bulk lead to deal conversion",
       error: error.message,
     });
   }
