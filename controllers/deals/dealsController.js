@@ -4746,6 +4746,34 @@ exports.getDealDetail = async (req, res) => {
       notes = Array.from(noteMap.values());
     }
 
+    // Add creator names to notes
+    if (notes.length > 0) {
+      // Get unique creator IDs from notes
+      const creatorIds = [...new Set(notes.map(n => n.createdBy).filter(id => id))];
+      
+      // Fetch all creator users in one query
+      const creatorUsers = await MasterUser.findAll({
+        where: {
+          masterUserID: { [Op.in]: creatorIds }
+        },
+        attributes: ["masterUserID", "name"],
+        raw: true
+      });
+      
+      // Create a map for quick lookup
+      const creatorMap = new Map();
+      creatorUsers.forEach(user => {
+        creatorMap.set(user.masterUserID, user.name);
+      });
+      
+      // Add creatorName to each note
+      notes = notes.map(note => {
+        const noteData = note.toJSON ? note.toJSON() : note;
+        noteData.creatorName = creatorMap.get(note.createdBy) || null;
+        return noteData;
+      });
+    }
+
     // Fetch activities for this deal and its linked lead (if any)
     // Fetch activities for this deal and its linked lead (if any) using Activity model
     let activities = await Activity.findAll({
