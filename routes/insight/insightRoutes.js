@@ -82,6 +82,7 @@ router.delete(
 router.get("/goal-types", insightController.getGoalTypes);
 router.post("/create-goals", verifyToken, insightController.createGoal);
 router.get("/get-goals", verifyToken, insightController.getAllGoals);
+router.get("/get-goalsdashboardwise/:dashboardId", verifyToken, insightController.getAllGoalsDashboardWsie);
 router.get(
   "/dashboards/:dashboardId/goals",
   verifyToken,
@@ -109,7 +110,7 @@ router.get(
 //   insightController.getProgressedGoalData
 // );
 router.post("/edit-goals/:goalId", verifyToken, insightController.updateGoal);
-router.delete("/delete-goals/:goalId", verifyToken, insightController.deleteGoal);
+router.delete("/delete-goal/:goalId", verifyToken, insightController.deleteGoal);
 router.post("/bulk-delete-goals", verifyToken, insightController.bulkDeleteGoal);
 router.post(
   "/dashboards/:dashboardId/goals/reorder",
