@@ -4859,6 +4859,13 @@ const getAggregatedLinkedEntities = async (emails) => {
         dueDate: activity.dueDate,
         isDone: activity.isDone,
         createdAt: activity.createdAt,
+        assignedTo: activity.assignedTo,
+        contactPerson: activity.contactPerson,
+        organization: activity.organization,
+        personId: activity.personId,
+        leadId: activity.leadId,
+        dealId: activity.dealId,
+        leadOrganizationId: activity.leadOrganizationId,
       });
     });
 
