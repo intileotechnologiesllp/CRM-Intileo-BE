@@ -2727,6 +2727,75 @@ exports.reorderGoals = async (req, res) => {
   }
 };
 
+exports.removeGoalFromDashboard = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+    const { dashboardId } = req.body;
+
+    // Validate dashboardId
+    if (!dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID is required",
+      });
+    }
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    // Check if goal has a dashboardId
+    if (!goal.dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Goal is not associated with any dashboard",
+      });
+    }
+
+    // Check if the goal's dashboardId matches the requested dashboardId
+    if (goal.dashboardId.toString() !== dashboardId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "Goal is not associated with the specified dashboard",
+      });
+    }
+
+    // Remove the dashboard association by setting dashboardId to null
+    await goal.update({
+      dashboardId: null
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goal removed from dashboard successfully",
+      data: {
+        goalId,
+        goalDescription: goal.description,
+        removedFromDashboard: dashboardId,
+        remainingDashboard: null
+      }
+    });
+  } catch (error) {
+    console.error("Error removing goal from dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove goal from dashboard",
+      error: error.message,
+    });
+  }
+};
+
 exports.softDeleteGoal = async (req, res) => {
   try {
     const { goalId } = req.params;
@@ -7587,6 +7656,92 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to get reports for dashboard",
+      error: error.message,
+    });
+  }
+};
+
+exports.removeReportFromDashboard = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const ownerId = req.adminId;
+    const { dashboardId } = req.body;
+
+    // Validate dashboardId
+    if (!dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID is required",
+      });
+    }
+
+    const report = await Report.findOne({
+      where: {
+        reportId,
+        ownerId,
+      },
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    // Check if report has any dashboardIds
+    if (!report.dashboardIds) {
+      return res.status(400).json({
+        success: false,
+        message: "Report is not associated with any dashboard",
+      });
+    }
+
+    // Convert dashboardIds to array
+    let dashboardIdsArray = [];
+    if (typeof report.dashboardIds === 'string') {
+      dashboardIdsArray = report.dashboardIds.split(',').map(id => id.trim());
+    } else if (Array.isArray(report.dashboardIds)) {
+      dashboardIdsArray = report.dashboardIds;
+    }
+
+    // Check if the dashboardId exists in the report's dashboardIds
+    if (!dashboardIdsArray.includes(dashboardId.toString())) {
+      return res.status(400).json({
+        success: false,
+        message: "Report is not associated with the specified dashboard",
+      });
+    }
+
+    // Remove the specific dashboardId
+    const updatedDashboardIds = dashboardIdsArray.filter(id => id !== dashboardId.toString());
+    
+    // Prepare new dashboardIds value
+    let newDashboardIds = null;
+    if (updatedDashboardIds.length > 0) {
+      newDashboardIds = updatedDashboardIds.join(',');
+    }
+
+    // Update the report
+    await report.update({
+      dashboardIds: newDashboardIds
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Report removed from dashboard successfully",
+      data: {
+        reportId,
+        reportName: report.name,
+        removedFromDashboard: dashboardId,
+        remainingDashboards: updatedDashboardIds.length > 0 ? updatedDashboardIds : 'None'
+      }
+    });
+  } catch (error) {
+    console.error("Error removing report from dashboard:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove report from dashboard",
       error: error.message,
     });
   }
