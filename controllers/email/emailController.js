@@ -5967,6 +5967,109 @@ exports.getTemplateById = async (req, res) => {
       .json({ message: "Failed to fetch template.", error: error.message });
   }
 };
+
+exports.deleteTemplate = async (req, res) => {
+  const { templateID } = req.params;
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+  try {
+    // Check if the template exists and belongs to the user
+    const template = await Template.findOne({
+      where: {
+        templateID,
+        masterUserID, // Ensure the template belongs to the specific user
+      },
+    });
+
+    if (!template) {
+      return res.status(404).json({ 
+        message: "Template not found or you don't have permission to delete it." 
+      });
+    }
+
+    // Delete the template
+    await Template.destroy({
+      where: {
+        templateID,
+        masterUserID,
+      },
+    });
+
+    console.log(`Template ${templateID} deleted successfully by user ${masterUserID}`);
+
+    res.status(200).json({
+      message: "Template deleted successfully.",
+      deletedTemplateId: templateID,
+    });
+  } catch (error) {
+    console.error("Error deleting template:", error);
+    res.status(500).json({ 
+      message: "Failed to delete template.", 
+      error: error.message 
+    });
+  }
+};
+
+exports.deleteBulkTemplates = async (req, res) => {
+  const { templateIDs } = req.body; // Array of template IDs to delete
+  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
+
+  try {
+    // Validate input
+    if (!templateIDs || !Array.isArray(templateIDs) || templateIDs.length === 0) {
+      return res.status(400).json({ 
+        message: "Please provide an array of template IDs to delete." 
+      });
+    }
+
+    // Check which templates exist and belong to the user
+    const existingTemplates = await Template.findAll({
+      where: {
+        templateID: { [Sequelize.Op.in]: templateIDs },
+        masterUserID, // Ensure templates belong to the specific user
+      },
+      attributes: ['templateID', 'name'],
+    });
+
+    if (existingTemplates.length === 0) {
+      return res.status(404).json({ 
+        message: "No templates found or you don't have permission to delete them." 
+      });
+    }
+
+    const existingTemplateIDs = existingTemplates.map(t => t.templateID);
+    const notFoundTemplateIDs = templateIDs.filter(id => !existingTemplateIDs.includes(parseInt(id)));
+
+    // Delete the templates
+    const deletedCount = await Template.destroy({
+      where: {
+        templateID: { [Sequelize.Op.in]: existingTemplateIDs },
+        masterUserID,
+      },
+    });
+
+    console.log(`${deletedCount} templates deleted successfully by user ${masterUserID}`);
+
+    res.status(200).json({
+      message: `${deletedCount} template(s) deleted successfully.`,
+      deletedCount,
+      deletedTemplateIds: existingTemplateIDs,
+      notFoundTemplateIds: notFoundTemplateIDs,
+      summary: {
+        requested: templateIDs.length,
+        deleted: deletedCount,
+        notFound: notFoundTemplateIDs.length,
+      }
+    });
+  } catch (error) {
+    console.error("Error deleting templates:", error);
+    res.status(500).json({ 
+      message: "Failed to delete templates.", 
+      error: error.message 
+    });
+  }
+};
+
 exports.getUnreadCounts = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 

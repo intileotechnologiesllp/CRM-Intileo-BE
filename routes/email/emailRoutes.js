@@ -26,6 +26,18 @@ router.get(
   validatePrivilege(4, "view"),
   emailController.getTemplateById
 );
+router.delete(
+  "/template/:templateID",
+  verifyToken,
+  validatePrivilege(4, "delete"),
+  emailController.deleteTemplate
+);
+router.delete(
+  "/templates/bulk",
+  verifyToken,
+  validatePrivilege(4, "delete"),
+  emailController.deleteBulkTemplates
+);
 router.get("/unread-counts", verifyToken, validatePrivilege(4, "view"), emailController.getUnreadCounts);
 router.post("/add-credential", verifyToken, validatePrivilege(4, "view"), emailController.addUserCredential);
 router.get("/get-credential", verifyToken, validatePrivilege(4, "view"), emailController.getUserCredential);
