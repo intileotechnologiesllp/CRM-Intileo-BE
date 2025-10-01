@@ -5793,6 +5793,8 @@ exports.composeEmail = [
           (match, url) => `href="${generateRedirectLink(url, messageId)}"`
         );
       };
+      
+      // Build signature block - but don't add it to finalBody yet
       let signatureBlock = "";
       if (userCredential.signatureName) {
         signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
@@ -5803,7 +5805,12 @@ exports.composeEmail = [
       if (userCredential.signatureImage) {
         signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
       }
-      finalBody += `<br><br>${signatureBlock}`;
+      
+      // Add signature to final body AFTER all content processing is done
+      if (signatureBlock.trim() !== "") {
+        finalBody += `<br><br>${signatureBlock}`;
+      }
+      
       // Generate a temporary messageId for tracking
       const tempMessageId = `temp-${Date.now()}`;
 
