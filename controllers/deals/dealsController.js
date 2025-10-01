@@ -220,29 +220,7 @@ exports.createDeal = async (req, res) => {
       sanitizedProposalSentDate = null;
     }
     // Find or create Person and Organization here...
-    // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
-    const existingContactOrgTitleDeal = await Deal.findOne({
-      where: {
-        contactPerson: contactPerson,
-        organization: organization,
-        title: title,
-      },
-    });
-    if (existingContactOrgTitleDeal) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: A deal with this exact combination of contact person, organization, and title already exists.`,
-        req.adminId
-      );
-      return res.status(409).json({
-        message:
-          "A deal with this exact combination of contact person, organization, and title already exists. Please use a different title for a new deal with the same contact.",
-        existingDealId: existingContactOrgTitleDeal.dealId,
-        existingDealTitle: existingContactOrgTitleDeal.title,
-      });
-    }
+
     // 1. Set masterUserID at the top, before using it anywhere
     const masterUserID = req.adminId;
     // 1. Check if a matching lead exists
