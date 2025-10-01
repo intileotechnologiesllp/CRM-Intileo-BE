@@ -34,6 +34,10 @@ const Report = sequelize.define(
     ownerId: { type: DataTypes.INTEGER, allowNull: false },
     graphtype: { type: DataTypes.STRING, allowNull: false, defaultValue: "bar" },
     colors: { type: DataTypes.JSON, allowNull: true },
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
   },
   {
     tableName: "Reports",

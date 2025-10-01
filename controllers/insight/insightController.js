@@ -2727,6 +2727,44 @@ exports.reorderGoals = async (req, res) => {
   }
 };
 
+exports.softDeleteGoal = async (req, res) => {
+  try {
+    const { goalId } = req.params;
+    const ownerId = req.adminId;
+
+    const goal = await Goal.findOne({
+      where: {
+        goalId,
+        ownerId,
+      },
+    });
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found or access denied",
+      });
+    }
+
+    // Soft delete by setting isActive to false
+    await goal.update({
+      isActive: false
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Goal deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting goal:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete goal",
+      error: error.message,
+    });
+  }
+};
+
 exports.deleteGoal = async (req, res) => {
   try {
     const { goalId } = req.params;
@@ -2771,6 +2809,7 @@ exports.getGoalProgress = async (req, res) => {
       where: {
         goalId,
         ownerId,
+        isActive: true
       },
     });
 
@@ -2817,6 +2856,7 @@ exports.getGoalData = async (req, res) => {
         where: {
           goalId,
           ownerId,
+          isActive: true
         },
       });
 
@@ -7312,7 +7352,7 @@ exports.GetAllReports = async (req, res) => {
 
     // Get all reports for the user
     const reports = await Report.findAll({
-      where: whereCondition,
+      where: {...whereCondition, isActive : true},
       attributes: [
         "reportId",
         "ownerId",
@@ -7407,7 +7447,7 @@ exports.GetReportsDataReportWise = async (req, res) => {
     }
 
     const existingReport = await Report.findOne({
-      where: { reportId },
+      where: { reportId, isActive: true },
     });
 
     if (!existingReport) {
@@ -7493,6 +7533,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       whereCondition.ownerId = ownerId;
     }
 
+    whereCondition.isActive = true;
     // Fetch reports for this dashboard
     const reports = await Report.findAll({
       where: whereCondition,
@@ -7546,6 +7587,43 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to get reports for dashboard",
+      error: error.message,
+    });
+  }
+};
+
+exports.softDeleteSingleReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const ownerId = req.adminId;
+
+    const report = await Report.findOne({
+      where: {
+        reportId,
+        ownerId,
+      },
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or access denied",
+      });
+    }
+
+    await report.update({
+      isActive: false
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
       error: error.message,
     });
   }
