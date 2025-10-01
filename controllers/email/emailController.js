@@ -4483,6 +4483,32 @@ const getLinkedEntities = async (email) => {
           })
         : [];
 
+    // Fetch lead and deal titles for activities
+    const activityLeadIds = [...new Set(activities.map(a => a.leadId).filter(Boolean))];
+    const activityDealIds = [...new Set(activities.map(a => a.dealId).filter(Boolean))];
+    
+    // Fetch leads and deals for activities
+    const activityLeads = activityLeadIds.length > 0 ? await Lead.findAll({
+      where: { leadId: { [Sequelize.Op.in]: activityLeadIds } },
+      attributes: ['leadId', 'title']
+    }) : [];
+    
+    const activityDeals = activityDealIds.length > 0 ? await Deal.findAll({
+      where: { dealId: { [Sequelize.Op.in]: activityDealIds } },
+      attributes: ['dealId', 'title']
+    }) : [];
+    
+    // Create maps for quick lookup
+    const leadTitleMap = {};
+    activityLeads.forEach(lead => {
+      leadTitleMap[lead.leadId] = lead.title;
+    });
+    
+    const dealTitleMap = {};
+    activityDeals.forEach(deal => {
+      dealTitleMap[deal.dealId] = deal.title;
+    });
+
     // Group activities by personId
     const activitiesByPersonId = {};
     activities.forEach((activity) => {
@@ -4501,6 +4527,20 @@ const getLinkedEntities = async (email) => {
         dueDate: activity.dueDate,
         isDone: activity.isDone,
         createdAt: activity.createdAt,
+        updatedAt: activity.updatedAt, // Add updatedAt field
+        assignedTo: activity.assignedTo,
+        contactPerson: activity.contactPerson,
+        organization: activity.organization,
+        personId: activity.personId,
+        leadId: activity.leadId,
+        leadTitle: activity.leadId ? leadTitleMap[activity.leadId] || null : null, // Add lead title
+        dealId: activity.dealId,
+        dealTitle: activity.dealId ? dealTitleMap[activity.dealId] || null : null, // Add deal title
+        leadOrganizationId: activity.leadOrganizationId,
+        masterUserID: activity.masterUserID, // Add masterUserID field
+        notes: activity.notes, // Add notes field if exists
+        location: activity.location, // Add location field if exists
+        participants: activity.participants, // Add participants field if exists
       });
     });
 
@@ -4841,6 +4881,32 @@ const getAggregatedLinkedEntities = async (emails) => {
           })
         : [];
 
+    // Fetch lead and deal titles for activities
+    const activityLeadIds = [...new Set(activities.map(a => a.leadId).filter(Boolean))];
+    const activityDealIds = [...new Set(activities.map(a => a.dealId).filter(Boolean))];
+    
+    // Fetch leads and deals for activities
+    const activityLeads = activityLeadIds.length > 0 ? await Lead.findAll({
+      where: { leadId: { [Sequelize.Op.in]: activityLeadIds } },
+      attributes: ['leadId', 'title']
+    }) : [];
+    
+    const activityDeals = activityDealIds.length > 0 ? await Deal.findAll({
+      where: { dealId: { [Sequelize.Op.in]: activityDealIds } },
+      attributes: ['dealId', 'title']
+    }) : [];
+    
+    // Create maps for quick lookup
+    const leadTitleMap = {};
+    activityLeads.forEach(lead => {
+      leadTitleMap[lead.leadId] = lead.title;
+    });
+    
+    const dealTitleMap = {};
+    activityDeals.forEach(deal => {
+      dealTitleMap[deal.dealId] = deal.title;
+    });
+
     // Group activities by personId
     const activitiesByPersonId = {};
     activities.forEach((activity) => {
@@ -4859,13 +4925,20 @@ const getAggregatedLinkedEntities = async (emails) => {
         dueDate: activity.dueDate,
         isDone: activity.isDone,
         createdAt: activity.createdAt,
+        updatedAt: activity.updatedAt, // Add updatedAt field
         assignedTo: activity.assignedTo,
         contactPerson: activity.contactPerson,
         organization: activity.organization,
         personId: activity.personId,
         leadId: activity.leadId,
+        leadTitle: activity.leadId ? leadTitleMap[activity.leadId] || null : null, // Add lead title
         dealId: activity.dealId,
+        dealTitle: activity.dealId ? dealTitleMap[activity.dealId] || null : null, // Add deal title
         leadOrganizationId: activity.leadOrganizationId,
+        masterUserID: activity.masterUserID, // Add masterUserID field
+        notes: activity.notes, // Add notes field if exists
+        location: activity.location, // Add location field if exists
+        participants: activity.participants, // Add participants field if exists
       });
     });
 
