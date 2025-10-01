@@ -48,7 +48,6 @@ const Deal = sequelize.define(
     title: {
       type: DataTypes.STRING,
       allowNull: false,
-      unique: true,
     },
     value: {
       type: DataTypes.FLOAT,
