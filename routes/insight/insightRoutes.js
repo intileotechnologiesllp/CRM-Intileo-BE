@@ -110,6 +110,7 @@ router.get(
 //   insightController.getProgressedGoalData
 // );
 router.post("/edit-goals/:goalId", verifyToken, insightController.updateGoal);
+router.delete("/softdelete-goal/:goalId", verifyToken, insightController.softDeleteGoal);
 router.delete("/delete-goal/:goalId", verifyToken, insightController.deleteGoal);
 router.post("/bulk-delete-goals", verifyToken, insightController.bulkDeleteGoal);
 router.post(
@@ -119,6 +120,7 @@ router.post(
 );
 
 
+router.post("/softdeletesinglereport/:reportId", verifyToken, insightController.softDeleteSingleReport);
 router.post("/deletesinglereport/:reportId", verifyToken, insightController.deleteSingleReport);
 router.post("/bulkdelete-report", verifyToken, insightController.bulkDeleteReports);
 router.get("/get-allreports", verifyToken, insightController.GetAllReports);
