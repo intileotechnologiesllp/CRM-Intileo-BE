@@ -1171,12 +1171,12 @@ exports.markAsRead = async (req, res) => {
 
 exports.updateEmailSharing = async (req, res) => {
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const { emailId } = req.params; // Email ID from URL
+  const { emailID } = req.params; // Email ID from URL
   const { isShared } = req.body; // Boolean value in request body
 
   try {
     const email = await Email.findOne({
-      where: { emailID: emailId, masterUserID },
+      where: { emailID: emailID },
     });
 
     if (!email) {

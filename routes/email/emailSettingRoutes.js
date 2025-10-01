@@ -39,7 +39,7 @@ router.post("/mark-as-unread",verifyToken, validatePrivilege(4, "edit"), emailSe
 router.post("/update-signature",verifyToken, validatePrivilege(4, "edit"), upload.single("signatureImage"),emailSettingsController.updateSignature);
 router.post("/bulk-archive", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.bulkArchiveEmails);
 router.post("/mark-as-read", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.markAsRead);
-router.post("/update-email-shared", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateEmailSharing);
+router.post("/update-email-shared/:emailID", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateEmailSharing);
 router.post("/update-smart-bcc", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.setSmartBcc);
 router.post("/update-blocked-email", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateBlockedAddress);
 router.post("/remove-blocked-email", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.removeBlockedAddress);
