@@ -56,7 +56,7 @@ exports.createDealPerformReport = async (req, res) => {
 
     const segmentedByOptions = [
       "none",
-     "esplProposalNo",
+      "esplProposalNo",
       "numberOfReportsPrepared",
       "organizationCountry",
       "projectLocation",
@@ -73,11 +73,7 @@ exports.createDealPerformReport = async (req, res) => {
       "pipelineStage",
     ];
 
-    const yaxisArray = [
-      "no of deals",
-      "proposalValue",
-      "value"
-    ];
+    const yaxisArray = ["no of deals", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = {
@@ -253,7 +249,7 @@ exports.createDealPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Deal" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -412,7 +408,7 @@ exports.createDealPerformReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedByOptions: segmentedByOptions
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -820,7 +816,7 @@ async function generateDealPerformanceData(
   // Handle special cases for xaxis (like Owner which needs join)
 
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "creator") {
     includeModels.push({
@@ -990,15 +986,33 @@ async function generateDealPerformanceData(
   if (segmentedBy && segmentedBy !== "none") {
     // Group by xValue and then by segmentValue
     const groupedData = {};
-
     results.forEach((item) => {
       const xValue = item.xValue === null ? "Unknown" : item.xValue;
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
-
+      
+      // if (!groupedData[xValue]) {
+      //   groupedData[xValue] = { label: xValue, segments: [] };
+      // }
+      
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        }
       }
+
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
         value: yValue,
@@ -1022,10 +1036,27 @@ async function generateDealPerformanceData(
     );
   } else {
     // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    })); // Calculate the grand total
+    formattedResults = results.map((item) => {
+      if (xaxis == "contactPerson") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.personId || null,
+        };
+      } else if (xaxis == "organization") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      } else {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: null,
+        };
+      }
+    }); // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -1070,14 +1101,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
-  
+
   if (isDateRangeFilter && Array.isArray(value)) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
-    
+
     // Determine which date field to filter based on the table alias
     let dateField;
-    switch(tableAlias) {
+    switch (tableAlias) {
       case "Organization":
       case "Person":
         dateField = "createdAt";
@@ -1085,24 +1116,34 @@ function getConditionObject(column, operator, value, includeModels = []) {
       default:
         dateField = "createdAt";
     }
-    
+
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "Deal") {
       // Add the required include model
       addIncludeModel(tableAlias, includeModels);
-      
+
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     } else {
@@ -1110,14 +1151,24 @@ function getConditionObject(column, operator, value, includeModels = []) {
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [dateField]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [dateField]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     }
@@ -1133,14 +1184,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       }
     } else if (operator === ">") {
@@ -1151,20 +1202,20 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // For not equal, exclude the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
-      
+
       // For related tables
       if (hasRelation) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       }
     } else {
@@ -1181,17 +1232,23 @@ function getConditionObject(column, operator, value, includeModels = []) {
   // Handle related table joins
   if (hasRelation) {
     addIncludeModel(tableAlias, includeModels);
-    
+
     const op = getSequelizeOperator(operator);
-    
+
     // Use proper Sequelize syntax for related table conditions
     switch (operator) {
       case "contains":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
+        };
       case "startsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` },
+        };
       case "endsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` },
+        };
       case "isEmpty":
         return {
           [Op.or]: [
@@ -1359,7 +1416,7 @@ async function generateExistingDealPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-  
+
   // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
@@ -2028,7 +2085,7 @@ exports.saveDealPerformReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -2059,40 +2116,39 @@ exports.saveDealPerformReport = async (req, res) => {
         });
       }
     }
-      // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
-    
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,
@@ -2531,11 +2587,7 @@ exports.createDealConversionReport = async (req, res) => {
       "pipelineStage",
     ];
 
-    const yaxisArray = [
-      "no of deals",
-      "proposalValue",
-      "value",
-    ];
+    const yaxisArray = ["no of deals", "proposalValue", "value"];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = {
@@ -2703,7 +2755,7 @@ exports.createDealConversionReport = async (req, res) => {
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Deal" && type === "Conversion") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -3009,7 +3061,7 @@ async function generateConversionActivityPerformanceData(
 
   // Now get the status breakdown for only the paginated x-axis values
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "creator") {
     groupBy.push("assignedUser.masterUserID");
@@ -3084,13 +3136,32 @@ async function generateConversionActivityPerformanceData(
       return;
     }
 
+    // if (!groupedData[xValue]) {
+    //   groupedData[xValue] = {
+    //     label: xValue,
+    //     status: [],
+    //     total: 0,
+    //   };
+    // }
     if (!groupedData[xValue]) {
-      groupedData[xValue] = {
-        label: xValue,
-        status: [],
-        total: 0,
-      };
-    }
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            status: [],
+            total: 0,
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            status: [],
+            total: 0,
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, status: [], total: 0, id: null };
+        }
+      }
 
     // Add status breakdown
     groupedData[xValue].status.push({
@@ -3995,15 +4066,14 @@ exports.saveDealConversionReport = async (req, res) => {
         }
 
         try {
-          const result =
-            await generateExistingDealConversionDataForSave(
-              ownerId,
-              role,
-              existingxaxis,
-              existingyaxis,
-              existingSegmentedBy,
-              existingfilters
-            );
+          const result = await generateExistingDealConversionDataForSave(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters
+          );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
@@ -4090,7 +4160,7 @@ exports.saveDealConversionReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -4121,39 +4191,39 @@ exports.saveDealConversionReport = async (req, res) => {
         });
       }
     }
-      // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,
@@ -4589,11 +4659,7 @@ exports.createDealProgressReport = async (req, res) => {
       "pipelineStage",
     ];
 
-    const yaxisArray = [
-      "no of deals",
-      "proposalValue",
-      "value",
-    ];
+    const yaxisArray = ["no of deals", "proposalValue", "value"];
 
     // Filter columns definition
     const availableFilterColumns = {
@@ -4698,7 +4764,7 @@ exports.createDealProgressReport = async (req, res) => {
     let totalValue = 0;
     let summary = {};
 
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Deal" && type === "Progress") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -4880,7 +4946,7 @@ exports.createDealProgressReport = async (req, res) => {
 };
 
 // Helper function to format results with pipeline stage breakdown
-function formatResultsWithPipelineBreakdown(results) {
+function formatResultsWithPipelineBreakdown(results, xaxis) {
   const groupedByXValue = {};
 
   // First pass: collect all pipeline stage values for each xValue
@@ -4889,13 +4955,32 @@ function formatResultsWithPipelineBreakdown(results) {
     const pipelineStage = item.pipelineStage || "Unknown";
     const yValue = parseFloat(item.yValue || 0);
 
-    if (!groupedByXValue[xValue]) {
-      groupedByXValue[xValue] = {
-        label: xValue,
-        value: 0,
-        breakdown: {},
-      };
-    }
+    // if (!groupedByXValue[xValue]) {
+    //   groupedByXValue[xValue] = {
+    //     label: xValue,
+    //     value: 0,
+    //     breakdown: {},
+    //   };
+    // }
+     if (!groupedByXValue[xValue]) {
+        if (xaxis == "contactPerson") {
+          groupedByXValue[xValue] = {
+            label: xValue,
+            breakdown: {},
+            value: 0,
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedByXValue[xValue] = {
+            label: xValue,
+            breakdown: {},
+            value: 0,
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedByXValue[xValue] = { label: xValue, breakdown: {}, value: 0, id: null };
+        }
+      }
 
     // Add to the pipeline stage breakdown - accumulate values for same stage
     if (!groupedByXValue[xValue].breakdown[pipelineStage]) {
@@ -5220,7 +5305,7 @@ async function generateProgressExistingActivityPerformanceData(
     );
   } else {
     // Use the pipeline breakdown format
-    formattedResults = formatResultsWithPipelineBreakdown(results);
+    formattedResults = formatResultsWithPipelineBreakdown(results, xaxis);
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -5317,7 +5402,7 @@ async function generateProgressActivityPerformanceData(
 
   // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "creator") {
     includeModels.push({
@@ -5515,8 +5600,25 @@ async function generateProgressActivityPerformanceData(
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
+      // if (!groupedData[xValue]) {
+      //   groupedData[xValue] = { label: xValue, segments: [] };
+      // }
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        }
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -5541,7 +5643,7 @@ async function generateProgressActivityPerformanceData(
     );
   } else {
     // Use the pipeline breakdown format for non-segmented data
-    formattedResults = formatResultsWithPipelineBreakdown(results);
+    formattedResults = formatResultsWithPipelineBreakdown(results, xaxis);
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -5757,7 +5859,7 @@ exports.saveDealProgressReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -5788,39 +5890,39 @@ exports.saveDealProgressReport = async (req, res) => {
         });
       }
     }
-      // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,
@@ -6026,7 +6128,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
       );
       reportData = reportResult.data;
 
-     if (reportData.length > 0) {
+      if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
         if (segmentedBy === "none") {
@@ -6092,7 +6194,7 @@ exports.getDealProgressReportSummary = async (req, res) => {
         );
       reportData = reportResult.data;
 
-     if (reportData.length > 0) {
+      if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
         if (segmentedBy === "none") {
@@ -6362,7 +6464,7 @@ exports.createDealDurationReport = async (req, res) => {
     let totalValue = 0;
     let reportConfig = {};
 
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Deal" && type === "Duration") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -6490,7 +6592,7 @@ exports.createDealDurationReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedByOptions: segmentedByOptions
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -6976,7 +7078,7 @@ async function generateDealDurationData(
   // Handle special cases for xaxis (like Owner which needs join)
 
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "creator") {
     includeModels.push({
@@ -7223,8 +7325,25 @@ async function generateDealDurationData(
       const yValue = Number(item.yValue) || 0;
       const dealCount = Number(item.dealCount) || 0;
 
+      // if (!groupedData[xValue]) {
+      //   groupedData[xValue] = { label: xValue, segments: [] };
+      // }
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        }
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -7254,11 +7373,30 @@ async function generateDealDurationData(
     );
   } else {
     // Format for non-segmented data with deal count
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-      deals: Number(item.dealCount) || 0,
-    })); // Calculate the grand total
+    formattedResults = results.map((item) => {
+      if (xaxis == "contactPerson") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          deals: Number(item.dealCount) || 0,
+          id: item?.personId || null,
+        };
+      } else if (xaxis == "organization") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          deals: Number(item.dealCount) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      } else {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          deals: Number(item.dealCount) || 0,
+          id: null,
+        };
+      }
+    }); // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -7470,12 +7608,12 @@ exports.saveDealDurationReport = async (req, res) => {
         ...(colors !== undefined && { colors }),
       };
 
-       // Handle dashboardIds update - store as comma-separated string
+      // Handle dashboardIds update - store as comma-separated string
       if (dashboardIds !== undefined) {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -7507,39 +7645,39 @@ exports.saveDealDurationReport = async (req, res) => {
       }
     }
 
-      // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,

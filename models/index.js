@@ -67,6 +67,10 @@ Activity.belongsTo(MasterUser, {
   foreignKey: "assignedTo",
   as: "assignedUser",
 });
+Activity.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  as: "assignee",
+});
 Activity.belongsTo(Person, { foreignKey: "personId", as: "ActivityPerson" });
 Activity.belongsTo(Organization, {
   foreignKey: "leadOrganizationId",
