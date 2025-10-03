@@ -62,61 +62,69 @@ cron.schedule("*/2 * * * *", async () => {
   }
 });
 
-// COMMENTED OUT: Scheduled email queue cron job
-// cron.schedule("* * * * *", async () => {
-//   // Every minute
-//   console.log("Running cron job to queue scheduled outbox emails...");
-//   const now = new Date();
-//   console.log("Current server time:", now.toISOString());
+// Enhanced scheduled email cron job with user-specific queues
+cron.schedule("* * * * *", async () => {
+  // Every minute
+  console.log("🕐 Running scheduled email cron job...");
+  const now = new Date();
+  console.log("📅 Current server time:", now.toISOString());
 
-//   try {
-//     // Find all outbox emails that should be sent now or earlier
-//     const emails = await Email.findAll({
-//       where: {
-//         folder: "outbox",
-//         scheduledAt: { [Sequelize.Op.lte]: now },
-//       },
-//       attributes: ["emailID", "scheduledAt", "folder"],
-//     });
+  try {
+    // Find all outbox emails that should be sent now or earlier
+    const emails = await Email.findAll({
+      where: {
+        folder: "outbox",
+        scheduledAt: { [Sequelize.Op.lte]: now },
+      },
+      attributes: ["emailID", "scheduledAt", "folder", "masterUserID", "subject"],
+    });
 
-//     console.log(
-//       "Found scheduled outbox emails:",
-//       emails.map((e) => ({
-//         emailID: e.emailID,
-//         scheduledAt: e.scheduledAt,
-//         folder: e.folder,
-//       }))
-//     );
+    console.log(
+      "📧 Found scheduled outbox emails:",
+      emails.map((e) => ({
+        emailID: e.emailID,
+        scheduledAt: e.scheduledAt,
+        folder: e.folder,
+        masterUserID: e.masterUserID,
+        subject: e.subject
+      }))
+    );
 
-//     if (!emails.length) {
-//       console.log("No scheduled outbox emails to queue at this time.");
-//       return;
-//     }
+    if (!emails.length) {
+      console.log("📭 No scheduled outbox emails to queue at this time.");
+      return;
+    }
 
-//     // Connect to RabbitMQ and queue each email for sending
-//     const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
-//     const connection = await amqp.connect(amqpUrl);
-//     const channel = await connection.createChannel();
-//     await channel.assertQueue(SCHEDULED_QUEUE, { durable: true });
+    // Connect to RabbitMQ and queue each email to user-specific queues
+    const amqpUrl = process.env.RABBITMQ_URL || "amqp://localhost:5672";
+    const connection = await amqp.connect(amqpUrl);
+    const channel = await connection.createChannel();
 
-//     for (const email of emails) {
-//       console.log(
-//         `Queueing emailID ${email.emailID} (scheduledAt: ${email.scheduledAt}) to RabbitMQ...`
-//       );
-//       channel.sendToQueue(
-//         SCHEDULED_QUEUE,
-//         Buffer.from(JSON.stringify({ emailID: email.emailID })),
-//         { persistent: true }
-//       );
-//     }
-//     console.log(`Queued ${emails.length} scheduled outbox emails for sending.`);
+    for (const email of emails) {
+      // Use user-specific queue for scheduled emails
+      const userScheduledQueueName = `SCHEDULED_EMAIL_QUEUE_${email.masterUserID}`;
+      
+      await channel.assertQueue(userScheduledQueueName, { durable: true });
+      
+      console.log(
+        `🚀 Queueing scheduled email: ID ${email.emailID}, Subject: "${email.subject}", User: ${email.masterUserID}, Queue: ${userScheduledQueueName}, Due: ${email.scheduledAt}`
+      );
+      
+      channel.sendToQueue(
+        userScheduledQueueName,
+        Buffer.from(JSON.stringify({ emailID: email.emailID })),
+        { persistent: true }
+      );
+    }
+    
+    console.log(`✅ Queued ${emails.length} scheduled emails for sending to user-specific queues.`);
 
-//     await channel.close();
-//     await connection.close();
-//   } catch (error) {
-//     console.error("Error queueing scheduled outbox emails:", error);
-//   }
-// });
+    await channel.close();
+    await connection.close();
+  } catch (error) {
+    console.error("❌ Error queueing scheduled outbox emails:", error);
+  }
+});
 
 // cron.schedule("*/2 * * * *", async () => {
 //   console.log("Running combined cron job to fetch recent and sent emails for all users...");

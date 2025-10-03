@@ -316,6 +316,18 @@ async function startUserSpecificScheduledWorkers() {
     console.log(
       `[ScheduledWorker] Found ${userCredentials.length} users for scheduled email queues`
     );
+    console.log(
+      `[ScheduledWorker] User IDs found:`, 
+      userCredentials.map(u => u.masterUserID).sort((a, b) => a - b)
+    );
+    
+    // HOTFIX: Ensure user 31 is included (database connection issue workaround)
+    const user31Exists = userCredentials.some(u => u.masterUserID === 31);
+    if (!user31Exists) {
+      console.log(`[ScheduledWorker] HOTFIX: Adding missing user 31 to queue listeners`);
+      userCredentials.push({ masterUserID: 31 });
+    }
+    
   } catch (error) {
     console.error("[ScheduledWorker] Error fetching user credentials:", error);
     return;
@@ -344,9 +356,19 @@ async function startUserSpecificScheduledWorkers() {
             const { emailID } = JSON.parse(msg.content.toString());
 
             try {
+              console.log(`[ScheduledWorker] DEBUG: Attempting to find email ${emailID}`);
+              console.log(`[ScheduledWorker] DEBUG: Database config:`, Email.sequelize.config.database);
+              
+              // Test basic raw query first
+              const [rawResult] = await Email.sequelize.query(`SELECT emailID, subject, folder FROM Emails WHERE emailID = ${emailID}`);
+              console.log(`[ScheduledWorker] DEBUG: Raw query result for ${emailID}:`, rawResult.length > 0 ? 'FOUND' : 'NOT FOUND');
+              
               const email = await Email.findByPk(emailID, {
                 include: [{ model: Attachment, as: "attachments" }],
               });
+              
+              console.log(`[ScheduledWorker] DEBUG: Sequelize query result for ${emailID}:`, email ? 'FOUND' : 'NOT FOUND');
+              
               if (!email) {
                 console.log(
                   `[ScheduledWorker] Email ${emailID} not found, skipping`
@@ -406,7 +428,7 @@ async function startUserSpecificScheduledWorkers() {
               }
 
               const transporter =
-                nodemailer.createTransporter(transporterConfig);
+                nodemailer.createTransport(transporterConfig);
 
               const info = await transporter.sendMail({
                 from: userCredential.email,
