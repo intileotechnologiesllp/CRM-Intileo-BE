@@ -9,6 +9,8 @@ const { verifyToken } = require("../../../middlewares/authMiddleware");
 
 router.post("/create-activityreport", verifyToken, activityReportController.createActivityReport);
 
+router.post("/get-activity-data", verifyToken,  activityReportController.createActivityReportDrillDown);
+
 router.post("/get-summaryactivityreport", verifyToken, activityReportController.getActivityReportSummary);
 
 router.post("/save-activityreport", verifyToken, activityReportController.saveActivityReport);
