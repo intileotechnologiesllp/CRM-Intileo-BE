@@ -5645,15 +5645,26 @@ exports.composeEmail = [
       let draftEmail;
       // If draftId is present, fetch the draft and use its data as defaults
       if (draftId) {
+        console.log(`[composeEmail] 📝 Fetching draft with draftId: ${draftId}, masterUserID: ${masterUserID}`);
         draftEmail = await Email.findOne({
           where: { draftId, masterUserID, folder: "drafts" },
         });
         if (!draftEmail) {
+          console.log(`[composeEmail] ❌ Draft not found for draftId: ${draftId}`);
           return res.status(404).json({ message: "Draft not found." });
         }
+        console.log(`[composeEmail] ✅ Draft found:`, {
+          emailID: draftEmail.emailID,
+          subject: draftEmail.subject,
+          recipient: draftEmail.recipient,
+          cc: draftEmail.cc,
+          bcc: draftEmail.bcc,
+          hasBody: !!draftEmail.body
+        });
         // Use draft's data as defaults, allow override by request
         finalSubject = subject || draftEmail.subject;
         finalBody = text || html || draftEmail.body;
+        console.log(`[composeEmail] 📋 Final content: subject="${finalSubject}", hasBody=${!!finalBody}`);
       }
       // Handle reply action
       if (actionType === "reply") {
@@ -5885,9 +5896,9 @@ exports.composeEmail = [
       // Define the email options
       const mailOptions = {
         from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-        to: to || (draftEmail && draftEmail.recipient),
-        cc: cc || (draftEmail && draftEmail.cc),
-        bcc: finalBcc || bcc || (draftEmail && draftEmail.bcc),
+        to: finalTo,
+        cc: finalCc,
+        bcc: finalBccValue,
         subject: finalSubject,
         text: htmlToText(finalBody),
         html: finalBody,
@@ -5928,11 +5939,35 @@ exports.composeEmail = [
       const finalCc = cc || (draftEmail && draftEmail.cc);
       const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
 
+      console.log(`[composeEmail] 👥 Recipients calculated:`, {
+        requestTo: to,
+        requestCc: cc,
+        requestBcc: bcc,
+        draftTo: draftEmail ? draftEmail.recipient : null,
+        draftCc: draftEmail ? draftEmail.cc : null,
+        draftBcc: draftEmail ? draftEmail.bcc : null,
+        finalTo,
+        finalCc,
+        finalBccValue
+      });
+
+      // For drafts, we need to be more flexible with recipient validation
+      // Allow the user to provide recipients when composing from a draft
       if (!finalTo && !finalCc && !finalBccValue) {
-        return res.status(400).json({
-          message: "At least one recipient (to, cc, bcc) is required.",
-        });
+        console.log(`[composeEmail] ❌ No recipients found - validation failed`);
+        // If this is a draft composition, provide a more helpful error message
+        if (draftId) {
+          return res.status(400).json({
+            message: "When composing from a draft, please provide at least one recipient (to, cc, or bcc).",
+          });
+        } else {
+          return res.status(400).json({
+            message: "At least one recipient (to, cc, bcc) is required.",
+          });
+        }
       }
+
+      console.log(`[composeEmail] ✅ Recipients validation passed`);
       const emailData = {
         // messageId: info.messageId,
         draftId: draftId || null,
