@@ -858,7 +858,7 @@ async function generateLeadPerformanceData(
   // Handle special cases for xaxis (like Owner which needs join)
 
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "creator") {
     includeModels.push({
@@ -1003,7 +1003,8 @@ async function generateLeadPerformanceData(
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
-        group: groupBy,
+        group: [...groupBy],
+        // group: groupBy,
         raw: true,
         order: [[Sequelize.literal("yValue"), "DESC"]],
       });
@@ -1034,8 +1035,29 @@ async function generateLeadPerformanceData(
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
+      // if (!groupedData[xValue]) {
+      //   groupedData[xValue] = { label: xValue, segments: [] };
+      // }
+      // groupedData[xValue].segments.push({
+      //   labeltype: segmentValue,
+      //   value: yValue,
+      // });
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        }
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -1060,10 +1082,27 @@ async function generateLeadPerformanceData(
     );
   } else {
     // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    })); // Calculate the grand total
+    formattedResults = results.map((item) => {
+      if (xaxis == "contactPerson") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.personId || null,
+        };
+      } else if (xaxis == "organization") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      } else {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      }
+    });// Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
