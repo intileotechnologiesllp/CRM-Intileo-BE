@@ -1272,7 +1272,7 @@ async function generateActivityPerformanceData(
         return {
           label: item.xValue || "Unknown",
           value: Number(item.yValue) || 0,
-          id: item?.leadOrganizationId || null,
+          id: null,
         };
       }
     }); // Calculate the grand total
@@ -1309,6 +1309,29 @@ async function generateActivityPerformanceDataForDrillDown(
     baseWhere.masterUserID = ownerId;
   }
 
+  let groupBy = [];
+  let attributes = [];
+  // if (name === "Owner" || name === "assignedTo") {
+  //   includeModels.push({
+  //     model: MasterUser,
+  //     as: "assignedUser",
+  //     attributes: [],
+  //   });
+  //   groupBy.push("assignedUser.name");
+  //   // attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  // } else if (name === "Team") {
+  //   includeModels.push({
+  //     model: MasterUser,
+  //     as: "assignedUser",
+  //     attributes: [],
+  //   });
+  //   groupBy.push("assignedUser.team");
+  //   // attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+  // } 
+  // else {
+  //   groupBy.push(`Activity.${xaxis}`);
+  //   // attributes.push([Sequelize.col(`Activity.${name}`), "xValue"]);
+  // }
   const conditionObjFunc = {
     0: getActivityConditionObject,
     1: getLeadConditionObject,
@@ -1366,26 +1389,81 @@ async function generateActivityPerformanceDataForDrillDown(
 
   const tableName = entityData[entity]
   const columnNames = Object.keys(tableName.rawAttributes);
-  let attributes = columnNames;
+  attributes = [...attributes, ...columnNames];
 
   let results;
   
   results = await tableName.findAll({
     where: baseWhere,
     attributes: attributes,
-    include: includeModels
+    include: [...includeModels,
+     {
+      model: MasterUser,
+      as: 'assignedUser', // For masterUserID
+      attributes: ['masterUserID', 'name'],
+    },
+    {
+      model: MasterUser,
+      as: 'assignee', // For assignedTo
+      attributes: [ 'masterUserID', 'name'],
+    }
+    ],
+    groupBy: groupBy
   });
+  console.log(JSON.parse(JSON.stringify(results[0], null, 2)));
+  
+  
+  
+  // Recursive flatten function
+  function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey = parentKey ? `${parentKey}_${key}` : key;
+      
+    if (typeof obj[key] === "object" && obj[key] !== null && !Array.isArray(obj[key])) {
+      flattenObject(obj[key], newKey, res);
+    } else {
+      res[newKey] = obj[key];
+    }
+  }
+  return res;
+}
+
+// const flattened = JSON.parse(JSON.stringify(results[0], null, 2)).map(item => flattenObject(item));
+const flattened = JSON.parse(JSON.stringify(results, null, 2)).map(item => flattenObject(item));
+// console.log(flattened[0]);
+const formattedResults = flattened.filter((item) => {
+  // Handle startDateTime check
+  if (name === "startDateTime") {
+    return (
+      new Date(item?.startDateTime).getTime() === new Date("2025-09-05T07:45:00.000Z").getTime()
+    );
+  }
+  if (name === "Owner") {
+    // console.log(item["assignee_name"])
+    return (
+      item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase()
+    );
+  }
+
+  // Handle string fields safely
+  if (typeof item[name] === "string" && typeof value === "string") {
+    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+  } else {
+    if (item[name] !== value) return false;
+  }
+
+  // Extra checks
+  if (name === "contactPerson" && item.personId !== id) return false;
+  if (name === "organization" && item.leadOrganizationId !== id) return false;
+
+  return true;
+});
 
 
-  const formattedResults = results.filter(
-    (item) => item[name]?.toLowerCase() === value?.toLowerCase() && 
-    (name == "contactPerson" ? item.personId === id : true) && 
-    (name == "organization" ? item.leadOrganizationId === id : true)
-  );
-  return {
-    data: formattedResults,
-    totalValue: formattedResults?.length
-  };
+return {
+  data: formattedResults,
+  totalValue: formattedResults?.length
+};
 }
 
 // Enhanced helper function to handle related table conditions and date filtering
