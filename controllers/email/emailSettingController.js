@@ -1228,16 +1228,81 @@ exports.updateBlockedAddress = async (req, res) => {
       return res.status(404).json({ message: "User credentials not found." });
     }
 
-    // If blockedEmail is an array, join to string
-    let blockedEmailStr = blockedEmail;
-    if (Array.isArray(blockedEmail)) {
-      blockedEmailStr = blockedEmail.join(",");
+    // Always convert to array format for consistent storage
+    let blockedEmailArray = [];
+    
+    // Helper function to clean and extract emails
+    const cleanEmail = (email) => {
+      if (typeof email !== 'string') return '';
+      return email.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, '').toLowerCase();
+    };
+    
+    // Helper function to parse potentially nested JSON strings
+    const parseEmailData = (data) => {
+      if (Array.isArray(data)) {
+        return data;
+      }
+      if (typeof data === 'string') {
+        // Try to parse as JSON if it looks like JSON
+        if (data.startsWith('[') && data.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(data);
+            return Array.isArray(parsed) ? parsed : [data];
+          } catch (e) {
+            // If parsing fails, treat as comma-separated string
+            return data.split(',');
+          }
+        }
+        // Regular comma-separated string
+        return data.split(',');
+      }
+      return [];
+    };
+    
+    const emailData = parseEmailData(blockedEmail);
+    
+    // Process each email, handling nested arrays and JSON strings
+    for (let item of emailData) {
+      if (typeof item === 'string' && (item.startsWith('[') || item.startsWith('"['))) {
+        // Handle nested JSON string like "[\"email@test.com\"]"
+        try {
+          const nestedParsed = JSON.parse(item);
+          if (Array.isArray(nestedParsed)) {
+            for (let nestedItem of nestedParsed) {
+              const cleaned = cleanEmail(nestedItem);
+              if (cleaned && cleaned.includes('@')) {
+                blockedEmailArray.push(cleaned);
+              }
+            }
+          } else {
+            const cleaned = cleanEmail(nestedParsed);
+            if (cleaned && cleaned.includes('@')) {
+              blockedEmailArray.push(cleaned);
+            }
+          }
+        } catch (e) {
+          // If parsing fails, clean the string directly
+          const cleaned = cleanEmail(item);
+          if (cleaned && cleaned.includes('@')) {
+            blockedEmailArray.push(cleaned);
+          }
+        }
+      } else {
+        const cleaned = cleanEmail(item);
+        if (cleaned && cleaned.includes('@')) {
+          blockedEmailArray.push(cleaned);
+        }
+      }
     }
+    
+    // Remove duplicates
+    blockedEmailArray = [...new Set(blockedEmailArray)];
 
-    await userCredential.update({ blockedEmail: blockedEmailStr });
-    res
-      .status(200)
-      .json({ message: "Blocked address list updated successfully." });
+    await userCredential.update({ blockedEmail: blockedEmailArray });
+    res.status(200).json({ 
+      message: "Blocked address list updated successfully.",
+      blockedEmail: blockedEmailArray
+    });
   } catch (error) {
     res.status(500).json({
       message: "Failed to update blocked address.",
@@ -1257,10 +1322,46 @@ exports.removeBlockedAddress = async (req, res) => {
       return res.status(404).json({ message: "User credentials not found." });
     }
 
-    // Ensure blockedEmail is always an array
+    // Helper function to clean emails from nested JSON strings
+    const cleanEmail = (email) => {
+      if (typeof email !== 'string') return '';
+      return email.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, '').toLowerCase();
+    };
+
+    // Ensure blockedEmail is always an array and handle nested JSON
     let blockedList = [];
     if (Array.isArray(userCredential.blockedEmail)) {
-      blockedList = userCredential.blockedEmail;
+      for (let item of userCredential.blockedEmail) {
+        if (typeof item === 'string' && (item.startsWith('[') || item.startsWith('"['))) {
+          // Handle nested JSON string like "[\"email@test.com\"]"
+          try {
+            const parsed = JSON.parse(item);
+            if (Array.isArray(parsed)) {
+              for (let nestedItem of parsed) {
+                const cleaned = cleanEmail(nestedItem);
+                if (cleaned && cleaned.includes('@')) {
+                  blockedList.push(cleaned);
+                }
+              }
+            } else {
+              const cleaned = cleanEmail(parsed);
+              if (cleaned && cleaned.includes('@')) {
+                blockedList.push(cleaned);
+              }
+            }
+          } catch (e) {
+            const cleaned = cleanEmail(item);
+            if (cleaned && cleaned.includes('@')) {
+              blockedList.push(cleaned);
+            }
+          }
+        } else {
+          const cleaned = cleanEmail(item);
+          if (cleaned && cleaned.includes('@')) {
+            blockedList.push(cleaned);
+          }
+        }
+      }
     } else if (
       typeof userCredential.blockedEmail === "string" &&
       userCredential.blockedEmail.length > 0
@@ -1268,14 +1369,15 @@ exports.removeBlockedAddress = async (req, res) => {
       // Fallback for legacy comma-separated string
       blockedList = userCredential.blockedEmail
         .split(",")
-        .map((e) => e.trim().toLowerCase())
+        .map((e) => cleanEmail(e))
         .filter(Boolean);
     }
 
-    // Remove the email (case-insensitive, trimmed)
-    const updatedList = blockedList
-      .map((e) => e.trim().toLowerCase())
-      .filter((email) => email !== emailToRemove.trim().toLowerCase());
+    // Clean the email to remove and normalize it
+    const cleanEmailToRemove = cleanEmail(emailToRemove);
+
+    // Remove the email (case-insensitive, trimmed, quotes removed)
+    const updatedList = blockedList.filter((email) => email !== cleanEmailToRemove);
 
     await userCredential.update({ blockedEmail: updatedList });
 
@@ -1326,9 +1428,60 @@ exports.getBlockedAddress = async (req, res) => {
     if (!userCredential) {
       return res.status(404).json({ message: "User credentials not found." });
     }
+
+    // Helper function to clean emails from nested JSON strings
+    const cleanEmail = (email) => {
+      if (typeof email !== 'string') return '';
+      return email.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, '');
+    };
+
+    // Normalize the blocked email data to array format and clean quotes
+    let blockedEmailArray = [];
+    if (Array.isArray(userCredential.blockedEmail)) {
+      for (let item of userCredential.blockedEmail) {
+        if (typeof item === 'string' && (item.startsWith('[') || item.startsWith('"['))) {
+          // Handle nested JSON string like "[\"email@test.com\"]"
+          try {
+            const parsed = JSON.parse(item);
+            if (Array.isArray(parsed)) {
+              for (let nestedItem of parsed) {
+                const cleaned = cleanEmail(nestedItem);
+                if (cleaned && cleaned.includes('@')) {
+                  blockedEmailArray.push(cleaned);
+                }
+              }
+            } else {
+              const cleaned = cleanEmail(parsed);
+              if (cleaned && cleaned.includes('@')) {
+                blockedEmailArray.push(cleaned);
+              }
+            }
+          } catch (e) {
+            const cleaned = cleanEmail(item);
+            if (cleaned && cleaned.includes('@')) {
+              blockedEmailArray.push(cleaned);
+            }
+          }
+        } else {
+          const cleaned = cleanEmail(item);
+          if (cleaned && cleaned.includes('@')) {
+            blockedEmailArray.push(cleaned);
+          }
+        }
+      }
+    } else if (typeof userCredential.blockedEmail === "string" && userCredential.blockedEmail.length > 0) {
+      blockedEmailArray = userCredential.blockedEmail
+        .split(",")
+        .map(email => cleanEmail(email))
+        .filter(Boolean);
+    }
+    
+    // Remove duplicates
+    blockedEmailArray = [...new Set(blockedEmailArray)];
+
     res.status(200).json({
       message: "Blocked addresses fetched successfully.",
-      blockedEmail: userCredential.blockedEmail,
+      blockedEmail: blockedEmailArray,
     });
   } catch (error) {
     res.status(500).json({
