@@ -4344,7 +4344,7 @@ exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
 };
 
 // Helper function to fetch linked entities for an email
-const getLinkedEntities = async (email) => {
+const getLinkedEntities = async (email, masterUserID = null) => {
   try {
     const linkedEntities = {
       leads: [],
@@ -4472,16 +4472,50 @@ const getLinkedEntities = async (email) => {
     const personIds = persons.map((p) => p.personId).filter(Boolean);
 
     // Fetch activities for all persons at once
+    console.log(`[getLinkedEntities] 🔍 Fetching activities for ${personIds.length} persons:`, personIds);
+    console.log(`[getLinkedEntities] 👤 User: ${masterUserID || 'No user provided'}`);
+    
+    // Build activity query with optional user filtering
+    const activityWhere = {
+      personId: { [Sequelize.Op.in]: personIds },
+    };
+    
+    // ✅ SHARED ACTIVITIES: No user filtering - activities are shared across users for shared contacts
+    // This allows all users to see activities related to shared contacts/persons
+    console.log(`[getLinkedEntities] 🌐 SHARED ACTIVITIES: Fetching all activities for persons (no user isolation)`);
+    console.log(`[getLinkedEntities] 👤 Current user: ${masterUserID}, but activities are shared for these persons`);
+    
     const activities =
       personIds.length > 0
         ? await Activity.findAll({
-            where: {
-              personId: { [Sequelize.Op.in]: personIds },
-            },
+            where: activityWhere,
             order: [["createdAt", "DESC"]],
-            limit: 50, // Reasonable limit to prevent too much data
+            limit: 100, // Increased limit to get more recent activities
           })
         : [];
+    
+    console.log(`[getLinkedEntities] ✅ Found ${activities.length} activities for persons:`, personIds);
+    
+    if (activities.length > 0) {
+      console.log(`[getLinkedEntities] ✅ Found ${activities.length} activities across all users for persons:`, personIds);
+      
+      // Show activity ownership distribution
+      const userIdCounts = {};
+      activities.forEach(a => {
+        const userId = a.masterUserID || 'NULL';
+        userIdCounts[userId] = (userIdCounts[userId] || 0) + 1;
+      });
+      console.log(`[getLinkedEntities] � Activity ownership distribution:`, userIdCounts);
+      
+      // Show activities per person
+      const personActivityCounts = {};
+      activities.forEach(a => {
+        personActivityCounts[a.personId] = (personActivityCounts[a.personId] || 0) + 1;
+      });
+      console.log(`[getLinkedEntities] 📊 Activities by person:`, personActivityCounts);
+    } else {
+      console.log(`[getLinkedEntities] ⚠️ No activities found for persons:`, personIds);
+    }
 
     // Fetch lead and deal titles for activities
     const activityLeadIds = [...new Set(activities.map(a => a.leadId).filter(Boolean))];
@@ -4511,10 +4545,16 @@ const getLinkedEntities = async (email) => {
 
     // Group activities by personId
     const activitiesByPersonId = {};
+    console.log(`[getLinkedEntities] 📊 Grouping ${activities.length} activities by personId...`);
+    
     activities.forEach((activity) => {
       if (!activitiesByPersonId[activity.personId]) {
         activitiesByPersonId[activity.personId] = [];
+        console.log(`[getLinkedEntities] 🆕 Creating activity group for personId: ${activity.personId}`);
       }
+      
+      console.log(`[getLinkedEntities] 📝 Adding activity ${activity.activityId} to personId: ${activity.personId} (${activity.subject})`);
+      
       activitiesByPersonId[activity.personId].push({
         activityId: activity.activityId,
         type: activity.type, // Corrected field name from activityType to type
@@ -4544,19 +4584,24 @@ const getLinkedEntities = async (email) => {
       });
     });
 
-    linkedEntities.persons = persons.map((person) => ({
-      personId: person.personId,
-      contactPerson: person.contactPerson,
-      email: person.email,
-      phone: person.phone,
-      leadOrganizationId: person.leadOrganizationId, // Add leadOrganizationId
-      organization: person.LeadOrganization
-        ? person.LeadOrganization.organization
-        : null,
-      createdAt: person.createdAt,
-      activities: activitiesByPersonId[person.personId] || [], // Add activities array
-      activityCount: (activitiesByPersonId[person.personId] || []).length, // Add activity count
-    }));
+    linkedEntities.persons = persons.map((person) => {
+      const personActivities = activitiesByPersonId[person.personId] || [];
+      console.log(`[getLinkedEntities] 👤 Person ${person.personId} (${person.contactPerson}): ${personActivities.length} activities`);
+      
+      return {
+        personId: person.personId,
+        contactPerson: person.contactPerson,
+        email: person.email,
+        phone: person.phone,
+        leadOrganizationId: person.leadOrganizationId, // Add leadOrganizationId
+        organization: person.LeadOrganization
+          ? person.LeadOrganization.organization
+          : null,
+        createdAt: person.createdAt,
+        activities: personActivities, // Add activities array
+        activityCount: personActivities.length, // Add activity count
+      };
+    });
 
     linkedEntities.organizations = organizations.map((org) => ({
       leadOrganizationId: org.leadOrganizationId,
@@ -4579,7 +4624,7 @@ const getLinkedEntities = async (email) => {
 
 // Helper function to aggregate linked entities from all emails in a conversation
 // Enhanced to include detailed participant information for uniqueParticipants
-const getAggregatedLinkedEntities = async (emails) => {
+const getAggregatedLinkedEntities = async (emails, masterUserID = null) => {
   try {
     const aggregatedEntities = {
       leads: [],
@@ -4791,7 +4836,7 @@ const getAggregatedLinkedEntities = async (emails) => {
 
     // Process each email in the conversation for additional linked entities
     for (const email of emails) {
-      const linkedEntities = await getLinkedEntities(email);
+      const linkedEntities = await getLinkedEntities(email, masterUserID);
 
       // Aggregate leads (deduplicate by leadId)
       linkedEntities.leads.forEach((lead) => {
@@ -4870,16 +4915,50 @@ const getAggregatedLinkedEntities = async (emails) => {
       .map((p) => p.personId)
       .filter(Boolean); // Only get persons that have personId
 
+    console.log(`[getAggregatedLinkedEntities] 🔍 Fetching activities for ${personIds.length} aggregated persons:`, personIds);
+    console.log(`[getAggregatedLinkedEntities] 👤 User: ${masterUserID || 'No user provided'}`);
+    
+    // Build activity query with optional user filtering
+    const activityWhere = {
+      personId: { [Sequelize.Op.in]: personIds },
+    };
+    
+    // ✅ SHARED ACTIVITIES: No user filtering - activities are shared across users for shared contacts
+    // This allows all users to see activities related to shared contacts/persons in conversations
+    console.log(`[getAggregatedLinkedEntities] 🌐 SHARED ACTIVITIES: Fetching all activities for persons (no user isolation)`);
+    console.log(`[getAggregatedLinkedEntities] 👤 Current user: ${masterUserID}, but activities are shared for these persons`);
+    
     const activities =
       personIds.length > 0
         ? await Activity.findAll({
-            where: {
-              personId: { [Sequelize.Op.in]: personIds },
-            },
+            where: activityWhere,
             order: [["createdAt", "DESC"]],
-            limit: 100, // Reasonable limit to prevent too much data for aggregated view
+            limit: 200, // Increased limit for aggregated view to show more activities
           })
         : [];
+    
+    console.log(`[getAggregatedLinkedEntities] ✅ Found ${activities.length} activities for aggregated persons:`, personIds);
+    
+    if (activities.length > 0) {
+      console.log(`[getAggregatedLinkedEntities] ✅ Found ${activities.length} activities across all users for persons:`, personIds);
+      
+      // Show activity ownership distribution  
+      const userIdCounts = {};
+      activities.forEach(a => {
+        const userId = a.masterUserID || 'NULL';
+        userIdCounts[userId] = (userIdCounts[userId] || 0) + 1;
+      });
+      console.log(`[getAggregatedLinkedEntities] � Activity ownership distribution:`, userIdCounts);
+      
+      // Show activities per person
+      const personActivityCounts = {};
+      activities.forEach(a => {
+        personActivityCounts[a.personId] = (personActivityCounts[a.personId] || 0) + 1;
+      });
+      console.log(`[getAggregatedLinkedEntities] 📊 Activities by person:`, personActivityCounts);
+    } else {
+      console.log(`[getAggregatedLinkedEntities] ⚠️ No activities found for persons:`, personIds);
+    }
 
     // Fetch lead and deal titles for activities
     const activityLeadIds = [...new Set(activities.map(a => a.leadId).filter(Boolean))];
@@ -4909,10 +4988,16 @@ const getAggregatedLinkedEntities = async (emails) => {
 
     // Group activities by personId
     const activitiesByPersonId = {};
+    console.log(`[getAggregatedLinkedEntities] 📊 Grouping ${activities.length} activities by personId...`);
+    
     activities.forEach((activity) => {
       if (!activitiesByPersonId[activity.personId]) {
         activitiesByPersonId[activity.personId] = [];
+        console.log(`[getAggregatedLinkedEntities] 🆕 Creating activity group for personId: ${activity.personId}`);
       }
+      
+      console.log(`[getAggregatedLinkedEntities] 📝 Adding activity ${activity.activityId} to personId: ${activity.personId} (${activity.subject})`);
+      
       activitiesByPersonId[activity.personId].push({
         activityId: activity.activityId,
         type: activity.type, // Use 'type' instead of 'activityType' based on model
@@ -5260,7 +5345,7 @@ exports.getOneEmail = async (req, res) => {
 
     // If this is a draft or trash, do NOT fetch related emails but still get linked entities
     if (mainEmail.folder === "drafts") {
-      const linkedEntities = await getLinkedEntities(mainEmail);
+      const linkedEntities = await getLinkedEntities(mainEmail, masterUserID);
       return res.status(200).json({
         message: "Draft email fetched successfully.",
         data: {
@@ -5271,7 +5356,7 @@ exports.getOneEmail = async (req, res) => {
       });
     }
     if (mainEmail.folder === "trash") {
-      const linkedEntities = await getLinkedEntities(mainEmail);
+      const linkedEntities = await getLinkedEntities(mainEmail, masterUserID);
       return res.status(200).json({
         message: "trash email fetched successfully.",
         data: {
@@ -5511,7 +5596,7 @@ exports.getOneEmail = async (req, res) => {
     });
 
     // Fetch linked entities from ALL emails in the conversation thread
-    const linkedEntities = await getAggregatedLinkedEntities(conversation);
+    const linkedEntities = await getAggregatedLinkedEntities(conversation, masterUserID);
 
     res.status(200).json({
       message: "Email fetched successfully.",
@@ -5793,6 +5878,8 @@ exports.composeEmail = [
           (match, url) => `href="${generateRedirectLink(url, messageId)}"`
         );
       };
+      
+      // Build signature block - but don't add it to finalBody yet
       let signatureBlock = "";
       if (userCredential.signatureName) {
         signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
@@ -5803,7 +5890,12 @@ exports.composeEmail = [
       if (userCredential.signatureImage) {
         signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
       }
-      finalBody += `<br><br>${signatureBlock}`;
+      
+      // Add signature to final body AFTER all content processing is done
+      if (signatureBlock.trim() !== "") {
+        finalBody += `<br><br>${signatureBlock}`;
+      }
+      
       // Generate a temporary messageId for tracking
       const tempMessageId = `temp-${Date.now()}`;
 
