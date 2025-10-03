@@ -8,6 +8,12 @@ const MasterUser = require("../../../models/master/masterUserModel");
 const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
+const { getLeadConditionObject } = require("../../../utils/conditionObject/lead");
+const { getActivityConditionObject } = require("../../../utils/conditionObject/activity");
+const { getDealConditionObject } = require("../../../utils/conditionObject/deal");
+const { getPersonConditionObject } = require("../../../utils/conditionObject/createPerson");
+const LeadPerson = require("../../../models/leads/leadPersonModel");
+
 
 exports.createActivityReport = async (req, res) => {
   try {
@@ -360,7 +366,7 @@ exports.createActivityReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Activity" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -532,6 +538,119 @@ exports.createActivityReport = async (req, res) => {
       error: error.message,
     });
   }
+};
+exports.createActivityReportDrillDown = async (req, res) => {
+  try {
+    const {
+      xaxis,
+      yaxis,
+      filters,
+      segmentedBy = "none",
+      page = 1,
+      limit = 8,
+      fieldName,
+      fieldValue,
+      id,
+      moduleId
+    } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    const result = await generateActivityPerformanceDataForDrillDown(
+      ownerId,
+      role,
+      filters,
+      fieldName,
+      fieldValue,
+      id,
+      moduleId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: result?.data,
+      pagination: result?.data?.length,
+    });
+  } catch (error) {
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
+};
+
+exports.getInsightReportsData = async (req, res) => {
+  try {
+    // your Activity model
+
+    function buildWhere(data) {
+      const where = {};
+
+      // main fieldName condition
+      where[data.fieldName] = data.fieldValue;
+
+      // loop over conditions
+      if (Array.isArray(data.conditions)) {
+        data.conditions.forEach((cond) => {
+          let op;
+
+          switch (cond.operator) {
+            case "=":
+              op = Op.eq;
+              break;
+            case "!=":
+              op = Op.ne;
+              break;
+            case ">":
+              op = Op.gt;
+              break;
+            case "<":
+              op = Op.lt;
+              break;
+            case ">=":
+              op = Op.gte;
+              break;
+            case "<=":
+              op = Op.lte;
+              break;
+            case "IN":
+              op = Op.in;
+              break;
+            case "NOT IN":
+              op = Op.notIn;
+              break;
+            case "LIKE":
+              op = Op.like;
+              break;
+            default:
+              throw new Error(`Unsupported operator: ${cond.operator}`);
+          }
+
+          where[cond.column] = { [op]: cond.value };
+        });
+      }
+
+      return where;
+    }
+    const where = buildWhere(data);
+
+    console.log(where);
+    // const activities = await Activity.findAll({
+    //   where,
+    //   raw: true, // plain objects instead of Sequelize instances
+    // });
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: reportData,
+      // totalValue: activities,
+      totalValue: where,
+    });
+  } catch {}
 };
 
 async function generateExistingActivityPerformanceData(
@@ -880,6 +999,7 @@ async function generateActivityPerformanceData(
         );
       });
 
+      // console.log(conditions, "CONDITIONs");
       let combinedCondition = conditions[0];
       for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
@@ -905,7 +1025,7 @@ async function generateActivityPerformanceData(
   }
 
   let groupBy = [];
-  let attributes = [];
+  let attributes = ["personId", "leadOrganizationId"];
 
   if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
@@ -1068,7 +1188,7 @@ async function generateActivityPerformanceData(
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
-        group: groupBy,
+        group: ["personId", ...groupBy],
         raw: true,
         order: [[Sequelize.literal("yValue"), "DESC"]],
       });
@@ -1097,7 +1217,21 @@ async function generateActivityPerformanceData(
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        if (xaxis == "contactPerson") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.personId || null,
+          };
+        } else if (xaxis == "organization") {
+          groupedData[xValue] = {
+            label: xValue,
+            segments: [],
+            id: item?.leadOrganizationId || null,
+          };
+        } else {
+          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        }
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -1121,10 +1255,27 @@ async function generateActivityPerformanceData(
       0
     );
   } else {
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    })); // Calculate the grand total
+    formattedResults = results.map((item) => {
+      if (xaxis == "contactPerson") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.personId || null,
+        };
+      } else if (xaxis == "organization") {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      } else {
+        return {
+          label: item.xValue || "Unknown",
+          value: Number(item.yValue) || 0,
+          id: item?.leadOrganizationId || null,
+        };
+      }
+    }); // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -1139,6 +1290,101 @@ async function generateActivityPerformanceData(
       hasNextPage: page < totalPages,
       hasPrevPage: page > 1,
     },
+  };
+}
+
+async function generateActivityPerformanceDataForDrillDown(
+  ownerId,
+  role,
+  filters,
+  name,
+  value,
+  id,
+  entity
+) {
+  let includeModels = [];
+  const baseWhere = {};
+
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  const conditionObjFunc = {
+    0: getActivityConditionObject,
+    1: getLeadConditionObject,
+    2: getDealConditionObject,
+    3: getPersonConditionObject,
+    4: getPersonConditionObject
+  }
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const filterIncludeModels = [];
+      const conditions = validConditions.map((cond) => {
+        return conditionObjFunc[entity](
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+      Object.assign(baseWhere, combinedCondition);
+
+      filterIncludeModels.forEach((newInclude) => {
+        const exists = includeModels.some(
+          (existingInclude) => existingInclude.as === newInclude.as
+        );
+        if (!exists) {
+          includeModels.push(newInclude);
+        }
+      });
+    }
+  }
+
+  const entityData = {
+    0: Activity,
+    1: Lead,
+    2: Deal,
+    3: LeadPerson,
+    4: Organization
+  }
+
+  const tableName = entityData[entity]
+  const columnNames = Object.keys(tableName.rawAttributes);
+  let attributes = columnNames;
+
+  let results;
+  
+  results = await tableName.findAll({
+    where: baseWhere,
+    attributes: attributes,
+    include: includeModels
+  });
+
+
+  const formattedResults = results.filter(
+    (item) => item[name]?.toLowerCase() === value?.toLowerCase() && 
+    (name == "contactPerson" ? item.personId === id : true) && 
+    (name == "organization" ? item.leadOrganizationId === id : true)
+  );
+  return {
+    data: formattedResults,
+    totalValue: formattedResults?.length
   };
 }
 
@@ -1667,7 +1913,7 @@ async function generateExistingActivityPerformanceDataForSave(
   existingxaxis,
   existingyaxis,
   existingSegmentedBy,
-  existingfilters,
+  existingfilters
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -1947,7 +2193,7 @@ async function generateActivityPerformanceDataForSave(
   xaxis,
   yaxis,
   segmentedBy,
-  filters,
+  filters
 ) {
   let includeModels = [];
   const baseWhere = {};
