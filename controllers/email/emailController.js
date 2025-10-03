@@ -3739,7 +3739,8 @@ exports.getEmails = async (req, res) => {
       "bcc",
       "subject",
       // 🚀 PHASE 2: Conditional body inclusion for performance
-      ...(includeFullBody === "true" ? ["body"] : []), // Only include body if explicitly requested
+      // Always include body for drafts folder, or when explicitly requested
+      ...(includeFullBody === "true" || folder === "drafts" ? ["body"] : []),
       "folder",
       "createdAt",
       "isRead",
@@ -3884,8 +3885,8 @@ exports.getEmails = async (req, res) => {
       const emailObj = { ...email.toJSON(), attachments };
 
       // Replace body with preview content (but keep the 'body' key name)
-      if (includeFullBody === "true") {
-        // Keep full body if explicitly requested
+      if (includeFullBody === "true" || folder === "drafts") {
+        // Keep full body if explicitly requested or for drafts folder
         emailObj.body = emailObj.body;
       } else {
         // Replace body with preview content
