@@ -2077,6 +2077,10 @@ exports.getLeads = async (req, res) => {
         leadObj.ownerName = leadObj.Owner.name;
       }
       delete leadObj.Owner; // Remove the nested Owner object
+      
+      // Preserve person and organization data for the response
+      const person = leadObj.LeadPerson;
+      const organization = leadObj.LeadOrganization;
       delete leadObj.LeadPerson;
       delete leadObj.LeadOrganization;
 
@@ -2157,6 +2161,14 @@ exports.getLeads = async (req, res) => {
       // Keep the customFields property for backward compatibility (optional)
       leadObj.customFields = customFields;
 
+      // Add person and organization data back to the lead object
+      if (person) {
+        leadObj.person = person;
+      }
+      if (organization) {
+        leadObj.leadOrganization = organization;
+      }
+
       return leadObj;
     });
     
@@ -2208,6 +2220,26 @@ exports.getLeads = async (req, res) => {
       console.log("✅ Currency fields included based on column preferences and validity");
       console.log("✅ Currency fields respect leadColumnPreference table settings");
     }
+    
+    // Extract unique persons and leadOrganizations from flatLeads
+    const personsFromLeads = [];
+    const leadOrganizationsFromLeads = [];
+    const uniquePersonIds = new Set();
+    const uniqueOrganizationIds = new Set();
+
+    flatLeads.forEach(lead => {
+      // Collect unique persons
+      if (lead.person && !uniquePersonIds.has(lead.person.personId)) {
+        personsFromLeads.push(lead.person);
+        uniquePersonIds.add(lead.person.personId);
+      }
+      
+      // Collect unique leadOrganizations
+      if (lead.leadOrganization && !uniqueOrganizationIds.has(lead.leadOrganization.leadOrganizationId)) {
+        leadOrganizationsFromLeads.push(lead.leadOrganization);
+        uniqueOrganizationIds.add(lead.leadOrganization.leadOrganizationId);
+      }
+    });
     
     // console.log(leads.rows, "leads rows after flattening"); // Commented out to see Activity filtering debug messages
 
@@ -2432,6 +2464,8 @@ exports.getLeads = async (req, res) => {
       leads: flatLeads, // Return flattened leads with leadDetails merged
       persons,
       organizations,
+      personsFromLeads, // Persons associated with current page leads
+      leadOrganizationsFromLeads, // Lead organizations associated with current page leads
       role: req.role, // Include user role in the response
       // leadDetails
     });
