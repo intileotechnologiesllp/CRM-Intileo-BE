@@ -1447,24 +1447,20 @@ const flattened = JSON.parse(JSON.stringify(results, null, 2)).map(item => flatt
 
 const formattedResults = flattened.filter((item) => {
   if (name === "startDateTime") {
-    const dateTimeString = value;
-    const dateOnly = dateTimeString.split('T')[0];
+    /* for date only comparison */
+    // const dateTimeString = value;
+    // const dateOnly = dateTimeString.split('T')[0];
 
-    const dateTimeString2 = item?.startDateTime;
-    const dateOnly2 = dateTimeString2.split('T')[0];
+    // const dateTimeString2 = item?.startDateTime;
+    // const dateOnly2 = dateTimeString2.split('T')[0];
     return (
-      dateOnly === dateOnly2
+      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
     );
   }
 
   if (name === "endDateTime") {
-    const dateTimeString = value;
-    const dateOnly = dateTimeString.split('T')[0];
-
-    const dateTimeString2 = item?.startDateTime;
-    const dateOnly2 = dateTimeString2.split('T')[0];
     return (
-      dateOnly === dateOnly2
+      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
     );
   }
   if (name === "Owner") {
