@@ -7160,245 +7160,195 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
 
 // Bulk delete deals
 exports.bulkDeleteDeals = async (req, res) => {
-  let transaction;
-  
+  const { dealIds } = req.body;
+
+  // Validate input
+  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+    return res.status(400).json({
+      message: "dealIds must be a non-empty array",
+    });
+  }
+
+  console.log("Bulk delete request for deals:", dealIds);
+
   try {
-    const { dealIds, deleteOptions = {} } = req.body;
-    const userId = req.user?.id || req.adminId;
-    
-    // Validation
-    if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
-      return res.status(400).json({
-        message: "dealIds array is required and cannot be empty",
-        success: false
+    // Check access permissions
+    if (!["admin", "general", "master"].includes(req.role)) {
+      await logAuditTrail(
+        PROGRAMS.DEAL_MANAGEMENT,
+        "BULK_DEAL_DELETE",
+        null,
+        "Access denied. You do not have permission to bulk delete deals.",
+        req.adminId
+      );
+      return res.status(403).json({
+        message:
+          "Access denied. You do not have permission to bulk delete deals.",
       });
     }
 
-    if (dealIds.length > 50) {
-      return res.status(400).json({
-        message: "Maximum 50 deals can be deleted at once for safety",
-        success: false
+    // Find deals to delete
+    let whereClause = { dealId: { [Op.in]: dealIds } };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      whereClause[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId },
+      ];
+    }
+
+    const dealsToDelete = await Deal.findAll({
+      where: whereClause,
+      attributes: [
+        "dealId",
+        "title",
+        "contactPerson",
+        "organization",
+        "value",
+        "masterUserID",
+      ],
+    });
+
+    if (dealsToDelete.length === 0) {
+      return res.status(404).json({
+        message:
+          "No deals found to delete or you don't have permission to delete them",
       });
     }
 
-    console.log(`[BULK-DELETE] 🗑️ Starting bulk deletion for ${dealIds.length} deals by user ${userId}`);
+    console.log(`Found ${dealsToDelete.length} deals to delete`);
 
-    // Start database transaction
-    transaction = await sequelize.transaction();
-
-    const results = {
-      summary: {
-        totalRequested: dealIds.length,
-        successCount: 0,
-        failCount: 0,
-        skippedCount: 0
-      },
-      success: [],
+    const deleteResults = {
+      successful: [],
       failed: [],
-      skipped: []
+      skipped: [],
     };
 
-    // Process each deal
-    for (const dealId of dealIds) {
+    // Process each deal for deletion
+    for (const deal of dealsToDelete) {
       try {
-        console.log(`[BULK-DELETE] 🗑️ Processing deal ${dealId}`);
+        console.log(`Deleting deal ${deal.dealId}`);
 
-        // 1. Fetch the deal to verify it exists and get data for logging
-        const deal = await Deal.findOne({
-          where: { dealId },
-          include: [
-            {
-              model: MasterUser,
-              as: 'Owner',
-              required: false
-            }
-          ],
-          transaction
+        // Delete related data first
+        // Delete custom field values
+        await CustomFieldValue.destroy({
+          where: {
+            entityId: deal.dealId,
+            entityType: "deal",
+          },
         });
 
-        if (!deal) {
-          console.log(`[BULK-DELETE] ⚠️ Deal ${dealId} not found`);
-          results.failed.push({
-            dealId,
-            error: 'Deal not found'
-          });
-          results.summary.failCount++;
-          continue;
-        }
-
-        // 2. Check if deal is already archived (optional skip logic)
-        if (deleteOptions.skipArchived && deal.isArchived) {
-          console.log(`[BULK-DELETE] ⚠️ Deal ${dealId} is archived, skipping`);
-          results.skipped.push({
-            dealId,
-            title: deal.title,
-            reason: 'Deal is archived'
-          });
-          results.summary.skippedCount++;
-          continue;
-        }
-
-        // 3. Store deal information for logging before deletion
-        const dealInfo = {
-          dealId: deal.dealId,
-          title: deal.title,
-          organization: deal.organization,
-          contactPerson: deal.contactPerson,
-          value: deal.value,
-          ownerId: deal.ownerId
-        };
-
-        // 4. Delete related data first (to maintain referential integrity)
-        
         // Delete deal notes
         await DealNote.destroy({
-          where: { dealId },
-          transaction
+          where: { dealId: deal.dealId },
         });
 
         // Delete deal stage history
         await DealStageHistory.destroy({
-          where: { dealId },
-          transaction
+          where: { dealId: deal.dealId },
         });
 
         // Delete deal participants
         await DealParticipant.destroy({
-          where: { dealId },
-          transaction
+          where: { dealId: deal.dealId },
         });
 
         // Delete deal details
         await DealDetails.destroy({
-          where: { dealId },
-          transaction
+          where: { dealId: deal.dealId },
         });
 
-        // Update or delete related activities based on options
-        if (deleteOptions.deleteActivities) {
-          await Activity.destroy({
-            where: { dealId },
-            transaction
-          });
-        } else {
-          // Just remove the deal reference, keep activities
-          await Activity.update(
-            { dealId: null },
-            { 
-              where: { dealId },
-              transaction 
-            }
-          );
-        }
+        // Update emails to remove dealId association
+        await Email.update(
+          { dealId: null },
+          { where: { dealId: deal.dealId } }
+        );
 
-        // Update or delete related emails based on options
-        if (deleteOptions.deleteEmails) {
-          // First delete email attachments
-          const emails = await Email.findAll({
-            where: { dealId },
-            attributes: ['emailId'],
-            transaction
-          });
+        // Update activities to remove dealId association
+        await Activity.update(
+          { dealId: null },
+          { where: { dealId: deal.dealId } }
+        );
 
-          for (const email of emails) {
-            await Attachment.destroy({
-              where: { emailId: email.emailId },
-              transaction
-            });
-          }
-
-          // Then delete emails
-          await Email.destroy({
-            where: { dealId },
-            transaction
-          });
-        } else {
-          // Just remove the deal reference, keep emails
-          await Email.update(
-            { dealId: null },
-            { 
-              where: { dealId },
-              transaction 
-            }
-          );
-        }
-
-        // Delete custom field values related to this deal
-        await CustomFieldValue.destroy({
-          where: { 
-            entityId: dealId,
-            entityType: 'deal'
-          },
-          transaction
+        // Delete the deal
+        await Deal.destroy({
+          where: { dealId: deal.dealId },
         });
 
-        // 5. Finally delete the deal itself
-        await deal.destroy({ transaction });
+        // Log audit trail for successful deletion
+        await historyLogger(
+          PROGRAMS.DEAL_MANAGEMENT,
+          "BULK_DEAL_DELETE",
+          req.adminId,
+          deal.dealId,
+          null,
+          `Deal bulk deleted by ${req.role}`,
+          { dealTitle: deal.title }
+        );
 
-        console.log(`[BULK-DELETE] ✅ Deleted deal ${dealId}: ${deal.title}`);
-
-        // 6. Log audit trail
-        await logAuditTrail({
-          action: "DEAL_BULK_DELETED",
-          entity: "Deal",
-          entityId: dealId,
-          changes: {
-            deletedDeal: dealInfo,
-            deletedBy: userId,
-            deleteOptions: deleteOptions
-          },
-          userId: userId,
-          ipAddress: req.ip,
-          userAgent: req.get("User-Agent")
-        });
-
-        // 7. Log history
-        await historyLogger("Deal", dealId, "bulk deleted", {
-          deletedBy: userId,
-          dealTitle: deal.title
-        }, userId);
-
-        results.success.push({
-          dealId,
+        deleteResults.successful.push({
+          dealId: deal.dealId,
           title: deal.title,
-          organization: deal.organization
+          contactPerson: deal.contactPerson,
+          organization: deal.organization,
+          value: deal.value,
         });
-        results.summary.successCount++;
-
       } catch (dealError) {
-        console.error(`[BULK-DELETE] ❌ Failed to delete deal ${dealId}:`, dealError);
-        results.failed.push({
-          dealId,
-          error: dealError.message
+        console.error(`Error deleting deal ${deal.dealId}:`, dealError);
+
+        await logAuditTrail(
+          PROGRAMS.DEAL_MANAGEMENT,
+          "BULK_DEAL_DELETE",
+          req.adminId,
+          `Error deleting deal ${deal.dealId}: ${dealError.message}`,
+          req.adminId
+        );
+
+        deleteResults.failed.push({
+          dealId: deal.dealId,
+          title: deal.title,
+          error: dealError.message,
         });
-        results.summary.failCount++;
       }
     }
 
-    // Commit transaction
-    await transaction.commit();
+    // Check for deals that were requested but not found
+    const foundDealIds = dealsToDelete.map((deal) => deal.dealId);
+    const notFoundDealIds = dealIds.filter((id) => !foundDealIds.includes(id));
 
-    console.log(`[BULK-DELETE] ✅ Bulk deletion completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
-
-    const statusCode = results.summary.successCount > 0 ? 200 : 400;
-    
-    res.status(statusCode).json({
-      message: `Bulk deletion completed. ${results.summary.successCount} deals deleted successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
-      success: true,
-      results: results,
-      timestamp: new Date().toISOString(),
+    notFoundDealIds.forEach((dealId) => {
+      deleteResults.skipped.push({
+        dealId: dealId,
+        reason: "Deal not found or no permission to delete",
+      });
     });
 
+    console.log("Bulk delete results:", deleteResults);
+
+    res.status(200).json({
+      message: "Bulk delete operation completed",
+      results: deleteResults,
+      summary: {
+        total: dealIds.length,
+        successful: deleteResults.successful.length,
+        failed: deleteResults.failed.length,
+        skipped: deleteResults.skipped.length,
+      },
+    });
   } catch (error) {
-    // Rollback transaction on error
-    if (transaction) {
-      await transaction.rollback();
-    }
-    
-    console.error(`[BULK-DELETE] ❌ Bulk deletion error:`, error);
+    console.error("Error in bulk delete deals:", error);
+
+    await logAuditTrail(
+      PROGRAMS.DEAL_MANAGEMENT,
+      "BULK_DEAL_DELETE",
+      null,
+      "Error in bulk delete deals: " + error.message,
+      req.adminId
+    );
+
     res.status(500).json({
-      message: "Failed to delete deals in bulk.",
-      success: false,
+      message: "Internal server error during bulk delete",
       error: error.message,
     });
   }
