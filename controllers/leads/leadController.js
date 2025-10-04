@@ -3898,6 +3898,22 @@ exports.getAllLeadDetails = async (req, res) => {
 
     const clientEmail = lead.email;
 
+    // Fetch person and leadOrganization data for the lead
+    let person = null;
+    let leadOrganization = null;
+
+    if (lead.personId) {
+      person = await Person.findByPk(lead.personId, {
+        raw: true
+      });
+    }
+
+    if (lead.leadOrganizationId) {
+      leadOrganization = await Organization.findByPk(lead.leadOrganizationId, {
+        raw: true
+      });
+    }
+
     // Optimize email fetching with pagination and size limits
     const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
     const maxBodyLength = 1000;
@@ -4170,6 +4186,8 @@ exports.getAllLeadDetails = async (req, res) => {
       notes: notesWithCreator,
       emails: relatedEmails,
       activities,
+      person: person ? [person] : [], // Person array (single person if exists)
+      leadOrganization: leadOrganization ? [leadOrganization] : [], // Lead organization array (single organization if exists)
       currencyDetails: {
         valueCurrency: valueCurrencyDetails
           ? {
