@@ -6922,3 +6922,484 @@ exports.duplicateDealsInBatch = async (req, res) => {
     });
   }
 };
+
+// Bulk convert deals to leads
+exports.bulkConvertDealsToLeads = async (req, res) => {
+  let transaction;
+  
+  try {
+    const { dealIds, convertOptions = {} } = req.body;
+    const userId = req.user?.id || req.adminId;
+    
+    // Validation
+    if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+      return res.status(400).json({
+        message: "dealIds array is required and cannot be empty",
+        success: false
+      });
+    }
+
+    if (dealIds.length > 100) {
+      return res.status(400).json({
+        message: "Maximum 100 deals can be converted at once",
+        success: false
+      });
+    }
+
+    console.log(`[BULK-CONVERT] 🔄 Starting bulk conversion for ${dealIds.length} deals by user ${userId}`);
+
+    // Start database transaction
+    transaction = await sequelize.transaction();
+
+    const results = {
+      summary: {
+        totalRequested: dealIds.length,
+        successCount: 0,
+        failCount: 0,
+        skippedCount: 0
+      },
+      success: [],
+      failed: [],
+      skipped: []
+    };
+
+    // Process each deal
+    for (const dealId of dealIds) {
+      try {
+        console.log(`[BULK-CONVERT] 📊 Processing deal ${dealId}`);
+
+        // 1. Fetch the deal with all related data
+        const deal = await Deal.findOne({
+          where: { dealId },
+          include: [
+            {
+              model: Person,
+              as: 'Person',
+              required: false
+            },
+            {
+              model: Organization,
+              as: 'LeadOrganization',
+              required: false
+            },
+            {
+              model: MasterUser,
+              as: 'Owner',
+              required: false
+            }
+          ],
+          transaction
+        });
+
+        if (!deal) {
+          console.log(`[BULK-CONVERT] ⚠️ Deal ${dealId} not found`);
+          results.failed.push({
+            dealId,
+            error: 'Deal not found'
+          });
+          results.summary.failCount++;
+          continue;
+        }
+
+        // 2. Check if deal already has an associated lead
+        if (deal.leadId) {
+          console.log(`[BULK-CONVERT] ⚠️ Deal ${dealId} already linked to lead ${deal.leadId}`);
+          results.skipped.push({
+            dealId,
+            leadId: deal.leadId,
+            reason: 'Deal already has an associated lead'
+          });
+          results.summary.skippedCount++;
+          continue;
+        }
+
+        // 3. Create new lead from deal data
+        const leadData = {
+          // Basic information
+          contactPerson: deal.contactPerson,
+          organization: deal.organization,
+          title: deal.title || `Lead converted from Deal #${dealId}`,
+          
+          // Communication
+          phone: deal.phone,
+          email: deal.email,
+          company: deal.organization,
+          
+          // Business details
+          proposalValue: deal.proposalValue || deal.value,
+          esplProposalNo: deal.esplProposalNo,
+          projectLocation: deal.projectLocation,
+          organizationCountry: deal.organizationCountry,
+          proposalSentDate: deal.proposalSentDate,
+          
+          // Status and classification
+          status: convertOptions.leadStatus || 'Open',
+          sourceChannel: deal.sourceChannel || 'Deal Conversion',
+          serviceType: deal.serviceType,
+          
+          // Relationships
+          personId: deal.personId,
+          leadOrganizationId: deal.leadOrganizationId,
+          ownerId: deal.ownerId,
+          masterUserID: deal.masterUserID || userId,
+          
+          // Metadata
+          sourceOrgin: '3', // Mark as converted from deal
+          questionShared: false,
+          isArchived: false
+        };
+
+        // 4. Create the lead
+        const newLead = await Lead.create(leadData, { transaction });
+
+        console.log(`[BULK-CONVERT] ✅ Created lead ${newLead.leadId} from deal ${dealId}`);
+
+        // 5. Update the deal to reference the new lead
+        await deal.update({
+          leadId: newLead.leadId,
+          sourceOrgin: '2' // Mark as originated from lead
+        }, { transaction });
+
+        // 6. Copy deal notes to lead notes if requested
+        if (convertOptions.copyNotes !== false) {
+          const dealNotes = await DealNote.findAll({
+            where: { dealId },
+            transaction
+          });
+
+          for (const note of dealNotes) {
+            await LeadNote.create({
+              leadId: newLead.leadId,
+              note: `[Converted from Deal] ${note.note}`,
+              masterUserID: note.masterUserID || userId,
+              createdAt: note.createdAt
+            }, { transaction });
+          }
+        }
+
+        // 7. Copy activities if requested
+        if (convertOptions.copyActivities !== false) {
+          await Activity.update(
+            { leadId: newLead.leadId },
+            { 
+              where: { 
+                dealId,
+                leadId: null 
+              },
+              transaction 
+            }
+          );
+        }
+
+        // 8. Log audit trail
+        await logAuditTrail({
+          action: "DEAL_CONVERTED_TO_LEAD",
+          entity: "Deal",
+          entityId: dealId,
+          changes: {
+            convertedToLeadId: newLead.leadId,
+            convertedBy: userId,
+            conversionOptions: convertOptions
+          },
+          userId: userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent")
+        });
+
+        // 9. Log history
+        await historyLogger("Deal", dealId, "converted to lead", {
+          leadId: newLead.leadId,
+          convertedBy: userId
+        }, userId);
+
+        results.success.push({
+          dealId,
+          leadId: newLead.leadId,
+          leadTitle: newLead.title
+        });
+        results.summary.successCount++;
+
+      } catch (dealError) {
+        console.error(`[BULK-CONVERT] ❌ Failed to convert deal ${dealId}:`, dealError);
+        results.failed.push({
+          dealId,
+          error: dealError.message
+        });
+        results.summary.failCount++;
+      }
+    }
+
+    // Commit transaction
+    await transaction.commit();
+
+    console.log(`[BULK-CONVERT] ✅ Bulk conversion completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
+
+    const statusCode = results.summary.successCount > 0 ? 200 : 400;
+    
+    res.status(statusCode).json({
+      message: `Bulk conversion completed. ${results.summary.successCount} deals converted successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
+      success: true,
+      results: results,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error) {
+    // Rollback transaction on error
+    if (transaction) {
+      await transaction.rollback();
+    }
+    
+    console.error(`[BULK-CONVERT] ❌ Bulk conversion error:`, error);
+    res.status(500).json({
+      message: "Failed to convert deals to leads in bulk.",
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+// Bulk delete deals
+exports.bulkDeleteDeals = async (req, res) => {
+  let transaction;
+  
+  try {
+    const { dealIds, deleteOptions = {} } = req.body;
+    const userId = req.user?.id || req.adminId;
+    
+    // Validation
+    if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
+      return res.status(400).json({
+        message: "dealIds array is required and cannot be empty",
+        success: false
+      });
+    }
+
+    if (dealIds.length > 50) {
+      return res.status(400).json({
+        message: "Maximum 50 deals can be deleted at once for safety",
+        success: false
+      });
+    }
+
+    console.log(`[BULK-DELETE] 🗑️ Starting bulk deletion for ${dealIds.length} deals by user ${userId}`);
+
+    // Start database transaction
+    transaction = await sequelize.transaction();
+
+    const results = {
+      summary: {
+        totalRequested: dealIds.length,
+        successCount: 0,
+        failCount: 0,
+        skippedCount: 0
+      },
+      success: [],
+      failed: [],
+      skipped: []
+    };
+
+    // Process each deal
+    for (const dealId of dealIds) {
+      try {
+        console.log(`[BULK-DELETE] 🗑️ Processing deal ${dealId}`);
+
+        // 1. Fetch the deal to verify it exists and get data for logging
+        const deal = await Deal.findOne({
+          where: { dealId },
+          include: [
+            {
+              model: MasterUser,
+              as: 'Owner',
+              required: false
+            }
+          ],
+          transaction
+        });
+
+        if (!deal) {
+          console.log(`[BULK-DELETE] ⚠️ Deal ${dealId} not found`);
+          results.failed.push({
+            dealId,
+            error: 'Deal not found'
+          });
+          results.summary.failCount++;
+          continue;
+        }
+
+        // 2. Check if deal is already archived (optional skip logic)
+        if (deleteOptions.skipArchived && deal.isArchived) {
+          console.log(`[BULK-DELETE] ⚠️ Deal ${dealId} is archived, skipping`);
+          results.skipped.push({
+            dealId,
+            title: deal.title,
+            reason: 'Deal is archived'
+          });
+          results.summary.skippedCount++;
+          continue;
+        }
+
+        // 3. Store deal information for logging before deletion
+        const dealInfo = {
+          dealId: deal.dealId,
+          title: deal.title,
+          organization: deal.organization,
+          contactPerson: deal.contactPerson,
+          value: deal.value,
+          ownerId: deal.ownerId
+        };
+
+        // 4. Delete related data first (to maintain referential integrity)
+        
+        // Delete deal notes
+        await DealNote.destroy({
+          where: { dealId },
+          transaction
+        });
+
+        // Delete deal stage history
+        await DealStageHistory.destroy({
+          where: { dealId },
+          transaction
+        });
+
+        // Delete deal participants
+        await DealParticipant.destroy({
+          where: { dealId },
+          transaction
+        });
+
+        // Delete deal details
+        await DealDetails.destroy({
+          where: { dealId },
+          transaction
+        });
+
+        // Update or delete related activities based on options
+        if (deleteOptions.deleteActivities) {
+          await Activity.destroy({
+            where: { dealId },
+            transaction
+          });
+        } else {
+          // Just remove the deal reference, keep activities
+          await Activity.update(
+            { dealId: null },
+            { 
+              where: { dealId },
+              transaction 
+            }
+          );
+        }
+
+        // Update or delete related emails based on options
+        if (deleteOptions.deleteEmails) {
+          // First delete email attachments
+          const emails = await Email.findAll({
+            where: { dealId },
+            attributes: ['emailId'],
+            transaction
+          });
+
+          for (const email of emails) {
+            await Attachment.destroy({
+              where: { emailId: email.emailId },
+              transaction
+            });
+          }
+
+          // Then delete emails
+          await Email.destroy({
+            where: { dealId },
+            transaction
+          });
+        } else {
+          // Just remove the deal reference, keep emails
+          await Email.update(
+            { dealId: null },
+            { 
+              where: { dealId },
+              transaction 
+            }
+          );
+        }
+
+        // Delete custom field values related to this deal
+        await CustomFieldValue.destroy({
+          where: { 
+            entityId: dealId,
+            entityType: 'deal'
+          },
+          transaction
+        });
+
+        // 5. Finally delete the deal itself
+        await deal.destroy({ transaction });
+
+        console.log(`[BULK-DELETE] ✅ Deleted deal ${dealId}: ${deal.title}`);
+
+        // 6. Log audit trail
+        await logAuditTrail({
+          action: "DEAL_BULK_DELETED",
+          entity: "Deal",
+          entityId: dealId,
+          changes: {
+            deletedDeal: dealInfo,
+            deletedBy: userId,
+            deleteOptions: deleteOptions
+          },
+          userId: userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent")
+        });
+
+        // 7. Log history
+        await historyLogger("Deal", dealId, "bulk deleted", {
+          deletedBy: userId,
+          dealTitle: deal.title
+        }, userId);
+
+        results.success.push({
+          dealId,
+          title: deal.title,
+          organization: deal.organization
+        });
+        results.summary.successCount++;
+
+      } catch (dealError) {
+        console.error(`[BULK-DELETE] ❌ Failed to delete deal ${dealId}:`, dealError);
+        results.failed.push({
+          dealId,
+          error: dealError.message
+        });
+        results.summary.failCount++;
+      }
+    }
+
+    // Commit transaction
+    await transaction.commit();
+
+    console.log(`[BULK-DELETE] ✅ Bulk deletion completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
+
+    const statusCode = results.summary.successCount > 0 ? 200 : 400;
+    
+    res.status(statusCode).json({
+      message: `Bulk deletion completed. ${results.summary.successCount} deals deleted successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
+      success: true,
+      results: results,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error) {
+    // Rollback transaction on error
+    if (transaction) {
+      await transaction.rollback();
+    }
+    
+    console.error(`[BULK-DELETE] ❌ Bulk deletion error:`, error);
+    res.status(500).json({
+      message: "Failed to delete deals in bulk.",
+      success: false,
+      error: error.message,
+    });
+  }
+};
