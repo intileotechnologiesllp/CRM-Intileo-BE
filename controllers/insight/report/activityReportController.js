@@ -1188,7 +1188,7 @@ async function generateActivityPerformanceData(
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
-        group: ["personId", ...groupBy],
+        group: [...groupBy],
         raw: true,
         order: [[Sequelize.literal("yValue"), "DESC"]],
       });
@@ -1460,7 +1460,7 @@ const formattedResults = flattened.filter((item) => {
 
   if (name === "endDateTime") {
     return (
-      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
+      new Date(value).getTime() === new Date(item?.endDateTime).getTime()
     );
   }
   if (name === "Owner") {
