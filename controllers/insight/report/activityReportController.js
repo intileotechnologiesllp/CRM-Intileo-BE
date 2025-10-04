@@ -1423,7 +1423,7 @@ async function generateActivityPerformanceDataForDrillDown(
       flattenObject(obj[key], newKey, res);
     } else {
       res[newKey] = obj[key];
-    }
+    } 
   }
   return res;
 }
@@ -1434,8 +1434,24 @@ const flattened = JSON.parse(JSON.stringify(results, null, 2)).map(item => flatt
 const formattedResults = flattened.filter((item) => {
   // Handle startDateTime check
   if (name === "startDateTime") {
+    const dateTimeString = value;
+    const dateOnly = dateTimeString.split('T')[0];
+
+    const dateTimeString2 = item?.startDateTime;
+    const dateOnly2 = dateTimeString2.split('T')[0];
     return (
-      new Date(item?.startDateTime).getTime() === new Date("2025-09-05T07:45:00.000Z").getTime()
+      dateOnly === dateOnly2
+    );
+  }
+
+  if (name === "endDateTime") {
+    const dateTimeString = value;
+    const dateOnly = dateTimeString.split('T')[0];
+
+    const dateTimeString2 = item?.startDateTime;
+    const dateOnly2 = dateTimeString2.split('T')[0];
+    return (
+      dateOnly === dateOnly2
     );
   }
   if (name === "Owner") {
