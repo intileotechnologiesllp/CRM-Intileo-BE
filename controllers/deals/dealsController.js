@@ -6924,12 +6924,12 @@ exports.duplicateDealsInBatch = async (req, res) => {
   }
 };
 
-// Bulk convert deals to leads
+// Bulk disconnect deals from leads
 exports.bulkConvertDealsToLeads = async (req, res) => {
   let transaction;
   
   try {
-    const { dealIds, convertOptions = {} } = req.body;
+    const { dealIds } = req.body;
     const userId = req.user?.id || req.adminId;
     
     // Validation
@@ -6942,12 +6942,12 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
 
     if (dealIds.length > 100) {
       return res.status(400).json({
-        message: "Maximum 100 deals can be converted at once",
+        message: "Maximum 100 deals can be disconnected at once",
         success: false
       });
     }
 
-    console.log(`[BULK-CONVERT] 🔄 Starting bulk conversion for ${dealIds.length} deals by user ${userId}`);
+    console.log(`[BULK-DISCONNECT] 🔄 Starting bulk disconnection for ${dealIds.length} deals by user ${userId}`);
 
     // Start database transaction
     transaction = await sequelize.transaction();
@@ -6967,33 +6967,16 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
     // Process each deal
     for (const dealId of dealIds) {
       try {
-        console.log(`[BULK-CONVERT] 📊 Processing deal ${dealId}`);
+        console.log(`[BULK-DISCONNECT] 📊 Processing deal ${dealId}`);
 
-        // 1. Fetch the deal with all related data
+        // 1. Fetch the deal
         const deal = await Deal.findOne({
           where: { dealId },
-          include: [
-            {
-              model: Person,
-              as: 'Person',
-              required: false
-            },
-            {
-              model: Organization,
-              as: 'LeadOrganization',
-              required: false
-            },
-            {
-              model: MasterUser,
-              as: 'Owner',
-              required: false
-            }
-          ],
           transaction
         });
 
         if (!deal) {
-          console.log(`[BULK-CONVERT] ⚠️ Deal ${dealId} not found`);
+          console.log(`[BULK-DISCONNECT] ⚠️ Deal ${dealId} not found`);
           results.failed.push({
             dealId,
             error: 'Deal not found'
@@ -7002,126 +6985,75 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
           continue;
         }
 
-        // 2. Check if deal already has an associated lead
+        // 2. Check if deal has an associated lead
         if (deal.leadId) {
-          console.log(`[BULK-CONVERT] ⚠️ Deal ${dealId} already linked to lead ${deal.leadId}`);
-          results.skipped.push({
-            dealId,
-            leadId: deal.leadId,
-            reason: 'Deal already has an associated lead'
-          });
-          results.summary.skippedCount++;
-          continue;
-        }
-
-        // 3. Create new lead from deal data
-        const leadData = {
-          // Basic information
-          contactPerson: deal.contactPerson,
-          organization: deal.organization,
-          title: deal.title || `Lead converted from Deal #${dealId}`,
+          console.log(`[BULK-DISCONNECT] 🔄 Deal ${dealId} is linked to lead ${deal.leadId}, disconnecting...`);
           
-          // Communication
-          phone: deal.phone,
-          email: deal.email,
-          company: deal.organization,
-          
-          // Business details
-          proposalValue: deal.proposalValue || deal.value,
-          esplProposalNo: deal.esplProposalNo,
-          projectLocation: deal.projectLocation,
-          organizationCountry: deal.organizationCountry,
-          proposalSentDate: deal.proposalSentDate,
-          
-          // Status and classification
-          status: convertOptions.leadStatus || 'Open',
-          sourceChannel: deal.sourceChannel || 'Deal Conversion',
-          serviceType: deal.serviceType,
-          
-          // Relationships
-          personId: deal.personId,
-          leadOrganizationId: deal.leadOrganizationId,
-          ownerId: deal.ownerId,
-          masterUserID: deal.masterUserID || userId,
-          
-          // Metadata
-          sourceOrgin: '3', // Mark as converted from deal
-          questionShared: false,
-          isArchived: false
-        };
-
-        // 4. Create the lead
-        const newLead = await Lead.create(leadData, { transaction });
-
-        console.log(`[BULK-CONVERT] ✅ Created lead ${newLead.leadId} from deal ${dealId}`);
-
-        // 5. Update the deal to reference the new lead
-        await deal.update({
-          leadId: newLead.leadId,
-          sourceOrgin: '2' // Mark as originated from lead
-        }, { transaction });
-
-        // 6. Copy deal notes to lead notes if requested
-        if (convertOptions.copyNotes !== false) {
-          const dealNotes = await DealNote.findAll({
-            where: { dealId },
-            transaction
-          });
-
-          for (const note of dealNotes) {
-            await LeadNote.create({
-              leadId: newLead.leadId,
-              note: `[Converted from Deal] ${note.note}`,
-              masterUserID: note.masterUserID || userId,
-              createdAt: note.createdAt
-            }, { transaction });
-          }
-        }
-
-        // 7. Copy activities if requested
-        if (convertOptions.copyActivities !== false) {
-          await Activity.update(
-            { leadId: newLead.leadId },
+          // Remove dealId from the lead record
+          await Lead.update(
+            { dealId: null },
             { 
-              where: { 
-                dealId,
-                leadId: null 
-              },
+              where: { leadId: deal.leadId },
               transaction 
             }
           );
+          
+          // Store the original leadId for response
+          const originalLeadId = deal.leadId;
+          
+          // Remove leadId from the deal record
+          await deal.update({
+            leadId: null
+          }, { transaction });
+          
+          console.log(`[BULK-DISCONNECT] ✅ Successfully disconnected deal ${dealId} from lead ${originalLeadId}`);
+
+          // Log audit trail
+          try {
+            await logAuditTrail({
+              action: "DEAL_DISCONNECTED_FROM_LEAD",
+              entity: "Deal",
+              entityId: dealId,
+              changes: {
+                previousLeadId: originalLeadId,
+                disconnectedBy: userId
+              },
+              userId: userId,
+              ipAddress: req.ip,
+              userAgent: req.get("User-Agent")
+            });
+          } catch (auditError) {
+            console.log(`[BULK-DISCONNECT] Audit logging failed: ${auditError.message}`);
+          }
+
+          // Log history
+          try {
+            await historyLogger("Deal", dealId, "disconnected from lead", {
+              previousLeadId: originalLeadId,
+              disconnectedBy: userId
+            }, userId);
+          } catch (historyError) {
+            console.log(`[BULK-DISCONNECT] History logging failed: ${historyError.message}`);
+          }
+
+          results.success.push({
+            dealId,
+            previousLeadId: originalLeadId,
+            action: 'disconnected'
+          });
+          results.summary.successCount++;
+
+        } else {
+          console.log(`[BULK-DISCONNECT] ⚠️ Deal ${dealId} is not linked to any lead, skipping`);
+          results.skipped.push({
+            dealId,
+            reason: 'Deal is not linked to any lead'
+          });
+          results.summary.skippedCount++;
         }
 
-        // 8. Log audit trail
-        await logAuditTrail({
-          action: "DEAL_CONVERTED_TO_LEAD",
-          entity: "Deal",
-          entityId: dealId,
-          changes: {
-            convertedToLeadId: newLead.leadId,
-            convertedBy: userId,
-            conversionOptions: convertOptions
-          },
-          userId: userId,
-          ipAddress: req.ip,
-          userAgent: req.get("User-Agent")
-        });
-
-        // 9. Log history
-        await historyLogger("Deal", dealId, "converted to lead", {
-          leadId: newLead.leadId,
-          convertedBy: userId
-        }, userId);
-
-        results.success.push({
-          dealId,
-          leadId: newLead.leadId,
-          leadTitle: newLead.title
-        });
-        results.summary.successCount++;
-
       } catch (dealError) {
-        console.error(`[BULK-CONVERT] ❌ Failed to convert deal ${dealId}:`, dealError);
+        console.error(`[BULK-DISCONNECT] ❌ Failed to disconnect deal ${dealId}:`, dealError);
         results.failed.push({
           dealId,
           error: dealError.message
@@ -7133,12 +7065,12 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
     // Commit transaction
     await transaction.commit();
 
-    console.log(`[BULK-CONVERT] ✅ Bulk conversion completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
+    console.log(`[BULK-DISCONNECT] ✅ Bulk disconnection completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
 
     const statusCode = results.summary.successCount > 0 ? 200 : 400;
     
     res.status(statusCode).json({
-      message: `Bulk conversion completed. ${results.summary.successCount} deals converted successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
+      message: `Bulk disconnection completed. ${results.summary.successCount} deals disconnected successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
       success: true,
       results: results,
       timestamp: new Date().toISOString(),
@@ -7150,9 +7082,9 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
       await transaction.rollback();
     }
     
-    console.error(`[BULK-CONVERT] ❌ Bulk conversion error:`, error);
+    console.error(`[BULK-DISCONNECT] ❌ Bulk disconnection error:`, error);
     res.status(500).json({
-      message: "Failed to convert deals to leads in bulk.",
+      message: "Failed to disconnect deals from leads in bulk.",
       success: false,
       error: error.message,
     });
