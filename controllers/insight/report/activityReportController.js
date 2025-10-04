@@ -1279,8 +1279,23 @@ async function generateActivityPerformanceData(
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
+  let finalResult = []
+  if(xaxis == "startDateTime" || xaxis == "endDateTime"){
+    const formattedData = Object.values(
+      formattedResults.reduce((acc, { label, value }) => {
+        const date = new Date(label).toISOString().split('T')[0]; // Extract YYYY-MM-DD
+        acc[date] = acc[date] || { label: date, value: 0, id: null };
+        acc[date].value += value;
+        return acc;
+      }, {})
+    ).sort((a, b) => new Date(a.label) - new Date(b.label)); // Sort by date
+
+    // console
+    finalResult = formattedData
+  }
+
   return {
-    data: formattedResults,
+    data: finalResult,
     totalValue: totalValue,
     pagination: {
       currentPage: page,
@@ -1428,11 +1443,9 @@ async function generateActivityPerformanceDataForDrillDown(
   return res;
 }
 
-// const flattened = JSON.parse(JSON.stringify(results[0], null, 2)).map(item => flattenObject(item));
 const flattened = JSON.parse(JSON.stringify(results, null, 2)).map(item => flattenObject(item));
-// console.log(flattened[0]);
+
 const formattedResults = flattened.filter((item) => {
-  // Handle startDateTime check
   if (name === "startDateTime") {
     const dateTimeString = value;
     const dateOnly = dateTimeString.split('T')[0];
@@ -1455,7 +1468,6 @@ const formattedResults = flattened.filter((item) => {
     );
   }
   if (name === "Owner") {
-    // console.log(item["assignee_name"])
     return (
       item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase()
     );
