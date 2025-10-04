@@ -1279,23 +1279,23 @@ async function generateActivityPerformanceData(
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
-  let finalResult = formattedResults
-  if(xaxis == "startDateTime" || xaxis == "endDateTime"){
-    const formattedData = Object.values(
-      formattedResults.reduce((acc, { label, value }) => {
-        const date = new Date(label).toISOString().split('T')[0]; // Extract YYYY-MM-DD
-        acc[date] = acc[date] || { label: date, value: 0, id: null };
-        acc[date].value += value;
-        return acc;
-      }, {})
-    ).sort((a, b) => new Date(a.label) - new Date(b.label)); // Sort by date
+  // let finalResult = formattedResults
+  // if(xaxis == "startDateTime" || xaxis == "endDateTime"){
+  //   const formattedData = Object.values(
+  //     formattedResults.reduce((acc, { label, value }) => {
+  //       const date = new Date(label).toISOString().split('T')[0]; // Extract YYYY-MM-DD
+  //       acc[date] = acc[date] || { label: date, value: 0, id: null };
+  //       acc[date].value += value;
+  //       return acc;
+  //     }, {})
+  //   ).sort((a, b) => new Date(a.label) - new Date(b.label)); // Sort by date
 
-    // console
-    finalResult = formattedData
-  }
+  //   // console
+  //   finalResult = formattedData
+  // }
 
   return {
-    data: finalResult,
+    data: formattedResults,
     totalValue: totalValue,
     pagination: {
       currentPage: page,
