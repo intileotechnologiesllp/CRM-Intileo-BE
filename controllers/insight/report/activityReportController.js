@@ -1279,7 +1279,7 @@ async function generateActivityPerformanceData(
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
-  let finalResult = []
+  let finalResult = formattedResults
   if(xaxis == "startDateTime" || xaxis == "endDateTime"){
     const formattedData = Object.values(
       formattedResults.reduce((acc, { label, value }) => {
