@@ -98,5 +98,21 @@ router.post(
   dealsController.duplicateDealsInBatch
 );
 
+// ================ BULK CONVERT ROUTES ================
+router.post(
+  "/bulk-convert-to-leads",
+  verifyToken,
+  validatePrivilege(3, "create"),
+  dealsController.bulkConvertDealsToLeads
+);
+
+// ================ BULK DELETE ROUTES ================
+router.delete(
+  "/bulk-delete",
+  verifyToken,
+  validatePrivilege(3, "delete"),
+  dealsController.bulkDeleteDeals
+);
+
 module.exports = router;
 
