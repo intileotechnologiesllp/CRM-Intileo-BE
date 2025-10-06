@@ -3059,6 +3059,9 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
         createdAt: parsedEmail.date || new Date(),
         isRead: isRead, // Save read/unread status
         uid: recentUID, // Store the IMAP UID for future body fetching
+         recipientName: parsedEmail.to
+          ? parsedEmail.to.value.map((to) => to.name).join(", ")
+          : null,
       };
 
       console.log(`Processing recent email: ${emailData.messageId}`);
