@@ -1379,7 +1379,9 @@ async function generateActivityPerformanceDataForDrillDown(
     1: Lead,
     2: Deal,
     3: LeadPerson,
-    4: Organization
+    4: Organization,
+    5: Deal,
+    6: Lead,
   }
 
   const tableName = entityData[entity]
@@ -1390,14 +1392,14 @@ async function generateActivityPerformanceDataForDrillDown(
   
   let addIncludeModel = includeModels;
   if(entity != 4 && entity != 3){
-    if(entity == 1){
+    if(entity == 1 || entity == 6){
       addIncludeModel = [...includeModels,
        {
         model: MasterUser,
         as: 'Owner', // For masterUserID
         attributes: ['masterUserID', 'name'],
       }]
-    }else if(entity == 2){
+    }else if(entity == 2 || entity == 5){
       addIncludeModel = [...includeModels,
        {
         model: MasterUser,
@@ -1497,9 +1499,20 @@ const formattedResults = flattened.filter((item) => {
   return true;
 });
 
+let dealConvertion = formattedResults;
+if(entity == 5 || entity == 6){
+  let convertion = []
+  for(let i = 0; i < formattedResults?.length; i++){
+    if(formattedResults[i].status == "won" || formattedResults[i]?.status == "lost"){
+      convertion.push(formattedResults[i])
+    }
+  }
+
+  dealConvertion = convertion
+}
 
 return {
-  data: formattedResults,
+  data: dealConvertion,
   totalValue: formattedResults?.length
 };
 }
