@@ -1401,6 +1401,14 @@ async function generateActivityPerformanceDataForDrillDown(
       as: 'assignee', // For assignedTo
       attributes: [ 'masterUserID', 'name'],
     }]
+  }else{
+    addIncludeModel = [...includeModels,
+    {
+      model: MasterUser,
+      as: 'MasterUser',
+      required: false, // LEFT JOIN
+    },
+  ]
   }
 
   results = await tableName.findAll({
