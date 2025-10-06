@@ -21,6 +21,7 @@ const PROGRAMS = {
   STATUS_MASTER: 18, // Program ID for status management
   MASTER_USER_MANAGEMENT: 19, // Program ID for master user management
   LEAD_COLUMN_MASTER: 20, // Program ID for lead column management
+  LABEL_MASTER: 21, // Program ID for label management
   
 };
 
