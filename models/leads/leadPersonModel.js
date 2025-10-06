@@ -58,6 +58,10 @@ const LeadPerson = sequelize.define("LeadPerson", {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
 },
+  ownerId: {
+    type: DataTypes.INTEGER,
+    allowNull: true, // Owner ID of the person
+  },
   // Multiple emails and phones support
   emails: {
     type: DataTypes.JSON,

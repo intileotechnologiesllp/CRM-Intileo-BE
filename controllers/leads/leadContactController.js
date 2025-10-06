@@ -1278,15 +1278,23 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     }
 
     // Role-based filtering logic for organizations - same as getLeads API
-    let orgWhere = orgSearch
-      ? {
+    let orgWhere = {};
+    if (orgSearch) {
+      // If orgSearch is a single character, search by first letter
+      if (orgSearch.length === 1) {
+        orgWhere = {
+          organization: { [Op.like]: `${orgSearch}%` }
+        };
+      } else {
+        orgWhere = {
           [Op.or]: [
             { organization: { [Op.like]: `%${orgSearch}%` } },
             { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
             { address: { [Op.like]: `%${orgSearch}%` } },
           ],
-        }
-      : {};
+        };
+      }
+    }
 
     // Merge organizationWhere from filters with orgWhere from search
     if (Object.keys(organizationWhere).length > 0) {
@@ -1714,7 +1722,7 @@ exports.createPerson = async (req, res) => {
       // Only create/find organization if provided
       [org] = await Organization.findOrCreate({
         where: { organization },
-        defaults: { organization, masterUserID },
+        defaults: { organization, masterUserID, ownerId: masterUserID },
       });
     }
 
@@ -1744,6 +1752,7 @@ exports.createPerson = async (req, res) => {
       organization: org ? org.organization : null,
       leadOrganizationId: org ? org.leadOrganizationId : null,
       masterUserID,
+      ownerId: masterUserID, // Automatically set owner to the user creating the person
     });
 
     // Save custom fields if any
@@ -1893,7 +1902,7 @@ exports.getPerson = async (req, res) => {
 exports.createOrganization = async (req, res) => {
   try {
     const masterUserID = req.adminId; // Get the master user ID from the request
-    const ownerId = req.body.ownerId || masterUserID;
+    const ownerId = req.body.ownerId || masterUserID; // Default to masterUserID if not provided
     if (!req.body || !req.body.organization) {
       return res
         .status(400)
@@ -4072,14 +4081,26 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       }
     } else if (personSearch) {
       // Fallback to search logic if no filterConfig
-      personWhere[Op.or] = [
-        { contactPerson: { [Op.like]: `%${personSearch}%` } },
-        { email: { [Op.like]: `%${personSearch}%` } },
-        { phone: { [Op.like]: `%${personSearch}%` } },
-        { jobTitle: { [Op.like]: `%${personSearch}%` } },
-        { personLabels: { [Op.like]: `%${personSearch}%` } },
-        { organization: { [Op.like]: `%${personSearch}%` } },
-      ];
+      if (personSearch.length === 1) {
+        // If personSearch is a single character, filter by first letter
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `${personSearch}%` } },
+          { email: { [Op.like]: `${personSearch}%` } },
+          { phone: { [Op.like]: `${personSearch}%` } },
+          { jobTitle: { [Op.like]: `${personSearch}%` } },
+          { personLabels: { [Op.like]: `${personSearch}%` } },
+          { organization: { [Op.like]: `${personSearch}%` } },
+        ];
+      } else {
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `%${personSearch}%` } },
+          { email: { [Op.like]: `%${personSearch}%` } },
+          { phone: { [Op.like]: `%${personSearch}%` } },
+          { jobTitle: { [Op.like]: `%${personSearch}%` } },
+          { personLabels: { [Op.like]: `%${personSearch}%` } },
+          { organization: { [Op.like]: `%${personSearch}%` } },
+        ];
+      }
     }
 
     // Debug: log all where clauses
@@ -5000,6 +5021,400 @@ exports.deletePerson = async (req, res) => {
     await transaction.rollback();
     
     console.error("Error deleting person:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Person Owner API
+exports.updatePersonOwner = async (req, res) => {
+  const { personId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!personId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the person
+    let person;
+    if (req.role === "admin") {
+      person = await Person.findByPk(personId, { transaction });
+    } else {
+      // Non-admin users can only update persons they own or created
+      person = await Person.findOne({
+        where: {
+          personId: personId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!person) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Person not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await person.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Person owner updated successfully.",
+      data: {
+        personId: person.personId,
+        name: person.name,
+        email: person.email,
+        ownerId: person.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating person owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Organization Owner API
+exports.updateOrganizationOwner = async (req, res) => {
+  const { leadOrganizationId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!leadOrganizationId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "leadOrganizationId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the organization
+    let organization;
+    if (req.role === "admin") {
+      organization = await Organization.findByPk(leadOrganizationId, { transaction });
+    } else {
+      // Non-admin users can only update organizations they own or created
+      organization = await Organization.findOne({
+        where: {
+          leadOrganizationId: leadOrganizationId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Organization not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await organization.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization owner updated successfully.",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        name: organization.name,
+        email: organization.email,
+        ownerId: organization.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating organization owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Bulk Update Person Owners API
+exports.bulkUpdatePersonOwners = async (req, res) => {
+  const { personIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!Array.isArray(personIds) || personIds.length === 0 || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personIds array and ownerId are required."
+    });
+  }
+
+  const results = [];
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    for (const personId of personIds) {
+      const transaction = await sequelize.transaction();
+
+      try {
+        // Find the person
+        let person;
+        if (req.role === "admin") {
+          person = await Person.findByPk(personId, { transaction });
+        } else {
+          // Non-admin users can only update persons they own or created
+          person = await Person.findOne({
+            where: {
+              personId: personId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
+
+        if (!person) {
+          await transaction.rollback();
+          results.push({
+            personId: personId,
+            success: false,
+            error: "Person not found or you don't have permission to update it."
+          });
+          continue;
+        }
+
+        // Update the ownerId
+        await person.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          personId: person.personId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: person.name,
+            email: person.email,
+            ownerId: person.ownerId,
+            ownerName: newOwner.name
+          }
+        });
+
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating person ${personId} owner:`, error);
+        results.push({
+          personId: personId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
+      summary: {
+        total: personIds.length,
+        successful: successCount,
+        failed: failureCount
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in bulk update person owners:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Bulk Update Organization Owners API
+exports.bulkUpdateOrganizationOwners = async (req, res) => {
+  const { leadOrganizationIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!Array.isArray(leadOrganizationIds) || leadOrganizationIds.length === 0 || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "leadOrganizationIds array and ownerId are required."
+    });
+  }
+
+  const results = [];
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    for (const orgId of leadOrganizationIds) {
+      const transaction = await sequelize.transaction();
+
+      try {
+        // Find the organization
+        let organization;
+        if (req.role === "admin") {
+          organization = await Organization.findByPk(orgId, { transaction });
+        } else {
+          // Non-admin users can only update organizations they own or created
+          organization = await Organization.findOne({
+            where: {
+              leadOrganizationId: orgId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
+
+        if (!organization) {
+          await transaction.rollback();
+          results.push({
+            leadOrganizationId: orgId,
+            success: false,
+            error: "Organization not found or you don't have permission to update it."
+          });
+          continue;
+        }
+
+        // Update the ownerId
+        await organization.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          leadOrganizationId: organization.leadOrganizationId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: organization.name,
+            email: organization.email,
+            ownerId: organization.ownerId,
+            ownerName: newOwner.name
+          }
+        });
+
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating organization ${orgId} owner:`, error);
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
+      summary: {
+        total: leadOrganizationIds.length,
+        successful: successCount,
+        failed: failureCount
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in bulk update organization owners:", error);
     return res.status(500).json({
       success: false,
       error: "Internal server error",

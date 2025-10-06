@@ -7,6 +7,7 @@ const Admin = require("./models/adminModel"); // Import models
 const MasterUser = require("./models/master/masterUserModel"); // Import MasterUser model
 const Designation = require("./models/admin/masters/designationModel"); // Import Designation model
 const Department = require("./models/admin/masters/departmentModel"); // Import the Department model
+const Label = require("./models/admin/masters/labelModel"); // Import Label model
 const adminRoutes = require("./routes/auth/adminRoutes"); // Import admin routes
 const designationRoutes = require("./routes/admin/masters/designation/designationRoutes");
 const departmentRoutes = require("./routes/admin/masters/department/departmentRoutes");
@@ -18,6 +19,7 @@ const programRoutes = require("./routes/admin/masters/program/programRoutes"); /
 const currencyRoutes = require("./routes/admin/masters/currency/currencyRoutes"); // Import currency routes
 const countryRoutes = require("./routes/admin/masters/country/countryRoutes"); // Import country routes
 const regionRoutes = require("./routes/admin/masters/region/regionRoutes"); // Import region routes
+const labelRoutes = require("./routes/admin/masters/labels/labelRoutes"); // Import label routes
 const leadsRoutes = require("./routes/leads/leadRoutes"); // Import leads routes
 const auditHistoryRoutes = require("./routes/reports/auditHistoryRoutes"); // Import audit history routes
 const masterUserRoutes = require("./routes/auth/masterUserRoutes");
@@ -86,6 +88,7 @@ app.use("/api/programs", programRoutes); // Register program routes
 app.use("/api/currencies", currencyRoutes); // Register currency routes
 app.use("/api/countries", countryRoutes); // Register country routes
 app.use("/api/regions", regionRoutes); // Register region routes
+app.use("/api/labels", labelRoutes); // Register label routes
 app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
