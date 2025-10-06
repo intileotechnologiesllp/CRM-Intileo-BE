@@ -1,5 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+const { workloadmanager } = require("googleapis/build/src/apis/workloadmanager");
+const { people } = require("googleapis/build/src/apis/people");
 
 const LeadOrganization = sequelize.define("LeadOrganization", {
   leadOrganizationId: {
@@ -32,11 +34,53 @@ ownerId:{
   type: DataTypes.INTEGER,
   allowNull: true, // Owner ID of the organization
 },
-// active:{
-//   type: DataTypes.INTEGER,
-//   allowNull: false,
-//   defaultValue: 1
-// },
+ownerName:{
+  type: DataTypes.STRING,
+  allowNull: true, // Owner Name of the organization
+},
+wonDeals:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Number of won deals
+  defaultValue:0
+},
+lostDeals:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Number of lost deals
+  defaultValue:0
+},
+openDeals:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Number of open deals
+  defaultValue:0
+},
+peopleCount:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Number of people associated with the organization 
+  defaultValue:0
+},
+lastActivityDate:{
+  type: DataTypes.DATE,
+  allowNull: true, // Date of the last activity
+},
+nextActivityDate:{
+  type: DataTypes.DATE,
+  allowNull: true, // Date of the next scheduled activity 
+},
+doneActivitiesCount:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Count of completed activities
+  defaultValue:0
+},
+totalActivitiesCount:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Total count of activities
+  defaultValue:0
+},
+activitiesTodoCount:{
+  type: DataTypes.INTEGER,
+  allowNull: true, // Count of activities to do
+  defaultValue:0
+},
 // deletedAt: {
 //     type: DataTypes.DATE,
 //     allowNull: true,
