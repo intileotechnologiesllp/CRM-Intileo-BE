@@ -1389,7 +1389,7 @@ async function generateActivityPerformanceDataForDrillDown(
   let results;
   
   let addIncludeModel = includeModels;
-  if(entity != 4){
+  if(entity != 4 && entity != 3){
     addIncludeModel = [...includeModels,
      {
       model: MasterUser,
@@ -1402,13 +1402,15 @@ async function generateActivityPerformanceDataForDrillDown(
       attributes: [ 'masterUserID', 'name'],
     }]
   }else{
-    addIncludeModel = [...includeModels,
-    {
-      model: MasterUser,
-      as: 'MasterUser',
-      required: false, // LEFT JOIN
-    },
-  ]
+    if(entity == 4){
+      addIncludeModel = [...includeModels,
+        {
+          model: MasterUser,
+          as: 'MasterUser',
+          required: false, // LEFT JOIN
+        },
+      ]
+    }
   }
 
   results = await tableName.findAll({
