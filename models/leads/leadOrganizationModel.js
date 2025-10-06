@@ -26,6 +26,7 @@ const LeadOrganization = sequelize.define("LeadOrganization", {
   masterUserID: {
   type: DataTypes.INTEGER,
   allowNull: false, // or true if you want to allow nulls
+  references: { model: "masterusers", key: "masterUserID" }
 },
 ownerId:{
   type: DataTypes.INTEGER,
