@@ -118,6 +118,9 @@ router.post("/bulk-edit-persons", verifyToken, validatePrivilege(5, "edit"), lea
 router.post("/bulk-edit-organizations", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdateOrganizations);
 router.delete('/deleteorganization/:leadOrganizationId', verifyToken, leadContactsController.deleteOrganization);
 router.delete('/deleteperson/:personId', verifyToken, leadContactsController.deletePerson);
+router.post("/save-organization-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllOrganizationFieldsWithCheck);
+router.get("/organization-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationColumnPreference);
+router.post("/update-organization-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationColumnChecks);
 
 
 module.exports = router

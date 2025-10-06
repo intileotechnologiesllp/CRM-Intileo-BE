@@ -5775,6 +5775,23 @@ exports.markDealAsWon = async (req, res) => {
       note: "Marked as won",
     });
 
+    // --- Update wonDeals count for connected leadOrganizationId ---
+    if (deal.leadOrganizationId) {
+      const Organization = require("../../models/leads/leadOrganizationModel");
+      const org = await Organization.findByPk(deal.leadOrganizationId);
+      if (org) {
+        // Count all deals for this organization with status 'won'
+        const Deal = require("../../models/deals/dealsModels");
+        const wonDealsCount = await Deal.count({
+          where: {
+            leadOrganizationId: deal.leadOrganizationId,
+            status: "won",
+          },
+        });
+        await org.update({ wonDeals: wonDealsCount });
+      }
+    }
+
     // --- Activity popup settings logic (for frontend popup) ---
     const popup = req.activityPopupSettings || {};
     const activityPopupSettings = {
