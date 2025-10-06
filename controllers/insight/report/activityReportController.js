@@ -1326,27 +1326,7 @@ async function generateActivityPerformanceDataForDrillDown(
 
   let groupBy = [];
   let attributes = [];
-  // if (name === "Owner" || name === "assignedTo") {
-  //   includeModels.push({
-  //     model: MasterUser,
-  //     as: "assignedUser",
-  //     attributes: [],
-  //   });
-  //   groupBy.push("assignedUser.name");
-  //   // attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  // } else if (name === "Team") {
-  //   includeModels.push({
-  //     model: MasterUser,
-  //     as: "assignedUser",
-  //     attributes: [],
-  //   });
-  //   groupBy.push("assignedUser.team");
-  //   // attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  // } 
-  // else {
-  //   groupBy.push(`Activity.${xaxis}`);
-  //   // attributes.push([Sequelize.col(`Activity.${name}`), "xValue"]);
-  // }
+
   const conditionObjFunc = {
     0: getActivityConditionObject,
     1: getLeadConditionObject,
@@ -1408,10 +1388,9 @@ async function generateActivityPerformanceDataForDrillDown(
 
   let results;
   
-  results = await tableName.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: [...includeModels,
+  let addIncludeModel = includeModels;
+  if(entity != 4){
+    addIncludeModel = [...includeModels,
      {
       model: MasterUser,
       as: 'assignedUser', // For masterUserID
@@ -1421,14 +1400,17 @@ async function generateActivityPerformanceDataForDrillDown(
       model: MasterUser,
       as: 'assignee', // For assignedTo
       attributes: [ 'masterUserID', 'name'],
-    }
-    ],
+    }]
+  }
+
+  results = await tableName.findAll({
+    where: baseWhere,
+    attributes: attributes,
+    include: [...addIncludeModel],
     groupBy: groupBy
   });
-  console.log(JSON.parse(JSON.stringify(results[0], null, 2)));
   
-  
-  
+  // console.log(results)
   // Recursive flatten function
   function flattenObject(obj, parentKey = "", res = {}) {
     for (let key in obj) {
@@ -1471,6 +1453,7 @@ const formattedResults = flattened.filter((item) => {
 
   // Handle string fields safely
   if (typeof item[name] === "string" && typeof value === "string") {
+    // console.log(item[name], value)
     if (item[name].toLowerCase() !== value.toLowerCase()) return false;
   } else {
     if (item[name] !== value) return false;
@@ -1478,7 +1461,7 @@ const formattedResults = flattened.filter((item) => {
 
   // Extra checks
   if (name === "contactPerson" && item.personId !== id) return false;
-  if (name === "organization" && item.leadOrganizationId !== id) return false;
+  if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
 
   return true;
 });
