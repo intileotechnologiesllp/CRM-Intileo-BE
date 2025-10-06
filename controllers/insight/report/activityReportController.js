@@ -1390,8 +1390,24 @@ async function generateActivityPerformanceDataForDrillDown(
   
   let addIncludeModel = includeModels;
   if(entity != 4 && entity != 3){
-    addIncludeModel = [...includeModels,
-     {
+    if(entity == 1){
+      addIncludeModel = [...includeModels,
+       {
+        model: MasterUser,
+        as: 'Owner', // For masterUserID
+        attributes: ['masterUserID', 'name'],
+      }]
+    }else if(entity == 2){
+      addIncludeModel = [...includeModels,
+       {
+        model: MasterUser,
+        as: 'Owner', // For masterUserID
+        attributes: ['masterUserID', 'name'],
+      }]
+    }
+    else{
+      addIncludeModel = [...includeModels,
+        {
       model: MasterUser,
       as: 'assignedUser', // For masterUserID
       attributes: ['masterUserID', 'name'],
@@ -1401,6 +1417,7 @@ async function generateActivityPerformanceDataForDrillDown(
       as: 'assignee', // For assignedTo
       attributes: [ 'masterUserID', 'name'],
     }]
+  }
   }else{
     if(entity == 4){
       addIncludeModel = [...includeModels,
