@@ -16,7 +16,8 @@ const OrganizationNote = require("./leads/organizationNoteModel");
 const Dashboard = require("./insight/dashboardModel");
 const Report = require("./insight/reportModel");
 const Goal = require("./insight/goalModel");
-const GroupVisibility = require("../models/admin/groupVisibilityModel")
+const GroupVisibility = require("../models/admin/groupVisibilityModel");
+const LeadOrganization = require("./leads/leadOrganizationModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -178,6 +179,13 @@ Lead.hasMany(Deal, { foreignKey: "leadId", as: "LeadDeals" });
 
 Dashboard.hasMany(Goal, { foreignKey: "dashboardId", as: "Goals" });
 Goal.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });
+
+LeadOrganization.belongsTo(MasterUser, {
+  foreignKey: 'masterUserID',
+  targetKey: 'masterUserID',
+  as: 'MasterUser'
+});
+
 
 module.exports = {
   Lead,
