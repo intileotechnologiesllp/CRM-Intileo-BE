@@ -4082,15 +4082,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     } else if (personSearch) {
       // Fallback to search logic if no filterConfig
       if (personSearch.length === 1) {
-        // If personSearch is a single character, filter by first letter
-        personWhere[Op.or] = [
-          { contactPerson: { [Op.like]: `${personSearch}%` } },
-          { email: { [Op.like]: `${personSearch}%` } },
-          { phone: { [Op.like]: `${personSearch}%` } },
-          { jobTitle: { [Op.like]: `${personSearch}%` } },
-          { personLabels: { [Op.like]: `${personSearch}%` } },
-          { organization: { [Op.like]: `${personSearch}%` } },
-        ];
+        // If personSearch is a single character, filter contactPerson by first letter only
+        personWhere.contactPerson = { [Op.like]: `${personSearch}%` };
       } else {
         personWhere[Op.or] = [
           { contactPerson: { [Op.like]: `%${personSearch}%` } },
