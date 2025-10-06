@@ -1,6704 +1,5755 @@
-const Imap = require("imap-simple");
-const Email = require("../../models/email/emailModel");
-const { htmlToText } = require("html-to-text");
-const { simpleParser } = require("mailparser");
-const Attachment = require("../../models/email/attachmentModel");
-const Template = require("../../models/email/templateModel");
-const { Sequelize } = require("sequelize");
-const nodemailer = require("nodemailer");
-const amqp = require('amqplib'); // Added for auto-pagination queue system
-const {
-  saveAttachments,
-  saveUserUploadedAttachments,
-} = require("../../services/attachmentService");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
-const UserCredential = require("../../models/email/userCredentialModel");
-const DefaultEmail = require("../../models/email/defaultEmailModel");
-const MasterUser = require("../../models/master/masterUserModel");
-const { Lead, Deal, Person, Organization } = require("../../models/index");
-const Activity = require("../../models/activity/activityModel");
-const { publishToQueue } = require("../../services/rabbitmqService");
-const { log } = require("console");
+// Update check status for organization columns and custom fields
+exports.updateOrganizationColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
 
-// Configuration constants
-const ICON_ATTACHMENT_SIZE_THRESHOLD = 100; // bytes - attachments smaller than this are considered icons/tracking pixels
-const MAX_BATCH_SIZE = 100; // Maximum number of emails to process in one batch
-const DEFAULT_BATCH_SIZE = 50; // Default batch size for email fetching
-// Helper function to identify icon/image attachments and body content that shouldn't be saved as attachments
-const isIconAttachment = (attachment) => {
-  const filename = attachment.filename || attachment.generatedFileName || "";
-  const contentType = attachment.contentType || "";
-  const contentId = attachment.contentId || "";
-  const contentDisposition = attachment.contentDisposition || "";
-
-  // DON'T skip inline attachments anymore - we need them for email body rendering
-  // Instead, we'll save them and mark them as inline for proper handling
-  if (contentDisposition.toLowerCase().includes("inline")) {
-    console.log(
-      `Keeping inline attachment for email body: ${filename} (${contentType}) with contentId: ${contentId}`
-    );
-    return false; // Changed from true to false - keep inline attachments
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
   }
 
-  // Skip if it has a content ID (usually embedded images)
-  // BUT allow screenshots and important embedded images
-  if (contentId) {
-    // Allow screenshots and important embedded images
-    const importantEmbeddedPatterns = [
-      /screenshot/i,
-      /image_?\d+/i, // image001, image_1, etc.
-      /photo/i,
-      /picture/i,
-      /document/i,
-      /scan/i,
-      /attachment/i,
-      /file/i,
-    ];
-
-    const isImportantEmbedded =
-      importantEmbeddedPatterns.some((pattern) => pattern.test(filename)) ||
-      attachment.size > 5000; // Also keep larger embedded images (> 5KB)
-
-    if (!isImportantEmbedded) {
-      console.log(
-        `Filtering out small embedded attachment: ${filename} (${contentType}) with contentId: ${contentId}`
-      );
-      return true;
-    } else {
-      console.log(
-        `Keeping important embedded attachment: ${filename} (${contentType}) with contentId: ${contentId} - size: ${attachment.size} bytes`
-      );
-    }
-  }
-
-  // Skip common icon/signature image patterns
-  const iconPatterns = [
-    /icon/i,
-    /signature/i,
-    /logo/i,
-    /avatar/i,
-    /spacer/i,
-    /pixel/i,
-    /tracker/i,
-    /blank/i,
-    /transparent/i,
-    /1x1/i,
-  ];
-
-  if (iconPatterns.some((pattern) => pattern.test(filename))) {
-    console.log(
-      `Filtering out icon/pattern attachment: ${filename} (${contentType})`
-    );
-    return true;
-  }
-
-  // Skip very small images (likely tracking pixels or icons) - CONFIGURABLE
-  if (
-    contentType.startsWith("image/") &&
-    attachment.size &&
-    attachment.size < ICON_ATTACHMENT_SIZE_THRESHOLD
-  ) {
-    console.log(
-      `Filtering out small image attachment: ${filename} (${contentType}) - size: ${attachment.size} bytes (threshold: ${ICON_ATTACHMENT_SIZE_THRESHOLD} bytes)`
-    );
-    return true;
-  }
-
-  // Skip common body content types
-  const bodyContentTypes = [
-    "text/html",
-    "text/plain",
-    "multipart/",
-    "message/",
-  ];
-
-  if (bodyContentTypes.some((type) => contentType.startsWith(type))) {
-    console.log(
-      `Filtering out body content attachment: ${filename} (${contentType})`
-    );
-    return true;
-  }
-
-  return false;
-};
-
-const PROVIDER_CONFIG = {
-  gmail: {
-    host: "imap.gmail.com",
-    port: 993,
-    tls: true,
-  },
-  yandex: {
-    host: "imap.yandex.com",
-    port: 993,
-    tls: true,
-  },
-  outlook: {
-    host: "outlook.office365.com",
-    port: 993,
-    tls: true,
-  },
-  yahoo: {
-    host: "imap.mail.yahoo.com",
-    port: 993,
-    tls: true,
-  },
-  // Add more providers as needed
-};
-
-// Add this near PROVIDER_CONFIG
-const PROVIDER_FOLDER_MAP = {
-  gmail: {
-    inbox: "INBOX",
-    drafts: "[Gmail]/Drafts",
-    sent: "[Gmail]/Sent Mail",
-    archive: "[Gmail]/All Mail",
-  },
-  yandex: {
-    inbox: "INBOX",
-    drafts: "Drafts",
-    sent: "Sent",
-    archive: "Archive",
-  },
-  outlook: {
-    inbox: "INBOX",
-    drafts: "Drafts",
-    sent: "Sent",
-    archive: "Archive",
-  },
-  custom: {
-    inbox: "INBOX",
-    drafts: "Drafts",
-    sent: "Sent",
-    archive: "Archive",
-  },
-};
-// Ensure the upload directory exists
-const uploadDir = path.join(__dirname, "../../uploads/attachments");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-// Configure Multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../../uploads/attachments")); // Directory to store attachments
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + "-" + file.originalname); // Generate a unique filename
-  },
-});
-
-const upload = multer({
-  storage,
-  // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
-});
-
-const imapConfig = {
-  imap: {
-    user: process.env.SENDER_EMAIL, // Your email address
-    password: process.env.SENDER_PASSWORD, // Your email password
-    host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-    port: 993, // IMAP port
-    tls: true, // Use TLS
-    authTimeout: 30000,
-    tlsOptions: {
-      rejectUnauthorized: false, // Allow self-signed certificates
-    },
-  },
-};
-// const cleanEmailBody = (body) => {
-//   if (!body) return "";
-
-//   let cleanBody = body;
-
-//   // Use html-to-text for robust HTML conversion
-//   try {
-//     if (body.includes("<") && body.includes(">")) {
-//       // This looks like HTML, use html-to-text for better conversion
-//       cleanBody = htmlToText(body, {
-//         wordwrap: false,
-//         ignoreHref: true,
-//         ignoreImage: true,
-//         preserveNewlines: true,
-//         uppercaseHeadings: false,
-//         hideLinkHrefIfSameAsText: true,
-//         noLinkBrackets: true,
-//         formatters: {
-//           // Custom formatter to handle VML and CSS blocks
-//           vmlBlock: function (elem, walk, builder, formatOptions) {
-//             return "";
-//           },
-//           styleBlock: function (elem, walk, builder, formatOptions) {
-//             return "";
-//           },
-//         },
-//         selectors: [
-//           // Ignore VML and style blocks completely
-//           { selector: "v\\:*", format: "skip" },
-//           { selector: "o\\:*", format: "skip" },
-//           { selector: "style", format: "skip" },
-//           { selector: "script", format: "skip" },
-//           { selector: "head", format: "skip" },
-//           { selector: "title", format: "skip" },
-//           { selector: "meta", format: "skip" },
-//           { selector: "link", format: "skip" },
-//           // Format common elements
-//           { selector: "p", format: "paragraph" },
-//           { selector: "br", format: "lineBreak" },
-//           { selector: "div", format: "block" },
-//           { selector: "span", format: "inline" },
-//           { selector: "table", format: "table" },
-//           { selector: "tr", format: "tableRow" },
-//           { selector: "td", format: "tableCell" },
-//           { selector: "th", format: "tableCell" },
-//           { selector: "ul", format: "unorderedList" },
-//           { selector: "ol", format: "orderedList" },
-//           { selector: "li", format: "listItem" },
-//         ],
-//       });
-//     }
-//   } catch (htmlError) {
-//     console.log(
-//       "HTML-to-text conversion failed, falling back to regex cleanup:",
-//       htmlError.message
-//     );
-//     // Fall back to regex if html-to-text fails
-//     cleanBody = body.replace(/<[^>]*>/g, "");
-//   }
-
-//   // Additional cleanup for any remaining VML/CSS artifacts
-//   cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
-//   cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
-//   cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
-//   cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
-//   cleanBody = cleanBody.replace(/\{[^}]*\}/g, ""); // Remove any remaining CSS blocks
-
-//   // Remove HTML entities and encoded characters
-//   cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " ");
-//   cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " ");
-//   cleanBody = cleanBody.replace(/v\\\*/g, "");
-//   cleanBody = cleanBody.replace(/o\\\*/g, "");
-
-//   // Remove quoted replies (e.g., lines starting with ">")
-//   cleanBody = cleanBody
-//     .split("\n")
-//     .filter((line) => !line.trim().startsWith(">"))
-//     .join("\n");
-
-//   // Clean up extra whitespace and special characters
-//   cleanBody = cleanBody.replace(/[{}[\]]/g, " ");
-//   cleanBody = cleanBody.replace(/\s+/g, " ").trim();
-
-//   return cleanBody;
-// };
-const cleanEmailBody = (body, attachments = [], emailId = null, baseURL = process.env.BASE_URL || 'http://localhost:3000') => {
-  if (!body) return "";
-  
-  let cleanedBody = body;
-  
-  // Replace cid: references with our proxy endpoint URLs (only if emailId is available)
-  if (emailId) {
-    // Look for cid: references in the email body
-    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
-    
-    if (cidMatches) {
-      cidMatches.forEach(cidMatch => {
-        // Extract the content ID (remove 'cid:' prefix)
-        const contentId = cidMatch.replace(/^cid:/i, '').replace(/[<>]/g, '');
-        
-        // Create proxy URL for the inline image
-        const proxyUrl = `${baseURL}/api/email/inline-image/${emailId}/${encodeURIComponent(contentId)}`;
-        
-        // Replace the cid: reference with the proxy URL
-        cleanedBody = cleanedBody.replace(new RegExp(cidMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), proxyUrl);
-        
-        console.log(`[cleanEmailBody] 🔗 Replaced ${cidMatch} with ${proxyUrl}`);
-      });
-    }
-  } else {
-    // If no emailId, just log that we found CID references but can't replace them yet
-    const cidMatches = cleanedBody.match(/cid:([^"'\s>]+)/gi);
-    if (cidMatches) {
-      console.log(`[cleanEmailBody] ⚠️ Found ${cidMatches.length} cid: references but no emailId available for replacement`);
-    }
-  }
-  
-  // Remove quoted replies (e.g., lines starting with ">")
-  cleanedBody = cleanedBody
-    .split("\n")
-    .filter((line) => !line.startsWith(">"))
-    .join("\n")
-    .trim();
-    
-  return cleanedBody;
-};
-
-// Helper function to create email body preview
-const createBodyPreview = (body, maxLength = 120) => {
-  if (!body) return "";
-
-  let cleanBody = body;
-
-  // Use html-to-text for robust HTML conversion
   try {
-    if (body.includes("<") && body.includes(">")) {
-      // This looks like HTML, use html-to-text for better conversion
-      cleanBody = htmlToText(body, {
-        wordwrap: false,
-        ignoreHref: true,
-        ignoreImage: true,
-        preserveNewlines: false,
-        uppercaseHeadings: false,
-        hideLinkHrefIfSameAsText: true,
-        noLinkBrackets: true,
-        formatters: {
-          // Custom formatter to handle VML and CSS blocks
-          vmlBlock: function (elem, walk, builder, formatOptions) {
-            return "";
-          },
-          styleBlock: function (elem, walk, builder, formatOptions) {
-            return "";
-          },
-        },
-        selectors: [
-          // Ignore VML and style blocks completely
-          { selector: "v\\:*", format: "skip" },
-          { selector: "o\\:*", format: "skip" },
-          { selector: "style", format: "skip" },
-          { selector: "script", format: "skip" },
-          { selector: "head", format: "skip" },
-          { selector: "title", format: "skip" },
-          { selector: "meta", format: "skip" },
-          { selector: "link", format: "skip" },
-          // Format common elements to preserve structure
-          { selector: "p", format: "paragraph" },
-          { selector: "br", format: "lineBreak" },
-          { selector: "div", format: "block" },
-          { selector: "span", format: "inline" },
-        ],
-      });
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Find the global OrganizationColumnPreference record
+    let pref = await OrganizationColumnPreference.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
     }
-  } catch (htmlError) {
-    console.log(
-      "HTML-to-text conversion failed in preview, falling back to regex cleanup:",
-      htmlError.message
-    );
-    // Fall back to regex if html-to-text fails
-    cleanBody = body.replace(/<[^>]*>/g, "");
-  }
 
-  // Additional cleanup for any remaining VML/CSS artifacts
-  cleanBody = cleanBody.replace(/v\\\*\s*\{[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/o\\\*\s*\{[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/\{[^}]*behavior:[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/\{[^}]*url\([^)]*\)[^}]*\}/g, "");
-  cleanBody = cleanBody.replace(/\{[^}]*\}/g, ""); // Remove any remaining CSS blocks
+    // Parse columns if stored as string
+    let prefColumns =
+      typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
 
-  // Remove HTML entities and encoded characters
-  cleanBody = cleanBody.replace(/&[a-zA-Z0-9#]+;/g, " ");
-  cleanBody = cleanBody.replace(/\\[a-zA-Z0-9]+/g, " ");
-  cleanBody = cleanBody.replace(/v\\\*/g, "");
-  cleanBody = cleanBody.replace(/o\\\*/g, "");
-
-  // Remove extra whitespace, newlines, and special characters
-  cleanBody = cleanBody.replace(/\s+/g, " ").trim();
-
-  // Remove any remaining curly braces and brackets
-  cleanBody = cleanBody.replace(/[{}[\]]/g, " ");
-
-  // Clean up any remaining special patterns
-  cleanBody = cleanBody.replace(/[^\w\s.,!?;:()-]/g, " ");
-
-  // Final cleanup - remove multiple spaces
-  cleanBody = cleanBody.replace(/\s+/g, " ").trim();
-
-  // If after cleaning there's no meaningful content, return empty
-  if (cleanBody.length < 3 || /^[\s\W]*$/.test(cleanBody)) {
-    return "";
-  }
-
-  // Truncate to maxLength and add ellipsis if needed
-  if (cleanBody.length <= maxLength) {
-    return cleanBody;
-  }
-
-  return cleanBody.substring(0, maxLength).trim() + "...";
-};
-
-// Helper function to format date to DD-MMM-YYYY
-const formatDateForIMAP = (date) => {
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const day = date.getDate();
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  return `${day}-${month}-${year}`;
-};
-function flattenFolders(boxes, prefix = "") {
-  let folders = [];
-  for (const [name, box] of Object.entries(boxes)) {
-    const fullName = prefix ? `${prefix}${name}` : name;
-    folders.push(fullName);
-    if (box.children) {
-      folders = folders.concat(
-        flattenFolders(box.children, `${fullName}${box.delimiter}`)
-      );
-    }
-  }
-  return folders;
-}
-
-// Helper function to find matching folder by type
-function findMatchingFolder(allFoldersArr, folderType) {
-  const folderMap = {
-    inbox: ["INBOX", "Inbox", "inbox"],
-    sent: [
-      "Sent", "SENT", "Sent Items", "Sent Mail", 
-      "[Gmail]/Sent Mail", "[Google Mail]/Sent Mail",
-      "Отправленные", "Sent",  // Yandex Russian and English
-      "Отправлено", "Sent Messages",  // Additional Yandex patterns
-      "outbox", "Outbox", "OUTBOX"  // Yandex uses outbox for sent emails
-    ],
-    drafts: [
-      "Drafts", "DRAFTS", "Draft", "[Gmail]/Drafts", "[Google Mail]/Drafts",
-      "Черновики", "Черновики"  // Yandex Russian
-    ],
-    archive: [
-      "Archive", "ARCHIVE", "All Mail", "[Gmail]/All Mail", "[Google Mail]/All Mail", 
-      "Archived", "Архив"  // Yandex Russian
-    ]
-  };
-  
-  const patterns = folderMap[folderType] || [folderType];
-  
-  console.log(`🔍 FOLDER SEARCH: Looking for '${folderType}' using patterns: [${patterns.join(', ')}]`);
-  console.log(`🔍 AVAILABLE FOLDERS: [${allFoldersArr.join(', ')}]`);
-  
-  // Special handling for Yandex sent folder - try exact matches for Russian names first, then outbox
-  if (folderType === 'sent') {
-    // Try Yandex Russian folder names with exact matching first
-    const yandexExactNames = ['Отправленные', 'Отправлено'];
-    for (const exactName of yandexExactNames) {
-      const found = allFoldersArr.find(folder => folder === exactName);
-      if (found) {
-        console.log(`✅ YANDEX EXACT MATCH: Found '${found}' for exact Russian pattern`);
-        return found;
+    // Get custom fields to validate incoming custom field columns
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
       }
     }
-    
-    // Try outbox as Yandex sent folder alternative
-    const outboxFound = allFoldersArr.find(folder => folder.toLowerCase() === 'outbox');
-    if (outboxFound) {
-      console.log(`✅ YANDEX OUTBOX MATCH: Found '${outboxFound}' - using as SENT folder for Yandex`);
-      return outboxFound;
-    }
-  }
-  
-  for (const pattern of patterns) {
-    // 🔧 GMAIL FIX: Use exact case matching for Gmail folders first
-    const exactFound = allFoldersArr.find(folder => folder === pattern);
-    if (exactFound) {
-      console.log(`✅ EXACT MATCH: Found '${exactFound}' for exact pattern '${pattern}'`);
-      return exactFound;
-    }
-    
-    // Fallback to case-insensitive matching for other providers
-    const found = allFoldersArr.find(folder => 
-      folder.toLowerCase() === pattern.toLowerCase() ||
-      folder.toLowerCase().includes(pattern.toLowerCase())
-    );
-    if (found) {
-      console.log(`✅ FOLDER MATCH: Found '${found}' for pattern '${pattern}'`);
-      return found;
-    }
-  }
-  
-  console.log(`❌ FOLDER NOT FOUND: No match for '${folderType}' in available folders`);
-  return null;
-}
 
-// Helper function to recursively fetch all emails in a thread
-async function getFullThread(messageId, EmailModel, collected = new Set()) {
-  if (!messageId || collected.has(messageId)) return [];
-  collected.add(messageId);
-  const emails = await EmailModel.findAll({
-    where: {
-      [Sequelize.Op.or]: [
-        { messageId },
-        { inReplyTo: messageId },
-        { references: { [Sequelize.Op.like]: `%${messageId}%` } },
-      ],
-    },
-  });
-  let thread = [...emails];
-  for (const email of emails) {
-    if (email.inReplyTo && !collected.has(email.inReplyTo)) {
-      thread = thread.concat(
-        await getFullThread(email.inReplyTo, EmailModel, collected)
-      );
+    // Create a map of custom field names for quick lookup
+    const customFieldMap = {};
+    customFields.forEach((field) => {
+      customFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
+    });
+
+    // Update check status for existing columns
+    prefColumns = prefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    // Handle new custom field columns that don't exist in preferences yet
+    const existingKeys = new Set(prefColumns.map((col) => col.key));
+
+    columns.forEach((incomingCol) => {
+      // If this column doesn't exist in preferences but is a custom field, add it
+      if (
+        !existingKeys.has(incomingCol.key) &&
+        customFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = customFieldMap[incomingCol.key];
+        prefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+    });
+
+    // Update check field in CustomField table for custom fields
+    const customFieldUpdates = [];
+    columns.forEach((incomingCol) => {
+      if (customFieldMap[incomingCol.key]) {
+        const customField = customFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          customFieldUpdates.push({
+            fieldId: customField.fieldId,
+            check: !!incomingCol.check,
+          });
+        }
+      }
+    });
+
+    // Perform bulk update of CustomField check values
+    if (customFieldUpdates.length > 0) {
+      for (const update of customFieldUpdates) {
+        await CustomField.update(
+          { check: update.check },
+          {
+            where: {
+              fieldId: update.fieldId,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" },
+              ],
+            },
+          }
+        );
+      }
     }
-    if (email.references) {
-      const refs = email.references.split(" ");
-      for (const ref of refs) {
-        if (ref && !collected.has(ref)) {
-          thread = thread.concat(
-            await getFullThread(ref, EmailModel, collected)
+
+    pref.columns = prefColumns;
+    await pref.save();
+
+    res.status(200).json({
+      message: "Organization columns updated",
+      columns: pref.columns,
+      customFieldsProcessed: customFields.length,
+      customFieldsUpdated: customFieldUpdates.length,
+      totalColumns: prefColumns.length,
+    });
+  } catch (error) {
+    console.error("Error updating organization columns:", error);
+    res.status(500).json({ message: "Error updating organization columns" });
+  }
+};
+exports.getOrganizationColumnPreference = async (req, res) => {
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+    const pref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    let columns = [];
+    if (pref) {
+      columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for organizations (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Create a map of available custom field names from CustomFields table
+    const availableCustomFieldNames = new Set(customFields.map(field => field.fieldName));
+
+    // Filter out custom field columns that don't exist in CustomFields table
+    const validColumns = columns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    columns = validColumns;
+
+    // Format custom fields for column preferences
+    const customFieldColumns = customFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    customFieldColumns.forEach((customCol) => {
+      const existingCol = columns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    const allColumns = [...columns, ...customFieldColumns];
+    const uniqueColumns = [];
+    const seenKeys = new Set();
+    allColumns.forEach((col) => {
+      if (!seenKeys.has(col.key)) {
+        seenKeys.add(col.key);
+        uniqueColumns.push(col);
+      }
+    });
+
+    const originalColumnsCount = pref ? (typeof pref.columns === "string" ? JSON.parse(pref.columns).length : pref.columns.length) : 0;
+    const filteredColumnsCount = columns.length;
+    if (pref && originalColumnsCount > filteredColumnsCount) {
+      try {
+        pref.columns = uniqueColumns;
+        await pref.save();
+        console.log(`Updated preferences: removed ${originalColumnsCount - filteredColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      columns: uniqueColumns,
+      customFieldsCount: customFields.length,
+      message: "Organization column preferences with custom fields fetched successfully",
+      hasCustomFields: customFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
+      removedFieldsCount: originalColumnsCount - filteredColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching organization column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching organization preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+// Save all organization fields with check status to OrganizationColumnPreference
+exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
+  let Organization;
+  try {
+    Organization = require("../../models/leads/leadOrganizationModel");
+  } catch (e) {
+    Organization = null;
+  }
+
+  // Get all field names from Organization model
+  const orgFields = Organization ? Object.keys(Organization.rawAttributes) : [];
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = orgFields.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    let pref = await OrganizationColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await OrganizationColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res
+      .status(200)
+      .json({ message: "All organization columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all organization columns:", error);
+    res.status(500).json({ message: "Error saving all organization columns" });
+  }
+};
+// Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
+exports.bulkUpdateOrganizations = async (req, res) => {
+  const { leadOrganizationId, updateData } = req.body; // { leadOrganizationId: [1,2,3], updateData: { field1: value1, ... } }
+  const adminId = req.adminId;
+  const entityType = "organization";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const sequelize = require("../../config/db");
+
+  if (
+    !Array.isArray(leadOrganizationId) ||
+    leadOrganizationId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res.status(400).json({
+      message:
+        "'leadOrganizationId' array and 'updateData' object are required.",
+    });
+  }
+
+  const results = [];
+  // Get all organization model fields
+  const orgFields = Object.keys(Organization.rawAttributes);
+  for (const orgId of leadOrganizationId) {
+    const fields = { ...updateData };
+    const transaction = await sequelize.transaction();
+    try {
+      // Admins can update any organization, others only their own
+      let organization;
+      if (req.role === "admin") {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId },
+          transaction,
+        });
+      } else {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId, masterUserID: adminId },
+          transaction,
+        });
+      }
+      if (!organization) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          error: "Organization not found.",
+        });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        if (orgFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await organization.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field \"${customField.fieldLabel}\" is required.`
           );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: orgId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: orgId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          errors: validationErrors,
+        });
+        continue;
+      }
+      await transaction.commit();
+      results.push({
+        leadOrganizationId: orgId,
+        success: true,
+        updatedFields: updatedValues,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({
+        leadOrganizationId: orgId,
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
+// Bulk update persons with custom fields (accepts { personId: [], updateData: {} })
+exports.bulkUpdatePersons = async (req, res) => {
+  const { personId, updateData } = req.body; // { personId: [1,2,3], updateData: { field1: value1, ... } }
+  const adminId = req.adminId;
+  const entityType = "person";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Person = require("../../models/leads/leadPersonModel");
+  const sequelize = require("../../config/db");
+
+  if (
+    !Array.isArray(personId) ||
+    personId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res.status(400).json({
+      message: "'personId' array and 'updateData' object are required.",
+    });
+  }
+
+  const results = [];
+  // Get all person model fields
+  const personFields = Object.keys(Person.rawAttributes);
+  for (const pId of personId) {
+    const fields = { ...updateData };
+    const transaction = await sequelize.transaction();
+    try {
+      // Admins can update any person, others only their own
+      let person;
+      if (req.role === "admin") {
+        person = await Person.findOne({
+          where: { personId: pId },
+          transaction,
+        });
+      } else {
+        person = await Person.findOne({
+          where: { personId: pId, masterUserID: adminId },
+          transaction,
+        });
+      }
+      if (!person) {
+        await transaction.rollback();
+        results.push({
+          personId: pId,
+          success: false,
+          error: "Person not found.",
+        });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        if (personFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await person.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field \"${customField.fieldLabel}\" is required.`
+          );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: pId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: pId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({
+          personId: pId,
+          success: false,
+          errors: validationErrors,
+        });
+        continue;
+      }
+      await transaction.commit();
+      results.push({
+        personId: pId,
+        success: true,
+        updatedFields: updatedValues,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({ personId: pId, success: false, error: error.message });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
+
+exports.getOrganizationsAndPersons = async (req, res) => {
+  try {
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+
+    // Pagination and search for organizations
+    const orgPage = parseInt(req.query.orgPage) || 1;
+    const orgLimit = parseInt(req.query.orgLimit) || 20;
+    const orgOffset = (orgPage - 1) * orgLimit;
+    const orgSearch = req.query.orgSearch || "";
+
+    // Sorting parameters
+    const sortBy = req.query.sortBy || "createdAt";
+    const sortOrder = req.query.sortOrder || "DESC";
+
+    // Dynamic filter config (from body or query)
+    const LeadFilter = require("../../models/leads/leadFiltersModel");
+    let filterConfig = null;
+    let filterIdRaw = null;
+    if (req.body && req.body.filterId !== undefined) {
+      filterIdRaw = req.body.filterId;
+    } else if (req.query && req.query.filterId !== undefined) {
+      filterIdRaw = req.query.filterId;
+    }
+    if (filterIdRaw !== null && filterIdRaw !== undefined) {
+      if (typeof filterIdRaw === "string" && /^\d+$/.test(filterIdRaw)) {
+        const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else if (typeof filterIdRaw === "number") {
+        const filterRow = await LeadFilter.findByPk(filterIdRaw);
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else {
+        try {
+          filterConfig =
+            typeof filterIdRaw === "string"
+              ? JSON.parse(filterIdRaw)
+              : filterIdRaw;
+        } catch (e) {
+          filterConfig = null;
         }
       }
     }
-  }
-  return thread;
-}
 
-// 🚀 PHASE 2: Fetch single email body on-demand
-const fetchSingleEmailBody = async (messageId, userCredential) => {
-  const imaps = require('imap-simple');
-  
-  try {
-    console.log(`[Phase 2] Connecting to IMAP for single email body fetch...`);
+    let organizationWhere = {};
+    let personWhere = {};
+    let leadWhere = {};
+    let dealWhere = {};
+    let activityWhere = {};
+
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Debug: print filterConfig
+    console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
+    console.log("[DEBUG] Available model fields:");
+    console.log("[DEBUG] - Lead fields:", Object.keys(Lead.rawAttributes));
+    console.log("[DEBUG] - Person fields:", Object.keys(Person.rawAttributes));
+    console.log(
+      "[DEBUG] - Organization fields:",
+      Object.keys(Organization.rawAttributes)
+    );
+    const ops = {
+      eq: Op.eq,
+      ne: Op.ne,
+      like: Op.like,
+      notLike: Op.notLike,
+      gt: Op.gt,
+      gte: Op.gte,
+      lt: Op.lt,
+      lte: Op.lte,
+      in: Op.in,
+      notIn: Op.notIn,
+      is: Op.eq,
+      isNot: Op.ne,
+      isEmpty: Op.is,
+      isNotEmpty: Op.not,
+      between: Op.between,
+      notBetween: Op.notBetween,
+    };
+    const operatorMap = {
+      is: "eq",
+      "is not": "ne",
+      "is empty": "isEmpty",
+      "is not empty": "isNotEmpty",
+      contains: "like",
+      "does not contain": "notLike",
+      "is exactly or earlier than": "lte",
+      "is earlier than": "lt",
+      "is exactly or later than": "gte",
+      "not equals": "ne",
+      "greater than": "gt",
+      "greater than or equal": "gte",
+      "less than": "lt",
+      "less than or equal": "lte",
+    };
+
+    // Helper function to build a single condition - following the pattern from other APIs
+    function buildCondition(cond) {
+      console.log(
+        "[DEBUG] buildCondition called with:",
+        JSON.stringify(cond, null, 2)
+      );
+
+      const ops = {
+        eq: Op.eq,
+        ne: Op.ne,
+        like: Op.like,
+        notLike: Op.notLike,
+        gt: Op.gt,
+        gte: Op.gte,
+        lt: Op.lt,
+        lte: Op.lte,
+        in: Op.in,
+        notIn: Op.notIn,
+        is: Op.eq,
+        isNot: Op.ne,
+        isEmpty: Op.is,
+        isNotEmpty: Op.not,
+        between: Op.between,
+        notBetween: Op.notBetween,
+      };
+
+      let operator = cond.operator;
+      console.log("[DEBUG] Original operator:", operator);
+
+      if (operatorMap[operator]) {
+        operator = operatorMap[operator];
+        console.log("[DEBUG] Mapped operator:", operator);
+      }
+
+      // Handle "is empty" and "is not empty"
+      if (operator === "isEmpty" || operator === "is empty") {
+        const result = { [cond.field]: { [Op.is]: null } };
+        console.log(
+          "[DEBUG] isEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "isNotEmpty" || operator === "is not empty") {
+        const result = { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+        console.log(
+          "[DEBUG] isNotEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "contains" and "does not contain" for text fields
+      if (operator === "like" || operator === "contains") {
+        const result = { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] like condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "notLike" || operator === "does not contain") {
+        const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Default condition
+      const finalOperator = ops[operator] || Op.eq;
+      console.log("[DEBUG] Final operator symbol:", finalOperator.toString());
+      console.log("[DEBUG] Condition value:", cond.value);
+      console.log("[DEBUG] Condition field:", cond.field);
+
+      const result = {
+        [cond.field]: {
+          [finalOperator]: cond.value,
+        },
+      };
+
+      // Special logging for sequelize operators (they don't serialize well with JSON.stringify)
+      console.log("[DEBUG] Default condition result:", {
+        field: cond.field,
+        operator: finalOperator.toString(),
+        value: cond.value,
+        resultStructure: `{ ${cond.field}: { ${finalOperator.toString()}: "${
+          cond.value
+        }" } }`,
+      });
+
+      // Additional validation
+      if (cond.value === undefined || cond.value === null) {
+        console.log("[DEBUG] WARNING: cond.value is undefined or null!");
+      }
+
+      return result;
+    }
+
+    // Get model field names for validation
+    const personFields = Object.keys(Person.rawAttributes);
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    let activityFields = [];
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      activityFields = Object.keys(Activity.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Activity model not available:", e.message);
+    }
+
+    console.log("[DEBUG] Available fields:");
+    console.log("- Person fields:", personFields.slice(0, 5), "...");
+    console.log("- Lead fields:", leadFields.slice(0, 5), "...");
+    console.log("- Deal fields:", dealFields.slice(0, 5), "...");
+    console.log(
+      "- Organization fields:",
+      organizationFields.slice(0, 5),
+      "..."
+    );
+    console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+
+    // If filterConfig is provided, build AND/OR logic for all entities
+    if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
+      if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
+        console.log("[DEBUG] Processing 'all' conditions:", filterConfig.all);
+
+        filterConfig.all.forEach(function (cond) {
+          console.log(`[DEBUG] Processing AND condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.and]) personWhere[Op.and] = [];
+                  personWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+                  leadWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+                  dealWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.and])
+                    organizationWhere[Op.and] = [];
+                  organizationWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+                  activityWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.and]) personWhere[Op.and] = [];
+              personWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person AND condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+              leadWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead AND condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+              dealWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal AND condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+              organizationWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization AND condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+              activityWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity AND condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        console.log("[DEBUG] Processing 'any' conditions:", filterConfig.any);
+
+        filterConfig.any.forEach(function (cond) {
+          console.log(`[DEBUG] Processing OR condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.or]) personWhere[Op.or] = [];
+                  personWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+                  leadWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+                  dealWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+                  organizationWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+                  activityWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.or]) personWhere[Op.or] = [];
+              personWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person OR condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+              leadWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead OR condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+              dealWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal OR condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+              organizationWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization OR condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+              activityWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity OR condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+    } else if (orgSearch) {
+      // Fallback to search logic if no filterConfig
+      organizationWhere[Op.or] = [
+        { organization: { [Op.like]: `%${orgSearch}%` } },
+        { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+        { address: { [Op.like]: `%${orgSearch}%` } },
+      ];
+    }
+
+    // Debug: log all where clauses
+    console.log("[DEBUG] Final where clauses:");
+    console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
+    console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- leadWhere keys:", Object.keys(leadWhere));
+    console.log("- leadWhere[Op.and]:", leadWhere[Op.and]);
+    console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
+    console.log(
+      "- organizationWhere:",
+      JSON.stringify(organizationWhere, null, 2)
+    );
+    console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
+
+    // Apply Lead filters to get relevant organization IDs
+    let leadFilteredOrgIds = [];
+    const hasLeadFilters =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFilters) {
+      console.log("[DEBUG] Applying Lead filters to find organizations");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get organization IDs from leads
+      leadFilteredOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from leads that don't have leadOrganizationId but have organization name
+      const leadOrgNames = leadFilterResults
+        .map((lead) => lead.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Lead-filtered org IDs:", leadFilteredOrgIds);
+      console.log("[DEBUG] Lead organization names:", leadOrgNames);
+
+      // If we have organization names from leads, also find organizations by name
+      if (leadOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: leadOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        leadFilteredOrgIds = [
+          ...new Set([...leadFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from lead org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined lead-filtered org IDs:",
+          leadFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Activity filters to get relevant organization IDs
+    let activityFilteredOrgIds = [];
+    const hasActivityFilters =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFilters) {
+      console.log("[DEBUG] Applying Activity filters to find organizations");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get organization IDs from activities
+        activityFilteredOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        // Also get organization names directly from activities that don't have leadOrganizationId but have organization name
+        const activityOrgNames = activityFilterResults
+          .map((activity) => activity.organization)
+          .filter(Boolean);
+
+        console.log(
+          "[DEBUG] Activity-filtered org IDs:",
+          activityFilteredOrgIds
+        );
+        console.log("[DEBUG] Activity organization names:", activityOrgNames);
+
+        // If we have organization names from activities, also find organizations by name
+        if (activityOrgNames.length > 0) {
+          const orgsByName = await Organization.findAll({
+            where: {
+              organization: { [Op.in]: activityOrgNames },
+            },
+            attributes: ["leadOrganizationId"],
+            raw: true,
+          });
+
+          const additionalOrgIds = orgsByName.map(
+            (org) => org.leadOrganizationId
+          );
+          activityFilteredOrgIds = [
+            ...new Set([...activityFilteredOrgIds, ...additionalOrgIds]),
+          ];
+
+          console.log(
+            "[DEBUG] Additional org IDs from activity org names:",
+            additionalOrgIds
+          );
+          console.log(
+            "[DEBUG] Combined activity-filtered org IDs:",
+            activityFilteredOrgIds
+          );
+        }
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Person filters to get relevant organization IDs
+    let personFilteredOrgIds = [];
+    const hasPersonFilters =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFilters) {
+      console.log("[DEBUG] Applying Person filters to find organizations");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }else {
+        personFilterResults = await Person.findAll({
+          where: {
+            ...personWhere,
+            [Op.or]: [{ masterUserID: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get organization IDs from persons
+      personFilteredOrgIds = personFilterResults
+        .map((person) => person.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from persons that don't have leadOrganizationId but have organization name
+      const personOrgNames = personFilterResults
+        .map((person) => person.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Person-filtered org IDs:", personFilteredOrgIds);
+      console.log("[DEBUG] Person organization names:", personOrgNames);
+
+      // If we have organization names from persons, also find organizations by name
+      if (personOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: personOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        personFilteredOrgIds = [
+          ...new Set([...personFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from person org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined person-filtered org IDs:",
+          personFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Deal filters to get relevant organization IDs
+    let dealFilteredOrgIds = [];
+    const hasDealFilters =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFilters) {
+      console.log("[DEBUG] Applying Deal filters to find organizations");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get organization IDs from deals
+      dealFilteredOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from deals that don't have leadOrganizationId but have organization name
+      const dealOrgNames = dealFilterResults
+        .map((deal) => deal.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Deal-filtered org IDs:", dealFilteredOrgIds);
+      console.log("[DEBUG] Deal organization names:", dealOrgNames);
+
+      // If we have organization names from deals, also find organizations by name
+      if (dealOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: dealOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        dealFilteredOrgIds = [
+          ...new Set([...dealFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from deal org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined deal-filtered org IDs:",
+          dealFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Organization filters directly
+    let orgFilteredOrgIds = [];
+    const hasOrgFilters =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFilters) {
+      console.log(
+        "[DEBUG] Applying Organization filters to find organizations"
+      );
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+      else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs from organizations
+      orgFilteredOrgIds = orgFilterResults
+        .map((org) => org.leadOrganizationId)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Organization-filtered org IDs:", orgFilteredOrgIds);
+    }
+
+    // Role-based filtering logic for organizations - same as getLeads API
+    let orgWhere = {};
+    if (orgSearch) {
+      // If orgSearch is a single character, search by first letter
+      if (orgSearch.length === 1) {
+        orgWhere = {
+          organization: { [Op.like]: `${orgSearch}%` }
+        };
+      } else {
+        orgWhere = {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${orgSearch}%` } },
+            { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+            { address: { [Op.like]: `%${orgSearch}%` } },
+          ],
+        };
+      }
+    }
+
+    // Merge organizationWhere from filters with orgWhere from search
+    if (Object.keys(organizationWhere).length > 0) {
+      orgWhere = { ...orgWhere, ...organizationWhere };
+    }
+
+    // Apply Lead, Activity, Person, Deal, and Organization filters by restricting to organizations found in those entities
+    const allFilteredOrgIds = [
+      ...new Set([
+        ...leadFilteredOrgIds,
+        ...activityFilteredOrgIds,
+        ...personFilteredOrgIds,
+        ...dealFilteredOrgIds,
+        ...orgFilteredOrgIds,
+      ]),
+    ];
+
+    if (allFilteredOrgIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to org IDs:",
+        allFilteredOrgIds
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredOrgIds.length,
+        "org IDs"
+      );
+
+      if (Object.keys(orgWhere).length > 0) {
+        // Combine with existing filters using AND
+        orgWhere = {
+          [Op.and]: [
+            orgWhere,
+            { leadOrganizationId: { [Op.in]: allFilteredOrgIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        orgWhere = { leadOrganizationId: { [Op.in]: allFilteredOrgIds } };
+      }
+    } else if (
+      hasLeadFilters ||
+      hasActivityFilters ||
+      hasPersonFilters ||
+      hasDealFilters ||
+      hasOrgFilters
+    ) {
+      // If entity filters were applied but no matching organizations found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching organizations found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: orgPage,
+        organizations: [],
+      });
+    }
+
+    console.log("[DEBUG] Final orgWhere:", JSON.stringify(orgWhere, null, 2));
+
+    // Prepare sorting options
+    const validSortFields = Object.keys(Organization.rawAttributes);
+    const validSortOrders = ["ASC", "DESC"];
     
-    // Connect to IMAP
-    const connection = await imaps.connect({
-      imap: {
-        user: userCredential.email,
-        password: userCredential.appPassword,
-        host: userCredential.imapHost,
-        port: userCredential.imapPort,
-        tls: userCredential.imapEncryption === 'tls',
-        authTimeout: 30000,
-        connTimeout: 30000,
-        tlsOptions: { rejectUnauthorized: false }
+    // Validate sortBy parameter
+    const finalSortBy = validSortFields.includes(sortBy) ? sortBy : "createdAt";
+    
+    // Validate sortOrder parameter
+    const finalSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) 
+      ? sortOrder.toUpperCase() 
+      : "DESC";
+    
+    console.log(`[DEBUG] Sorting by: ${finalSortBy} ${finalSortOrder}`);
+
+    // Fetch organizations using EXACT same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin"&&!req.query.masterUserID) {
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }else if (req.query.masterUserID) {
+      orgWhere.masterUserID = req.query.masterUserID;
+      organizations = await Organization.findAll({
+        where:orgWhere,
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }else {
+      organizations = await Organization.findAll({
+        where: {
+          ...orgWhere,
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }
+
+    console.log(
+      "[DEBUG] Found",
+      organizations.length,
+      "organizations after filtering"
+    );
+    if (organizations.length > 0) {
+      console.log(
+        "[DEBUG] Sample organizations:",
+        organizations.slice(0, 3).map((o) => ({
+          id: o.leadOrganizationId,
+          name: o.organization,
+          createdAt: o.createdAt,
+        }))
+      );
+    }
+
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Merge personWhere from filters with role-based filtering - same as getLeads API
+    let finalPersonWhere = { ...personWhere };
+
+    // Fetch persons using EXACT same logic as getLeads API
+    let persons = [];
+    if (req.role === "admin") {
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    }
+
+    // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] } - same as getLeads API
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
       }
     });
-    
-    await connection.openBox('INBOX');
-    console.log(`[Phase 2] IMAP connected, searching for message: ${messageId}`);
-    
-    // Search for specific email by message ID
-    const searchCriteria = [['HEADER', 'MESSAGE-ID', messageId]];
-    const fetchOptions = {
-      bodies: 'TEXT', // Fetch full body content
-      struct: true
-    };
-    
-    const emails = await connection.search(searchCriteria, fetchOptions);
-    
-    if (emails && emails.length > 0) {
-      const email = emails[0];
-      console.log(`[Phase 2] Found email, extracting body...`);
-      
-      // Extract body content
-      let bodyContent = '';
-      if (email.bodies && email.bodies.TEXT) {
-        bodyContent = email.bodies.TEXT;
-      }
-      
-      await connection.end();
-      console.log(`[Phase 2] Single email body fetched successfully`);
-      return bodyContent;
-    } else {
-      await connection.end();
-      console.log(`[Phase 2] Email not found with message ID: ${messageId}`);
-      return null;
+
+    // Get all unique ownerIds from persons and organizations - same as getLeads API
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser - same as getLeads API
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Add ownerName to organizations - same as getLeads API
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+    }));
+
+    // Count leads for each organization - same as getLeads API
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Add leadCount and persons array to organizations - EXACT same format as getLeads API
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
+      persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- same as getLeads API
+    }));
+
+    // Fetch custom field values for all organizations - same as getLeads API
+    const orgIdsForCustomFields = organizations.map(
+      (o) => o.leadOrganizationId
+    );
+    let orgCustomFieldValues = [];
+    if (orgIdsForCustomFields.length > 0) {
+      orgCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: orgIdsForCustomFields,
+          entityType: "organization",
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for organization entity
+    const allOrgCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const orgCustomFieldIdToName = {};
+    allOrgCustomFields.forEach((cf) => {
+      orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map orgId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    orgCustomFieldValues.forEach((cfv) => {
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization - same as getLeads API
+    organizations = organizations.map((o) => {
+      const customFields = orgCustomFieldsMap[o.leadOrganizationId] || {};
+      return { ...o, ...customFields };
+    });
+
+    // Return organizations in EXACT same format as getLeads API
+    res.status(200).json({
+      totalRecords: organizations.length,
+      totalPages: Math.ceil(organizations.length / orgLimit),
+      currentPage: orgPage,
+      sortBy: finalSortBy,
+      sortOrder: finalSortOrder,
+      organizations: organizations, // Return organizations exactly as they are in getLeads API
+    });
+  } catch (error) {
+    console.error("Error fetching organizations and persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+// Get organizations with persons, leadCount, and ownerName, supporting dynamic filtering
+
+const { Op } = require("sequelize");
+const Sequelize = require("sequelize");
+const Email = require("../../models/email/emailModel");
+const LeadNote = require("../../models/leads/leadNoteModel");
+const DealNote = require("../../models/deals/delasNoteModel");
+// const PersonNote = require("../../models/leads/personNoteModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Attachment = require("../../models/email/attachmentModel");
+const OrganizationNote = require("../../models/leads/organizationNoteModel");
+const PersonNote = require("../../models/leads/personNoteModel");
+const Deal = require("../../models/deals/dealsModels");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const Lead = require("../../models/leads/leadsModel")
+const Activities = require("../../models/activity/activityModel")
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
+const sequelize = require("../../config/db");
+
+/**
+ * Create a person with support for multiple emails and phones
+ * Request body format:
+ * {
+ *   contactPerson: "John Doe", // Required
+ *   email: "john@example.com", // Optional if emails array is provided
+ *   emails: [                  // Optional array format
+ *     { email: "john@work.com", type: "Work" },
+ *     { email: "john@personal.com", type: "Personal" }
+ *   ],
+ *   phone: "1234567890",      // Optional if phones array is provided
+ *   phones: [                 // Optional array format
+ *     { phone: "1234567890", type: "Work" },
+ *     { phone: "0987654321", type: "Mobile" }
+ *   ],
+ *   organization: "Company Name",
+ *   jobTitle: "Manager",
+ *   notes: "Additional notes",
+ *   // ... other standard fields
+ * }
+ */
+exports.createPerson = async (req, res) => {
+  try {
+    const masterUserID = req.adminId;
+    if (!req.body || !req.body.contactPerson) {
+      return res
+        .status(400)
+        .json({ message: "Contact person is required." });
     }
     
+    const {
+      contactPerson,
+      email,
+      emails, // Array of email objects: [{ email: "test@example.com", type: "Work" }]
+      phone,
+      phones, // Array of phone objects: [{ phone: "123456789", type: "Work" }]
+      notes,
+      postalAddress,
+      birthday,
+      jobTitle,
+      personLabels,
+      organization, // may be undefined or empty
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
+      ...rest
+    } = req.body;
+
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && typeof emailObj.email === 'string' && emailObj.email.trim());
+    } else if (email && typeof email === 'string' && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Require at least one email
+    if (emailList.length === 0) {
+      return res.status(400).json({ 
+        message: "At least one email address is required." 
+      });
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && typeof phoneObj.phone === 'string' && phoneObj.phone.trim());
+    } else if (phone && typeof phone === 'string' && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Use primary email for uniqueness check (first email in the list)
+    const primaryEmail = emailList[0].email;
+    const primaryPhone = phoneList.length > 0 ? phoneList[0].phone : null;
+
+    // Check for duplicate primary email (primary email must be unique across all persons)
+    const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
+    if (existingEmailPerson) {
+      return res.status(409).json({
+        message: "A person with this email address already exists.",
+        person: {
+          personId: existingEmailPerson.personId,
+          contactPerson: existingEmailPerson.contactPerson,
+          email: existingEmailPerson.email,
+          organization: existingEmailPerson.organization,
+        },
+      });
+    }
+
+    // Check for duplicate person in the same organization (or globally if no org)
+    const whereClause = organization
+      ? { contactPerson, organization }
+      : { contactPerson, organization: null };
+
+    const existingPerson = await Person.findOne({ where: whereClause });
+    if (existingPerson) {
+      return res.status(409).json({
+        message:
+          "Person already exists" +
+          (organization ? " in this organization." : "."),
+        person: existingPerson,
+      });
+    }
+
+    let org = null;
+    if (organization) {
+      // Only create/find organization if provided
+      [org] = await Organization.findOrCreate({
+        where: { organization },
+        defaults: { organization, masterUserID, ownerId: masterUserID },
+      });
+    }
+
+    // Get all person model fields
+    const personFields = Object.keys(Person.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!personFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
+    }
+
+    // Create the person with primary email and phone + arrays in table fields
+    const person = await Person.create({
+      contactPerson,
+      email: primaryEmail, // Store primary email in the main field
+      phone: primaryPhone, // Store primary phone in the main field
+      emails: emailList, // Store all emails array directly in table
+      phones: phoneList.length > 0 ? phoneList : null, // Store all phones array directly in table
+      notes,
+      postalAddress,
+      birthday,
+      jobTitle,
+      personLabels,
+      organization: org ? org.organization : null,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
+      masterUserID,
+      ownerId: masterUserID, // Automatically set owner to the user creating the person
+    });
+
+    // Save custom fields if any
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["person", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: person.personId,
+          entityType: "person",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
+
+    // Link activity to person if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to person ${person.personId}`);
+        const activityUpdateResult = await Activities.update(
+          { personId: person.personId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to person:", activityError);
+        // Don't fail the person creation, just log the error
+      }
+    }
+
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      emails: emailList, // Include all emails in response
+      phones: phoneList, // Include all phones in response
+    };
+
+    const response = {
+      message: activityId 
+        ? "Person created and linked to activity successfully" 
+        : "Person created successfully",
+      person: personResponse
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
   } catch (error) {
-    console.log(`[Phase 2] Error fetching single email body:`, error.message);
+    console.error("Error creating person:", error);
+
+    // Handle database constraint violations
+    if (error.name === "SequelizeUniqueConstraintError") {
+      const field = error.errors[0]?.path || "unknown";
+      const value = error.errors[0]?.value || "unknown";
+
+      if (field === "email") {
+        return res.status(409).json({
+          message: `A person with email address "${value}" already exists.`,
+          field: "email",
+          value: value,
+        });
+      }
+
+      return res.status(409).json({
+        message: `A person with this ${field} already exists.`,
+        field: field,
+        value: value,
+      });
+    }
+
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
+  }
+};
+
+/**
+ * Get a person by ID with all emails and phones
+ */
+exports.getPerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Find the person
+    const person = await Person.findOne({
+      where: { 
+        personId,
+        // Role-based access control
+        ...(req.role !== "admin" && { masterUserID })
+      }
+    });
+
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    // Get emails and phones directly from the person record
+    let emails = person.emails || [];
+    let phones = person.phones || [];
+
+    // If no arrays stored, create from primary email/phone (backward compatibility)
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
+    }
+
+    // Prepare response
+    const personResponse = {
+      ...person.toJSON(),
+      emails,
+      phones,
+    };
+
+    res.status(200).json({
+      message: "Person fetched successfully",
+      person: personResponse
+    });
+
+  } catch (error) {
+    console.error("Error fetching person:", error);
+    res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+exports.createOrganization = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // Get the master user ID from the request
+    const ownerId = req.body.ownerId || masterUserID; // Default to masterUserID if not provided
+    if (!req.body || !req.body.organization) {
+      return res
+        .status(400)
+        .json({ message: "Organization name is required." });
+    }
+    const { 
+      organization, 
+      organizationLabels, 
+      address, 
+      visibleTo, 
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
+      ...rest 
+    } = req.body;
+
+    // Check if organization already exists
+    const existingOrg = await Organization.findOne({ where: { organization } });
+    if (existingOrg) {
+      return res.status(409).json({
+        message: "Organization already exists.",
+        organization: existingOrg,
+      });
+    }
+
+    // Get all organization model fields
+    const orgFields = Object.keys(Organization.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!orgFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
+    }
+
+    // Create the organization
+    const org = await Organization.create({
+      organization,
+      organizationLabels,
+      address,
+      visibleTo,
+      masterUserID,
+      ownerId, // Set the owner ID if provided
+    });
+
+    // Save custom fields if any
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const Sequelize = require("sequelize");
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: org.leadOrganizationId,
+          entityType: "organization",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
+
+    // Link activity to organization if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to organization ${org.leadOrganizationId}`);
+        const activityUpdateResult = await Activities.update(
+          { leadOrganizationId: org.leadOrganizationId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to organization:", activityError);
+        // Don't fail the organization creation, just log the error
+      }
+    }
+
+    const response = {
+      message: activityId 
+        ? "Organization created and linked to activity successfully" 
+        : "Organization created successfully",
+      organization: org,
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error("Error creating organization:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getContactTimeline = async (req, res) => {
+  try {
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    // Search
+    const search = req.query.search || "";
+    const searchFilter = search
+      ? {
+          [Op.or]: [
+            { contactPerson: { [Op.like]: `%${search}%` } },
+            { email: { [Op.like]: `%${search}%` } },
+            { phone: { [Op.like]: `%${search}%` } },
+            { jobTitle: { [Op.like]: `%${search}%` } },
+            { personLabels: { [Op.like]: `%${search}%` } },
+            { organization: { [Op.like]: `%${search}%` } }, // Assuming organization is a field in Person
+          ],
+        }
+      : {};
+
+    // Date filter (monthsBack)
+    const monthsBack = parseInt(req.query.monthsBack) || 3;
+    const fromDate = new Date();
+    fromDate.setMonth(fromDate.getMonth() - monthsBack);
+
+    // Main query
+    const { count, rows: persons } = await Person.findAndCountAll({
+      where: {
+        ...searchFilter,
+        createdAt: { [Op.gte]: fromDate },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "leadOrganizationId",
+        "createdAt",
+      ],
+      order: [["contactPerson", "ASC"]],
+      limit,
+      offset,
+    });
+
+    res.status(200).json({
+      message: "Contact timeline fetched successfully",
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+      filter: { monthsBack, fromDate },
+      search,
+      persons,
+    });
+  } catch (error) {
+    console.error("Error fetching contact timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonTimeline = async (req, res) => {
+  const { personId } = req.params;
+
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
+  try {
+    const person = await Person.findByPk(personId, {
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+    });
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // Fetch related leads
+    const leads = await Lead.findAll({ where: { personId } });
+    const deals = await Deal.findAll({ where: { personId } });
+
+    // Optimized email fetching with pagination and essential fields only
+    const leadIds = leads.map((l) => l.leadId);
+
+    // Get total email count first
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.or]: [
+          ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } },
+        ],
+      },
+    });
+
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
+
+    // Fetch emails where person's email is sender or recipient
+    const emailsByAddress = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } },
+        ],
+      },
+      attributes: [
+        "emailID",
+        "messageId",
+        "sender",
+        "senderName",
+        "recipient",
+        "cc",
+        "bcc",
+        "subject",
+        "createdAt",
+        "folder",
+        "isRead",
+        "leadId",
+        "dealId",
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: Math.ceil(safeEmailLimit / 2),
+      offset: Math.floor(emailOffset / 2),
+    });
+
+    // Merge and deduplicate emails
+    const allEmailsMap = new Map();
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    const allEmails = Array.from(allEmailsMap.values());
+
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
+      });
+
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
+    }
+
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes
+    const personNotes = await PersonNote.findAll({
+      where: { personId: personId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities
+    const personActivities = await Activities.findAll({
+      where: { personId: personId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch custom field values for the person
+    let personCustomFieldValues = [];
+    personCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: personId,
+        entityType: "person",
+      },
+      raw: true,
+    });
+
+    // Fetch all custom fields for person entity
+    const allPersonCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const personCustomFieldIdToName = {};
+    allPersonCustomFields.forEach((cf) => {
+      personCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const personCustomFields = {};
+    personCustomFieldValues.forEach((cfv) => {
+      const fieldName = personCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      personCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to person object
+    if (Object.keys(personCustomFields).length > 0) {
+      person.dataValues = { ...person.dataValues, ...personCustomFields };
+    }
+
+    console.log(
+      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person), ${Object.keys(personCustomFields).length} custom fields`
+    );
+
+    res.status(200).json({
+      person,
+      leads,
+      deals,
+      emails: optimizedEmails,
+      notes,
+      activities,
+      files,
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching person timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getOrganizationTimeline = async (req, res) => {
+  const { organizationId } = req.params;
+
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 50 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
+  try {
+    // Fetch the organization
+    const organization = await Organization.findByPk(organizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Fetch all persons in this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId: organizationId },
+    });
+    // Add array of { personId, contactPerson } to organization object
+    organization.dataValues.persons = persons.map((p) => ({
+      personId: p.personId,
+      contactPerson: p.contactPerson,
+    }));
+
+    // Fetch all leads for this organization (directly or via persons)
+    const personIds = persons.map((p) => p.personId);
+    const leads = await Lead.findAll({
+      where: {
+        [Op.or]: [
+          { leadOrganizationId: organizationId },
+          { personId: personIds },
+        ],
+      },
+    });
+
+    // Fetch all deals for this organization
+    const deals = await Deal.findAll({
+      where: { leadOrganizationId: organizationId },
+    });
+
+    // Optimized email fetching with pagination
+    const leadIds = leads.map((l) => l.leadId);
+    const personEmails = persons.map((p) => p.email).filter(Boolean);
+
+    // Get total email count first
+    const emailWhereConditions = [
+      ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+      ...(personEmails.length > 0
+        ? [
+            { sender: { [Op.in]: personEmails } },
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
+            },
+          ]
+        : []),
+    ];
+
+    const totalEmailsCount =
+      emailWhereConditions.length > 0
+        ? await Email.count({
+            where: { [Op.or]: emailWhereConditions },
+          })
+        : 0;
+
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
+
+    // Fetch emails where any person's email is sender or recipient
+    let emailsByAddress = [];
+    if (personEmails.length > 0) {
+      emailsByAddress = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { sender: { [Op.in]: personEmails } },
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
+            },
+          ],
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "sender",
+          "senderName",
+          "recipient",
+          "cc",
+          "bcc",
+          "subject",
+          "createdAt",
+          "folder",
+          "isRead",
+          "leadId",
+          "dealId",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(safeEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
+      });
+    }
+
+    // Merge and deduplicate emails by emailID
+    const allEmailsMap = new Map();
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    const allEmails = Array.from(allEmailsMap.values());
+
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
+      });
+
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
+    }
+
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes for all persons in the organization
+    const personNotes = personIds.length > 0 ? await PersonNote.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization notes
+    const organizationNotes = await OrganizationNote.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' })),
+      ...organizationNotes.map(note => ({ ...note.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities for all persons in the organization
+    const personActivities = personIds.length > 0 ? await Activities.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization activities
+    const organizationActivities = await Activities.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' })),
+      ...organizationActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch custom field values for the organization
+    let organizationCustomFieldValues = [];
+    organizationCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: organizationId,
+        entityType: "organization",
+      },
+      raw: true,
+    });
+
+    // Fetch all custom fields for organization entity
+    const allOrganizationCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const organizationCustomFieldIdToName = {};
+    allOrganizationCustomFields.forEach((cf) => {
+      organizationCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const organizationCustomFields = {};
+    organizationCustomFieldValues.forEach((cfv) => {
+      const fieldName = organizationCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      organizationCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to organization object
+    if (Object.keys(organizationCustomFields).length > 0) {
+      Object.assign(organization.dataValues, organizationCustomFields);
+    }
+
+    console.log(
+      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person, ${organizationNotes.length} org), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person, ${organizationActivities.length} org), ${Object.keys(organizationCustomFields).length} custom fields`
+    );
+
+    res.status(200).json({
+      organization,
+      persons,
+      leads,
+      deals,
+      emails: optimizedEmails,
+      notes,
+      activities,
+      files, // Attachments with related email data
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching organization timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonFields = async (req, res) => {
+  try {
+    // You can customize or fetch this list from your model or config if needed
+    const fields = [
+      { value: "contactPerson", label: "Name" },
+      // { key: "firstName", label: "First name" },
+      // { key: "lastName", label: "Last name" },
+      { value: "email", label: "Email" },
+      { value: "phone", label: "Phone" },
+      { value: "jobTitle", label: "Job title" },
+      { value: "birthday", label: "Birthday" },
+      { value: "personLabels", label: "Labels" },
+      { value: "organization", label: "Organization" },
+      // { value: "owner", label: "Owner" },
+      // { value: "notes", label: "Notes" },
+      { value: "postalAddress", label: "Postal address" },
+      // { value: "postalAddressDetails", label: "Postal address (details)" },
+      // { value: "visibleTo", label: "Visible to" },
+      { value: "createdAt", label: "Person created" },
+      { value: "updatedAt", label: "Update time" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
+      // { key: "instantMessenger", label: "Instant messenger" },
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching person fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getOrganizationFields = async (req, res) => {
+  try {
+    const fields = [
+      { value: "organization", label: "Organization name" },
+      { value: "organizationLabels", label: "Labels" },
+      { value: "address", label: "Address" },
+      // { value: "addressDetails", label: "Address (details)" },
+      // { value: "visibleTo", label: "Visible to" },
+      { value: "createdAt", label: "Organization created" },
+      { value: "updatedAt", label: "Update time" },
+      { value: "ownerId", label: "Owner" },
+      // { key: "people", label: "People" },
+      // { key: "notes", label: "Notes" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching organization fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.updateOrganization = async (req, res) => {
+  try {
+    const { leadOrganizationId } = req.params; // Use leadOrganizationId from params
+    const updateFields = req.body;
+
+    // Find the organization by leadOrganizationId
+    const org = await Organization.findByPk(leadOrganizationId);
+    if (!org) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Update all fields provided in req.body
+    await org.update(updateFields);
+
+    res.status(200).json({
+      message: "Organization updated successfully",
+      organization: org,
+    });
+  } catch (error) {
+    console.error("Error updating organization:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+/**
+ * Update person with support for multiple emails and phones
+ * Request body can include:
+ * - emails: [{ email: "new@email.com", type: "Work" }]
+ * - phones: [{ phone: "1234567890", type: "Work" }]
+ * - Any other standard person fields
+ */
+exports.updatePerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const { emails, phones, email, phone, ...updateFields } = req.body;
+    const masterUserID = req.adminId;
+
+    // Find the person
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && emailObj.email.trim());
+    } else if (email && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && phoneObj.phone.trim());
+    } else if (phone && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // If emails are being updated, validate primary email uniqueness
+    if (emailList.length > 0) {
+      const primaryEmail = emailList[0].email;
+      const existingEmailPerson = await Person.findOne({ 
+        where: { 
+          email: primaryEmail,
+          personId: { [Sequelize.Op.ne]: personId } // Exclude current person
+        } 
+      });
+      if (existingEmailPerson) {
+        return res.status(409).json({
+          message: "A person with this email address already exists.",
+          person: {
+            personId: existingEmailPerson.personId,
+            contactPerson: existingEmailPerson.contactPerson,
+            email: existingEmailPerson.email,
+          },
+        });
+      }
+      updateFields.email = primaryEmail;
+      updateFields.primaryEmailType = emailList[0].type || 'Work';
+    }
+
+    // If phones are being updated, set primary phone
+    if (phoneList.length > 0) {
+      updateFields.phone = phoneList[0].phone;
+      updateFields.primaryPhoneType = phoneList[0].type || 'Work';
+    }
+
+    // If ownerId is being updated, also update it in the related organization
+    if (updateFields.ownerId && person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org) {
+        await org.update({ ownerId: updateFields.ownerId });
+      }
+    }
+
+    // Update all fields provided in req.body for the person
+    await person.update(updateFields);
+
+    // Update or create custom field values for multiple emails and phones
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+
+    if (emailList.length > 0) {
+      // Remove existing emails custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new emails if more than one or if explicitly provided as array
+      if (emailList.length > 1 || emails) {
+        await CustomFieldValue.create({
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(emailList),
+          masterUserID,
+        });
+      }
+    }
+
+    if (phoneList.length > 0) {
+      // Remove existing phones custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new phones if more than one or if explicitly provided as array
+      if (phoneList.length > 1 || phones) {
+        await CustomFieldValue.create({
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(phoneList),
+          masterUserID,
+        });
+      }
+    }
+
+    // Fetch ownerName via organization.ownerId and MasterUser
+    let ownerName = null;
+    if (person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org && org.ownerId) {
+        const owner = await MasterUser.findByPk(org.ownerId);
+        if (owner) {
+          ownerName = owner.name;
+        }
+      }
+    }
+
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      ownerName,
+      emails: emailList.length > 0 ? emailList : undefined,
+      phones: phoneList.length > 0 ? phoneList : undefined,
+    };
+
+    res.status(200).json({
+      message: "Person updated successfully",
+      person: personResponse,
+    });
+  } catch (error) {
+    console.error("Error updating person:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Helper function to get person with multiple emails and phones
+ * @param {number} personId - The person ID
+ * @returns {Object} Person object with emails and phones arrays
+ */
+const getPersonWithContactInfo = async (personId) => {
+  try {
+    const person = await Person.findByPk(personId);
+    if (!person) return null;
+
+    // Get custom field values for emails and phones
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: personId,
+        entityType: 'person',
+        fieldId: ['person_emails', 'person_phones']
+      }
+    });
+
+    let emails = [];
+    let phones = [];
+
+    // Parse custom field values
+    customFieldValues.forEach(cfv => {
+      if (cfv.fieldId === 'person_emails' && cfv.value) {
+        try {
+          emails = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person emails:', e);
+        }
+      }
+      if (cfv.fieldId === 'person_phones' && cfv.value) {
+        try {
+          phones = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person phones:', e);
+        }
+      }
+    });
+
+    // If no custom field arrays found, use the primary email/phone
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
+    }
+
+    return {
+      ...person.toJSON(),
+      emails,
+      phones
+    };
+  } catch (error) {
+    console.error('Error getting person with contact info:', error);
     return null;
   }
 };
 
-// 🧠 INTELLIGENT CHUNKING: Helper function to fetch emails in date-based chunks for ALL providers
-// Enhanced progressive timeout calculation based on strategy
-const getProgressiveTimeout = (strategy) => {
-  switch (strategy) {
-    case "MASSIVE_INBOX": return 60000; // 60s for metadata-only fetching (Yandex compatibility)
-    case "VERY_LARGE": return 45000; // 45 seconds for very large inboxes
-    case "LARGE": return 30000; // 30 seconds for large inboxes
-    case "MEDIUM": return 20000; // 20 seconds for medium inboxes
-    case "SMALL_CHUNKS": return 15000; // 15 seconds for small chunks
-    default: return 10000; // 10 seconds for normal
-  }
-};
-
-// ⚡ HIGH-PERFORMANCE: Batch fetch by UID ranges (100-200 emails at once)
-const fetchEmailsByUIDRanges = async (connection, uidRanges, strategy = 'NORMAL', page = 1, userID = 'unknown', provider = 'unknown') => {
-  // 🚀 METADATA-ONLY FETCH: Can handle larger batches since we're not fetching bodies
-  const batchSize = strategy === "MASSIVE_INBOX" ? 1 : 5; // Yandex: ultra-conservative 1 range at a time
-  const allEmails = [];
-  let successfulBatches = 0;
-  let failedBatches = 0;
-  
-  console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE FETCH: Processing ${uidRanges.length} UID ranges for USER ${userID} ${provider}`);
-  console.log(`[Batch ${page}] 🎯 METADATA BATCH SIZE: ${batchSize} UID ranges per fetch (strategy: ${strategy})`);
-  
-  for (let i = 0; i < uidRanges.length; i += batchSize) {
-    const batchRanges = uidRanges.slice(i, i + batchSize);
-    const batchNum = Math.floor(i / batchSize) + 1;
-    
-    try {
-      // Create UID range string: "1001:1100,1201:1300,1401:1500"
-      const uidRangeStr = batchRanges.map(range => `${range.start}:${range.end}`).join(',');
-      
-      console.log(`[Batch ${page}] 🔄 UID Batch ${batchNum}: Fetching UIDs ${uidRangeStr} (${batchRanges.length} ranges)`);
-      
-      const timeout = getProgressiveTimeout(strategy);
-      
-      const fetchPromise = new Promise(async (resolve, reject) => {
-        try {
-          if (batchRanges.length > 0) {
-            // 🚀 TWO-PASS STRATEGY: Metadata first, then bodies
-            let searchCriteria;
-            let fetchOptions;
-            
-            if (batchRanges.length === 1) {
-              // Single range - use simple UID range format
-              const range = batchRanges[0];
-              searchCriteria = [['UID', `${range.start}:${range.end}`]];
-              
-              // 📋 PROGRESSIVE STRATEGY: Try HEADER.FIELDS first, fallback to HEADER
-              fetchOptions = {
-                bodies: 'HEADER',  // Use simpler HEADER for better compatibility
-                struct: true,     // Get structure for attachments
-                envelope: true,   // Get envelope for quick access
-                markSeen: false   // Don't mark as read
-              };
-              
-              console.log(`[Batch ${page}] 🔍 METADATA FETCH: UIDs ${range.start}:${range.end} (${range.end - range.start + 1} emails)`);
-            } else {
-              // Multiple ranges - use comma-separated ranges 
-              const rangeList = batchRanges.map(range => `${range.start}:${range.end}`).join(',');
-              searchCriteria = [['UID', rangeList]];
-              
-              // 📋 PROGRESSIVE STRATEGY: Use simpler HEADER for better compatibility
-              fetchOptions = {
-                bodies: 'HEADER',  // Use simpler HEADER for better compatibility
-                struct: true,     // Get structure for attachments
-                envelope: true,   // Get envelope for quick access
-                markSeen: false   // Don't mark as read
-              };
-              
-              console.log(`[Batch ${page}] 🔍 METADATA FETCH: ${batchRanges.length} ranges: ${rangeList}`);
-            }
-            
-            console.log(`[Batch ${page}] 🔍 SEARCH DEBUG: Using criteria:`, searchCriteria);
-            
-            // Fetch metadata only (fast and reliable)
-            const emails = await connection.search(searchCriteria, fetchOptions);
-            console.log(`[Batch ${page}] 📨 METADATA RESULT: Found ${emails.length} email headers`);
-            
-            // 📋 TODO: PASS 2 will be implemented separately for body fetching
-            // For now, we successfully get all email metadata without timeouts
-            
-            resolve(emails);
-          } else {
-            resolve([]);
-          }
-        } catch (err) {
-          reject(err);
-        }
-      });
-      
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`UID batch ${batchNum} timeout`)), timeout)
-      );
-      
-      const emails = await Promise.race([fetchPromise, timeoutPromise]);
-      allEmails.push(...emails);
-      successfulBatches++;
-      
-      console.log(`[Batch ${page}] ✅ UID Batch ${batchNum}: Found ${emails.length} email headers in ${timeout/1000}s`);
-      
-      // Minimal pause between batches
-      if (i + batchSize < uidRanges.length) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // 0.5s pause
-      }
-      
-    } catch (error) {
-      failedBatches++;
-      console.log(`[Batch ${page}] ⚠️ UID Batch ${batchNum} failed: ${error.message}`);
-      
-      // Continue processing other batches - more tolerant with smaller batches
-      if (failedBatches > 10 && successfulBatches === 0) {
-        console.log(`[Batch ${page}] ❌ Too many failed UID batches, stopping`);
-        break;
-      }
-    }
-  }
-  
-  console.log(`[Batch ${page}] 🎯 UID BATCH SUMMARY: ${allEmails.length} emails, ${successfulBatches} successful, ${failedBatches} failed batches`);
-  return allEmails;
-};
-
-// ⚡ HIGH-PERFORMANCE: Parallel database saving with p-limit
-const saveEmailsInParallel = async (emails, concurrency = 10, userID, provider, page = 1) => {
-  const pLimit = require('p-limit');
-  const limit = pLimit(concurrency); // Process up to 10 emails at once
-  const savedEmails = [];
-  const errors = [];
-  const startTime = Date.now();
-  
-  console.log(`[Batch ${page}] ⚡ PARALLEL SAVING: ${emails.length} emails with concurrency ${concurrency} for USER ${userID}`);
-  
-  const savePromises = emails.map((email, index) => 
-    limit(async () => {
-      try {
-        // Check if email already exists
-        const existingEmail = await Email.findOne({
-          where: { messageId: email.messageId },
-        });
-        
-        if (!existingEmail) {
-          // 🔍 DEBUG: Log UID before saving
-          console.log(`[Batch ${page}] 💾 SAVING NEW EMAIL: ${email.messageId} with UID: ${email.uid}`);
-          const savedEmail = await Email.create(email);
-          savedEmails.push(savedEmail);
-          
-          // Progress logging every 50 saves
-          if (savedEmails.length % 50 === 0) {
-            const elapsed = (Date.now() - startTime) / 1000;
-            const rate = savedEmails.length / elapsed;
-            console.log(`[Batch ${page}] 💾 SAVED: ${savedEmails.length}/${emails.length} emails (${rate.toFixed(1)} saves/sec)`);
-          }
-          
-          return savedEmail;
-        } else {
-          // ✅ UPDATE: Check if existing email needs UID update
-          if (!existingEmail.uid && email.uid) {
-            console.log(`[Batch ${page}] 🔄 UID UPDATE: Email ${email.messageId} - existing UID: ${existingEmail.uid}, new UID: ${email.uid}`);
-            await existingEmail.update({ uid: email.uid });
-            console.log(`[Batch ${page}] 🔄 UID UPDATED: Email ${email.messageId} now has UID ${email.uid}`);
-            savedEmails.push(existingEmail); // Count as processed
-            return existingEmail;
-          } else if (existingEmail.uid && email.uid && existingEmail.uid !== email.uid) {
-            // Handle potential UID conflicts (rare but possible)
-            console.log(`[Batch ${page}] ⚠️ UID CONFLICT: Email ${email.messageId} has different UID (existing: ${existingEmail.uid}, new: ${email.uid})`);
-          } else {
-            console.log(`[Batch ${page}] ⏭️ SKIP: Email ${email.messageId} already exists with UID (existing: ${existingEmail.uid}, new: ${email.uid})`);
-          }
-          return null;
-        }
-      } catch (error) {
-        errors.push({ email: email.messageId, error: error.message });
-        console.log(`[Batch ${page}] ⚠️ SAVE ERROR: ${email.messageId} - ${error.message}`);
-        return null;
-      }
-    })
-  );
-  
-  // Wait for all saves to complete 
-  await Promise.all(savePromises);
-  
-  const totalTime = (Date.now() - startTime) / 1000;
-  const rate = savedEmails.length / totalTime;
-  
-  console.log(`[Batch ${page}] ✅ PARALLEL SAVE COMPLETE: ${savedEmails.length} processed (new emails + UID updates), ${errors.length} errors in ${totalTime.toFixed(1)}s (${rate.toFixed(1)} saves/sec)`);
-  
-  return { savedEmails, errors, processingTime: totalTime, rate };
-};
-
-// ⚡ HIGH-PERFORMANCE: Fast email fetching with optimized strategy  
-const fetchEmailsHighPerformance = async (connection, strategy, userID, provider, page = 1) => {
-  const startTime = Date.now();
-  let allEmails = [];
-  
-  console.log(`[Batch ${page}] 🚀 HIGH-PERFORMANCE FETCH: Starting optimized fetch for USER ${userID} ${provider} (strategy: ${strategy})`);
-  
+/**
+ * Get a single person by ID with multiple emails and phones
+ */
+exports.getPerson = async (req, res) => {
   try {
-    // Step 1: Get all UIDs quickly (no body fetch)
-    console.log(`[Batch ${page}] 📋 STEP 1: Getting all email UIDs...`);
-    const uidResults = await connection.search(['ALL'], { struct: false });
+    const { personId } = req.params;
     
-    // Extract UIDs from message objects
-    const totalUIDs = uidResults.map((msg) => msg.attributes.uid);
-    
-    console.log(`[Batch ${page}] 📊 FOUND: ${totalUIDs.length} total emails in inbox`);
-    
-    // Step 2: Priority strategy - Recent emails first
-    const recentCount = strategy === "MASSIVE_INBOX" ? 2000 : 
-                       strategy === "VERY_LARGE" ? 3000 :
-                       strategy === "LARGE" ? 5000 : totalUIDs.length;
-    
-    const priorityUIDs = totalUIDs.slice(-recentCount); // Get most recent emails
-    console.log(`[Batch ${page}] 🎯 PRIORITY: Processing ${priorityUIDs.length} recent emails first`);
-    
-    // Step 3: Create UID ranges for batch fetching (METADATA ONLY - can handle larger batches)
-    const batchSize = strategy === "MASSIVE_INBOX" ? 25 : 100; // Smaller batches for Yandex MASSIVE_INBOX
-    const uidRanges = [];
-    
-    for (let i = 0; i < priorityUIDs.length; i += batchSize) {
-      const startUID = priorityUIDs[i];
-      const endUID = priorityUIDs[Math.min(i + batchSize - 1, priorityUIDs.length - 1)];
-      uidRanges.push({ start: startUID, end: endUID });
-    }
-    
-    console.log(`[Batch ${page}] 📦 BATCHING: Created ${uidRanges.length} UID ranges (${batchSize} emails per range)`);
-    
-    // Step 4: Batch fetch by UID ranges
-    allEmails = await fetchEmailsByUIDRanges(connection, uidRanges, strategy, page, userID, provider);
-    
-    const fetchTime = (Date.now() - startTime) / 1000;
-    const fetchRate = allEmails.length / fetchTime;
-    
-    console.log(`[Batch ${page}] ✅ FETCH COMPLETE: ${allEmails.length} emails fetched in ${fetchTime.toFixed(1)}s (${fetchRate.toFixed(1)} emails/sec)`);
-    
-    return {
-      emails: allEmails,
-      totalCount: totalUIDs.length,
-      fetchedCount: allEmails.length,
-      fetchTime: fetchTime,
-      fetchRate: fetchRate,
-      strategy: strategy
-    };
-    
-  } catch (error) {
-    console.log(`[Batch ${page}] ❌ HIGH-PERFORMANCE FETCH ERROR: ${error.message}`);
-    throw error;
-  }
-};
-
-const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider = 'unknown', userID = 'unknown', strategy = 'NORMAL') => {
-  const formatDateForIMAP = (date) => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const day = date.getDate();
-    const month = months[date.getMonth()];
-    const year = date.getFullYear();
-    return `${day}-${month}-${year}`;
-  };
-
-  const allChunkedMessages = [];
-  const today = new Date();
-  
-  // Enhanced chunk limits based on strategy
-  const getMaxChunks = (strategy) => {
-    switch (strategy) {
-      case "MASSIVE_INBOX": return 500; // Process up to 500 chunks (10+ years of 7-day chunks)
-      case "VERY_LARGE": return 400; // Process up to 400 chunks (11+ years of 10-day chunks)
-      case "LARGE": return 300; // Process up to 300 chunks (12+ years of 15-day chunks)
-      case "MEDIUM": return 200; // Process up to 200 chunks (16+ years of 30-day chunks)
-      case "SMALL_CHUNKS": return 100; // Process up to 100 chunks (16+ years of 60-day chunks)
-      default: return 50; // Default for normal processing
-    }
-  };
-  
-  const maxChunks = getMaxChunks(strategy);
-  let successfulChunks = 0;
-  let failedChunks = 0;
-  let lastChunkProcessed = 0;
-  let memoryOptimizationTrigger = false;
-  
-  console.log(`[Batch ${page}] 🚀 ENHANCED CHUNKING: Starting ${provider} enhanced fetch for USER ${userID}`);
-  console.log(`[Batch ${page}] 🔧 STRATEGY: ${strategy} with ${chunkDays}-day chunks, max ${maxChunks} chunks`);
-  console.log(`[Batch ${page}] 📊 CAPACITY: Will process up to ${Math.floor(maxChunks * chunkDays / 365)} years of email history`);
-  
-  for (let chunk = 0; chunk < maxChunks; chunk++) {
-    lastChunkProcessed = chunk + 1;
-    let chunkMessages = [];
-    
-    try {
-      const chunkEndDate = new Date(today.getTime() - (chunk * chunkDays * 24 * 60 * 60 * 1000));
-      const chunkStartDate = new Date(today.getTime() - ((chunk + 1) * chunkDays * 24 * 60 * 60 * 1000));
-      
-      const endDateStr = formatDateForIMAP(chunkEndDate);
-      const startDateStr = formatDateForIMAP(chunkStartDate);
-      
-      console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Enhanced Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
-      
-      // Enhanced progressive timeout based on strategy and chunk number
-      const baseTimeout = getProgressiveTimeout(strategy);
-      const adaptiveTimeout = baseTimeout + (chunk * 1000); // Add 1s per chunk for older data
-      const maxTimeout = Math.min(adaptiveTimeout, 120000); // Cap at 2 minutes
-      
-      const searchPromise = connection.search([
-        ["SINCE", startDateStr],
-        ["BEFORE", endDateStr]
-      ], {
-        bodies: "HEADER",
-        struct: true,
-        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-      });
-      
-      const chunkTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`${provider} enhanced chunk ${chunk + 1} timeout`)), maxTimeout)
-      );
-      
-      chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
-      successfulChunks++;
-      console.log(`[Batch ${page}] ✅ USER ${userID} ${provider} Enhanced Chunk ${chunk + 1}: Found ${chunkMessages.length} emails (${(maxTimeout/1000)}s timeout)`);
-      
-      allChunkedMessages.push(...chunkMessages);
-      
-      // Enhanced memory management based on strategy
-      const memoryThresholds = {
-        "MASSIVE_INBOX": 5000,
-        "VERY_LARGE": 8000,
-        "LARGE": 12000,
-        "MEDIUM": 15000,
-        "SMALL_CHUNKS": 20000,
-        "NORMAL": 25000
-      };
-      
-      const threshold = memoryThresholds[strategy] || 15000;
-      
-      if (allChunkedMessages.length > threshold && !memoryOptimizationTrigger) {
-        memoryOptimizationTrigger = true;
-        console.log(`[Batch ${page}] 🧠 MEMORY OPTIMIZATION: ${allChunkedMessages.length} emails collected, implementing memory management`);
-        
-        // Force garbage collection if available
-        if (global.gc) {
-          global.gc();
-          console.log(`[Batch ${page}] 🗑️ GARBAGE COLLECTION: Forced cleanup at ${allChunkedMessages.length} emails`);
-        }
-        
-        // For massive inboxes, break into stages
-        if (strategy === "MASSIVE_INBOX" && allChunkedMessages.length > 3000) {
-          console.log(`[Batch ${page}] 🏁 MASSIVE INBOX STAGE COMPLETE: ${allChunkedMessages.length} emails collected, will continue in next session`);
-          break;
-        }
-      }
-      
-      // Smart stopping logic with enhanced detection
-      if (chunkMessages.length === 0) {
-        console.log(`[Batch ${page}] 🏁 USER ${userID} ${provider} no more emails found, stopping at chunk ${chunk + 1}`);
-        break;
-      }
-      
-      // Dynamic chunk size adjustment for dense email periods
-      if (chunkMessages.length > 500 && chunkDays > 3 && strategy !== "MASSIVE_INBOX") {
-        console.log(`[Batch ${page}] 🔄 DENSE PERIOD DETECTED: ${chunkMessages.length} emails in ${chunkDays} days, consider smaller chunks for future optimization`);
-      }
-      
-    } catch (error) {
-      failedChunks++;
-      console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} Enhanced Chunk ${chunk + 1} failed: ${error.message}, continuing...`);
-      
-      // Enhanced error handling with strategy-specific recovery
-      if (failedChunks > 10 && successfulChunks === 0) {
-        console.log(`[Batch ${page}] ❌ USER ${userID} ${provider} too many failed chunks (${failedChunks}) with no success, stopping enhanced chunking`);
-        break;
-      } else if (failedChunks > 20 && successfulChunks > 10) {
-        console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} many failed chunks (${failedChunks}) but ${successfulChunks} successful, continuing with caution`);
-      }
-    }
-    
-    // Enhanced pause between chunks based on strategy
-    if (chunk < maxChunks - 1) {
-      const pauseDuration = strategy === "MASSIVE_INBOX" ? 2000 : 1000; // Longer pause for massive inboxes
-      await new Promise(resolve => setTimeout(resolve, pauseDuration));
-    }
-  }
-  
-  console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} ENHANCED chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
-  console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} ENHANCED SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${lastChunkProcessed} total chunks`);
-  console.log(`[Batch ${page}] 🏆 USER ${userID} PERFORMANCE: Processed ${Math.floor(allChunkedMessages.length / (successfulChunks || 1))} avg emails per successful chunk`);
-  
-  return allChunkedMessages;
-};
-
-const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unknown', userID = 'unknown') => {
-  const formatDateForIMAP = (date) => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", 
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const day = date.getDate();
-    const month = months[date.getMonth()];
-    const year = date.getFullYear();
-    return `${day}-${month}-${year}`;
-  };
-
-  const allChunkedMessages = [];
-  const today = new Date();
-  const maxChunks = 200; // Increased from 50 to handle larger inboxes
-  let successfulChunks = 0;
-  let failedChunks = 0;
-  let lastChunkProcessed = 0;
-  
-  console.log(`[Batch ${page}] 🔄 Starting ${provider} chunked fetch for USER ${userID}: ${chunkDays}-day chunks, max ${maxChunks} chunks`);
-  console.log(`[Batch ${page}] 📊 USER ${userID} CHUNKING STRATEGY: Will process up to ${maxChunks * chunkDays} days of email history in ${chunkDays}-day chunks`);
-  
-  for (let chunk = 0; chunk < maxChunks; chunk++) {
-    lastChunkProcessed = chunk + 1;
-    let chunkMessages = [];
-    try {
-      const chunkEndDate = new Date(today.getTime() - (chunk * chunkDays * 24 * 60 * 60 * 1000));
-      const chunkStartDate = new Date(today.getTime() - ((chunk + 1) * chunkDays * 24 * 60 * 60 * 1000));
-      
-      const endDateStr = formatDateForIMAP(chunkEndDate);
-      const startDateStr = formatDateForIMAP(chunkStartDate);
-      
-      console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
-      
-      // Search for emails in this date range with progressive timeout
-      const baseTimeout = 20000; // Base 20 seconds
-      const progressiveTimeout = baseTimeout + (chunk * 3000); // Add 3s per chunk for older data
-      
-      const searchPromise = connection.search([
-        ["SINCE", startDateStr],
-        ["BEFORE", endDateStr]
-      ], {
-        bodies: "HEADER",
-        struct: true,
-        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-      });
-      
-      const chunkTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`${provider} chunk ${chunk + 1} timeout`)), progressiveTimeout)
-      );
-      
-      chunkMessages = await Promise.race([searchPromise, chunkTimeout]);
-      successfulChunks++;
-      console.log(`[Batch ${page}] ✅ USER ${userID} ${provider} Chunk ${chunk + 1}: Found ${chunkMessages.length} emails (${(progressiveTimeout/1000)}s timeout)`);
-      
-      allChunkedMessages.push(...chunkMessages);
-      
-      // Smart stopping logic
-      if (chunkMessages.length === 0) {
-        console.log(`[Batch ${page}] 🏁 USER ${userID} ${provider} no more emails found, stopping at chunk ${chunk + 1}`);
-        break;
-      }
-      
-      // Memory protection - progressive strategy for very large inboxes
-      if (allChunkedMessages.length > 10000) {
-        console.log(`[Batch ${page}] 🛡️ USER ${userID} ${provider} STAGE 1 COMPLETE: ${allChunkedMessages.length} emails collected, will continue in next session`);
-        break;
-      } else if (allChunkedMessages.length > 5000) {
-        // Switch to smaller chunks for remaining processing
-        if (chunkDays > 7) {
-          console.log(`[Batch ${page}] 🔄 USER ${userID} ${provider} SWITCHING TO MICRO-CHUNKS: Reducing to 7-day periods for dense email areas`);
-          // Continue with current chunk size but note the strategy change
-        }
-      }
-      
-    } catch (error) {
-      failedChunks++;
-      console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} Chunk ${chunk + 1} failed: ${error.message}, continuing...`);
-      
-      // If too many consecutive chunks fail, but we have some success, continue with smaller chunks
-      if (failedChunks > 5 && successfulChunks === 0) {
-        console.log(`[Batch ${page}] ❌ USER ${userID} ${provider} too many failed chunks (${failedChunks}) with no success, stopping chunking`);
-        break;
-      } else if (failedChunks > 10 && successfulChunks > 0) {
-        console.log(`[Batch ${page}] ⚠️ USER ${userID} ${provider} many failed chunks (${failedChunks}) but ${successfulChunks} successful, switching to micro-chunking`);
-        // Could implement micro-chunking here (3-5 day periods)
-      }
-      
-      // Continue with next chunk even if this one fails
-    }
-    
-    // Brief pause between chunks to prevent rate limiting
-    if (chunk < maxChunks - 1) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second pause
-    }
-  }
-  
-  console.log(`[Batch ${page}] 🎯 USER ${userID} ${provider} chunked fetch complete: ${allChunkedMessages.length} total emails collected`);
-  console.log(`[Batch ${page}] 📈 USER ${userID} ${provider} CHUNK SUMMARY: ${successfulChunks} successful, ${failedChunks} failed out of ${lastChunkProcessed} total chunks`);
-  return allChunkedMessages;
-};
-
-exports.queueFetchAllEmails = async (req, res) => {
-  const { batchSize = 50, days = "all" } = req.query; // Enable ALL emails for all providers
-  const masterUserID = req.adminId;
-  const email = req.body?.email || req.email;
-  const appPassword = req.body?.appPassword || req.appPassword;
-  const provider = req.body?.provider;
-
-  try {
-    if (!masterUserID || !email || !appPassword) {
-      return res.status(400).json({ message: "All fields are required." });
-    }
-
-    console.log(
-      `[Queue] Queuing all folders email fetch job for masterUserID: ${masterUserID} (delegated to workers)`
-    );
-
-    // Save user credentials for workers to use
-    console.log(
-      `[Queue] Saving user credentials for masterUserID: ${masterUserID}`
-    );
-
-    // Prepare SMTP config for saving
-    const smtpConfigByProvider = {
-      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
-      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
-      yahoo: {
-        smtpHost: "smtp.mail.yahoo.com",
-        smtpPort: 465,
-        smtpSecure: true,
-      },
-      outlook: {
-        smtpHost: "smtp.office365.com",
-        smtpPort: 587,
-        smtpSecure: false,
-      },
-    };
-
-    let smtpHost = null,
-      smtpPort = null,
-      smtpSecure = null;
-    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
-      const smtpConfig = smtpConfigByProvider[provider];
-      smtpHost = smtpConfig.smtpHost;
-      smtpPort = smtpConfig.smtpPort;
-      smtpSecure = smtpConfig.smtpSecure;
-    } else if (provider === "custom") {
-      smtpHost = req.body.smtpHost;
-      smtpPort = req.body.smtpPort;
-      smtpSecure = req.body.smtpSecure;
-    }
-
-    // Check if credentials already exist
-    const existingCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-
-    if (existingCredential) {
-      await existingCredential.update({
-        email,
-        appPassword,
-        provider,
-        imapHost: provider === "custom" ? req.body.imapHost : null,
-        imapPort: provider === "custom" ? req.body.imapPort : null,
-        imapTLS: provider === "custom" ? req.body.imapTLS : null,
-        smtpHost,
-        smtpPort,
-        smtpSecure,
-      });
-      console.log(
-        `[Queue] User credentials updated for masterUserID: ${masterUserID}`
-      );
-    } else {
-      // Create new credentials with duplicate handling
-      try {
-        await UserCredential.create({
-          masterUserID,
-          email,
-          appPassword,
-          provider,
-          imapHost: provider === "custom" ? req.body.imapHost : null,
-          imapPort: provider === "custom" ? req.body.imapPort : null,
-          imapTLS: provider === "custom" ? req.body.imapTLS : null,
-          smtpHost,
-          smtpPort,
-          smtpSecure,
-        });
-        console.log(
-          `[Queue] User credentials created for masterUserID: ${masterUserID}`
-        );
-      } catch (createError) {
-        if (createError.name === "SequelizeUniqueConstraintError") {
-          console.log(
-            `[Queue] Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
-          );
-          const existingRecord = await UserCredential.findOne({
-            where: { masterUserID },
-          });
-          if (existingRecord) {
-            await existingRecord.update({
-              email,
-              appPassword,
-              provider,
-              imapHost: provider === "custom" ? req.body.imapHost : null,
-              imapPort: provider === "custom" ? req.body.imapPort : null,
-              imapTLS: provider === "custom" ? req.body.imapTLS : null,
-              smtpHost,
-              smtpPort,
-              smtpSecure,
-            });
-            console.log(
-              `[Queue] User credentials updated after duplicate error for masterUserID: ${masterUserID}`
-            );
-          }
-        } else {
-          throw createError; // Re-throw if it's not a duplicate error
-        }
-      }
-    }
-
-    // Queue job for dedicated inbox workers (no direct processing in main app)
-    const userQueueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
-
-    // Send a simple job to workers to let them handle all the IMAP processing
-    await publishToQueue(userQueueName, {
-      masterUserID,
-      email,
-      appPassword,
-      batchSize: Math.min(parseInt(batchSize), 25), // Align with worker limits
-      page: 1, // Start with page 1, workers will handle pagination
-      days,
-      provider,
-      imapHost: req.body.imapHost,
-      imapPort: req.body.imapPort,
-      imapTLS: req.body.imapTLS,
-      smtpHost: req.body.smtpHost,
-      smtpPort: req.body.smtpPort,
-      smtpSecure: req.body.smtpSecure,
-      dynamicFetch: true, // Let workers handle all IMAP operations
-      skipCount: 0, // Start from beginning
-    });
-
-    console.log(
-      `[Queue] Successfully queued all folders fetch job to ${userQueueName} - workers will handle all processing`
-    );
-
-    return res.status(200).json({
-      message:
-        "All folders email fetch job queued successfully. Workers will process emails from inbox, sent, drafts, and archive.",
-      queueName: userQueueName,
-      masterUserID,
-      folders: ["inbox", "sent", "drafts", "archive"],
-    });
-  } catch (error) {
-    console.error("[Queue] Error queuing all folders fetch job:", error);
-    res.status(500).json({
-      message: "Failed to queue all folders fetch job.",
-      error: error.message,
-    });
-  }
-};
-
-// Backward compatibility - alias for the old function name
-exports.queueFetchInboxEmails = exports.queueFetchAllEmails;
-
-// Fetch emails from all folders (inbox, sent, drafts, archive) in batches
-exports.fetchInboxEmails = async (req, res) => {
-  // Optimized batch size for better performance
-  let {
-    batchSize = 50,
-    page = 1,
-    days = "all", // Enable ALL emails for all providers
-    startUID,
-    endUID,
-    allUIDsInBatch,
-    expectedCount,
-  } = req.query;
-  batchSize = Math.min(Number(batchSize) || 50, MAX_BATCH_SIZE);
-
-  const masterUserID = req.adminId;
-  const email = req.body?.email || req.email;
-  const appPassword = req.body?.appPassword || req.appPassword;
-  const provider = req.body?.provider;
-
-  let connection;
-  try {
-    const currentPage = page || 1;
-    const effectiveStartUID = startUID || 'auto';
-    const effectiveEndUID = endUID || 'auto';
-    
-    console.log(
-      `[Batch ${currentPage}] Starting fetch for ${batchSize} emails, UIDs: ${effectiveStartUID}-${effectiveEndUID}`
-    );
-
-    if (allUIDsInBatch) {
-      console.log(`[Batch ${page}] Specific UIDs to fetch: ${allUIDsInBatch}`);
-    }
-
-    if (expectedCount) {
-      console.log(
-        `[Batch ${page}] Expected to process: ${expectedCount} emails`
-      );
-    }
-
-    if (!masterUserID || !email || !appPassword || !provider) {
-      return res.status(400).json({ message: "All fields are required." });
-    }
-
-    // Check if the user already has credentials saved
-    const existingCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-    const smtpConfigByProvider = {
-      gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
-      yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
-      yahoo: {
-        smtpHost: "smtp.mail.yahoo.com",
-        smtpPort: 465,
-        smtpSecure: true,
-      },
-      outlook: {
-        smtpHost: "smtp.office365.com",
-        smtpPort: 587,
-        smtpSecure: false,
-      },
-    };
-
-    // Prepare SMTP config for saving
-    let smtpHost = null,
-      smtpPort = null,
-      smtpSecure = null;
-    if (["gmail", "yandex", "yahoo", "outlook"].includes(provider)) {
-      const smtpConfig = smtpConfigByProvider[provider];
-      smtpHost = smtpConfig.smtpHost;
-      smtpPort = smtpConfig.smtpPort;
-      smtpSecure = smtpConfig.smtpSecure;
-    } else if (provider === "custom") {
-      smtpHost = req.body.smtpHost;
-      smtpPort = req.body.smtpPort;
-      smtpSecure = req.body.smtpSecure;
-    }
-    if (existingCredential) {
-      await existingCredential.update({
-        email,
-        appPassword,
-        provider,
-        imapHost: provider === "custom" ? req.body.imapHost : null,
-        imapPort: provider === "custom" ? req.body.imapPort : null,
-        imapTLS: provider === "custom" ? req.body.imapTLS : null,
-        smtpHost,
-        smtpPort,
-        smtpSecure,
-      });
-      console.log(`User credentials updated for masterUserID: ${masterUserID}`);
-    } else {
-      // Use upsert to avoid duplicate entry errors
-      try {
-        await UserCredential.create({
-          masterUserID,
-          email,
-          appPassword,
-          provider,
-          imapHost: provider === "custom" ? req.body.imapHost : null,
-          imapPort: provider === "custom" ? req.body.imapPort : null,
-          imapTLS: provider === "custom" ? req.body.imapTLS : null,
-          smtpHost,
-          smtpPort,
-          smtpSecure,
-        });
-        console.log(
-          `User credentials created for masterUserID: ${masterUserID}`
-        );
-      } catch (createError) {
-        if (createError.name === "SequelizeUniqueConstraintError") {
-          // If creation fails due to duplicate, try to find and update
-          console.log(
-            `Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
-          );
-          const existingRecord = await UserCredential.findOne({
-            where: { masterUserID },
-          });
-          if (existingRecord) {
-            await existingRecord.update({
-              email,
-              appPassword,
-              provider,
-              imapHost: provider === "custom" ? req.body.imapHost : null,
-              imapPort: provider === "custom" ? req.body.imapPort : null,
-              imapTLS: provider === "custom" ? req.body.imapTLS : null,
-              smtpHost,
-              smtpPort,
-              smtpSecure,
-            });
-            console.log(
-              `User credentials updated after duplicate error for masterUserID: ${masterUserID}`
-            );
-          }
-        } else {
-          throw createError; // Re-throw if it's not a duplicate error
-        }
-      }
-    }
-
-    // Fetch emails after saving credentials
-    console.log("Fetching emails for masterUserID:", masterUserID);
-    // Fetch user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-
-    if (!userCredential) {
-      console.error(
-        "User credentials not found for masterUserID:",
-        masterUserID
-      );
-      return res.status(404).json({ message: "User credentials not found." });
-    }
-    console.log(userCredential.email, "email");
-    console.log(userCredential.appPassword, "appPassword");
-
-    const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
-
-    console.log("Connecting to IMAP server...");
-    // const imapConfig = {
-    //   imap: {
-    //     user: userEmail,
-    //     password: userPassword,
-    //     host: "imap.gmail.com",
-    //     port: 993,
-    //     tls: true,
-    //     authTimeout: 30000,
-    //     tlsOptions: {
-    //       rejectUnauthorized: false,
-    //     },
-    //   },
-    // };
-    let imapConfig;
-    const providerd = userCredential.provider; // default to gmail
-
-    const providerConfig = PROVIDER_CONFIG[providerd];
-    const folderMap =
-      PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
-    if (providerd === "custom") {
-      if (!userCredential.imapHost || !userCredential.imapPort) {
-        return res.status(400).json({
-          message: "Custom IMAP settings are missing in user credentials.",
-        });
-      }
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-          keepalive: true, // Enable keepalive for better performance
-        },
-      };
-    } else {
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-          keepalive: true, // Enable keepalive for better performance
-        },
-      };
-    }
-
-    connection = await Imap.connect(imapConfig);
-
-    // Add robust error handler
-    connection.on("error", (err) => {
-      console.error("IMAP connection error:", err);
-    });
-
-    // Helper function to fetch emails from a specific folder using dynamic calculation
-    const fetchEmailsFromFolder = async (folderName, folderType) => {
-      try {
-        await connection.openBox(folderName);
-        let searchCriteria;
-        let messages = []; // Initialize messages array properly
-        let allMessages; // Declare allMessages at function scope
-        let skipCount = 0; // Declare skipCount at function scope with default value
-        let batchSize = 50; // Declare batchSize at function scope with default value
-        let chunkStrategy = "NORMAL"; // Declare chunkStrategy at function scope
-
-        // Check if we should use dynamic UID calculation
-        if (req.query.dynamicFetch) {
-          console.log(`[Batch ${page}] Using dynamic UID calculation...`);
-
-          // For dynamic fetch, get all emails and then slice for this batch
-          allMessages; // Already declared above
-          if (!days || days === 0 || days === "all") {
-            // 🧠 INTELLIGENT CHUNKING for ALL email providers
-            console.log(`[Batch ${page}] 📧 Provider: ${provider || 'unknown'} - analyzing inbox size...`);
-            
-            try {
-              // Step 1: Quick test to determine inbox size (works for all providers)
-              const testDate = formatDateForIMAP(
-                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-              );
-              const testPromise = connection.search([["SINCE", testDate]], {
-                bodies: "HEADER.FIELDS (FROM TO CC BCC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES)",
-                struct: true,
-                envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-              });
-              const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("Test timeout")), 3000) // Ultra-fast 3 second test
-              );
-              
-              let testMessages;
-              let chunkDays;
-              
-              try {
-                testMessages = await Promise.race([testPromise, timeoutPromise]);
-                console.log(`[Batch ${page}] 🔍 Found ${testMessages.length} emails in last 7 days for ${provider || 'unknown'}`);
-                
-                // Get total inbox count for detailed logging
-                let totalInboxCount = 0;
-                try {
-                  console.log(`[Batch ${page}] 📊 Getting total inbox count for user ${masterUserID}...`);
-                  const totalPromise = connection.search(["ALL"], { 
-                    bodies: "HEADER", 
-                    struct: true,
-                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-                  });
-                  const totalTimeout = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Total count timeout")), 10000)
-                  );
-                  const totalMessages = await Promise.race([totalPromise, totalTimeout]);
-                  totalInboxCount = totalMessages.length;
-                  console.log(`[Batch ${page}] 📧 USER ${masterUserID} TOTAL INBOX SIZE: ${totalInboxCount} emails`);
-                  console.log(`[Batch ${page}] 📈 USER ${masterUserID} INBOX ANALYSIS: ${testMessages.length} recent emails out of ${totalInboxCount} total emails`);
-                  console.log(`[Batch ${page}] 📊 USER ${masterUserID} INBOX PERCENTAGE: ${((testMessages.length / totalInboxCount) * 100).toFixed(1)}% of emails are from last 7 days`);
-                } catch (error) {
-                  console.log(`[Batch ${page}] ⚠️ Could not get total inbox count for user ${masterUserID}: ${error.message}`);
-                  console.log(`[Batch ${page}] 📧 USER ${masterUserID} INBOX SIZE: Unable to determine total (using recent count: ${testMessages.length})`);
-                }
-                
-                // Step 2: Enhanced inbox size detection and intelligent strategy selection
-                let totalInboxSize = totalInboxCount || 0;
-                
-                // Enhanced strategy determination based on both recent activity and total size
-                if (totalInboxSize > 50000 || testMessages.length > 500) {
-                  chunkStrategy = "MASSIVE_INBOX"; 
-                  chunkDays = 7; // 7-day micro-chunks for massive inboxes (50K+ emails)
-                  console.log(`[Batch ${page}] 🔥 MASSIVE INBOX detected (${totalInboxSize} total, ${testMessages.length} recent) - using MICRO chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🔥 USER ${masterUserID} INBOX STRATEGY: MASSIVE_INBOX micro-chunks (${chunkDays}-day periods) for maximum stability`);
-                } else if (totalInboxSize > 20000 || testMessages.length > 300) {
-                  chunkStrategy = "VERY_LARGE"; 
-                  chunkDays = 10; // 10-day chunks for very large inboxes (20K+ emails)
-                  console.log(`[Batch ${page}] 🔴 VERY LARGE inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using ULTRA_SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: VERY_LARGE chunks (${chunkDays}-day periods) for large dataset`);
-                } else if (totalInboxSize > 10000 || testMessages.length > 200) {
-                  chunkStrategy = "LARGE"; 
-                  chunkDays = 15; // 15-day chunks for large inboxes (10K+ emails)
-                  console.log(`[Batch ${page}] 🟠 LARGE inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using SMALL chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🟠 USER ${masterUserID} INBOX STRATEGY: LARGE chunks (${chunkDays}-day periods) for medium-large dataset`);
-                } else if (totalInboxSize > 5000 || testMessages.length > 100) {
-                  chunkStrategy = "MEDIUM"; 
-                  chunkDays = 30; // 30-day chunks for medium inboxes (5K+ emails)
-                  console.log(`[Batch ${page}] 🟡 MEDIUM inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using MEDIUM chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🟡 USER ${masterUserID} INBOX STRATEGY: MEDIUM chunks (${chunkDays}-day periods) for balanced processing`);
-                } else if (totalInboxSize > 2000 || testMessages.length > 50) {
-                  chunkStrategy = "SMALL_CHUNKS"; 
-                  chunkDays = 60; // 60-day chunks for smaller but still chunked processing
-                  console.log(`[Batch ${page}] 🟢 SMALL_CHUNKS inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using LARGE chunks (${chunkDays} days)`);
-                  console.log(`[Batch ${page}] 🟢 USER ${masterUserID} INBOX STRATEGY: SMALL_CHUNKS (${chunkDays}-day periods) for efficient processing`);
-                } else {
-                  chunkStrategy = "NORMAL";
-                  console.log(`[Batch ${page}] 🌟 NORMAL inbox detected (${totalInboxSize} total, ${testMessages.length} recent) - using DIRECT processing`);
-                  console.log(`[Batch ${page}] 🌟 USER ${masterUserID} INBOX STRATEGY: NORMAL processing (all emails at once) for small inbox`);
-                }
-              } catch (testError) {
-                // If test fails, assume large inbox and force ultra-safe chunking
-                console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} inbox test failed: ${testError.message} - FORCING ULTRA-SAFE CHUNKING`);
-                console.log(`[Batch ${page}] 🔴 USER ${masterUserID} INBOX STRATEGY: FORCED MASSIVE_INBOX chunks (7-day periods) due to timeout - assuming MASSIVE inbox`);
-                chunkStrategy = "MASSIVE_INBOX";
-                chunkDays = 7; // Ultra-conservative 7-day chunks for maximum safety
-                testMessages = [];
-              }
-              
-              // Step 3: Apply intelligent chunking strategy to get ALL emails with enhanced memory management
-              if (chunkStrategy !== "NORMAL") {
-                const effectiveChunkDays = chunkDays || 30; // Fallback value
-                console.log(`[Batch ${page}] 🔄 Fetching ALL emails using ${effectiveChunkDays}-day chunks for ${provider || 'unknown'}...`);
-                console.log(`[Batch ${page}] 🔄 USER ${masterUserID} CHUNKING: Starting ${chunkStrategy} chunking (${effectiveChunkDays}-day periods)`);
-                console.log(`[Batch ${page}] 📊 USER ${masterUserID} CHUNKING STRATEGY: Will process up to ${Math.floor(3000 / effectiveChunkDays)} chunks of ${effectiveChunkDays} days each`);
-                
-                try {
-              // ⚡ HIGH-PERFORMANCE MODE: Use optimized fetching for large inboxes
-              if (chunkStrategy === "MASSIVE_INBOX" || chunkStrategy === "VERY_LARGE") {
-                console.log(`[Batch ${page}] 🚀 ACTIVATING HIGH-PERFORMANCE MODE for ${chunkStrategy} strategy`);
-                const highPerfResult = await fetchEmailsHighPerformance(connection, chunkStrategy, masterUserID, provider || 'unknown', page);
-                allMessages = highPerfResult.emails;
-                
-                console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE RESULTS:`);
-                console.log(`[Batch ${page}] 📊 Total emails in inbox: ${highPerfResult.totalCount}`);
-                console.log(`[Batch ${page}] 📥 Fetched for processing: ${highPerfResult.fetchedCount}`);
-                console.log(`[Batch ${page}] ⏱️ Fetch time: ${highPerfResult.fetchTime.toFixed(1)}s`);
-                console.log(`[Batch ${page}] 🚀 Fetch rate: ${highPerfResult.fetchRate.toFixed(1)} emails/sec`);
-              } else {
-                // Original enhanced chunking for smaller inboxes
-                allMessages = await fetchEmailsInChunksEnhanced(connection, effectiveChunkDays, page, provider || 'unknown', masterUserID, chunkStrategy);
-              }
-                } catch (chunkError) {
-                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} CHUNKING FAILED: ${chunkError.message} - falling back to progressive search`);
-                  // Enhanced fallback with progressive timeout increases
-                  try {
-                    const progressiveTimeout = getProgressiveTimeout(chunkStrategy);
-                    console.log(`[Batch ${page}] 🔄 USER ${masterUserID} PROGRESSIVE FALLBACK: Using ${progressiveTimeout}ms timeout for ${chunkStrategy} strategy`);
-                    
-                    const fallbackPromise = connection.search(["ALL"], {
-                      bodies: "HEADER", 
-                      struct: true,
-                      envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-                    });
-                    const fallbackTimeoutPromise = new Promise((_, reject) =>
-                      setTimeout(() => reject(new Error(`${provider || 'Email'} progressive fallback timeout`)), progressiveTimeout)
-                    );
-                    allMessages = await Promise.race([fallbackPromise, fallbackTimeoutPromise]);
-                    console.log(`[Batch ${page}] ✅ USER ${masterUserID} FALLBACK SUCCESS: Found ${allMessages.length} emails`);
-                  } catch (fallbackError) {
-                    console.log(`[Batch ${page}] ❌ USER ${masterUserID} FALLBACK FAILED: ${fallbackError.message} - returning empty result`);
-                    allMessages = [];
-                  }
-                }
-              } else {
-                // Normal inbox: Get all emails at once (all providers)
-                console.log(`[Batch ${page}] 📧 Fetching ALL emails directly for ${provider || 'unknown'}...`);
-                console.log(`[Batch ${page}] 📧 USER ${masterUserID} DIRECT FETCH: Processing all emails at once for small inbox`);
-                
-                try {
-                  const searchPromise = connection.search(["ALL"], {
-                    bodies: "HEADER", 
-                    struct: true,
-                    envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-                  });
-                  const normalTimeout = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error(`${provider || 'Email'} search timeout`)), 15000)
-                  );
-                  allMessages = await Promise.race([searchPromise, normalTimeout]);
-                } catch (directError) {
-                  console.log(`[Batch ${page}] ❌ USER ${masterUserID} DIRECT FETCH FAILED: ${directError.message} - returning empty result`);
-                  allMessages = [];
-                }
-              }
-              
-              console.log(`[Batch ${page}] ✅ ${provider || 'unknown'} intelligent chunking completed: ${allMessages.length} total emails found`);
-              console.log(`[Batch ${page}] ✅ USER ${masterUserID} FETCH COMPLETED: Found ${allMessages.length} total emails using ${chunkStrategy} strategy`);
-              
-            } catch (error) {
-              console.log(`[Batch ${page}] ⚠️ ${provider || 'unknown'} intelligent chunking failed: ${error.message} - FORCING CHUNKING as fallback`);
-              // Force chunking as fallback when everything fails
-              console.log(`[Batch ${page}] 🔄 Forcing 30-day chunking for ${provider || 'unknown'} as safety fallback...`);
-              allMessages = await fetchEmailsInChunks(connection, 30, page, provider || 'unknown');
-            }
-          } else {
-            const sinceDate = formatDateForIMAP(
-              new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-            );
-            console.log(`Using dynamic SINCE date: ${sinceDate}`);
-            allMessages = await connection.search([["SINCE", sinceDate]], {
-              bodies: "HEADER",
-              struct: true,
-              envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-            });
-          }
-
-          // 🛡️ ENHANCED INTELLIGENT SAFETY: Dynamic limits with progressive processing for large datasets
-          const getMaxSafeEmailsForStrategy = (strategy, totalEmails) => {
-            switch (strategy) {
-              case "MASSIVE_INBOX": return totalEmails; // Process ALL emails for MASSIVE_INBOX
-              case "VERY_LARGE": return totalEmails; // Process ALL emails for VERY_LARGE  
-              case "LARGE": return totalEmails; // Process ALL emails for LARGE
-              case "MEDIUM": return totalEmails; // Process ALL emails for MEDIUM
-              case "SMALL_CHUNKS": return totalEmails; // Process ALL emails
-              default: return totalEmails; // Process all for normal inboxes
-            }
-          };
-          
-          const maxSafeEmails = getMaxSafeEmailsForStrategy(chunkStrategy || "NORMAL", allMessages.length);
-          const shouldLimitProcessing = allMessages.length > maxSafeEmails;
-          
-          if (shouldLimitProcessing) {
-            console.log(
-              `[Batch ${page}] 🎯 LARGE DATASET OPTIMIZATION: ${allMessages.length} emails found, processing ${maxSafeEmails} in this session (${chunkStrategy} strategy)`
-            );
-            console.log(
-              `[Batch ${page}] 📊 PROGRESSIVE PROCESSING: Session will handle ${maxSafeEmails} emails, remaining ${allMessages.length - maxSafeEmails} will be auto-queued for next sessions`
-            );
-            // Process most recent emails first for large datasets
-            allMessages = allMessages.slice(-maxSafeEmails); // Take the last (most recent) emails
-          }
-
-          console.log(
-            `[Batch ${page}] Found ${allMessages.length} total emails dynamically for ${provider || 'provider'}`
-          );
-
-          // 📊 ENHANCED SMART BATCH SIZING: Optimized batches based on inbox size and strategy
-          skipCount = parseInt(req.query.skipCount) || 0; // Assign to existing variable
-          batchSize = parseInt(req.query.batchSize) || getDynamicBatchSize(allMessages.length, chunkStrategy); // Enhanced dynamic sizing
-          
-          // Intelligent batch sizing based on inbox size and processing strategy
-          function getDynamicBatchSize(totalEmails, strategy) {
-            if (totalEmails > 50000) {
-              return 5; // Micro-batches for massive inboxes (50K+ emails)
-            } else if (totalEmails > 20000) {
-              return 10; // Very small batches for very large inboxes (20K+ emails)
-            } else if (totalEmails > 10000) {
-              return 15; // Small batches for large inboxes (10K+ emails)
-            } else if (totalEmails > 5000) {
-              return 25; // Medium-small batches for medium-large inboxes
-            } else if (totalEmails > 2000) {
-              return 35; // Medium batches for medium inboxes
-            } else if (totalEmails > 1000) {
-              return 45; // Larger batches for smaller-medium inboxes
-            } else {
-              return 50; // Default batch size for small inboxes
-            }
-          }
-          
-          console.log(`[Batch ${page}] � BATCH OPTIMIZATION: Using ${batchSize} emails per batch for ${allMessages.length} total emails (${chunkStrategy || 'NORMAL'} strategy)`);
-          
-          // Additional memory and performance optimizations for large datasets
-          if (allMessages.length > 10000) {
-            console.log(`[Batch ${page}] 🧠 MEMORY OPTIMIZATION: Implementing enhanced memory management for ${allMessages.length} emails`);
-            // Force garbage collection if available
-            if (global.gc) {
-              global.gc();
-              console.log(`[Batch ${page}] �️ GARBAGE COLLECTION: Forced cleanup before processing large dataset`);
-            }
-          }
-          
-          const startIdx = skipCount;
-          const endIdx = Math.min(startIdx + batchSize, allMessages.length);
-
-          // Slice the messages array to get this batch
-          const batchMessages = allMessages.slice(startIdx, endIdx);
-
-          if (batchMessages.length === 0) {
-            console.log(
-              `[Batch ${page}] No emails found for this batch (skip: ${skipCount}, total: ${allMessages.length})`
-            );
-            return {
-              processedCount: 0,
-              totalEmails: allMessages ? allMessages.length : 0,
-              currentBatchEnd: allMessages ? Math.min(skipCount + batchSize, allMessages.length) : 0,
-              hasMoreEmails: allMessages ? (skipCount + batchSize < allMessages.length) : false,
-              remainingEmails: allMessages ? Math.max(0, allMessages.length - (skipCount + batchSize)) : 0
-            };
-          }
-
-          console.log(
-            `[Batch ${page}] � SMART BATCHING: Processing emails ${startIdx + 1}-${endIdx} out of ${allMessages.length} total`
-          );
-          console.log(
-            `[Batch ${page}] 💾 BATCH SIZE: ${batchMessages.length} emails in this batch (batchSize: ${batchSize})`
-          );
-
-          // Use the sliced messages for this batch
-          messages = batchMessages;
-        } else if (allUIDsInBatch) {
-          // Use specific UIDs for this batch (more reliable than ranges)
-          searchCriteria = [["UID", allUIDsInBatch]];
-          console.log(
-            `[Batch ${page}] Using specific UIDs: ${allUIDsInBatch} (expecting ${expectedCount} emails)`
-          );
-        } else if (startUID && endUID) {
-          // Fallback to UID range for this batch
-          searchCriteria = [["UID", `${startUID}:${endUID}`]];
-          console.log(`[Batch ${page}] Using UID range: ${startUID}-${endUID}`);
-        } else if (!days || days === 0 || days === "all") {
-          searchCriteria = ["ALL"];
-        } else {
-          const sinceDate = formatDateForIMAP(
-            new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-          );
-          searchCriteria = [["SINCE", sinceDate]];
-        }
-
-        // Only do additional search if not using dynamic fetch (which already has messages)
-        if (!req.query.dynamicFetch) {
-          // Fetch specific header fields for metadata without body content
-          const fetchOptions = { 
-            bodies: "HEADER", 
-            struct: true,
-            envelope: true  // 🔧 ADD ENVELOPE for proper email metadata (fixes sent folder fallback data)
-          };
-          messages = await connection.search(searchCriteria, fetchOptions);
-        }
-
-        console.log(
-          `[Batch ${page}] Total emails found in ${folderType}: ${messages.length}`
-        );
-
-        // Determine how many emails to process
-        let actualBatchSize;
-        if (req.query.dynamicFetch) {
-          // For dynamic fetch, process all found emails (no warnings needed)
-          actualBatchSize = messages.length;
-          console.log(
-            `[Batch ${page}] Dynamic fetch found ${actualBatchSize} emails to process`
-          );
-        } else if (allUIDsInBatch || (startUID && endUID)) {
-          // In batch mode with specific UIDs or UID range, process ALL emails found
-          actualBatchSize = messages.length;
-          if (expectedCount && messages.length !== parseInt(expectedCount)) {
-            // Only warn if the difference is significant (more than 50% difference)
-            // AND if we found significantly fewer emails than expected
-            const expectedCountNum = parseInt(expectedCount);
-            const difference = Math.abs(messages.length - expectedCountNum);
-            const percentDifference = (difference / expectedCountNum) * 100;
-
-            if (
-              percentDifference > 50 &&
-              messages.length < expectedCountNum * 0.5
-            ) {
-              console.warn(
-                `[Batch ${page}] WARNING: Expected ${expectedCount} emails but found ${
-                  messages.length
-                } (${percentDifference.toFixed(
-                  1
-                )}% difference). This may indicate UIDs were deleted/moved.`
-              );
-            } else if (percentDifference > 20) {
-              console.log(
-                `[Batch ${page}] INFO: Expected ${expectedCount} emails, found ${
-                  messages.length
-                } (${percentDifference.toFixed(
-                  1
-                )}% difference - likely due to duplicates or processed emails)`
-              );
-            } else {
-              console.log(
-                `[Batch ${page}] SUCCESS: Expected ${expectedCount} emails, found ${
-                  messages.length
-                } emails (${percentDifference.toFixed(
-                  1
-                )}% difference - within normal range)`
-              );
-            }
-          }
-          console.log(
-            `[Batch ${page}] Processing all ${actualBatchSize} emails in batch`
-          );
-        } else {
-          // In direct mode without UID specification, respect the batchSize limit
-          actualBatchSize = Math.min(batchSize, messages.length);
-          console.log(
-            `[Batch ${page}] Processing ${actualBatchSize} out of ${messages.length} emails (direct mode)`
-          );
-        }
-
-        let processedCount = 0;
-
-        // 🚀 HIGH-PERFORMANCE PROCESSING: Use optimized processing for all strategies
-        if (chunkStrategy && ["MASSIVE_INBOX", "VERY_LARGE", "LARGE"].includes(chunkStrategy)) {
-          console.log(`[Batch ${page}] ⚡ HIGH-PERFORMANCE PROCESSING: Starting optimized processing for ${chunkStrategy} strategy`);
-          console.log(`[Batch ${page}] 📊 PERFORMANCE MODE: Processing ${actualBatchSize} emails with parallel optimization`);
-          
-          // Step 1: Lightweight processing (headers + metadata only)
-          const lightweightResult = await processEmailsLightweight(messages.slice(0, actualBatchSize), masterUserID, provider || 'unknown', chunkStrategy, page, folderType);
-          
-          console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT COMPLETE: ${lightweightResult.processedEmails.length} emails processed at ${lightweightResult.rate.toFixed(1)} emails/sec`);
-          
-          // Step 2: Parallel database saving with concurrency control
-          const concurrency = chunkStrategy === "MASSIVE_INBOX" ? 15 : 10; // Higher concurrency for massive inboxes
-          const saveResult = await saveEmailsInParallel(lightweightResult.processedEmails, concurrency, masterUserID, provider || 'unknown', page);
-          
-          processedCount = saveResult.savedEmails.length;
-          
-          console.log(`[Batch ${page}] 🎯 HIGH-PERFORMANCE SUMMARY:`);
-          console.log(`[Batch ${page}] ⚡ Processing rate: ${lightweightResult.rate.toFixed(1)} emails/sec`);
-          console.log(`[Batch ${page}] 💾 Saving rate: ${saveResult.rate.toFixed(1)} saves/sec`);
-          console.log(`[Batch ${page}] ✅ Total processed: ${processedCount} emails`);
-          console.log(`[Batch ${page}] ⚠️ Errors: ${lightweightResult.errorCount + saveResult.errors.length}`);
-          
-          console.log(`[Batch ${page}] 🏆 HIGH-PERFORMANCE PROCESSING COMPLETE: ${processedCount} emails processed with ${chunkStrategy} strategy`);
-          
-        } else {
-          console.log(`[Batch ${page}] 📋 STANDARD PROCESSING: Using regular processing for ${chunkStrategy || 'NORMAL'} strategy`);
-          
-          // Step 1: Lightweight processing (headers + metadata only) - same as high-performance but for smaller batches
-          const lightweightResult = await processEmailsLightweight(messages.slice(0, actualBatchSize), masterUserID, provider || 'unknown', chunkStrategy || 'NORMAL', page, folderType);
-          
-          console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT COMPLETE: ${lightweightResult.processedEmails.length} emails processed at ${lightweightResult.rate.toFixed(1)} emails/sec`);
-          
-          // Step 2: Parallel database saving with standard concurrency
-          const concurrency = 5; // Lower concurrency for normal inboxes
-          const saveResult = await saveEmailsInParallel(lightweightResult.processedEmails, concurrency, masterUserID, provider || 'unknown', page);
-          
-          processedCount = saveResult.savedEmails.length;
-          
-          console.log(`[Batch ${page}] 🎯 STANDARD PROCESSING SUMMARY:`);
-          console.log(`[Batch ${page}] ⚡ Processing rate: ${lightweightResult.rate.toFixed(1)} emails/sec`);
-          console.log(`[Batch ${page}] 💾 Saving rate: ${saveResult.rate.toFixed(1)} saves/sec`);
-          console.log(`[Batch ${page}] ✅ Total processed: ${processedCount} emails`);
-          console.log(`[Batch ${page}] ⚠️ Errors: ${lightweightResult.errorCount + saveResult.errors.length}`);
-          
-          console.log(`[Batch ${page}] 🏆 STANDARD PROCESSING COMPLETE: ${processedCount} emails processed with ${chunkStrategy || 'NORMAL'} strategy`);
-        }
-
-        console.log(
-          `📧 [Batch ${page}] SUCCESSFULLY PROCESSED ${processedCount} NEW EMAILS in ${folderType} folder!`
-        );
-
-        // Return both count and pagination info for auto-pagination
-        const requestSkipCount = parseInt(req.query.skipCount) || 0;
-        const requestBatchSize = parseInt(req.query.batchSize) || 50;
-        
-        return {
-          processedCount,
-          totalEmails: allMessages ? allMessages.length : 0,
-          currentBatchEnd: allMessages ? Math.min(requestSkipCount + requestBatchSize, allMessages.length) : 0,
-          hasMoreEmails: allMessages ? (requestSkipCount + requestBatchSize < allMessages.length) : false,
-          remainingEmails: allMessages ? Math.max(0, allMessages.length - (requestSkipCount + requestBatchSize)) : 0
-        };
-        
-      } catch (folderError) {
-        console.error(
-          `[Batch ${page}] Error fetching emails from folder ${folderType}:`,
-          folderError.message
-        );
-        return {
-          processedCount: 0,
-          totalEmails: 0,
-          currentBatchEnd: 0,
-          hasMoreEmails: false,
-          remainingEmails: 0
-        };
-      }
-    }
-    
-    // Continue with main email processing
-    const boxes = await connection.getBoxes();
-    const allFoldersArr = flattenFolders(boxes); // 🔧 GMAIL FIX: Keep original case for proper folder matching
-
-    console.log(
-      `[Batch ${page}] Processing all folders for masterUserID: ${masterUserID}`
-    );
-
-    // 🎯 SMART FOLDER PROCESSING: Provider-specific folder configuration
-    let primaryFolders, optionalFolders;
-    
-    console.log(`[Batch ${page}] 🔍 FOLDER DEBUG: Provider detected as '${provider}' for USER ${masterUserID}`);
-    
-    // ALL PROVIDERS: Process both INBOX and SENT folders
-    primaryFolders = ["inbox", "sent"];
-    optionalFolders = ["drafts", "archive"];
-    console.log(`[Batch ${page}] 📧 PROVIDER (${provider}): Processing INBOX + SENT folders (updated to include all providers)`);
-    
-    console.log(`[Batch ${page}] 📂 PRIMARY FOLDERS TO PROCESS: [${primaryFolders.join(', ')}]`);
-    console.log(`[Batch ${page}] 📂 OPTIONAL FOLDERS TO PROCESS: [${optionalFolders.join(', ')}]`);
-    console.log(`[Batch ${page}] 📂 ALL AVAILABLE FOLDERS (COMPLETE): [${allFoldersArr.join(', ')}]`);
-    console.log(`[Batch ${page}] 📂 TOTAL FOLDER COUNT: ${allFoldersArr.length}`);
-    
-    
-    let totalProcessedEmails = 0;
-    const folderResults = {};
-    let paginationInfo = null; // 🔧 FIX: Declare paginationInfo before the loop
-
-    // Process primary folders (INBOX - guaranteed to exist)
-    for (const folderType of primaryFolders) {
-      try {
-        console.log(`[Batch ${page}] 🔍 ATTEMPTING TO FIND: ${folderType.toUpperCase()} folder`);
-        const folderName = findMatchingFolder(allFoldersArr, folderType);
-        
-        if (folderName) {
-          console.log(`[Batch ${page}] ✅ FOUND ${folderType.toUpperCase()} FOLDER: '${folderName}' - Processing now...`);
-          const result = await fetchEmailsFromFolder(folderName, folderType);
-          
-          if (result && result.processedCount !== undefined) {
-            totalProcessedEmails += result.processedCount;
-            // 🔧 FIX: Add missing properties for proper logging
-            result.status = result.processedCount > 0 ? 'success' : 'no_emails';
-            result.folderName = folderName;
-            folderResults[folderType] = result;
-            
-            console.log(`[Batch ${page}] ✅ ${folderType.toUpperCase()} COMPLETE: ${result.processedCount} emails processed from '${folderName}'`);
-            
-            // Enhanced auto-pagination support
-            if (result.hasMoreEmails && result.remainingEmails > 0) {
-              console.log(`[Batch ${page}] 🔄 AUTO-PAGINATION: ${folderType} has ${result.remainingEmails} more emails`);
-              // Store pagination info for auto-queuing
-              if (!paginationInfo || result.remainingEmails > paginationInfo.remainingEmails) {
-                paginationInfo = result;
-              }
-            }
-          } else {
-            console.log(`[Batch ${page}] ⚠️ ${folderType.toUpperCase()} RESULT INCOMPLETE: No processedCount returned`);
-            folderResults[folderType] = {
-              processedCount: 0,
-              status: 'error',
-              folderName: folderName
-            };
-          }
-        } else {
-          console.log(`[Batch ${page}] ❌ ${folderType.toUpperCase()} FOLDER NOT FOUND in available folders: [${allFoldersArr.slice(0, 5).join(', ')}...]`);
-          folderResults[folderType] = { processedCount: 0, message: "Critical folder not found" };
-        }
-      } catch (folderError) {
-        console.error(`[Batch ${page}] Error processing ${folderType}:`, folderError.message);
-        folderResults[folderType] = { processedCount: 0, error: folderError.message };
-      }
-    }
-
-    // 🔧 OPTIONAL FOLDERS: Only process if they exist, skip silently if not
-    for (const folderType of optionalFolders) {
-      try {
-        const folderName = findMatchingFolder(allFoldersArr, folderType);
-        if (folderName) {
-          console.log(`[Batch ${page}] Processing ${folderType} folder: ${folderName}`);
-          const result = await fetchEmailsFromFolder(folderName, folderType);
-          
-          if (result && result.processedCount !== undefined) {
-            totalProcessedEmails += result.processedCount;
-            result.status = result.processedCount > 0 ? 'success' : 'no_emails';
-            result.folderName = folderName;
-            folderResults[folderType] = result;
-          }
-        } else {
-          // 🔇 SILENT SKIP: Don't log missing optional folders to reduce noise
-          folderResults[folderType] = { processedCount: 0, status: 'no_emails', message: folderType };
-        }
-      } catch (folderError) {
-        // 🔇 SILENT SKIP: Don't log errors for optional folders (like "No such folder")
-        if (!folderError.message.includes('No such folder')) {
-          console.error(`[Batch ${page}] Error fetching emails from folder ${folderType}: ${folderError.message}`);
-        }
-        folderResults[folderType] = { processedCount: 0, status: 'no_emails', message: folderType };
-      }
-    }
-
-    // Auto-pagination logic
-    if (paginationInfo && paginationInfo.hasMoreEmails && paginationInfo.remainingEmails > 0) {
-      const nextSkipCount = paginationInfo.currentBatchEnd;
-      const nextPage = page + 1;
-      
-      console.log(`🔄 AUTO-PAGINATION TRIGGERED FOR USER ${masterUserID}:`);
-      console.log(`📊 Total emails found by chunking: ${paginationInfo.totalEmails}`);
-      console.log(`✅ Current batch processed: ${parseInt(req.query.skipCount) || 0 + 1}-${paginationInfo.currentBatchEnd}`);
-      console.log(`🔄 Remaining emails to process: ${paginationInfo.remainingEmails}`);
-      console.log(`⏭️ Queuing next batch: Page ${nextPage}, Skip: ${nextSkipCount}`);
-
-      try {
-        // Queue the next batch for this user
-        const queueConnection = await amqp.connect('amqp://localhost');
-        const queueChannel = await queueConnection.createChannel();
-        const queueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
-        
-        await queueChannel.assertQueue(queueName, { durable: true });
-        
-        const nextBatchJob = {
-          adminId: masterUserID,
-          email: email,
-          appPassword: appPassword,
-          provider: provider,
-          page: nextPage,
-          batchSize: batchSize,
-          skipCount: nextSkipCount,
-          source: 'auto-pagination',
-          originalTotalEmails: paginationInfo.totalEmails,
-          timestamp: new Date().toISOString()
-        };
-        
-        await queueChannel.sendToQueue(
-          queueName,
-          Buffer.from(JSON.stringify(nextBatchJob)),
-          { persistent: true }
-        );
-        
-        await queueChannel.close();
-        await queueConnection.close();
-        
-        console.log(`✅ AUTO-PAGINATION: Successfully queued next batch (Page ${nextPage}) for user ${masterUserID}`);
-        
-      } catch (queueError) {
-        console.error(`❌ AUTO-PAGINATION: Failed to queue next batch for user ${masterUserID}:`, queueError.message);
-      }
-    } else if (paginationInfo) {
-      console.log(`✅ AUTO-PAGINATION: All ${paginationInfo.totalEmails} emails processed for user ${masterUserID} - no more batches needed`);
-    }
-    
-    // Main processing continues here (auto-pagination logic above)
-
-    // Memory cleanup for large batches
-    console.log(`[Batch ${page}] Performing memory cleanup...`);
-    if (global.gc && page % 10 === 0) {
-      // Only every 10th batch for larger batches
-      global.gc();
-    }
-
-    // Add small delay for system recovery (optimized for larger batches)
-    if (page > 1 && page % 10 === 0) {
-      // Only every 10th batch
-      await new Promise((resolve) => setTimeout(resolve, 100)); // Reduced from 200ms to 100ms
-    }
-
-    connection.end();
-    console.log(`[Batch ${page}] IMAP connection closed successfully.`);
-
-    // Enhanced logging with prominent email count display for all folders
-    console.log(`
-====== FETCH ALL FOLDERS QUEUE RESULTS FOR BATCH ${page} ======
-✅ TOTAL EMAILS FETCHED: ${totalProcessedEmails} emails
-📊 Batch Info: Page ${page}, Batch size: ${batchSize}
-👤 User: ${masterUserID}
-📁 Folders Processed:
-${Object.entries(folderResults)
-  .map(
-    ([type, result]) =>
-      `   ${type.toUpperCase()}: ${result.processedCount} emails (${
-        result.status
-      }) - ${result.folderName}`
-  )
-  .join("\n")}
-📅 Timestamp: ${new Date().toISOString()}
-${startUID && endUID ? `📋 UID Range: ${startUID}-${endUID}` : `📋 Processing: Metadata-only strategy (auto UIDs)`}
-${allUIDsInBatch ? `📋 Specific UIDs: ${allUIDsInBatch}` : ""}
-========================================================
-`);
-
-    res.status(200).json({
-      message: `✅ [Batch ${page}] Successfully fetched ${totalProcessedEmails} new emails from all folders!`,
-      processedBatch: `Page ${page}, Batch size: ${batchSize}`,
-      processedEmails: totalProcessedEmails,
-      folderResults: folderResults,
-      expectedEmails: expectedCount ? parseInt(expectedCount) : null,
-      uidRange: startUID && endUID ? `${startUID}-${endUID}` : "Not specified",
-      specificUIDs: allUIDsInBatch ? allUIDsInBatch : "Not specified",
-      masterUserID: masterUserID,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error(`[Batch ${page}] Error fetching emails:`, error.message);
-    res.status(500).json({
-      message: `[Batch ${page}] Internal server error.`,
-      error: error.message,
-      batch: page,
-      masterUserID: masterUserID,
-    });
-  } finally {
-    // Safe connection close with better error handling
-    if (connection) {
-      try {
-        if (connection.imap && connection.imap.state !== "disconnected") {
-          await connection.end();
-          console.log(
-            `[Batch ${page}] IMAP connection closed in finally block.`
-          );
-        }
-      } catch (closeErr) {
-        console.error(
-          `[Batch ${page}] Error closing IMAP connection:`,
-          closeErr.message
-        );
-      }
-    }
-    // Final memory cleanup
-    console.log(`[Batch ${page}] Final memory cleanup...`);
-    if (global.gc && page % 15 === 0) {
-      // Only every 15th batch for larger batches
-      global.gc();
-    }
-  }
-};
-
-// ⚡ HIGH-PERFORMANCE: Lightweight email processing with priority strategy
-const processEmailsLightweight = async (emails, userID, provider, strategy = 'NORMAL', page = 1, folderType = 'inbox') => {
-  const processedEmails = [];
-  let errorCount = 0;
-  const startTime = Date.now();
-  
-  console.log(`[Batch ${page}] ⚡ LIGHTWEIGHT PROCESSING: ${emails.length} emails for USER ${userID} ${provider} (strategy: ${strategy}, folder: ${folderType})`);
-  
-  // Priority strategy: Sort by date (recent first)
-  const sortedEmails = emails.sort((a, b) => {
-    const dateA = new Date(a.date || a.envelope?.date || 0);
-    const dateB = new Date(b.date || b.envelope?.date || 0);
-    return dateB - dateA; // Recent emails first
-  });
-  
-  console.log(`[Batch ${page}] 🎯 PRIORITY STRATEGY: Processing recent emails first`);
-  
-  for (let i = 0; i < sortedEmails.length; i++) {
-    try {
-      const email = sortedEmails[i];
-      
-      // 🔍 DEBUG: Log the complete email object to understand structure
-      console.log(`\n=== EMAIL ${i} COMPLETE STRUCTURE ===`);
-      console.log('UID:', email.uid);
-      console.log('Attributes:', JSON.stringify(email.attributes, null, 2));
-      console.log('Envelope:', JSON.stringify(email.envelope, null, 2));
-      console.log('Headers keys:', email.headers ? Object.keys(email.headers) : 'none');
-      console.log('Bodies keys:', email.bodies ? Object.keys(email.bodies) : 'none');
-      
-      // 🔧 ENHANCED HEADER PARSING: Safely extract all email metadata
-      let parsedHeaders = {};
-      let rawHeaderText = '';
-      
-      // 🔍 DEBUG: Log the complete email structure first
-      console.log(`\n🔍 EMAIL ${i} RAW STRUCTURE:`, {
-        uid: email.uid,
-        attributes: email.attributes,
-        envelope: email.envelope,
-        bodiesKeys: email.bodies ? Object.keys(email.bodies) : 'none'
-      });
-      
-      if (email.bodies) {
-        // Handle HEADER response (this should be our primary source)
-        if (email.bodies.HEADER) {
-          rawHeaderText = email.bodies.HEADER;
-          console.log(`📧 Found HEADER content (${rawHeaderText.length} chars)`);
-        } else {
-          // Check for any header fields in bodies as fallback
-          const headerKeys = Object.keys(email.bodies).filter(key => 
-            key.includes('HEADER') || key.includes('header')
-          );
-          if (headerKeys.length > 0) {
-            rawHeaderText = email.bodies[headerKeys[0]];
-            console.log(`📧 Found header field: ${headerKeys[0]} (${rawHeaderText.length} chars)`);
-          }
-        }
-        
-        if (rawHeaderText && rawHeaderText.length > 10) {
-          // Use mailparser for robust header parsing
-          try {
-            const parsed = await simpleParser(rawHeaderText, { skipHtmlToText: true, skipTextLinks: true });
-            
-            // 🔧 SAFE EXTRACTION: Extract with proper fallbacks
-            parsedHeaders = {
-              messageId: parsed.messageId || parsed.headers?.get('message-id'),
-              subject: parsed.subject || parsed.headers?.get('subject'),
-              date: parsed.date || new Date(parsed.headers?.get('date')) || new Date(),
-              
-              // From field with multiple fallbacks
-              from: parsed.from?.value?.[0]?.address || 
-                    parsed.from?.text || 
-                    parsed.headers?.get('from'),
-              fromName: parsed.from?.value?.[0]?.name || 
-                       parsed.from?.value?.[0]?.address ||
-                       parsed.headers?.get('from'),
-              
-              // To field with proper handling
-              to: parsed.to?.value?.map(addr => addr.address).join(', ') || 
-                  parsed.to?.text || 
-                  parsed.headers?.get('to'),
-              toName: parsed.to?.value?.map(addr => addr.name || addr.address).join(', ') || 
-                     parsed.to?.text || 
-                     parsed.headers?.get('to'),
-              
-              // CC and BCC
-              cc: parsed.cc?.value?.map(addr => addr.address).join(', ') || 
-                  parsed.cc?.text || 
-                  parsed.headers?.get('cc') || '',
-              bcc: parsed.bcc?.value?.map(addr => addr.address).join(', ') || 
-                   parsed.bcc?.text || 
-                   parsed.headers?.get('bcc') || '',
-              
-              // Threading
-              inReplyTo: parsed.inReplyTo || parsed.headers?.get('in-reply-to'),
-              references: (() => {
-                const refs = parsed.references || parsed.headers?.get('references');
-                if (Array.isArray(refs)) {
-                  return refs.join(' ');
-                }
-                return refs || null;
-              })()
-            };
-            
-            console.log('✅ PARSED HEADERS:', {
-              messageId: parsedHeaders.messageId,
-              subject: parsedHeaders.subject,
-              from: parsedHeaders.from,
-              fromName: parsedHeaders.fromName,
-              to: parsedHeaders.to,
-              date: parsedHeaders.date
-            });
-            
-          } catch (parseError) {
-            console.log('⚠️ simpleParser failed, using manual parsing:', parseError.message);
-            
-            // Enhanced manual parsing as fallback
-            const headerLines = rawHeaderText.split(/\r?\n/);
-            let currentHeader = '';
-            let currentValue = '';
-            
-            for (const line of headerLines) {
-              if (line.match(/^\s/) && currentHeader) {
-                // Continuation of previous header
-                currentValue += ' ' + line.trim();
-              } else if (line.includes(':')) {
-                // Save previous header
-                if (currentHeader && currentValue) {
-                  parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
-                }
-                
-                // Start new header
-                const colonIndex = line.indexOf(':');
-                currentHeader = line.substring(0, colonIndex).trim();
-                currentValue = line.substring(colonIndex + 1).trim();
-              }
-            }
-            
-            // Save last header
-            if (currentHeader && currentValue) {
-              parsedHeaders[currentHeader.toLowerCase()] = currentValue.trim();
-            }
-
-            // 🔧 FIX: Ensure references field is properly handled
-            if (parsedHeaders['references']) {
-              // References can be multi-line or array, ensure it's properly formatted
-              if (Array.isArray(parsedHeaders['references'])) {
-                parsedHeaders['references'] = parsedHeaders['references'].join(' ').trim();
-              } else {
-                parsedHeaders['references'] = parsedHeaders['references'].trim();
-              }
-            }
-
-            console.log('📋 Manual parsed headers:', Object.keys(parsedHeaders));
-          }
-        } else {
-          console.log('⚠️ No usable header content found in email.bodies');
-        }
-      } else {
-        console.log('⚠️ No email.bodies found in IMAP response');
-      }
-      
-      console.log('Direct properties:', {
-        messageId: email.messageId,
-        subject: email.subject,
-        from: email.from,
-        to: email.to,
-        date: email.date
-      });
-      console.log('=== END EMAIL STRUCTURE ===\n');
-
-      // ✅ SAFE EMAIL DATA EXTRACTION with comprehensive fallbacks
-      const generateFallbackMessageId = () => `generated-${Date.now()}-${userID}-${i}`;
-      
-      // 🔍 UID EXTRACTION DEBUG
-      const extractedUID = email.uid || email.attributes?.uid;
-      console.log(`🔍 UID EXTRACTION DEBUG for email ${i}:`);
-      console.log(`  email.uid: ${email.uid}`);
-      console.log(`  email.attributes?.uid: ${email.attributes?.uid}`);
-      console.log(`  extractedUID: ${extractedUID}`);
-      
-      const lightweightEmail = {
-        uid: extractedUID,
-        
-        // Message ID with fallback generation  
-        messageId: parsedHeaders.messageId || 
-                  parsedHeaders['message-id'] ||
-                  email.attributes?.envelope?.messageId ||
-                  email.envelope?.messageId || 
-                  email.messageId || 
-                  email.attributes?.messageId || 
-                  generateFallbackMessageId(),
-                  
-        // Subject with proper fallback
-        subject: parsedHeaders.subject || 
-                email.attributes?.envelope?.subject ||
-                email.envelope?.subject || 
-                email.subject || 
-                email.attributes?.subject || 
-                'No Subject',
-        
-        // 🔧 ENHANCED SENDER EXTRACTION: Never use "Unknown Sender"
-        sender: parsedHeaders.from || 
-                parsedHeaders['from'] ||
-                (email.attributes?.envelope?.from && 
-                 email.attributes.envelope.from[0] && 
-                 `${email.attributes.envelope.from[0].mailbox}@${email.attributes.envelope.from[0].host}`) ||
-                (email.envelope?.from && email.envelope.from[0]?.address) || 
-                email.from || 
-                email.attributes?.from || 
-                'system@unknown.com', // Better than "Unknown Sender"
-                
-        senderName: parsedHeaders.fromName || 
-                   parsedHeaders['from'] ||
-                   (email.attributes?.envelope?.from && 
-                    email.attributes.envelope.from[0] && 
-                    (email.attributes.envelope.from[0].name || `${email.attributes.envelope.from[0].mailbox}@${email.attributes.envelope.from[0].host}`)) ||
-                   (email.envelope?.from && email.envelope.from[0]?.name) || 
-                   parsedHeaders.from ||
-                   email.fromName || 
-                   email.attributes?.fromName ||
-                   'System Email',
-        
-        // 🔧 ENHANCED RECIPIENT EXTRACTION
-        recipient: parsedHeaders.to || 
-                  parsedHeaders['to'] ||
-                  (email.attributes?.envelope?.to && 
-                   email.attributes.envelope.to.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
-                  (email.envelope?.to && email.envelope.to.map(addr => addr.address).join(', ')) || 
-                  email.to || 
-                  email.attributes?.to ||
-                  'recipient@unknown.com',
-                  
-        recipientName: parsedHeaders.toName || 
-                      parsedHeaders['to'] ||
-                      (email.attributes?.envelope?.to && 
-                       email.attributes.envelope.to.map(addr => addr.name || `${addr.mailbox}@${addr.host}`).join(', ')) ||
-                      (email.envelope?.to && email.envelope.to.map(addr => addr.name || addr.address).join(', ')) || 
-                      parsedHeaders.to ||
-                      email.toName || 
-                      email.attributes?.toName ||
-                      'Unknown Recipient',
-        
-        // CC and BCC with empty string fallback
-        cc: parsedHeaders.cc || 
-            parsedHeaders['cc'] ||
-            (email.attributes?.envelope?.cc && 
-             email.attributes.envelope.cc.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
-            (email.envelope?.cc && email.envelope.cc.map(addr => addr.address).join(', ')) || 
-            email.cc || 
-            email.attributes?.cc || 
-            '',
-            
-        bcc: parsedHeaders.bcc || 
-             parsedHeaders['bcc'] ||
-             (email.attributes?.envelope?.bcc && 
-              email.attributes.envelope.bcc.map(addr => `${addr.mailbox}@${addr.host}`).join(', ')) ||
-             (email.envelope?.bcc && email.envelope.bcc.map(addr => addr.address).join(', ')) || 
-             email.bcc || 
-             email.attributes?.bcc || 
-             '',
-        
-        // Threading fields
-        inReplyTo: parsedHeaders.inReplyTo || 
-                  parsedHeaders['in-reply-to'] ||
-                  email.attributes?.envelope?.inReplyTo ||
-                  email.envelope?.inReplyTo || 
-                  email.inReplyTo || null,
-                  
-        references: (() => {
-          const refs = parsedHeaders.references || 
-                      parsedHeaders['references'] ||
-                      email.attributes?.envelope?.references ||
-                      email.envelope?.references || 
-                      email.references;
-          if (Array.isArray(refs)) {
-            return refs.join(' ');
-          }
-          return refs || null;
-        })(),
-        
-        // Date handling with multiple fallbacks and validation
-        createdAt: (() => {
-          // 🔍 DEBUG: Log all available date sources
-          console.log('🕒 DATE DEBUG:', {
-            parsedHeadersDate: parsedHeaders.date,
-            envelopeDate: email.attributes?.envelope?.date,
-            emailDate: email.date,
-            rawEnvelope: email.attributes?.envelope ? 'present' : 'missing'
-          });
-          
-          const tryDate = parsedHeaders.date || 
-                         email.attributes?.envelope?.date ||
-                         email.envelope?.date || 
-                         email.attributes?.date || 
-                         email.date;
-          
-          console.log('🕒 Selected tryDate:', tryDate, typeof tryDate);
-          
-          if (tryDate) {
-            const dateObj = new Date(tryDate);
-            console.log('🕒 Parsed dateObj:', dateObj, 'isValid:', !isNaN(dateObj.getTime()));
-            if (!isNaN(dateObj.getTime())) {
-              return dateObj;
-            }
-          }
-          
-          // If parsing parsedHeaders['date'] string
-          if (parsedHeaders['date']) {
-            const dateObj = new Date(parsedHeaders['date']);
-            console.log('🕒 Fallback dateObj from parsedHeaders:', dateObj);
-            if (!isNaN(dateObj.getTime())) {
-              return dateObj;
-            }
-          }
-          
-          // Fallback to current time
-          console.log('🕒 Using current time as fallback');
-          return new Date();
-        })(),
-        updatedAt: new Date(),
-        
-        // Email flags and attributes
-        isRead: email.attributes?.flags?.includes('\\Seen') || false,
-        flags: email.attributes?.flags || email.flags || [],
-        size: email.attributes?.size || 0,
-        
-        // CRM specific fields
-        masterUserID: userID,
-        folder: folderType || 'inbox',
-        isDraft: folderType === 'drafts',
-        isOpened: false,
-        isClicked: false,
-        
-        // Body handling (Phase 2 strategy)
-        body_fetch_status: 'pending',
-        body: '',
-        
-        // Optional fields
-        leadId: null,
-        dealId: null,
-        draftId: null,
-        tempMessageId: null,
-        scheduledAt: null,
-        threadId: email.envelope?.messageId || null,
-        
-        // Processing metadata (not saved to DB)
-        provider: provider,
-        processed: true,
-        lightweight: true,
-        strategy: strategy,
-        needsBodyProcessing: true,
-        processedAt: new Date(),
-        
-        // Quick content preview (if available in headers)
-        preview: email.headers?.['x-gmail-snippet'] || email.snippet || '',
-        importance: email.headers?.importance || 'normal',
-        priority: email.headers?.priority || 'normal'
-      };
-      
-      // 🔍 COMPREHENSIVE DEBUG LOGGING: See exactly what we're about to save
-      console.log(`\n🔍 EMAIL ${i} FINAL EXTRACTION RESULT:`);
-      console.log('==================================================');
-      console.log('📧 CORE FIELDS:');
-      console.log('  MessageID:', lightweightEmail.messageId);
-      console.log('  Subject:', lightweightEmail.subject);
-      console.log('  Sender:', lightweightEmail.sender);
-      console.log('  SenderName:', lightweightEmail.senderName);
-      console.log('  Recipient:', lightweightEmail.recipient);
-      console.log('  Date:', lightweightEmail.createdAt);
-      console.log('📧 PARSED vs FALLBACK:');
-      console.log('  Parsed Headers:', Object.keys(parsedHeaders));
-      console.log('  Envelope Data:', email.envelope ? 'present' : 'missing');
-      console.log('  Attributes Data:', email.attributes ? 'present' : 'missing');
-      console.log('🔧 DATA QUALITY CHECK:');
-      console.log('  Has real sender?', !lightweightEmail.sender.includes('unknown') && !lightweightEmail.sender.includes('Unknown'));
-      console.log('  Has real subject?', lightweightEmail.subject !== 'No Subject');
-      console.log('  Has real messageId?', !lightweightEmail.messageId.includes('generated'));
-      console.log('==================================================\n');
-      
-      processedEmails.push(lightweightEmail);
-      
-      // Progress logging every 100 emails
-      if ((i + 1) % 100 === 0) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        const rate = (i + 1) / elapsed;
-        console.log(`[Batch ${page}] 📈 PROGRESS: ${i + 1}/${emails.length} emails (${rate.toFixed(1)} emails/sec)`);
-      }
-      
-    } catch (emailError) {
-      errorCount++;
-      console.log(`[Batch ${page}] ⚠️ Lightweight processing error ${errorCount}: ${emailError.message}`);
-      
-      // Higher error tolerance for performance
-      if (errorCount > 100) {
-        console.log(`[Batch ${page}] ❌ Too many errors (${errorCount}), stopping batch`);
-        break;
-      }
-    }
-  }
-  
-  const totalTime = (Date.now() - startTime) / 1000;
-  const rate = processedEmails.length / totalTime;
-  
-  console.log(`[Batch ${page}] ✅ LIGHTWEIGHT COMPLETE: ${processedEmails.length} emails processed in ${totalTime.toFixed(1)}s (${rate.toFixed(1)} emails/sec)`);
-  console.log(`[Batch ${page}] 📊 ERROR RATE: ${errorCount}/${emails.length} (${((errorCount/emails.length)*100).toFixed(1)}%)`);
-  
-  return { processedEmails, errorCount, processingTime: totalTime, rate };
-};
-
-// Fetch and store the most recent email
-exports.fetchRecentEmail = async (adminId, options = {}) => {
-  // Enforce max batch size if options.batchSize is provided (for worker safety)
-  const batchSize = Math.min(Number(options.batchSize) || 10, MAX_BATCH_SIZE);
-  let connection = null; // Track connection for proper cleanup
-
-  try {
-    console.log(`[fetchRecentEmail] Starting for adminId: ${adminId}`);
-
-    // Fetch the user's email and app password from the UserCredential model
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID: adminId },
-    });
-
-    if (!userCredential) {
-      console.error("User credentials not found for adminId:", adminId);
-      return { message: "User credentials not found." };
-    }
-
-    const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
-
-    console.log("Connecting to IMAP server...");
-    // const imapConfig = {
-    //   imap: {
-    //     user: userEmail, // Use the email from the database
-    //     password: userPassword, // Use the app password from the database
-    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-    //     port: 993, // IMAP port
-    //     tls: true, // Use TLS
-    //     authTimeout: 30000,
-    //     tlsOptions: {
-    //       rejectUnauthorized: false, // Allow self-signed certificates
-    //     },
-    //   },
-    // };
-    const provider = userCredential.provider; // default to gmail
-
-    let imapConfig;
-    if (provider === "custom") {
-      if (!userCredential.imapHost || !userCredential.imapPort) {
-        return {
-          message: "Custom IMAP settings are missing in user credentials.",
-        };
-      }
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: userCredential.imapHost,
-          port: userCredential.imapPort,
-          tls: userCredential.imapTLS,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    } else {
-      const providerConfig = PROVIDER_CONFIG[provider];
-      imapConfig = {
-        imap: {
-          user: userCredential.email,
-          password: userCredential.appPassword,
-          host: providerConfig.host,
-          port: providerConfig.port,
-          tls: providerConfig.tls,
-          authTimeout: 30000,
-          tlsOptions: { rejectUnauthorized: false },
-        },
-      };
-    }
-
-    // Add connection timeout wrapper
-    const connectWithTimeout = async () => {
-      console.log(
-        `[fetchRecentEmail] Connecting to IMAP server for adminId: ${adminId}...`
-      );
-
-      const connectionPromise = Imap.connect(imapConfig);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `IMAP connection timeout after 2 minutes for adminId ${adminId}`
-              )
-            ),
-          120000
-        ); // 2 minutes - increased for Gmail
-      });
-
-      try {
-        connection = await Promise.race([connectionPromise, timeoutPromise]);
-        console.log(
-          `[fetchRecentEmail] IMAP connected successfully for adminId: ${adminId}`
-        );
-        return connection;
-      } catch (error) {
-        console.error(
-          `[fetchRecentEmail] IMAP connection failed for adminId ${adminId}:`,
-          error.message
-        );
-        throw error;
-      }
-    };
-
-    connection = await connectWithTimeout();
-
-    // Add overall operation timeout wrapper
-    const operationWithTimeout = async () => {
-      console.log(
-        `[fetchRecentEmail] Starting email fetch operation for adminId: ${adminId}...`
-      );
-
-      const operationPromise = performEmailFetch();
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Email fetch operation timeout after 10 minutes for adminId ${adminId}`
-              )
-            ),
-          600000
-        ); // 10 minutes - increased for large Gmail mailboxes
-      });
-
-      return await Promise.race([operationPromise, timeoutPromise]);
-    };
-
-    const performEmailFetch = async () => {
-      console.log("Opening INBOX...");
-      await connection.openBox("INBOX");
-
-      console.log("Fetching the most recent email...");
-
-      // // Fetch all emails, then get the most recent one
-      // const fetchOptions = { bodies: "", struct: true };
-      // const messages = await connection.search(["ALL"], fetchOptions);
-
-      // if (!messages.length) {
-      //   connection.end();
-      //   return { message: "No emails found." };
-      // }
-
-      //...................optimized for Gmail performance.................
-      // For better Gmail performance, fetch only recent emails (last 2 days instead of 7)
-      const sinceDate = formatDateForIMAP(
-        new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
-      );
-      console.log(`Using optimized SINCE date for Gmail: ${sinceDate}`);
-
-      const searchCriteria = [["SINCE", sinceDate]];
-      const fetchOptions = {
-        bodies: "HEADER", // Only fetch headers first for better performance
-        struct: true,
-        envelope: true  // 🔧 ADD ENVELOPE for proper email metadata
-      };
-
-      console.log("Searching for recent emails (headers only)...");
-      const messages = await connection.search(searchCriteria, fetchOptions);
-
-      console.log(`Total recent emails found: ${messages.length}`);
-
-      if (messages.length === 0) {
-        console.log("No recent emails found.");
-        return { message: "No recent emails found." };
-      }
-
-      // Get the most recent email UID
-      const recentHeaderMessage = messages[messages.length - 1];
-      const recentUID = recentHeaderMessage.attributes.uid;
-      
-      console.log(`Fetching full body for most recent email UID: ${recentUID}`);
-      
-      // Now fetch only the full body of the most recent email
-      const fullMessages = await connection.search(
-        [["UID", recentUID]], 
-        { bodies: "", struct: true }
-      );
-
-      if (!fullMessages || fullMessages.length === 0) {
-        console.log("Could not fetch full message body.");
-        return { message: "Could not fetch full message body." };
-      }
-
-      console.log(`Total emails found: ${messages.length}`);
-
-      // Get the full message data
-      const recentMessage = fullMessages[0];
-      const rawBodyPart = recentMessage.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      // Determine read/unread status from IMAP flags
-      // If the message has the "\Seen" flag, it is read; otherwise, unread
-      let isRead = false;
-      if (
-        recentMessage.attributes &&
-        Array.isArray(recentMessage.attributes.flags)
-      ) {
-        isRead = recentMessage.attributes.flags.includes("\\Seen");
-      }
-
-      if (!rawBody) {
-        console.log("No body found for the most recent email.");
-        return { message: "No body found for the most recent email." };
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      let blockedList = [];
-      if (userCredential && userCredential.blockedEmail) {
-        blockedList = Array.isArray(userCredential.blockedEmail)
-          ? userCredential.blockedEmail
-              .map((e) => String(e).trim().toLowerCase())
-              .filter(Boolean)
-          : [];
-      }
-      const senderEmail = parsedEmail.from
-        ? parsedEmail.from.value[0].address.toLowerCase()
-        : null;
-      // Sponsored patterns (add more as needed)
-      const sponsoredPatterns = [
-        /no-?reply/i,
-        /mailer-?daemon/i,
-        /demon\.mailer/i,
-        /sponsored/i,
-      ];
-      const isSponsored = sponsoredPatterns.some((pattern) =>
-        pattern.test(senderEmail)
-      );
-      if (blockedList.includes(senderEmail) || isSponsored) {
-        console.log(`Blocked email from: ${senderEmail}`);
-        connection.end();
-        return { message: `Blocked email from: ${senderEmail}` };
-      }
-
-      const referencesHeader = parsedEmail.headers.get("references");
-      const references = Array.isArray(referencesHeader)
-        ? referencesHeader.join(" ") // Convert array to string
-        : referencesHeader || null;
-      //................................
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
-        references,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to
-          ? parsedEmail.to.value.map((to) => to.address).join(", ")
-          : null,
-        cc: parsedEmail.cc
-          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-          : null,
-        bcc: parsedEmail.bcc
-          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-          : null,
-        masterUserID: adminId,
-        subject: parsedEmail.subject || null,
-        // body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-        body: cleanEmailBody(parsedEmail.html || parsedEmail.text || ""),
-        folder: "inbox", // Add folder field
-        // threadId,
-        createdAt: parsedEmail.date || new Date(),
-        isRead: isRead, // Save read/unread status
-        uid: recentUID, // Store the IMAP UID for future body fetching
-      };
-
-      console.log(`Processing recent email: ${emailData.messageId}`);
-      // Check if the email exists in the trash folder
-      const trashedEmail = await Email.findOne({
-        where: { messageId: emailData.messageId, folder: "trash" },
-      });
-
-      let existingEmail;
-      if (trashedEmail) {
-        existingEmail = trashedEmail;
-      } else {
-        existingEmail = await Email.findOne({
-          where: { messageId: emailData.messageId, folder: emailData.folder },
-        });
-      }
-
-      // const existingEmail = await Email.findOne({
-      //   where: { messageId: emailData.messageId, folder: emailData.folder }, // Check uniqueness with folder
-      // });
-
-      let savedEmail;
-      if (!existingEmail) {
-        savedEmail = await Email.create(emailData);
-        console.log(`Recent email saved: ${emailData.messageId}`);
-      } else {
-        console.log(
-          `Recent email already exists in folder ${emailData.folder}: ${emailData.messageId}`
-        );
-        savedEmail = existingEmail;
-      }
-
-      // Save attachments
-      const attachments = [];
-      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        console.log(
-          `Found ${parsedEmail.attachments.length} total attachments for email: ${emailData.messageId}`
-        );
-
-        // Filter out icon attachments but KEEP inline attachments for email body rendering
-        const filteredAttachments = parsedEmail.attachments.filter(
-          (att) =>
-            !isIconAttachment(att) &&
-            att.contentType !== "text/html" &&
-            att.contentType !== "text/plain" &&
-            att.size > 0 &&
-            att.size < 10 * 1024 * 1024 // Max 10MB per attachment
-        );
-
-        console.log(
-          `Filtered to ${filteredAttachments.length} real attachments for email: ${emailData.messageId}`
-        );
-
-        if (filteredAttachments.length > 0 && filteredAttachments.length <= 5) {
-          // Max 5 attachments per email
-          try {
-            const savedAttachments = await saveAttachments(
-              filteredAttachments,
-              savedEmail.emailID
-            );
-            attachments.push(...savedAttachments);
-            console.log(
-              `Saved ${attachments.length} attachment metadata records for email: ${emailData.messageId}`
-            );
-          } catch (attachmentError) {
-            console.error(
-              `Error saving attachment metadata for email ${emailData.messageId}:`,
-              attachmentError.message
-            );
-          }
-        } else if (filteredAttachments.length > 5) {
-          console.log(
-            `Too many attachments (${filteredAttachments.length}) for email: ${emailData.messageId}, skipping attachment metadata processing`
-          );
-        } else {
-          console.log(
-            `No real attachments to save metadata for email: ${emailData.messageId}`
-          );
-        }
-      }
-
-      // Fetch related emails in the same thread
-      const relatedEmails = await Email.findAll({
-        where: {
-          [Sequelize.Op.or]: [
-            { messageId: emailData.inReplyTo }, // Parent email
-            { inReplyTo: emailData.messageId }, // Replies to this email
-            {
-              references: {
-                [Sequelize.Op.like]: `%${emailData.messageId}%`,
-              },
-            }, // Emails in the same thread
-          ],
-        },
-        order: [["createdAt", "ASC"]], // Sort by date
-      });
-      // Save related emails in the database
-      for (const relatedEmail of relatedEmails) {
-        const existingRelatedEmail = await Email.findOne({
-          where: { messageId: relatedEmail.messageId },
-        });
-
-        if (!existingRelatedEmail) {
-          await Email.create(relatedEmail);
-          console.log(`Related email saved: ${relatedEmail.messageId}`);
-        } else {
-          console.log(
-            `Related email already exists: ${relatedEmail.messageId}`
-          );
-        }
-      }
-
-      connection.end(); // Close the connection
-      console.log("IMAP connection closed.");
-
-      return {
-        message: "Fetched and saved the most recent email.",
-        email: emailData,
-        relatedEmails,
-      };
-    }; // End of performEmailFetch function
-
-    // Execute the operation with timeout
-    const result = await operationWithTimeout();
-    return result;
-  } catch (error) {
-    console.error("Error fetching recent email:", error);
-
-    // Ensure connection is closed on error
-    if (connection) {
-      try {
-        connection.end();
-        console.log("IMAP connection closed due to error.");
-      } catch (closeError) {
-        console.error("Error closing IMAP connection:", closeError.message);
-      }
-    }
-
-    return { message: "Internal server error.", error: error.message };
-  }
-};
-
-// Fetch and store emails from the Drafts folder using batching
-exports.fetchDraftEmails = async (req, res) => {
-  const { batchSize = 50, page = 1 } = req.query;
-
-  try {
-    console.log("Connecting to IMAP server...");
-    const connection = await Imap.connect(imapConfig);
-
-    console.log("Listing available folders...");
-    const boxes = await connection.getBoxes();
-    console.log("Available folders:", boxes);
-
-    console.log("Opening Drafts folder...");
-    await connection.openBox("[Gmail]/Drafts"); // Adjust the folder name based on the output of getBoxes()
-
-    console.log("Fetching emails from Drafts...");
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(["ALL"], fetchOptions);
-
-    console.log(`Total draft emails found: ${messages.length}`);
-
-    if (messages.length === 0) {
-      console.log("No draft emails found.");
-      return res.status(200).json({ message: "No draft emails found." });
-    }
-
-    // Pagination logic
-    const startIndex = (page - 1) * batchSize;
-    const endIndex = startIndex + parseInt(batchSize);
-    const batchMessages = messages.slice(startIndex, endIndex);
-
-    const draftEmails = [];
-
-    for (const message of batchMessages) {
-      const rawBodyPart = message.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      if (!rawBody) {
-        console.log("No body found for this email.");
-        continue;
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
-        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
-        subject: parsedEmail.subject || null,
-        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""), // Prefer plain text, fallback to HTML
-        folder: "drafts",
-        createdAt: parsedEmail.date || new Date(),
-      };
-
-      console.log(`Processing draft email: ${emailData.messageId}`);
-      draftEmails.push(emailData);
-
-      // Save the draft email to the database
-      const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId },
-      });
-      if (!existingEmail) {
-        await Email.create(emailData);
-        console.log(`Draft email saved: ${emailData.messageId}`);
-      } else {
-        console.log(`Draft email already exists: ${emailData.messageId}`);
-      }
-      // Save attachments using saveAttachments function
-      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        const savedAttachments = await saveAttachments(
-          parsedEmail.attachments,
-          savedEmail.emailID
-        );
-        console.log(
-          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
-        );
-      }
-    }
-
-    connection.end(); // Close the connection
-    console.log("IMAP connection closed.");
-
-    res.status(200).json({
-      message: `Fetched and saved ${draftEmails.length} draft emails.`,
-      currentPage: parseInt(page),
-      totalDrafts: messages.length,
-      drafts: draftEmails,
-    });
-  } catch (error) {
-    console.error("Error fetching draft emails:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-// Fetch and store emails from the Archive folder using batching
-exports.fetchArchiveEmails = async (req, res) => {
-  const { batchSize = 50, page = 1, days = 7 } = req.query;
-
-  try {
-    console.log("Connecting to IMAP server...");
-    const connection = await Imap.connect(imapConfig);
-
-    console.log("Opening Archive folder...");
-    await connection.openBox("[Gmail]/All Mail");
-
-    console.log("Fetching emails from the last 7 days...");
-    let searchCriteria;
-    if (!days || days === 0 || days === "all") {
-      searchCriteria = ["ALL"];
-      console.log("Fetching ALL emails (no date restriction)");
-    } else {
-      const sinceDate = formatDateForIMAP(
-        new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-      );
-      console.log(`Using SINCE date: ${sinceDate}`);
-      searchCriteria = [["SINCE", sinceDate]];
-    }
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    console.log(`Total archive emails found: ${messages.length}`);
-
-    // Pagination logic
-    const startIndex = (page - 1) * batchSize;
-    const endIndex = startIndex + parseInt(batchSize);
-    const batchMessages = messages.slice(startIndex, endIndex);
-
-    if (batchMessages.length === 0) {
-      console.log("No more emails to fetch.");
-      return res.status(200).json({ message: "No more emails to fetch." });
-    }
-
-    const archiveEmails = [];
-
-    for (const message of batchMessages) {
-      const rawBodyPart = message.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      if (!rawBody) {
-        console.log("No body found for this email.");
-        continue;
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to ? parsedEmail.to.value[0].address : null,
-        recipientName: parsedEmail.to ? parsedEmail.to.value[0].name : null,
-        subject: parsedEmail.subject || null,
-        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-        folder: "archive",
-        createdAt: parsedEmail.date || new Date(),
-      };
-
-      console.log(`Processing archive email: ${emailData.messageId}`);
-      archiveEmails.push(emailData);
-
-      const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId },
-      });
-      if (!existingEmail) {
-        await Email.create(emailData);
-        console.log(`Archive email saved: ${emailData.messageId}`);
-      } else {
-        console.log(`Archive email already exists: ${emailData.messageId}`);
-      }
-      // Save attachments using saveAttachments function
-      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        const savedAttachments = await saveAttachments(
-          parsedEmail.attachments,
-          savedEmail.emailID
-        );
-        console.log(
-          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
-        );
-      }
-    }
-
-    connection.end();
-    console.log("IMAP connection closed.");
-
-    res.status(200).json({
-      message: `Fetched and saved ${archiveEmails.length} archive emails.`,
-      currentPage: parseInt(page),
-      totalArchives: messages.length,
-    });
-  } catch (error) {
-    console.error("Error fetching archive emails:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-// Get emails with pagination, filtering, and searching
-exports.getEmails = async (req, res) => {
-  let {
-    page = 1,
-    pageSize = 20,
-    folder,
-    search,
-    isRead,
-    toMe,
-    hasAttachments,
-    isOpened, // <-- Add this
-    isClicked, // <-- Add this
-    trackedEmails,
-    isShared,
-    cursor, // Buffer pagination cursor (createdAt ISO string or emailID)
-    direction = "next", // 'next' or 'prev'
-    dealLinkFilter, // New filter: "linked_with_deal", "linked_with_open_deal", "not_linked_with_deal"
-    contactFilter, // New filter: "from_existing_contact", "not_from_existing_contact"
-    includeFullBody = "false", // New parameter to control body inclusion
-  } = req.query;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  // Enforce strict maximum page size
-  const MAX_SAFE_PAGE_SIZE = 50;
-  pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
-  if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
-
-  try {
-    // Check if user has credentials in UserCredential model
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
-
-    if (!userCredential) {
-      return res.status(200).json({
-        message: "No email credentials found for this user.",
-        currentPage: parseInt(page),
-        totalPages: 0,
-        totalEmails: 0,
-        unviewCount: 0,
-        threads: [],
-        nextCursor: null,
-        prevCursor: null,
-      });
-    }
-
-    let filters = {
-      masterUserID,
-    };
-    // if (isShared === "true") {
-    //   filters.isShared = true;
-    //   if (folder) filters.folder = folder;
-    // } else {
-    //   filters = {
-    //     [Sequelize.Op.or]: [
-    //       { masterUserID },
-    //       { isShared: true },
-    //     ]
-    //   };
-    //   if (folder) filters[Sequelize.Op.or].forEach(f => f.folder = folder);
-    // }
-    if (folder) {
-      filters.folder = folder;
-    }
-
-    if (isRead !== undefined) {
-      filters.isRead = isRead === "true";
-    }
-
-    if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-      if (!userCredential) {
-        return res.status(404).json({ message: "User credentials not found." });
-      }
-      const userEmail = userCredential.email;
-      filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
-    }
-
-    // Add tracked emails filter
-    // --- Tracked emails filter ---
-    if (trackedEmails === "true") {
-      filters.isOpened = true;
-      filters.isClicked = true;
-    } else {
-      if (isOpened !== undefined) filters.isOpened = isOpened === "true";
-      if (isClicked !== undefined) filters.isClicked = isClicked === "true";
-    }
-
-    // Add hasAttachments filter
-    let includeAttachments = [
-      {
-        model: Attachment,
-        as: "attachments",
-      },
-    ];
-    if (hasAttachments === "true") {
-      includeAttachments = [
-        {
-          model: Attachment,
-          as: "attachments",
-          required: true,
-        },
-      ];
-    }
-
-    // Search by subject, sender, or recipient
-    if (search) {
-      filters[Sequelize.Op.or] = [
-        { subject: { [Sequelize.Op.like]: `%${search}%` } },
-        { sender: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-        { folder: { [Sequelize.Op.like]: `%${search}%` } },
-      ];
-    }
-
-    // Deal linkage filter
-    let includeDeal = [];
-    if (dealLinkFilter) {
-      switch (dealLinkFilter) {
-        case "linked_with_deal":
-          // Emails linked to any deal
-          filters.dealId = { [Sequelize.Op.ne]: null };
-          break;
-        case "linked_with_open_deal":
-          // Emails linked to open deals only
-          filters.dealId = { [Sequelize.Op.ne]: null };
-          includeDeal = [
-            {
-              model: Deal,
-              as: "Deal",
-              required: true,
-              where: {
-                status: "open",
-              },
-            },
-          ];
-          break;
-        case "not_linked_with_deal":
-          // Emails not linked to any deal
-          filters.dealId = { [Sequelize.Op.or]: [null, ""] };
-          break;
-      }
-    }
-
-    // Contact filter (from existing contact)
-    let includePerson = [];
-    if (contactFilter) {
-      switch (contactFilter) {
-        case "from_existing_contact":
-          // Emails from senders who exist as contacts/persons
-          const existingContactEmails = await Person.findAll({
-            attributes: ["email"],
-            where: {
-              email: { [Sequelize.Op.ne]: null },
-            },
-          });
-          const existingEmailAddresses = existingContactEmails
-            .map((p) => p.email)
-            .filter(Boolean);
-
-          if (existingEmailAddresses.length > 0) {
-            filters.sender = { [Sequelize.Op.in]: existingEmailAddresses };
-          } else {
-            // If no contacts exist, return empty result
-            filters.sender = { [Sequelize.Op.in]: [] };
-          }
-          break;
-        case "not_from_existing_contact":
-          // Emails from senders who don't exist as contacts
-          const existingContactEmailsNot = await Person.findAll({
-            attributes: ["email"],
-            where: {
-              email: { [Sequelize.Op.ne]: null },
-            },
-          });
-          const existingEmailAddressesNot = existingContactEmailsNot
-            .map((p) => p.email)
-            .filter(Boolean);
-
-          if (existingEmailAddressesNot.length > 0) {
-            filters.sender = {
-              [Sequelize.Op.notIn]: existingEmailAddressesNot,
-            };
-          }
-          break;
-      }
-    }
-
-    // Create base filters without cursor-based date filtering (for totalCount and unviewCount)
-    const baseFilters = { masterUserID };
-    if (folder) baseFilters.folder = folder;
-    if (isRead !== undefined) baseFilters.isRead = isRead === "true";
-    if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-      if (userCredential) {
-        const userEmail = userCredential.email;
-        baseFilters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
-      }
-    }
-    if (trackedEmails === "true") {
-      baseFilters.isOpened = true;
-      baseFilters.isClicked = true;
-    } else {
-      if (isOpened !== undefined) baseFilters.isOpened = isOpened === "true";
-      if (isClicked !== undefined) baseFilters.isClicked = isClicked === "true";
-    }
-    if (search) {
-      baseFilters[Sequelize.Op.or] = [
-        { subject: { [Sequelize.Op.like]: `%${search}%` } },
-        { sender: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-        { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-        { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-        { folder: { [Sequelize.Op.like]: `%${search}%` } },
-      ];
-    }
-
-    // Add deal linkage filter to baseFilters
-    if (dealLinkFilter) {
-      switch (dealLinkFilter) {
-        case "linked_with_deal":
-          baseFilters.dealId = { [Sequelize.Op.ne]: null };
-          break;
-        case "linked_with_open_deal":
-          baseFilters.dealId = { [Sequelize.Op.ne]: null };
-          break;
-        case "not_linked_with_deal":
-          baseFilters.dealId = { [Sequelize.Op.or]: [null, ""] };
-          break;
-      }
-    }
-
-    // Add contact filter to baseFilters
-    if (contactFilter) {
-      switch (contactFilter) {
-        case "from_existing_contact":
-          // For baseFilters, we need to apply the same logic
-          const existingContactEmailsBase = await Person.findAll({
-            attributes: ["email"],
-            where: {
-              email: { [Sequelize.Op.ne]: null },
-            },
-          });
-          const existingEmailAddressesBase = existingContactEmailsBase
-            .map((p) => p.email)
-            .filter(Boolean);
-
-          if (existingEmailAddressesBase.length > 0) {
-            baseFilters.sender = {
-              [Sequelize.Op.in]: existingEmailAddressesBase,
-            };
-          } else {
-            // If no contacts exist, return empty result
-            baseFilters.sender = { [Sequelize.Op.in]: [] };
-          }
-          break;
-        case "not_from_existing_contact":
-          // For baseFilters, we need to apply the same logic
-          const existingContactEmailsNotBase = await Person.findAll({
-            attributes: ["email"],
-            where: {
-              email: { [Sequelize.Op.ne]: null },
-            },
-          });
-          const existingEmailAddressesNotBase = existingContactEmailsNotBase
-            .map((p) => p.email)
-            .filter(Boolean);
-
-          if (existingEmailAddressesNotBase.length > 0) {
-            baseFilters.sender = {
-              [Sequelize.Op.notIn]: existingEmailAddressesNotBase,
-            };
-          }
-          break;
-      }
-    }
-
-    // Buffer pagination logic
-    let order = [["createdAt", "DESC"]];
-    if (cursor) {
-      // If cursor is an emailID, fetch its createdAt
-      let cursorDate = null;
-      if (/^\d+$/.test(cursor)) {
-        const cursorEmail = await Email.findOne({ where: { emailID: cursor } });
-        if (cursorEmail) cursorDate = cursorEmail.createdAt;
-      } else {
-        cursorDate = new Date(cursor);
-      }
-      if (cursorDate) {
-        if (direction === "next") {
-          filters.createdAt = { [Sequelize.Op.lt]: cursorDate };
-        } else {
-          filters.createdAt = { [Sequelize.Op.gt]: cursorDate };
-          order = [["createdAt", "ASC"]]; // Reverse order for prev
-        }
-      }
-    }
-
-    // Pagination logic
-    const limit = pageSize;
-    let offset = null;
-
-    // Use buffer pagination if cursor is provided, otherwise use offset pagination
-    if (!cursor) {
-      offset = (page - 1) * pageSize;
-    }
-
-    // Only select essential fields for better performance
-    const essentialFields = [
-      "emailID",
-      "messageId",
-      "inReplyTo",
-      "references",
-      "sender",
-      "senderName",
-      "recipient",
-      "cc",
-      "bcc",
-      "subject",
-      // 🚀 PHASE 2: Conditional body inclusion for performance
-      ...(includeFullBody === "true" ? ["body"] : []), // Only include body if explicitly requested
-      "folder",
-      "createdAt",
-      "isRead",
-      "isOpened", // Used to track body fetch status
-      "isClicked",
-      "leadId",
-      "dealId",
-    ];
-
-    // Fetch emails from the database
-    let emails;
-
-    // Add Lead and Deal includes to get related information
-    const includeLeadDeal = [
-      {
-        model: Lead,
-        as: "Lead",
-        required: false,
-        attributes: [
-          "leadId",
-          "title",
-          "value",
-          "status",
-          "personId",
-          "leadOrganizationId",
-        ],
-        include: [
-          {
-            model: Person,
-            as: "LeadPerson",
-            required: false,
-            attributes: [
-              "personId",
-              "contactPerson",
-              "email",
-              "phone",
-              "jobTitle",
-            ],
-          },
-          {
-            model: Organization,
-            as: "LeadOrganization",
-            required: false,
-            attributes: [
-              "leadOrganizationId",
-              "organization",
-              "address",
-              "organizationLabels",
-            ],
-          },
-        ],
-      },
-      {
-        model: Deal,
-        as: "Deal",
-        required: false,
-        attributes: [
-          "dealId",
-          "title",
-          "value",
-          "status",
-          "personId",
-          "leadOrganizationId",
-        ],
-        include: [
-          {
-            model: Person,
-            as: "Person",
-            required: false,
-            attributes: [
-              "personId",
-              "contactPerson",
-              "email",
-              "phone",
-              "jobTitle",
-            ],
-          },
-          {
-            model: Organization,
-            as: "Organization",
-            required: false,
-            attributes: [
-              "leadOrganizationId",
-              "organization",
-              "address",
-              "organizationLabels",
-            ],
-          },
-        ],
-      },
-    ];
-
-    // Combine includes (attachments + deals + leads)
-    const includeModels = [
-      ...includeAttachments,
-      ...includeDeal,
-      ...includeLeadDeal,
-    ];
-
-    if (cursor) {
-      // Buffer pagination - use findAll with limit and order
-      emails = await Email.findAll({
-        where: filters,
-        include: includeModels,
-        limit,
-        order,
-        attributes: essentialFields,
-        distinct: true,
-      });
-      if (direction === "prev") emails = emails.reverse();
-    } else {
-      // Traditional offset pagination
-      const { count, rows } = await Email.findAndCountAll({
-        where: filters,
-        include: includeModels,
-        offset,
-        limit,
-        order,
-        attributes: essentialFields,
-        distinct: true,
-      });
-      emails = rows;
-    }
-
-    // Handle attachment metadata and file paths appropriately
-    const emailsWithAttachments = emails.map((email) => {
-      const attachments = (email.attachments || []).map((attachment) => {
-        const baseAttachment = { ...attachment.toJSON() };
-
-        // If filePath exists, it's a user-uploaded file, include the path
-        // If filePath is null, it's metadata-only from fetched emails
-        if (attachment.filePath) {
-          baseAttachment.path = attachment.filePath; // User-uploaded files
-        }
-        // For metadata-only attachments, we just return the basic info
-
-        return baseAttachment;
-      });
-
-      // Create email object with body preview, attachments, leads, and deals
-      const emailObj = { ...email.toJSON(), attachments };
-
-      // Replace body with preview content (but keep the 'body' key name)
-      if (includeFullBody === "true") {
-        // Keep full body if explicitly requested
-        emailObj.body = emailObj.body;
-      } else {
-        // Replace body with preview content
-        emailObj.body = createBodyPreview(emailObj.body);
-      }
-
-      // The emailObj now includes:
-      // - Lead information (if linkedId exists) with Person and Organization details
-      // - Deal information (if dealId exists) with Person and Organization details
-      // - Attachments information
-      // - All email fields
-
-      return emailObj;
-    });
-
-    // Calculate unviewCount using base filters (without cursor date filtering)
-    let unviewCount;
-    let totalCount;
-
-    // Handle count queries with deal linkage filter
-    if (dealLinkFilter === "linked_with_open_deal") {
-      // For open deals, we need to join with the Deal table
-      unviewCount = await Email.count({
-        where: {
-          ...baseFilters,
-          isRead: false, // Count only unread emails
-        },
-        include: [
-          {
-            model: Deal,
-            as: "Deal",
-            required: true,
-            where: {
-              status: "open",
-            },
-          },
-        ],
-        distinct: true,
-      });
-
-      totalCount = await Email.count({
-        where: baseFilters,
-        include: [
-          {
-            model: Deal,
-            as: "Deal",
-            required: true,
-            where: {
-              status: "open",
-            },
-          },
-        ],
-        distinct: true,
-      });
-    } else {
-      // For other filters, use simple count
-      unviewCount = await Email.count({
-        where: {
-          ...baseFilters,
-          isRead: false, // Count only unread emails
-        },
-      });
-
-      totalCount = await Email.count({ where: baseFilters });
-    }
-
-    // Grouping logic (only for current page)
-    let responseThreads;
-    if (folder === "drafts" || folder === "trash") {
-      // For drafts and trash, group by draftId if available, else by emailID
-      const threads = {};
-      emailsWithAttachments.forEach((email) => {
-        const threadId = email.draftId || email.emailID; // fallback to emailID if no draftId
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-    } else {
-      // For other folders, group by inReplyTo or messageId
-      const threads = {};
-      emailsWithAttachments.forEach((email) => {
-        const threadId = email.inReplyTo || email.messageId || email.emailID;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
-    }
-
-    // Buffer pagination cursors
-    const nextCursor =
-      emailsWithAttachments.length > 0
-        ? emailsWithAttachments[emailsWithAttachments.length - 1].createdAt
-        : null;
-    const prevCursor =
-      emailsWithAttachments.length > 0
-        ? emailsWithAttachments[0].createdAt
-        : null;
-
-    // Return the paginated response with threads and unviewCount
-    res.status(200).json({
-      message: "Emails fetched successfully.",
-      currentPage: parseInt(page),
-      totalPages: cursor ? 1 : Math.ceil(totalCount / pageSize), // totalPages not meaningful for buffer pagination
-      totalEmails: totalCount,
-      unviewCount, // Include the unviewCount field
-      threads: responseThreads, // Return grouped threads
-      nextCursor,
-      prevCursor,
-    });
-  } catch (error) {
-    console.error("Error fetching emails:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-// // Get emails with pagination, filtering, and searching
-// exports.getEmails = async (req, res) => {
-//   let {
-//     page = 1,
-//     pageSize = 20,
-//     folder,
-//     search,
-//     isRead,
-//     toMe,
-//     hasAttachments,
-//     isOpened,
-//     isClicked,
-//     trackedEmails,
-//     isShared,
-//   } = req.query;
-//   const masterUserID = req.adminId;
-
-//   // Enforce strict maximum page size
-//   const MAX_SAFE_PAGE_SIZE = 50;
-//   pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
-//   if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
-
-//   try {
-//     const userCredential = await UserCredential.findOne({
-//       where: { masterUserID },
-//     });
-//     if (!userCredential) {
-//       return res.status(200).json({
-//         message: "No email credentials found for this user.",
-//         currentPage: parseInt(page),
-//         totalPages: 0,
-//         totalEmails: 0,
-//         unviewCount: 0,
-//         threads: [],
-//       });
-//     }
-//     let filters = { masterUserID };
-//     if (folder) filters.folder = folder;
-//     if (isRead !== undefined) filters.isRead = isRead === "true";
-//     if (toMe === "true") {
-//       const userEmail = userCredential.email;
-//       filters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
-//     }
-//     if (trackedEmails === "true") {
-//       filters.isOpened = true;
-//       filters.isClicked = true;
-//     } else {
-//       if (isOpened !== undefined) filters.isOpened = isOpened === "true";
-//       if (isClicked !== undefined) filters.isClicked = isClicked === "true";
-//     }
-//     let includeAttachments = [
-//       {
-//         model: Attachment,
-//         as: "attachments",
-//         attributes: ["attachmentID", "filename", "size"], // Only metadata, removed mimetype
-//       },
-//     ];
-//     if (hasAttachments === "true") {
-//       includeAttachments[0].required = true;
-//     }
-//     if (search) {
-//       filters[Sequelize.Op.or] = [
-//         { subject: { [Sequelize.Op.like]: `%${search}%` } },
-//         { sender: { [Sequelize.Op.like]: `%${search}%` } },
-//         { recipient: { [Sequelize.Op.like]: `%${search}%` } },
-//         { senderName: { [Sequelize.Op.like]: `%${search}%` } },
-//         { recipientName: { [Sequelize.Op.like]: `%${search}%` } },
-//         { folder: { [Sequelize.Op.like]: `%${search}%` } },
-//       ];
-//     }
-//     const offset = (page - 1) * pageSize;
-//     const limit = pageSize;
-//     // Only select essential fields
-//     const essentialFields = [
-//       "emailID",
-//       "messageId",
-//       "inReplyTo",
-//       "references",
-//       "sender",
-//       "senderName",
-//       "recipient",
-//       "cc",
-//       "bcc",
-//       "subject",
-//       "folder",
-//       "createdAt",
-//       "isRead",
-//       "isOpened",
-//       "isClicked",
-//       "leadId",
-//       "dealId",
-//     ];
-//     const { count, rows: emails } = await Email.findAndCountAll({
-//       where: filters,
-//       include: includeAttachments,
-//       offset,
-//       limit,
-//       order: [["createdAt", "DESC"]],
-//       distinct: true,
-//       attributes: essentialFields,
-//     });
-//     // Add baseURL to attachment paths (metadata only)
-//     const baseURL = process.env.LOCALHOST_URL;
-//     const emailsWithAttachments = emails.map((email) => {
-//       const attachments = (email.attachments || []).map((attachment) => ({
-//         ...attachment.toJSON(),
-//         path: `${baseURL}/uploads/attachments/${attachment.filename}`,
-//       }));
-//       return {
-//         ...email.toJSON(),
-//         attachments,
-//       };
-//     });
-//     // Calculate unviewCount for the specified folder or all folders
-//     const unviewCount = await Email.count({
-//       where: {
-//         ...filters,
-//         isRead: false,
-//       },
-//     });
-//     // Grouping logic (only for current page)
-//     let responseThreads;
-//     if (folder === "drafts" || folder === "trash") {
-//       const threads = {};
-//       emailsWithAttachments.forEach((email) => {
-//         const threadId = email.draftId || email.emailID;
-//         if (!threads[threadId]) threads[threadId] = [];
-//         threads[threadId].push(email);
-//       });
-//       responseThreads = Object.values(threads);
-//     } else {
-//       const threads = {};
-//       emailsWithAttachments.forEach((email) => {
-//         const threadId = email.inReplyTo || email.messageId || email.emailID;
-//         if (!threads[threadId]) threads[threadId] = [];
-//         threads[threadId].push(email);
-//       });
-//       responseThreads = Object.values(threads);
-//     }
-//     // Safeguard: If response is too large, return error
-//     const estimatedResponseSize = JSON.stringify(responseThreads).length;
-//     const MAX_RESPONSE_SIZE = 2 * 1024 * 1024; // 2MB
-//     if (estimatedResponseSize > MAX_RESPONSE_SIZE) {
-//       return res.status(413).json({
-//         message:
-//           "Response too large. Please reduce pageSize or apply more filters.",
-//         currentPage: 1,
-//         totalPages: 1,
-//         totalEmails: 0,
-//         unviewCount,
-//         threads: [],
-//         nextCursor: null,
-//         prevCursor: null,
-//       });
-//     }
-//     // Buffer pagination cursors
-//     const nextCursor =
-//       emailsWithAttachments.length > 0
-//         ? emailsWithAttachments[emailsWithAttachments.length - 1].createdAt
-//         : null;
-//     const prevCursor =
-//       emailsWithAttachments.length > 0
-//         ? emailsWithAttachments[0].createdAt
-//         : null;
-//     res.status(200).json({
-//       message: "Emails fetched successfully.",
-//       threads: responseThreads,
-//       unviewCount,
-//       nextCursor,
-//       prevCursor,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching emails:", error);
-//     res.status(500).json({ message: "Internal server error." });
-//   }
-// };
-
-// Fetch and store emails from the Sent folder using batching
-exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
-  try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID: adminId },
-    });
-
-    if (!userCredential) {
-      console.error("User credentials not found for adminId:", adminId);
-      return { message: "User credentials not found." };
-    }
-
-    const userEmail = userCredential.email;
-    const userPassword = userCredential.appPassword;
-    console.log(userPassword);
-    console.log(userEmail);
-
-    console.log("Connecting to IMAP server...");
-    // const imapConfig = {
-    //   imap: {
-    //     user: userEmail, // Use the email from the database
-    //     password: userPassword, // Use the app password from the database
-    //     host: "imap.gmail.com", // IMAP host (e.g., Gmail)
-    //     port: 993, // IMAP port
-    //     tls: true, // Use TLS
-    //     authTimeout: 30000,
-    //     tlsOptions: {
-    //       rejectUnauthorized: false, // Allow self-signed certificates
-    //     },
-    //   },
-    // };
-    const provider = userCredential.provider; // default to gmail
-
-    const providerConfig = PROVIDER_CONFIG[provider];
-    const imapConfig = {
-      imap: {
-        user: userCredential.email,
-        password: userCredential.appPassword,
-        host: providerConfig.host,
-        port: providerConfig.port,
-        tls: providerConfig.tls,
-        authTimeout: 30000,
-        tlsOptions: { rejectUnauthorized: false },
-      },
-    };
-
-    console.log("Connecting to IMAP server...");
-    const connection = await Imap.connect(imapConfig);
-
-    console.log("Opening Sent folder...");
-    await connection.openBox("[Gmail]/Sent Mail");
-
-    console.log("Fetching emails from Sent...");
-    const sinceDate = formatDateForIMAP(
-      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    );
-    console.log(`Using SINCE date: ${sinceDate}`);
-
-    const searchCriteria = [["SINCE", sinceDate]];
-    const fetchOptions = {
-      bodies: "",
-      struct: true,
-    };
-
-    const messages = await connection.search(searchCriteria, fetchOptions);
-
-    console.log(`Total sent emails found: ${messages.length}`);
-
-    // Pagination logic
-    const startIndex = (page - 1) * batchSize;
-    const endIndex = startIndex + parseInt(batchSize);
-    const batchMessages = messages.slice(startIndex, endIndex);
-
-    if (batchMessages.length === 0) {
-      console.log("No more emails to fetch.");
-      return res.status(200).json({ message: "No more emails to fetch." });
-    }
-
-    const sentEmails = [];
-
-    for (const message of batchMessages) {
-      const rawBodyPart = message.parts.find((part) => part.which === "");
-      const rawBody = rawBodyPart ? rawBodyPart.body : null;
-
-      if (!rawBody) {
-        console.log("No body found for this email.");
-        continue;
-      }
-
-      // Parse the raw email body using simpleParser
-      const parsedEmail = await simpleParser(rawBody);
-
-      const emailData = {
-        messageId: parsedEmail.messageId || null,
-        inReplyTo: parsedEmail.headers.get("in-reply-to") || null, // Extract inReplyTo header
-        references: parsedEmail.headers.get("references")
-          ? Array.isArray(parsedEmail.headers.get("references"))
-            ? parsedEmail.headers.get("references").join(" ") // Convert array to string
-            : parsedEmail.headers.get("references") // Use string directly
-          : null,
-        sender: parsedEmail.from ? parsedEmail.from.value[0].address : null,
-        senderName: parsedEmail.from ? parsedEmail.from.value[0].name : null,
-        recipient: parsedEmail.to
-          ? parsedEmail.to.value.map((to) => to.address).join(", ")
-          : null,
-        cc: parsedEmail.cc
-          ? parsedEmail.cc.value.map((cc) => cc.address).join(", ")
-          : null,
-        bcc: parsedEmail.bcc
-          ? parsedEmail.bcc.value.map((bcc) => bcc.address).join(", ")
-          : null,
-        subject: parsedEmail.subject || null,
-        body: cleanEmailBody(parsedEmail.text || parsedEmail.html || ""),
-        folder: "sent",
-        createdAt: parsedEmail.date || new Date(),
-        masterUserID: adminId,
-      };
-
-      console.log(`Processing sent email: ${emailData.messageId}`);
-      sentEmails.push(emailData);
-
-      const existingEmail = await Email.findOne({
-        where: { messageId: emailData.messageId, folder: emailData.folder },
-      });
-
-      let savedEmail;
-      if (!existingEmail) {
-        savedEmail = await Email.create(emailData);
-        console.log(`Sent email saved: ${emailData.messageId}`);
-      } else {
-        console.log(`Sent email already exists: ${emailData.messageId}`);
-        savedEmail = existingEmail;
-      }
-
-      // Save attachments using saveAttachments function
-      if (parsedEmail.attachments && parsedEmail.attachments.length > 0) {
-        const savedAttachments = await saveAttachments(
-          parsedEmail.attachments,
-          savedEmail.emailID
-        );
-        console.log(
-          `Saved ${savedAttachments.length} attachment metadata records for email: ${emailData.messageId}`
-        );
-      }
-    }
-
-    connection.end();
-    console.log("IMAP connection closed.");
-
-    // res.status(200).json({
-    //   message: `Fetched and saved ${sentEmails.length} sent emails.`,
-    //   currentPage: parseInt(page),
-    //   totalSent: messages.length,
-    // });
-    return {
-      message: `Fetched and saved ${sentEmails.length} sent emails.`,
-    };
-  } catch (error) {
-    console.error("Error fetching sent emails:", error);
-    // res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-// Helper function to fetch linked entities for an email
-const getLinkedEntities = async (email) => {
-  try {
-    const linkedEntities = {
-      leads: [],
-      deals: [],
-      persons: [],
-      organizations: [],
-    };
-
-    // Extract emails from sender and recipient
-    const emailAddresses = [];
-
-    if (email.sender) emailAddresses.push(email.sender);
-    if (email.recipient) {
-      // Split recipient emails (comma-separated)
-      const recipients = email.recipient.split(",").map((r) => r.trim());
-      emailAddresses.push(...recipients);
-    }
-    if (email.cc) {
-      const ccEmails = email.cc.split(",").map((r) => r.trim());
-      emailAddresses.push(...ccEmails);
-    }
-    if (email.bcc) {
-      const bccEmails = email.bcc.split(",").map((r) => r.trim());
-      emailAddresses.push(...bccEmails);
-    }
-
-    // Remove duplicates and filter out empty values
-    const uniqueEmails = [...new Set(emailAddresses)].filter(Boolean);
-
-    if (uniqueEmails.length === 0) {
-      return linkedEntities;
-    }
-
-    // LINKING STRATEGY:
-    // 1. For Leads & Deals: Prioritize direct linkage (email.leadId/dealId) over email matching
-    //    - Each email should link to at most ONE lead and ONE deal
-    // 2. For Persons: Allow multiple persons with same email (different roles/organizations)
-    // 3. For Organizations: Derived from persons' organizations
-
-    // Search for leads ONLY by explicit linkage (no email matching)
-    let leads = [];
-    if (email.leadId) {
-      leads = await Lead.findAll({
-        where: { leadId: email.leadId },
-        include: [
-          {
-            model: MasterUser,
-            as: "Owner",
-            attributes: ["name", "masterUserID"],
-            required: false,
-          },
-        ],
-      });
-    }
-
-    // Search for deals ONLY by explicit linkage (no email matching)
-    let deals = [];
-    if (email.dealId) {
-      deals = await Deal.findAll({
-        where: { dealId: email.dealId },
-        include: [
-          {
-            model: MasterUser,
-            as: "Owner",
-            attributes: ["name", "masterUserID"],
-            required: false,
-          },
-        ],
-      });
-    }
-
-    // Search for persons by email (can have multiple persons with same email)
-    const persons = await Person.findAll({
-      where: {
-        email: { [Sequelize.Op.in]: uniqueEmails },
-      },
-      include: [
-        {
-          model: Organization,
-          as: "LeadOrganization",
-          required: false,
-        },
-      ],
-      limit: 10, // Reasonable limit to prevent performance issues
-      order: [["createdAt", "DESC"]], // Get the most recent persons first
-    });
-
-    // Search for organizations by finding persons first
-    const personOrgIds = persons
-      .map((p) => p.leadOrganizationId)
-      .filter(Boolean);
-    let organizations = [];
-
-    if (personOrgIds.length > 0) {
-      organizations = await Organization.findAll({
-        where: {
-          leadOrganizationId: { [Sequelize.Op.in]: personOrgIds },
-        },
-      });
-    }
-
-    // Format the results and fetch activities for persons
-    linkedEntities.leads = leads.map((lead) => ({
-      leadId: lead.leadId,
-      title: lead.title,
-      contactPerson: lead.contactPerson,
-      organization: lead.organization,
-      status: lead.status,
-      owner: lead.Owner ? lead.Owner.name : null,
-      createdAt: lead.createdAt,
-    }));
-
-    linkedEntities.deals = deals.map((deal) => ({
-      dealId: deal.dealId,
-      title: deal.title,
-      contactPerson: deal.contactPerson,
-      organization: deal.organization,
-      status: deal.status,
-      value: deal.value,
-      owner: deal.Owner ? deal.Owner.name : null,
-      createdAt: deal.createdAt,
-    }));
-
-    // Get all person IDs for activity lookup
-    const personIds = persons.map((p) => p.personId).filter(Boolean);
-
-    // Fetch activities for all persons at once
-    const activities =
-      personIds.length > 0
-        ? await Activity.findAll({
-            where: {
-              personId: { [Sequelize.Op.in]: personIds },
-            },
-            order: [["createdAt", "DESC"]],
-            limit: 50, // Reasonable limit to prevent too much data
-          })
-        : [];
-
-    // Group activities by personId
-    const activitiesByPersonId = {};
-    activities.forEach((activity) => {
-      if (!activitiesByPersonId[activity.personId]) {
-        activitiesByPersonId[activity.personId] = [];
-      }
-      activitiesByPersonId[activity.personId].push({
-        activityId: activity.activityId,
-        type: activity.type, // Corrected field name from activityType to type
-        subject: activity.subject,
-        description: activity.description,
-        status: activity.status,
-        priority: activity.priority,
-        startDateTime: activity.startDateTime,
-        endDateTime: activity.endDateTime,
-        dueDate: activity.dueDate,
-        isDone: activity.isDone,
-        createdAt: activity.createdAt,
-      });
-    });
-
-    linkedEntities.persons = persons.map((person) => ({
-      personId: person.personId,
-      contactPerson: person.contactPerson,
-      email: person.email,
-      phone: person.phone,
-      leadOrganizationId: person.leadOrganizationId, // Add leadOrganizationId
-      organization: person.LeadOrganization
-        ? person.LeadOrganization.organization
-        : null,
-      createdAt: person.createdAt,
-      activities: activitiesByPersonId[person.personId] || [], // Add activities array
-      activityCount: (activitiesByPersonId[person.personId] || []).length, // Add activity count
-    }));
-
-    linkedEntities.organizations = organizations.map((org) => ({
-      leadOrganizationId: org.leadOrganizationId,
-      organization: org.organization,
-      country: org.organizationCountry,
-      createdAt: org.createdAt,
-    }));
-
-    return linkedEntities;
-  } catch (error) {
-    console.error("Error fetching linked entities:", error);
-    return {
-      leads: [],
-      deals: [],
-      persons: [],
-      organizations: [],
-    };
-  }
-};
-
-// Helper function to aggregate linked entities from all emails in a conversation
-// Enhanced to include detailed participant information for uniqueParticipants
-const getAggregatedLinkedEntities = async (emails) => {
-  try {
-    const aggregatedEntities = {
-      leads: [],
-      deals: [],
-      persons: [],
-      organizations: [],
-      conversationStats: {
-        totalEmails: emails.length,
-        uniqueParticipants: new Set(),
-        dateRange: {
-          earliest: null,
-          latest: null,
-        },
-      },
-    };
-
-    // Keep track of unique entities to avoid duplicates
-    // const seenLeads = new Set();
-    // const seenDeals = new Set();
-    // const seenPersons = new Set();
-    // const seenOrganizations = new Set();
-
-    // Track conversation statistics and email-to-name mapping
-    const emailToNameMap = new Map(); // Map email addresses to their display names
-
-    emails.forEach((email) => {
-      // Add sender with name mapping
-      if (email.sender) {
-        aggregatedEntities.conversationStats.uniqueParticipants.add(
-          email.sender
-        );
-        // Map sender email to sender name (if available)
-        if (email.senderName) {
-          emailToNameMap.set(email.sender.toLowerCase(), email.senderName);
-        }
-      }
-
-      // Add recipients (note: recipients don't have individual names in most email structures)
-      if (email.recipient) {
-        email.recipient.split(",").forEach((r) => {
-          const cleanEmail = r.trim();
-          aggregatedEntities.conversationStats.uniqueParticipants.add(
-            cleanEmail
-          );
-          // Recipients typically don't have individual names in stored email data
-          // so we'll use email as fallback
-        });
-      }
-
-      if (email.cc) {
-        email.cc.split(",").forEach((r) => {
-          const cleanEmail = r.trim();
-          aggregatedEntities.conversationStats.uniqueParticipants.add(
-            cleanEmail
-          );
-        });
-      }
-
-      // Track date range
-      const emailDate = new Date(email.createdAt);
-      if (
-        !aggregatedEntities.conversationStats.dateRange.earliest ||
-        emailDate < aggregatedEntities.conversationStats.dateRange.earliest
-      ) {
-        aggregatedEntities.conversationStats.dateRange.earliest = emailDate;
-      }
-      if (
-        !aggregatedEntities.conversationStats.dateRange.latest ||
-        emailDate > aggregatedEntities.conversationStats.dateRange.latest
-      ) {
-        aggregatedEntities.conversationStats.dateRange.latest = emailDate;
-      }
-    });
-
-    // Convert Set to Array for response
-    aggregatedEntities.conversationStats.uniqueParticipants = Array.from(
-      aggregatedEntities.conversationStats.uniqueParticipants
-    ).filter(Boolean);
-
-    // Keep track of unique entities to avoid duplicates
-    const seenLeads = new Set();
-    const seenDeals = new Set();
-    const seenPersons = new Set(); // This will track all persons from both sources
-    const seenOrganizations = new Set();
-
-    // Fetch detailed participant data for ALL unique participants (conversation + linked entities)
-    const participantEmails =
-      aggregatedEntities.conversationStats.uniqueParticipants;
-
-    // Fetch ALL persons data for unique participants
-    const allParticipantPersons = await Person.findAll({
-      where: {
-        email: { [Sequelize.Op.in]: participantEmails },
-      },
-      include: [
-        {
-          model: Organization,
-          as: "LeadOrganization",
-          required: false,
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
-
-    // Create a map of emails that have person records
-    const emailsWithPersonRecords = new Set();
-    const emailToPersonMap = new Map();
-
-    allParticipantPersons.forEach((person) => {
-      emailsWithPersonRecords.add(person.email.toLowerCase());
-      emailToPersonMap.set(person.email.toLowerCase(), person);
-    }); // Add all participant emails to persons array (both existing persons and email-only participants)
-    participantEmails.forEach((email) => {
-      const emailLower = email.toLowerCase();
-
-      if (emailsWithPersonRecords.has(emailLower)) {
-        // Email has a person record in database
-        const person = emailToPersonMap.get(emailLower);
-        if (!seenPersons.has(person.personId)) {
-          seenPersons.add(person.personId);
-          aggregatedEntities.persons.push({
-            personId: person.personId,
-            contactPerson: person.contactPerson, // Keep contactPerson for existing persons
-            senderName: emailToNameMap.get(emailLower) || person.contactPerson, // Add senderName
-            email: person.email,
-            phone: person.phone,
-            leadOrganizationId: person.leadOrganizationId,
-            organization: person.LeadOrganization
-              ? person.LeadOrganization.organization
-              : null,
-            createdAt: person.createdAt,
-            isExistingPerson: true, // Flag: this is an existing person record
-            sourceType: "database", // Source: from person database
-            canCreateContact: false, // Already exists, no need to create
-            sourceEmail: {
-              emailId: null, // Participant from conversation, not specific email
-              messageId: null,
-              subject: "Conversation Participant",
-              createdAt: null,
-            },
-          });
-        }
-      } else {
-        // Email participant without person record
-        const emailOnlyId = `email-only-${emailLower}`;
-        if (!seenPersons.has(emailOnlyId)) {
-          seenPersons.add(emailOnlyId);
-          const displayName = emailToNameMap.get(emailLower) || email; // Use senderName if available, else email
-          aggregatedEntities.persons.push({
-            personId: null, // No person record exists
-            // contactPerson: removed for email-only participants
-            senderName: displayName, // Use senderName from email or email address as fallback
-            email: email,
-            phone: null,
-            leadOrganizationId: null,
-            organization: null,
-            createdAt: null,
-            isExistingPerson: false, // Flag: this is just an email participant
-            sourceType: "email_participant", // Source: from email conversation
-            canCreateContact: true, // Flag: can create new contact from this
-            sourceEmail: {
-              emailId: null,
-              messageId: null,
-              subject: "Email Participant Only",
-              createdAt: null,
-            },
-          });
-        }
-      }
-    });
-
-    // Fetch organizations related to all persons
-    const allPersonOrgIds = allParticipantPersons
-      .map((p) => p.leadOrganizationId)
-      .filter(Boolean);
-
-    // Add organizations from participants
-    if (allPersonOrgIds.length > 0) {
-      const participantOrganizations = await Organization.findAll({
-        where: {
-          leadOrganizationId: { [Sequelize.Op.in]: allPersonOrgIds },
-        },
-      });
-
-      participantOrganizations.forEach((org) => {
-        if (!seenOrganizations.has(org.leadOrganizationId)) {
-          seenOrganizations.add(org.leadOrganizationId);
-          aggregatedEntities.organizations.push({
-            leadOrganizationId: org.leadOrganizationId,
-            organization: org.organization,
-            country: org.organizationCountry,
-            createdAt: org.createdAt,
-            sourceEmail: {
-              emailId: null,
-              messageId: null,
-              subject: "Conversation Participant Organization",
-              createdAt: null,
-            },
-          });
-        }
-      });
-    }
-
-    // Update conversation stats to only include basic info
-    aggregatedEntities.conversationStats.participantSummary = {
-      totalParticipants: participantEmails.length,
-      emailAddresses: participantEmails,
-    };
-
-    // Process each email in the conversation for additional linked entities
-    for (const email of emails) {
-      const linkedEntities = await getLinkedEntities(email);
-
-      // Aggregate leads (deduplicate by leadId)
-      linkedEntities.leads.forEach((lead) => {
-        if (!seenLeads.has(lead.leadId)) {
-          seenLeads.add(lead.leadId);
-          aggregatedEntities.leads.push({
-            ...lead,
-            sourceEmail: {
-              emailId: email.emailID,
-              messageId: email.messageId,
-              subject: email.subject,
-              createdAt: email.createdAt,
-            },
-          });
-        }
-      });
-
-      // Aggregate deals (deduplicate by dealId)
-      linkedEntities.deals.forEach((deal) => {
-        if (!seenDeals.has(deal.dealId)) {
-          seenDeals.add(deal.dealId);
-          aggregatedEntities.deals.push({
-            ...deal,
-            sourceEmail: {
-              emailId: email.emailID,
-              messageId: email.messageId,
-              subject: email.subject,
-              createdAt: email.createdAt,
-            },
-          });
-        }
-      });
-
-      // Aggregate additional persons from linked entities (avoid duplicates)
-      linkedEntities.persons.forEach((person) => {
-        if (!seenPersons.has(person.personId)) {
-          seenPersons.add(person.personId);
-          aggregatedEntities.persons.push({
-            ...person,
-            leadOrganizationId: person.leadOrganizationId,
-            senderName:
-              emailToNameMap.get(person.email.toLowerCase()) ||
-              person.contactPerson, // Add senderName
-            isExistingPerson: true, // These are existing person records from database
-            sourceType: "database", // Source: from person database
-            canCreateContact: false, // Already exists, no need to create
-            sourceEmail: {
-              emailId: email.emailID,
-              messageId: email.messageId,
-              subject: email.subject,
-              createdAt: email.createdAt,
-            },
-          });
-        }
-      });
-
-      // Aggregate additional organizations from linked entities (avoid duplicates)
-      linkedEntities.organizations.forEach((org) => {
-        if (!seenOrganizations.has(org.leadOrganizationId)) {
-          seenOrganizations.add(org.leadOrganizationId);
-          aggregatedEntities.organizations.push({
-            ...org,
-            sourceEmail: {
-              emailId: email.emailID,
-              messageId: email.messageId,
-              subject: email.subject,
-              createdAt: email.createdAt,
-            },
-          });
-        }
-      });
-    }
-
-    // Fetch activities for all persons with personId (only for existing persons)
-    const personIds = aggregatedEntities.persons
-      .map((p) => p.personId)
-      .filter(Boolean); // Only get persons that have personId
-
-    const activities =
-      personIds.length > 0
-        ? await Activity.findAll({
-            where: {
-              personId: { [Sequelize.Op.in]: personIds },
-            },
-            order: [["createdAt", "DESC"]],
-            limit: 100, // Reasonable limit to prevent too much data for aggregated view
-          })
-        : [];
-
-    // Group activities by personId
-    const activitiesByPersonId = {};
-    activities.forEach((activity) => {
-      if (!activitiesByPersonId[activity.personId]) {
-        activitiesByPersonId[activity.personId] = [];
-      }
-      activitiesByPersonId[activity.personId].push({
-        activityId: activity.activityId,
-        type: activity.type, // Use 'type' instead of 'activityType' based on model
-        subject: activity.subject,
-        description: activity.description,
-        status: activity.status,
-        priority: activity.priority,
-        startDateTime: activity.startDateTime,
-        endDateTime: activity.endDateTime,
-        dueDate: activity.dueDate,
-        isDone: activity.isDone,
-        createdAt: activity.createdAt,
-      });
-    });
-
-    // Add activities to each person in the aggregated persons array
-    aggregatedEntities.persons = aggregatedEntities.persons.map((person) => ({
-      ...person,
-      activities: person.personId
-        ? activitiesByPersonId[person.personId] || []
-        : [], // Only add activities if personId exists
-      activityCount: person.personId
-        ? (activitiesByPersonId[person.personId] || []).length
-        : 0, // Activity count
-    }));
-
-    // Sort aggregated entities by creation date (most recent first)
-    // Handle null createdAt for email-only participants
-    aggregatedEntities.leads.sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-    aggregatedEntities.deals.sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-    aggregatedEntities.persons.sort((a, b) => {
-      // Put existing persons first, then email-only participants
-      if (a.isExistingPerson && !b.isExistingPerson) return -1;
-      if (!a.isExistingPerson && b.isExistingPerson) return 1;
-      // Within same type, sort by creation date
-      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-    });
-    aggregatedEntities.organizations.sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-
-    return aggregatedEntities;
-  } catch (error) {
-    console.error("Error aggregating linked entities:", error);
-    return {
-      leads: [],
-      deals: [],
-      persons: [],
-      organizations: [],
-      conversationStats: {
-        totalEmails: 0,
-        uniqueParticipants: [],
-        participantDetails: {
-          persons: [],
-          organizations: [],
-          emailAddresses: [],
-        },
-        dateRange: { earliest: null, latest: null },
-      },
-    };
-  }
-};
-
-// Helper function to fetch body for a single email on-demand
-const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
-  try {
-    // Check if body needs fetching
-    if ((email.body && email.body.trim() !== '') &&
-        email.body_fetch_status !== 'pending') {
-      console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Email ${email.emailID} already has body`);
-      return email;
-    }
-
-    console.log(`[fetchEmailBodyOnDemandForEmail] 🔍 Fetching body for related email ${email.emailID}...`);
-
-    const emailBodyService = require('../../services/emailBodyServiceSimple');
-
-    // Get user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID }
-    });
-
-    if (!userCredential) {
-      console.log(`[fetchEmailBodyOnDemandForEmail] ❌ No credentials found for masterUserID ${masterUserID}`);
-      return email;
-    }
-
-    // Fetch the body
-    const updatedEmail = await emailBodyService.fetchEmailBodyOnDemand(
-      email.emailID,
-      masterUserID,
-      userCredential.provider || 'gmail'
-    );
-
-    if (updatedEmail && updatedEmail.success && (updatedEmail.bodyText || updatedEmail.bodyHtml)) {
-      // Determine final body content
-      let finalBody = '';
-      if (updatedEmail.bodyHtml) {
-        finalBody = updatedEmail.bodyHtml;
-      } else if (updatedEmail.bodyText) {
-        finalBody = updatedEmail.bodyText;
-      }
-
-      // Update the email object
-      email.body = finalBody;
-      email.body_fetch_status = 'completed';
-
-      // Update the database record
-      await Email.update(
-        {
-          body: email.body || '',
-          body_fetch_status: 'completed'
-        },
-        { where: { emailID: email.emailID } }
-      );
-
-      console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Successfully fetched body for email ${email.emailID} - Body length: ${email.body.length}`);
-    } else {
-      console.log(`[fetchEmailBodyOnDemandForEmail] ⚠️ Failed to fetch body for email ${email.emailID}`);
-      // Mark as failed in database
-      await Email.update(
-        { body_fetch_status: 'failed' },
-        { where: { emailID: email.emailID } }
-      );
-    }
-
-    return email;
-  } catch (error) {
-    console.error(`[fetchEmailBodyOnDemandForEmail] ❌ Error fetching body for email ${email.emailID}:`, error.message);
-    // Mark as failed in database
-    try {
-      await Email.update(
-        { body_fetch_status: 'failed' },
-        { where: { emailID: email.emailID } }
-      );
-    } catch (dbError) {
-      console.error(`[fetchEmailBodyOnDemandForEmail] ❌ Error updating database:`, dbError.message);
-    }
-    return email;
-  }
-};
-
-exports.getOneEmail = async (req, res) => {
-  const { emailId } = req.params;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
-  try {
-    // Fetch the main email by emailId, including attachments
-    const mainEmail = await Email.findOne({
-      where: { emailID: emailId },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-        },
-      ],
-      // 🔧 DEBUG: Explicitly ensure body field is selected
-      attributes: { exclude: [] } // This ensures all fields including body are selected
-    });
-
-    if (!mainEmail) {
-      return res.status(404).json({ message: "Email not found." });
-    }
-
-    // 🔧 DEBUG: Log body status for debugging
-    console.log(`[getOneEmail] 📧 Email ${emailId}: body_fetch_status = ${mainEmail.body_fetch_status}, has body = ${!!mainEmail.body}, body length = ${mainEmail.body ? mainEmail.body.length : 0}`);
-
-    // Mark as read if not already
-    if (!mainEmail.isRead) {
-      await mainEmail.update({ isRead: true });
-    }
-
-    // 🚀 PHASE 2: Hybrid body fetching - On-demand for when user opens email
-    if ((!mainEmail.body || mainEmail.body === null || mainEmail.body.trim() === '') || 
-        (mainEmail.body_fetch_status === 'pending' && (!mainEmail.body || mainEmail.body === null))) {
-      // Email body not fetched yet - fetch it now using our smart service
-      console.log(`[Phase 2] 🔍 ON-DEMAND: Email ${emailId} body missing or pending, fetching now...`);
-      
-      try {
-        const emailBodyService = require('../../services/emailBodyServiceSimple');
-        const emailBodyServiceRaceSafe = require('../../services/emailBodyServiceRaceSafe');
-        console.log(`🔍 CONTROLLER DEBUG: EmailBodyService loaded, functions available:`, Object.keys(emailBodyService));
-        console.log(`🛡️ CONTROLLER DEBUG: Race-safe service loaded, functions available:`, Object.keys(emailBodyServiceRaceSafe));
-        
-        // 🔧 ENHANCED DEBUG: Get and analyze user credentials
-        console.log(`🔍 API DEBUG: Looking for credentials for masterUserID ${masterUserID}`);
-        const userCredential = await UserCredential.findOne({
-          where: { masterUserID }
-        });
-        
-        if (userCredential) {
-          console.log(`✅ API DEBUG: Credentials found for user ${masterUserID}`);
-          console.log(`📧 API DEBUG: Email: ${userCredential.email}`);
-          console.log(`🔧 API DEBUG: Provider: ${userCredential.provider}`);
-          console.log(`🔑 API DEBUG: Has App Password: ${!!userCredential.appPassword}`);
-          console.log(`🔑 API DEBUG: App Password Length: ${userCredential.appPassword ? userCredential.appPassword.length : 0}`);
-          console.log(`🌐 API DEBUG: IMAP Host: ${userCredential.imapHost || 'Not set (will use default)'}`);
-          console.log(`🌐 API DEBUG: IMAP Port: ${userCredential.imapPort || 'Not set (will use default)'}`);
-          console.log(`🔒 API DEBUG: IMAP TLS: ${userCredential.imapTLS !== null ? userCredential.imapTLS : 'Not set (will use default)'}`);
-          
-          // Check if it's Gmail and validate requirements
-          if (userCredential.email && userCredential.email.includes('gmail.com')) {
-            console.log(`📧 API DEBUG: GMAIL ACCOUNT DETECTED - Validating requirements...`);
-            console.log(`${userCredential.provider === 'gmail' ? '✅' : '❌'} API DEBUG: Provider should be 'gmail', current: ${userCredential.provider}`);
-            console.log(`${userCredential.appPassword && userCredential.appPassword.length === 16 ? '✅' : '❌'} API DEBUG: App Password should be 16 chars, current: ${userCredential.appPassword ? userCredential.appPassword.length : 0}`);
-            console.log(`🔑 API DEBUG: App Password preview: ${userCredential.appPassword ? userCredential.appPassword.substring(0, 4) + '************' : 'None'}`);
-          }
-          
-          console.log(`🚀 API DEBUG: Calling fetchEmailBodyOnDemand (SIMPLE VERSION) with:`);
-          console.log(`   - emailID: ${mainEmail.emailID}`);
-          console.log(`   - masterUserID: ${masterUserID}`);
-          console.log(`   - provider: ${userCredential.provider || 'gmail'}`);
-          
-          // � USE SIMPLE VERSION: No race condition protection, proven working method
-          const updatedEmail = await emailBodyService.fetchEmailBodyOnDemand(
-            mainEmail.emailID, // 🔧 FIX: Use emailID instead of id
-            masterUserID, 
-            userCredential.provider || 'gmail'
-          );
-          
-          console.log(`🔧 API DEBUG: fetchEmailBodyOnDemand result:`, {
-            success: updatedEmail.success,
-            hasBodyText: !!updatedEmail.bodyText,
-            hasBodyHtml: !!updatedEmail.bodyHtml,
-            bodyTextLength: updatedEmail.bodyText ? updatedEmail.bodyText.length : 0,
-            bodyHtmlLength: updatedEmail.bodyHtml ? updatedEmail.bodyHtml.length : 0
-          });
-          
-          // Update the main email object with fetched body
-          if (updatedEmail && updatedEmail.success && (updatedEmail.bodyText || updatedEmail.bodyHtml)) {
-            // Return only HTML content if available, otherwise use text content
-            let finalBody = '';
-            if (updatedEmail.bodyHtml) {
-              // HTML content available - use it
-              finalBody = updatedEmail.bodyHtml;
-            } else if (updatedEmail.bodyText) {
-              // Only text available - use it
-              finalBody = updatedEmail.bodyText;
-            }
-
-            mainEmail.body = finalBody;
-            mainEmail.body_fetch_status = 'completed';
-
-            // Also update the database record
-            await Email.update(
-              {
-                body: mainEmail.body || '',
-                body_fetch_status: 'completed'
-              },
-              { where: { emailID: mainEmail.emailID } }
-            );
-
-            console.log(`[Phase 2] ✅ ON-DEMAND: Email ${emailId} body fetched successfully - Body length: ${mainEmail.body.length}`);
-          } else {
-            console.log(`[Phase 2] ⚠️ ON-DEMAND: Email ${emailId} body fetch failed or returned empty result`);
-            console.log(`   - Success: ${updatedEmail ? updatedEmail.success : 'N/A'}`);
-            console.log(`   - Error: ${updatedEmail ? updatedEmail.error : 'N/A'}`);
-          }
-        } else {
-          console.log(`❌ API DEBUG: No credentials found for masterUserID ${masterUserID}`);
-          console.log(`[Phase 2] ⚠️ ON-DEMAND: No user credentials found for USER ${masterUserID}`);
-        }
-      } catch (bodyFetchError) {
-        console.log(`❌ API DEBUG: Body fetch error details:`);
-        console.log(`   - Error message: ${bodyFetchError.message}`);
-        console.log(`   - Error stack: ${bodyFetchError.stack}`);
-        console.log(`[Phase 2] ❌ ON-DEMAND: Failed to fetch body for email ${emailId}:`, bodyFetchError.message);
-        await mainEmail.update({ body_fetch_status: 'failed' });
-        // Continue with existing data - conversation still works!
-      }
-    } else {
-      console.log(`[Phase 2] ✅ BODY EXISTS: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0})`);
-    }
-
-    // Handle attachments appropriately based on type (user-uploaded vs fetched)
-    mainEmail.attachments = mainEmail.attachments.map((attachment) => {
-      const baseAttachment = { ...attachment };
-
-      // If filePath exists, it's a user-uploaded file, include the path
-      // If filePath is null, it's metadata-only from fetched emails
-      if (attachment.filePath) {
-        baseAttachment.path = attachment.filePath; // User-uploaded files
-      }
-      // For metadata-only attachments, we just return the basic info
-
-      return baseAttachment;
-    });
-
-    // Clean the body of the main email AFTER processing attachments so we can replace cid: references
-    console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments, emailId);
-    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
-    console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 200) + '...' : 'No body content'}`);
-
-    // If this is a draft or trash, do NOT fetch related emails but still get linked entities
-    if (mainEmail.folder === "drafts") {
-      const linkedEntities = await getLinkedEntities(mainEmail);
-      return res.status(200).json({
-        message: "Draft email fetched successfully.",
-        data: {
-          email: mainEmail,
-          relatedEmails: [],
-          linkedEntities,
-        },
-      });
-    }
-    if (mainEmail.folder === "trash") {
-      const linkedEntities = await getLinkedEntities(mainEmail);
-      return res.status(200).json({
-        message: "trash email fetched successfully.",
-        data: {
-          email: mainEmail,
-          relatedEmails: [],
-          linkedEntities,
-        },
-      });
-    }
-
-    // Gather all thread IDs (messageId, inReplyTo, and references)
-    const threadIds = [
-      mainEmail.messageId,
-      mainEmail.inReplyTo,
-      ...(mainEmail.references ? mainEmail.references.split(" ") : []),
-    ].filter(Boolean);
-
-    // Fetch all related emails in the thread (across all users)
-    let relatedEmails = await Email.findAll({
-      where: {
-        [Sequelize.Op.or]: [
-          { messageId: { [Sequelize.Op.in]: threadIds } },
-          { inReplyTo: { [Sequelize.Op.in]: threadIds } },
-          {
-            references: {
-              [Sequelize.Op.or]: threadIds.map((id) => ({
-                [Sequelize.Op.like]: `%${id}%`,
-              })),
-            },
-          },
-        ],
-        folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
-      },
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-        },
-      ],
-      order: [["createdAt", "ASC"]],
-    });
-
-    // Remove the main email from relatedEmails (by messageId) BEFORE checking for enhanced threading
-    relatedEmails = relatedEmails.filter(
-      (email) => email.messageId !== mainEmail.messageId
-    );
-
-    // 🚀 ENHANCED THREADING: If no related emails found via standard threading,
-    // try subject-based and participant-based matching
-    if (relatedEmails.length === 0 && mainEmail.subject) {
-      console.log(`[getOneEmail] 🔍 No standard thread matches found for email ${emailId}, trying enhanced threading...`);
-
-      // Extract base subject (remove Re:, Fwd:, etc.)
-      const baseSubject = mainEmail.subject
-        .replace(/^(Re|Fwd|Fw):\s*/i, '')
-        .trim();
-
-      // Get participants from main email
-      const participants = [
-        mainEmail.sender,
-        mainEmail.recipient,
-        ...(mainEmail.cc ? mainEmail.cc.split(',').map(cc => cc.trim()) : []),
-        ...(mainEmail.bcc ? mainEmail.bcc.split(',').map(bcc => bcc.trim()) : [])
-      ].filter(Boolean);
-
-      // Find emails with similar subjects and overlapping participants
-      const subjectBasedEmails = await Email.findAll({
-        where: {
-          [Sequelize.Op.and]: [
-            {
-              [Sequelize.Op.or]: [
-                { subject: { [Sequelize.Op.like]: `%${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Re: ${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Fwd: ${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Fw: ${baseSubject}%` } }
-              ]
-            },
-            {
-              [Sequelize.Op.or]: [
-                { sender: { [Sequelize.Op.in]: participants } },
-                { recipient: { [Sequelize.Op.in]: participants } },
-                { cc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } },
-                { bcc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } }
-              ]
-            }
-          ],
-          folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
-          messageId: { [Sequelize.Op.ne]: mainEmail.messageId } // Exclude main email
-        },
-        include: [
-          {
-            model: Attachment,
-            as: "attachments",
-          },
-        ],
-        order: [["createdAt", "ASC"]],
-        limit: 20 // Limit to prevent too many false matches
-      });
-
-      if (subjectBasedEmails.length > 0) {
-        console.log(`[getOneEmail] ✅ Found ${subjectBasedEmails.length} emails via enhanced threading for subject: "${baseSubject}"`);
-        relatedEmails = subjectBasedEmails;
-      }
-    }
-    // Remove the main email from relatedEmails
-    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
-    // Remove the main email from relatedEmails (by messageId)
-
-    // relatedEmails = relatedEmails.filter(
-    //   (email) => email.messageId !== mainEmail.messageId
-    // );
-
-    // Deduplicate relatedEmails by messageId (keep the first occurrence)
-    // const seen = new Set();
-    // relatedEmails = relatedEmails.filter(email => {
-    //   if (seen.has(email.messageId)) return false;
-    //   seen.add(email.messageId);
-    //   return true;
-    // });
-    let allEmails = [mainEmail, ...relatedEmails];
-
-    //......changes
-    const seen = new Set();
-    allEmails = allEmails.filter((email) => {
-      if (seen.has(email.messageId)) return false;
-      seen.add(email.messageId);
-      return true;
-    });
-    const emailMap = {};
-    allEmails.forEach((email) => {
-      emailMap[email.messageId] = email;
-    });
-    const conversation = [];
-    let current = allEmails.find(
-      (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
-    );
-    while (current) {
-      conversation.push(current);
-      // Find the next email that replies to the current one
-      current = allEmails.find(
-        (email) =>
-          email.inReplyTo === conversation[conversation.length - 1].messageId
-      );
-    }
-
-    // // If some emails are not in the chain (e.g., forwards), add them by date
-    const remaining = allEmails.filter(
-      (email) => !conversation.includes(email)
-    );
-    remaining.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    conversation.push(...remaining);
-
-    // // The first is the main email, the rest are related
-    // const sortedMainEmail = conversation[0];
-    // const sortedRelatedEmails = conversation.slice(1);
-
-    // Handle attachments appropriately for related emails
-    // 🚀 PHASE 2: Fetch bodies for related emails on-demand
-    console.log(`[getOneEmail] 🔍 Processing ${relatedEmails.length} related emails for body fetching...`);
-
-    for (let i = 0; i < relatedEmails.length; i++) {
-      const relatedEmail = relatedEmails[i];
-
-      // Check if body needs fetching (similar to main email logic)
-      if ((!relatedEmail.body || relatedEmail.body === null || relatedEmail.body.trim() === '') ||
-          (relatedEmail.body_fetch_status === 'pending' && (!relatedEmail.body || relatedEmail.body === null))) {
-
-        console.log(`[getOneEmail] 🔍 ON-DEMAND: Related email ${relatedEmail.emailID} body missing or pending, fetching now...`);
-
-        try {
-          // Use the helper function to fetch body for this related email
-          const updatedEmail = await fetchEmailBodyOnDemandForEmail(relatedEmail, masterUserID);
-
-          // Update the email in the array with the fetched body
-          relatedEmails[i] = updatedEmail;
-
-          console.log(`[getOneEmail] ✅ ON-DEMAND: Related email ${relatedEmail.emailID} body fetched successfully`);
-        } catch (bodyFetchError) {
-          console.log(`[getOneEmail] ❌ ON-DEMAND: Failed to fetch body for related email ${relatedEmail.emailID}:`, bodyFetchError.message);
-          // Continue with existing data - conversation still works!
-        }
-      } else {
-        console.log(`[getOneEmail] ✅ BODY EXISTS: Related email ${relatedEmail.emailID} already has body (length: ${relatedEmail.body ? relatedEmail.body.length : 0})`);
-      }
-    }
-
-    // Now clean the bodies (whether fetched or existing)
-    relatedEmails.forEach((email) => {
-      // First process attachments to get the paths ready
-      email.attachments = email.attachments.map((attachment) => {
-        const baseAttachment = { ...attachment };
-
-        // If filePath exists, it's a user-uploaded file, include the path
-        // If filePath is null, it's metadata-only from fetched emails
-        if (attachment.filePath) {
-          baseAttachment.path = attachment.filePath; // User-uploaded files
-        }
-        
-        return baseAttachment;
-      });
-      
-      // Then clean the body with attachment info to replace cid: references
-      email.body = cleanEmailBody(email.body, email.attachments, email.emailID);
-    });
-
-    const sortedMainEmail = conversation.find(email => email.emailID === mainEmail.emailID) || conversation[0];
-    const sortedRelatedEmails = conversation.slice(1);
-
-    // 🔧 ENSURE: Main email has the latest body content
-    if (sortedMainEmail.emailID === mainEmail.emailID) {
-      sortedMainEmail.body = mainEmail.body;
-      sortedMainEmail.body_fetch_status = mainEmail.body_fetch_status;
-    }
-
-    console.log(`[getOneEmail] 🔍 FINAL CHECK: Email ${emailId} body in response:`, {
-      hasBody: !!sortedMainEmail.body,
-      bodyLength: sortedMainEmail.body ? sortedMainEmail.body.length : 0,
-      bodyPreview: sortedMainEmail.body ? sortedMainEmail.body.substring(0, 100) + '...' : 'No body'
-    });
-
-    // Fetch linked entities from ALL emails in the conversation thread
-    const linkedEntities = await getAggregatedLinkedEntities(conversation);
-
-    res.status(200).json({
-      message: "Email fetched successfully.",
-      data: {
-        email: sortedMainEmail,
-        relatedEmails: sortedRelatedEmails,
-        linkedEntities, // Add aggregated linked entities to response
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching email:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-const dynamicUpload = require("../../middlewares/dynamicUpload");
-const { threadId } = require("worker_threads");
-exports.composeEmail = [
-  // upload.array("attachments"), // Use Multer to handle multiple file uploads
-  dynamicUpload,
-  async (req, res) => {
-    const {
-      to,
-      cc,
-      bcc,
-      subject,
-      text,
-      html,
-      templateID,
-      actionType,
-      replyToMessageId,
-      isDraft,
-      draftId,
-      // isShared
-    } = req.body;
-    const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
-    try {
-      // Check if a default email is set in the DefaultEmail table
-      const defaultEmail = await DefaultEmail.findOne({
-        where: { masterUserID, isDefault: true },
-      });
-
-      let SENDER_EMAIL, SENDER_PASSWORD, SENDER_NAME;
-
-      if (defaultEmail) {
-        // Use the default email account
-        SENDER_EMAIL = defaultEmail.email;
-        SENDER_PASSWORD = defaultEmail.appPassword;
-
-        // If senderName is not provided in DefaultEmail, fetch it from MasterUser
-        if (defaultEmail.senderName) {
-          SENDER_NAME = defaultEmail.senderName;
-        } else {
-          const masterUser = await MasterUser.findOne({
-            where: { masterUserID },
-          });
-
-          if (!masterUser) {
-            return res.status(404).json({
-              message: "Master user not found for the given user.",
-            });
-          }
-
-          SENDER_NAME = masterUser.name; // Use the name from MasterUser
-        }
-      } else {
-        // Fallback to UserCredential if no default email is set
-        const userCredential = await UserCredential.findOne({
-          where: { masterUserID },
-        });
-
-        if (!userCredential) {
-          return res.status(404).json({
-            message: "User credentials not found for the given user.",
-          });
-        }
-        // Add Smart BCC if set and not already in bcc
-        // let bccList = [];
-        // if (bcc) {
-        //   bccList = bcc.split(",").map(e => e.trim()).filter(Boolean);
-        // }
-        // if (userCredential.smartBcc) {
-        //   const smartBccEmail = userCredential.smartBcc.trim();
-        //   if (!bccList.includes(smartBccEmail)) {
-        //     bccList.push(smartBccEmail);
-        //   }
-        // }
-        // const finalBcc = bccList.join(", ");
-
-        SENDER_EMAIL = userCredential.email;
-        SENDER_PASSWORD = userCredential.appPassword;
-
-        // Fetch senderName from MasterUser
-        const masterUser = await MasterUser.findOne({
-          where: { masterUserID },
-        });
-
-        if (!masterUser) {
-          return res.status(404).json({
-            message: "Master user not found for the given user.",
-          });
-        }
-
-        SENDER_NAME = masterUser.name; // Use the name from MasterUser
-      }
-      // --- Smart BCC logic: always after sender is set ---
-      const userCredentialForBcc = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-
-      let bccList = [];
-      if (bcc) {
-        bccList = bcc
-          .split(",")
-          .map((e) => e.trim())
-          .filter(Boolean);
-      }
-      if (userCredentialForBcc && userCredentialForBcc.smartBcc) {
-        const smartBccEmail = userCredentialForBcc.smartBcc.trim();
-        if (!bccList.includes(smartBccEmail)) {
-          bccList.push(smartBccEmail);
-        }
-      }
-      const finalBcc = bccList.join(", ");
-
-      let finalSubject = subject;
-      let finalBody = text || html;
-      let inReplyToHeader = null;
-      let referencesHeader = null;
-      let draftEmail;
-      // If draftId is present, fetch the draft and use its data as defaults
-      if (draftId) {
-        draftEmail = await Email.findOne({
-          where: { draftId, masterUserID, folder: "drafts" },
-        });
-        if (!draftEmail) {
-          return res.status(404).json({ message: "Draft not found." });
-        }
-        // Use draft's data as defaults, allow override by request
-        finalSubject = subject || draftEmail.subject;
-        finalBody = text || html || draftEmail.body;
-      }
-      // Handle reply action
-      if (actionType === "reply") {
-        const originalEmail = await Email.findOne({
-          where: { messageId: replyToMessageId },
-        });
-
-        if (!originalEmail) {
-          return res.status(404).json({
-            message: "Original email not found for the given messageId.",
-          });
-        }
-
-        inReplyToHeader = originalEmail.messageId;
-        referencesHeader = originalEmail.references
-          ? `${originalEmail.references} ${originalEmail.messageId}`
-          : originalEmail.messageId;
-
-        finalSubject = originalEmail.subject.startsWith("Re:")
-          ? originalEmail.subject
-          : `Re: ${originalEmail.subject}`;
-        finalBody = `${text || html}`;
-        req.body.to = originalEmail.sender;
-        req.body.cc = "";
-      }
-      if (actionType === "replyAll") {
-        const originalEmail = await Email.findOne({
-          where: { messageId: replyToMessageId },
-        });
-
-        if (!originalEmail) {
-          return res.status(404).json({
-            message: "Original email not found for the given messageId.",
-          });
-        }
-
-        inReplyToHeader = originalEmail.messageId;
-        referencesHeader = originalEmail.references
-          ? `${originalEmail.references} ${originalEmail.messageId}`
-          : originalEmail.messageId;
-
-        finalSubject = originalEmail.subject.startsWith("Re:")
-          ? originalEmail.subject
-          : `Re: ${originalEmail.subject}`;
-        finalBody = `${text || html}`;
-
-        // Build recipients: all original To and CC, plus sender, except yourself
-        const currentUserEmail = SENDER_EMAIL.toLowerCase();
-        const allTo = (originalEmail.recipient || "")
-          .split(",")
-          .map((e) => e.trim().toLowerCase());
-        const allCc = (originalEmail.cc || "")
-          .split(",")
-          .map((e) => e.trim().toLowerCase());
-        const replyAllList = [originalEmail.sender, ...allTo, ...allCc].filter(
-          (email) => email && email !== currentUserEmail
-        );
-        // Remove duplicates
-        const uniqueReplyAll = [...new Set(replyAllList)];
-        // Set recipients for reply all
-        req.body.to = uniqueReplyAll[0] || "";
-        req.body.cc = uniqueReplyAll.slice(1).join(", ");
-      }
-      if (actionType === "forward") {
-        const originalEmail = await Email.findOne({
-          where: { messageId: replyToMessageId },
-        });
-
-        if (!originalEmail) {
-          return res.status(404).json({
-            message: "Original email not found for the given messageId.",
-          });
-        }
-
-        inReplyToHeader = null;
-        referencesHeader = null;
-
-        finalSubject = originalEmail.subject.startsWith("Fwd:")
-          ? originalEmail.subject
-          : `Fwd: ${originalEmail.subject}`;
-        finalBody = `${
-          text || html
-        }<br><br>---------- Forwarded message ----------<br>
-    From: ${originalEmail.senderName || originalEmail.sender}<br>
-    Date: ${originalEmail.createdAt}<br>
-    Subject: ${originalEmail.subject}<br>
-    To: ${originalEmail.recipient}<br>
-    ${originalEmail.body}`;
-        // For forward, req.body.to and req.body.cc are set by the user
-      }
-
-      // If a templateID is provided, fetch the template
-      if (templateID) {
-        const template = await Template.findOne({
-          where: { templateID },
-        });
-
-        if (!template) {
-          return res.status(404).json({ message: "Template not found." });
-        }
-
-        finalSubject = template.subject;
-        finalBody = template.content;
-      }
-
-      // Fetch user credentials to check tracking settings
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
-
-      if (!userCredential) {
-        return res.status(404).json({
-          message: "User credentials not found for the given user.",
-        });
-      }
-
-      const isTrackOpenEmail = userCredential.isTrackOpenEmail || false;
-      const isTrackClickEmail = userCredential.isTrackClickEmail || false;
-
-      // Add tracking pixel for email open tracking
-      const generateTrackingPixel = (messageId) => {
-        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
-        return `<img src="${baseURL}/track/open/${messageId}" width="1" height="1" style="display:none;"alt="" />`;
-      };
-
-      // Add tracking links for click tracking
-      const generateRedirectLink = (originalUrl, messageId) => {
-        const baseURL = process.env.LOCALHOST_URL || "http://yourdomain.com";
-        return `${baseURL}/track/click?tempMessageId=${messageId}&url=${encodeURIComponent(
-          originalUrl
-        )}`;
-      };
-
-      const replaceLinksWithTracking = (body, messageId) => {
-        return body.replace(
-          /href="([^"]*)"/g,
-          (match, url) => `href="${generateRedirectLink(url, messageId)}"`
-        );
-      };
-      let signatureBlock = "";
-      if (userCredential.signatureName) {
-        signatureBlock += `<strong>${userCredential.signatureName}</strong><br>`;
-      }
-      if (userCredential.signature) {
-        signatureBlock += `${userCredential.signature}<br>`;
-      }
-      if (userCredential.signatureImage) {
-        signatureBlock += `<img src="${userCredential.signatureImage}" alt="Signature Image" style="max-width:200px;"/><br>`;
-      }
-      finalBody += `<br><br>${signatureBlock}`;
-      // Generate a temporary messageId for tracking
-      const tempMessageId = `temp-${Date.now()}`;
-
-      // Conditionally add tracking pixel and replace links in the email body
-      if (isTrackOpenEmail) {
-        finalBody += `<br>${generateTrackingPixel(tempMessageId)}`;
-      }
-
-      if (isTrackClickEmail) {
-        finalBody = replaceLinksWithTracking(finalBody, tempMessageId);
-      }
-
-      // Prepare attachments for nodemailer
-      const formattedAttachments =
-        req.files && req.files.length > 0
-          ? req.files.map((file) => ({
-              filename: file.originalname,
-              path: file.path,
-            }))
-          : [];
-      //Check if scheduledAt is provided for scheduling
-      if (req.body.scheduledAt) {
-        const parsedDate = new Date(req.body.scheduledAt);
-        if (isNaN(parsedDate.getTime())) {
-          return res
-            .status(400)
-            .json({ message: "Invalid scheduledAt date format." });
-        }
-        // Save to outbox for later sending
-        const emailData = {
-          messageId: null,
-          inReplyTo: inReplyToHeader || null,
-          references: referencesHeader || null,
-          sender: SENDER_EMAIL,
-          senderName: SENDER_NAME,
-          recipient: to,
-          cc,
-          bcc,
-          subject: finalSubject,
-          body: finalBody,
-          folder: "outbox",
-          createdAt: new Date(),
-          masterUserID,
-          tempMessageId,
-          isDraft: false,
-          scheduledAt: parsedDate,
-        };
-        const savedEmail = await Email.create(emailData);
-
-        // Save user-uploaded attachment files with file paths for scheduled emails
-        if (req.files && req.files.length > 0) {
-          await saveUserUploadedAttachments(req.files, savedEmail.emailID);
-        }
-
-        return res.status(200).json({
-          message: "Email scheduled and saved to outbox successfully.",
-          scheduledAt: emailData.scheduledAt,
-          emailID: savedEmail.emailID,
-        });
-      }
-
-      // Create a transporter using the selected email credentials
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: SENDER_EMAIL,
-          pass: SENDER_PASSWORD,
-        },
-      });
-      // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
-
-      // Define the email options
-      const mailOptions = {
-        from: `"${SENDER_NAME}" <${SENDER_EMAIL}>`,
-        to: to || (draftEmail && draftEmail.recipient),
-        cc: cc || (draftEmail && draftEmail.cc),
-        bcc: finalBcc || bcc || (draftEmail && draftEmail.bcc),
-        subject: finalSubject,
-        text: htmlToText(finalBody),
-        html: finalBody,
-        attachments:
-          formattedAttachments.length > 0 ? formattedAttachments : undefined,
-        inReplyTo: inReplyToHeader || undefined,
-        references: referencesHeader || undefined,
-      };
-
-      const baseURL = process.env.LOCALHOST_URL;
-
-      let attachments = [];
-      if (req.files && req.files.length > 0) {
-        // For user-uploaded files, include the full file path for proper saving
-        const baseURL = process.env.LOCALHOST_URL;
-        attachments = req.files.map((file) => ({
-          filename: file.filename,
-          originalname: file.originalname,
-          path: file.path, // This is the actual file path on disk where multer saved the file
-          size: file.size,
-          contentType: file.mimetype,
-        }));
-      } else if (draftId && draftEmail) {
-        // If no new files uploaded, fetch existing attachments from the draft
-        const oldAttachments = await Attachment.findAll({
-          where: { emailID: draftEmail.emailID },
-        });
-        attachments = oldAttachments.map((att) => ({
-          filename: att.filename,
-          originalname: att.filename,
-          path: att.filePath || att.path, // use filePath or path
-          size: att.size,
-          contentType: att.contentType,
-        }));
-      }
-
-      const finalTo = to || (draftEmail && draftEmail.recipient);
-      const finalCc = cc || (draftEmail && draftEmail.cc);
-      const finalBccValue = finalBcc || bcc || (draftEmail && draftEmail.bcc);
-
-      if (!finalTo && !finalCc && !finalBccValue) {
-        return res.status(400).json({
-          message: "At least one recipient (to, cc, bcc) is required.",
-        });
-      }
-      const emailData = {
-        // messageId: info.messageId,
-        draftId: draftId || null,
-        inReplyTo: inReplyToHeader || null,
-        references: referencesHeader || null,
-        sender: SENDER_EMAIL,
-        senderName: SENDER_NAME,
-        // recipient: to,
-        // cc,
-        // bcc,
-        recipient: finalTo,
-        cc: finalCc,
-        bcc: finalBccValue,
-        subject: finalSubject,
-        body: finalBody,
-        folder: "sent", // Will be set when saved in queue worker
-        createdAt: new Date(),
-        masterUserID,
-        tempMessageId,
-        isDraft: false,
-        attachments,
-        // isShared: isShared === true || isShared === "true", // ensure boolean
-      };
-
-      // Don't save to database here - let the queue worker handle it
-      // Just send the email data to the queue for processing
-      await publishToQueue("EMAIL_QUEUE", emailData);
-      // }
-
-      res.status(200).json({
-        message: "Email sent and saved successfully.",
-        // messageId: info.messageId,
-        // attachments: attachmentLinks,
-      });
-    } catch (error) {
-      console.error("Error sending email:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to send email.", error: error.message });
-    }
-  },
-];
-
-exports.createTemplate = async (req, res) => {
-  const { name, subject, content, isShared } = req.body; // Changed `body` to `content`
-  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
-  try {
-    // Save the template in the database
-    const templateData = {
-      name,
-      subject,
-      content, // Use `content` instead of `body`
-      isShared: isShared || false, // Default to false if not provided
-      masterUserID, // Associate the template with the user
-    };
-
-    const savedTemplate = await Template.create(templateData);
-    console.log("Template created successfully:", savedTemplate);
-
-    res.status(200).json({
-      message: "Template created successfully.",
-      template: savedTemplate,
-    });
-  } catch (error) {
-    console.error("Error creating template:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to create template.", error: error.message });
-  }
-};
-
-exports.getTemplates = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
-  try {
-    // Fetch templates for the specific user
-    const templates = await Template.findAll({
-      where: { masterUserID }, // Filter by masterUserID
-    });
-
-    res.status(200).json({
-      message: "Templates fetched successfully.",
-      templates,
-    });
-  } catch (error) {
-    console.error("Error fetching templates:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch templates.", error: error.message });
-  }
-};
-
-exports.getTemplateById = async (req, res) => {
-  const { templateID } = req.params;
-  const masterUserID = req.adminId; // Assuming `adminId` is set in middleware
-
-  try {
-    // Fetch the template for the specific user and templateID
-    const template = await Template.findOne({
-      where: {
-        templateID,
-        masterUserID, // Ensure the template belongs to the specific user
-      },
-    });
-
-    if (!template) {
-      return res.status(404).json({ message: "Template not found." });
+    const person = await getPersonWithContactInfo(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
     }
 
     res.status(200).json({
-      message: "Template fetched successfully.",
-      template,
+      message: "Person retrieved successfully",
+      person
     });
   } catch (error) {
-    console.error("Error fetching template:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch template.", error: error.message });
+    console.error("Error getting person:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
-exports.getUnreadCounts = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-
+exports.linkPersonToOrganization = async (req, res) => {
+  const { personId, leadOrganizationId } = req.body;
   try {
-    // Check if user has credentials in UserCredential model
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+    const person = await Person.findByPk(personId);
+    if (!person) return res.status(404).json({ message: "Person not found" });
 
-    if (!userCredential) {
-      return res.status(200).json({
-        message: "No email credentials found for this user.",
-        masterUserID,
-        unreadCounts: {
-          inbox: 0,
-          drafts: 0,
-          sent: 0,
-          archive: 0,
-          trash: 0,
-        },
-      });
-    }
-
-    // Define all possible folders
-    const allFolders = ["inbox", "drafts", "sent", "archive", "trash"];
-
-    // Fetch the count of unread emails grouped by folder for the specific user
-    const unreadCounts = await Email.findAll({
-      attributes: [
-        "folder", // Group by folder
-        [Sequelize.fn("COUNT", Sequelize.col("emailID")), "unreadCount"], // Count unread emails
-      ],
-      where: {
-        isRead: false, // Only fetch unread emails
-        masterUserID, // Filter by the specific user's masterUserID
-      },
-      group: ["folder"], // Group by folder
-    });
-
-    // Convert the result into a dictionary with folder names as keys
-    const counts = unreadCounts.reduce((acc, item) => {
-      acc[item.folder] = parseInt(item.dataValues.unreadCount, 10);
-      return acc;
-    }, {});
-
-    // Ensure all folders are included in the response, even if they have zero unread emails
-    const response = allFolders.reduce((acc, folder) => {
-      acc[folder] = counts[folder] || 0; // Default to 0 if the folder is not in the result
-      return acc;
-    }, {});
-
-    res.status(200).json({
-      message: "Unread counts fetched successfully.",
-      masterUserID, // Include the user's masterUserID in the response
-      unreadCounts: response,
-    });
-  } catch (error) {
-    console.error("Error fetching unread counts:", error);
-    res.status(500).json({ message: "Internal server error." });
-  }
-};
-
-exports.addUserCredential = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const {
-    email,
-    appPassword,
-    syncStartDate,
-    syncFolders,
-    syncAllFolders,
-    isTrackOpenEmail,
-    isTrackClickEmail,
-    blockedEmail, // <-- Add this line
-    provider,
-    imapHost, // <-- Add these lines
-    imapPort,
-    imapTLS,
-    smtpHost,
-    smtpPort,
-    smtpSecure,
-  } = req.body;
-
-  try {
-    // Validate syncStartDate (ensure it's a valid ISO date string)
-    if (syncStartDate) {
-      const parsedDate = new Date(syncStartDate);
-      if (isNaN(parsedDate.getTime())) {
-        return res.status(400).json({
-          message: "Invalid syncStartDate format. Expected an ISO date string.",
-        });
-      }
-    }
-
-    // Validate syncFolders (optional validation to ensure it's an array)
-    if (syncFolders && !Array.isArray(syncFolders)) {
+    if (
+      person.leadOrganizationId &&
+      person.leadOrganizationId !== leadOrganizationId
+    ) {
       return res.status(400).json({
-        message: "Invalid syncFolders. It must be an array of folder names.",
+        message: "Person is already linked to another organization.",
+        currentOrganizationId: person.leadOrganizationId,
       });
     }
 
-    // Check if the user already has credentials saved
-    const existingCredential = await UserCredential.findOne({
-      where: { masterUserID },
+    // Fetch the organization name
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    person.leadOrganizationId = leadOrganizationId;
+    person.organization = organization.organization; // Update the organization column
+    await person.save();
+
+    res.status(200).json({
+      message: "Person linked to organization",
+      person,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.addPersonNote = async (req, res) => {
+  const { personId } = req.params; // Get personId from params
+  if (!personId) {
+    return res.status(400).json({ message: "Person ID is required." });
+  }
+  const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+  try {
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    const note = await PersonNote.create({
+      personId,
+      masterUserID: req.adminId,
+      content: content.trim(),
+      createdBy: req.adminId,
     });
 
-    const updateData = {};
-    if (email) updateData.email = email;
-    if (appPassword) updateData.appPassword = appPassword;
-    if (syncStartDate) updateData.syncStartDate = syncStartDate;
-    if (syncFolders) updateData.syncFolders = syncFolders;
-    if (syncAllFolders !== undefined)
-      updateData.syncAllFolders = syncAllFolders;
-    if (isTrackOpenEmail !== undefined)
-      updateData.isTrackOpenEmail = isTrackOpenEmail;
-    if (isTrackClickEmail !== undefined)
-      updateData.isTrackClickEmail = isTrackClickEmail;
-    if (blockedEmail !== undefined) updateData.blockedEmail = blockedEmail;
-    if (provider) updateData.provider = provider;
-    // Add custom provider fields
-    if (provider === "custom") {
-      if (imapHost) updateData.imapHost = imapHost;
-      if (imapPort) updateData.imapPort = imapPort;
-      if (imapTLS !== undefined) updateData.imapTLS = imapTLS;
-      if (smtpHost) updateData.smtpHost = smtpHost;
-      if (smtpPort) updateData.smtpPort = smtpPort;
-      if (smtpSecure !== undefined) updateData.smtpSecure = smtpSecure;
-    }
-
-    if (existingCredential) {
-      // Update existing credentials
-      await existingCredential.update(updateData);
-      return res.status(200).json({
-        message: "User credentials updated successfully.",
-        updatedFields: updateData,
-      });
-    }
-
-    // Create new credentials
-    const newCredential = await UserCredential.create({
-      masterUserID,
-      email: email || null,
-      appPassword: appPassword || null,
-      syncStartDate: syncStartDate || new Date().toISOString(),
-      syncFolders: syncFolders || [
-        "INBOX",
-        "[Gmail]/Sent Mail",
-        "[Gmail]/Drafts",
+    // Fetch the created note with creator details
+    const noteWithCreator = await PersonNote.findByPk(note.noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
       ],
-      syncAllFolders: syncAllFolders || false,
-      isTrackOpenEmail: isTrackOpenEmail || true,
-      isTrackClickEmail: isTrackClickEmail || true,
-      blockedEmail: blockedEmail || null, // <-- Add this line
-      provider: provider || "gmail",
-      // Add these lines for custom provider support
-      imapHost: provider === "custom" ? imapHost : null,
-      imapPort: provider === "custom" ? imapPort : null,
-      imapTLS: provider === "custom" ? imapTLS : null,
-      smtpHost: provider === "custom" ? smtpHost : null,
-      smtpPort: provider === "custom" ? smtpPort : null,
-      smtpSecure: provider === "custom" ? smtpSecure : null,
     });
 
     res.status(201).json({
-      message: "User credentials added successfully.",
-      credential: newCredential,
+      message: "Note added to person successfully",
+      note: noteWithCreator,
     });
   } catch (error) {
-    console.error("Error adding or updating user credentials:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("Error adding person note:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.getUserCredential = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming `adminId` is passed in the request (e.g., from middleware)
-
+exports.addOrganizationNote = async (req, res) => {
+  const { leadOrganizationId } = req.params; // Get leadOrganizationId from params
+  if (!leadOrganizationId) {
+    return res.status(400).json({ message: "Organization ID is required." });
+  }
+  const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
   try {
-    // Fetch the user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
+    }
+
+    const note = await OrganizationNote.create({
+      leadOrganizationId,
+      masterUserID: req.adminId,
+      content: content.trim(),
+      createdBy: req.adminId,
     });
 
-    if (!userCredential) {
-      return res.status(404).json({ message: "User credentials not found." });
+    // Fetch the created note with creator details
+    const noteWithCreator = await OrganizationNote.findByPk(note.noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      message: "Note added to organization successfully",
+      note: noteWithCreator,
+    });
+  } catch (error) {
+    console.error("Error adding organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get all notes for a person
+exports.getPersonNotes = async (req, res) => {
+  const { personId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
     }
+
+    const { count, rows: notes } = await PersonNote.findAndCountAll({
+      where: { personId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
+    });
 
     res.status(200).json({
-      message: "User credentials fetched successfully.",
-      credential: userCredential, // Return all fields
+      message: "Person notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+      notes,
     });
   } catch (error) {
-    console.error("Error fetching user credentials:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("Error fetching person notes:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
-exports.deleteEmail = async (req, res) => {
-  try {
-    const masterUserID = req.adminId; // Assuming adminId is set in middleware
-    const { emailId } = req.params; // Get the email ID from the request parameters
 
-    const email = await Email.findOne({
-      where: { emailID: emailId, masterUserID }, // Ensure the email belongs to the specific user
-    });
-    if (!email) {
-      return res.status(404).json({ message: "Email not found." });
-    } else {
-      // Move the email to the trash folder
-      await email.update({ folder: "trash" });
-      console.log(`Email moved to trash: ${email.messageId}`);
-      res.status(200).json({
-        message: "Email moved to trash successfully.",
-      });
+// Get all notes for an organization
+exports.getOrganizationNotes = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
     }
+
+    const { count, rows: notes } = await OrganizationNote.findAndCountAll({
+      where: { leadOrganizationId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
+    });
+
+    res.status(200).json({
+      message: "Organization notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+      notes,
+    });
   } catch (error) {
-    console.error("Error deleting email:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("Error fetching organization notes:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.deletebulkEmails = async (req, res) => {
-  try {
-    const masterUserID = req.adminId;
-    const { emailIds } = req.body; // Expecting an array of email IDs
+// Update a person note
+exports.updatePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+  const { content } = req.body;
 
-    if (!Array.isArray(emailIds) || emailIds.length === 0) {
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+
+  try {
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
       return res
-        .status(400)
-        .json({ message: "emailIds must be a non-empty array." });
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
     }
 
-    // Update all emails to move them to the trash folder
-    const [updatedCount] = await Email.update(
-      { folder: "trash" },
-      { where: { emailID: emailIds, masterUserID } }
-    );
+    // Update the note
+    await note.update({ content: content.trim() });
+
+    // Fetch updated note with creator details
+    const updatedNote = await PersonNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
 
     res.status(200).json({
-      message: `${updatedCount} email(s) moved to trash successfully.`,
+      message: "Person note updated successfully",
+      note: updatedNote,
     });
   } catch (error) {
-    console.error("Error deleting emails:", error);
-    res.status(500).json({ message: "Internal server error." });
+    console.error("Error updating person note:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.saveDraft = [
-  // upload.array("attachments"), // Use Multer to handle multiple file uploads
-  dynamicUpload,
-  async (req, res) => {
-    const { to, cc, bcc, subject, text, html, draftId } = req.body;
-    const masterUserID = req.adminId; // Assuming adminId is set in middleware
+// Update an organization note
+exports.updateOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+  const { content } = req.body;
 
-    try {
-      let savedDraft;
-      let isUpdate = false;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
 
-      if (draftId) {
-        // Try to find the existing draft
-        savedDraft = await Email.findOne({
-          where: { draftId, masterUserID, folder: "drafts" },
-        });
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
 
-        if (savedDraft) {
-          // Update the existing draft
-          await savedDraft.update({
-            recipient: to || null,
-            cc: cc || null,
-            bcc: bcc || null,
-            subject: subject || null,
-            body: text || html || null,
-          });
-          isUpdate = true;
-        }
-      }
-
-      if (!savedDraft) {
-        // Create a new draft if not updating
-        savedDraft = await Email.create({
-          messageId: null,
-          sender: null,
-          senderName: null,
-          recipient: to || null,
-          cc: cc || null,
-          bcc: bcc || null,
-          subject: subject || null,
-          body: text || html || null,
-          folder: "drafts",
-          masterUserID,
-          draftId: draftId || null,
-        });
-      }
-
-      // Handle attachments (save actual files for user uploads)
-      let savedAttachments = [];
-      if (req.files && req.files.length > 0) {
-        if (isUpdate) {
-          // Remove old attachments if updating
-          await Attachment.destroy({ where: { emailID: savedDraft.emailID } });
-        }
-        // Save user-uploaded draft attachments with file paths
-        const baseURL = process.env.LOCALHOST_URL || "http://localhost:3056";
-        savedAttachments = req.files.map((file) => ({
-          emailID: savedDraft.emailID,
-          filename: file.filename,
-          filePath: `${baseURL}/uploads/attachments/${encodeURIComponent(
-            file.filename
-          )}`, // Save actual file path for user uploads
-          size: file.size,
-          contentType: file.mimetype,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-      } else if (isUpdate) {
-        // If no new attachments, fetch existing ones for response
-        savedAttachments = await Attachment.findAll({
-          where: { emailID: savedDraft.emailID },
-        });
-      }
-
-      // Return attachment links for user-uploaded files
-      const attachmentLinks = savedAttachments.map((attachment) => ({
-        filename: attachment.filename,
-        link: attachment.filePath, // Return the file path for user uploads
-      }));
-
-      res.status(200).json({
-        message: isUpdate
-          ? "Draft updated successfully."
-          : "Draft saved successfully.",
-        draft: savedDraft,
-        attachments: attachmentLinks,
-      });
-    } catch (error) {
-      console.error("Error saving draft:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to save draft.", error: error.message });
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
     }
-  },
-];
 
-exports.scheduleEmail = [
-  // upload.array("attachments"),
-  dynamicUpload,
-  async (req, res) => {
-    const { to, cc, bcc, subject, text, html, scheduledAt } = req.body;
-    const masterUserID = req.adminId;
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
+    }
 
-    try {
-      // Fetch sender email and name (prefer DefaultEmail, fallback to UserCredential)
-      let SENDER_EMAIL, SENDER_NAME;
+    // Update the note
+    await note.update({ content: content.trim() });
 
-      const defaultEmail = await DefaultEmail.findOne({
-        where: { masterUserID, isDefault: true },
-      });
+    // Fetch updated note with creator details
+    const updatedNote = await OrganizationNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
 
-      if (defaultEmail) {
-        SENDER_EMAIL = defaultEmail.email;
-        SENDER_NAME = defaultEmail.senderName;
-        if (!SENDER_NAME) {
-          const masterUser = await MasterUser.findOne({
-            where: { masterUserID },
-          });
-          SENDER_NAME = masterUser ? masterUser.name : null;
+    res.status(200).json({
+      message: "Organization note updated successfully",
+      note: updatedNote,
+    });
+  } catch (error) {
+    console.error("Error updating organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete a person note
+exports.deletePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Person note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete an organization note
+exports.deleteOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Organization note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// exports.getAllContactPersons = async (req, res) => {
+//   try {
+//     const { search = "" } = req.query;
+
+//     const where = search
+//       ? { contactPerson: { [Op.like]: `%${search}%` } }
+//       : {};
+
+//     const persons = await Person.findAll({
+//       where,
+//       attributes: ["personId", "contactPerson", "email"],
+//       order: [["contactPerson", "ASC"]],
+//       raw: true
+//     });
+
+//     res.status(200).json({
+//       contactPersons: persons // Array of { personId, contactPerson }
+//     });
+//   } catch (error) {
+//     console.error("Error fetching contact persons:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+exports.getAllContactPersons = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
+
+    // Include organization using association
+    const { count, rows: persons } = await Person.findAndCountAll({
+      where,
+      attributes: ["personId", "contactPerson", "email", "leadOrganizationId"],
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization", // Make sure this matches your association
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+      order: [["contactPerson", "ASC"]],
+      limit: parseInt(limit),
+      offset,
+    });
+
+    // Format response to include organization info at top level
+    const contactPersons = persons.map((person) => ({
+      personId: person.personId,
+      contactPerson: person.contactPerson,
+      email: person.email,
+      organization: person.LeadOrganization
+        ? {
+            leadOrganizationId: person.LeadOrganization.leadOrganizationId,
+            organization: person.LeadOrganization.organization,
+          }
+        : null,
+    }));
+
+    res.status(200).json({
+      contactPersons,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPersonsByOrganization = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  try {
+    // Find the organization
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Find all persons linked to this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId },
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "organization",
+      ],
+      order: [["contactPerson", "ASC"]],
+    });
+
+    // Fetch ownerName from MasterUser using organization.ownerId
+    let ownerName = null;
+    if (organization.ownerId) {
+      const owner = await MasterUser.findByPk(organization.ownerId);
+      if (owner) {
+        ownerName = owner.name;
+      }
+    }
+
+    // Add ownerName to each person object
+    const personsWithOwner = persons.map((person) => ({
+      ...person.toJSON(),
+      ownerName,
+    }));
+
+    res.status(200).json({
+      organization: organization.organization,
+      persons: personsWithOwner,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonsAndOrganizations = async (req, res) => {
+  try {
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    // const CustomField = require("../../models/customFieldModel");
+    // const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Pagination and search for persons
+    const personPage = parseInt(req.query.personPage) || 1;
+    const personLimit = parseInt(req.query.personLimit) || 20;
+    const personOffset = (personPage - 1) * personLimit;
+    const personSearch = req.query.personSearch || "";
+
+     // Get sort parameters
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder || 'DESC';
+
+    // Pagination and search for organizations
+    const orgPage = parseInt(req.query.orgPage) || 1;
+    const orgLimit = parseInt(req.query.orgLimit) || 20;
+    const orgOffset = (orgPage - 1) * orgLimit;
+    const orgSearch = req.query.orgSearch || "";
+
+    // Dynamic filter config (from body or query) -- now supports filterId as number or object
+    const LeadFilter = require("../../models/leads/leadFiltersModel");
+    let filterConfig = null;
+    let filterIdRaw = null;
+    if (req.body && req.body.filterId !== undefined) {
+      filterIdRaw = req.body.filterId;
+    } else if (req.query && req.query.filterId !== undefined) {
+      filterIdRaw = req.query.filterId;
+    }
+
+    // If filterIdRaw is a number, fetch filterConfig from DB
+    if (filterIdRaw !== null && filterIdRaw !== undefined) {
+      if (typeof filterIdRaw === "string" && /^\d+$/.test(filterIdRaw)) {
+        // filterIdRaw is a string number
+        const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else if (typeof filterIdRaw === "number") {
+        const filterRow = await LeadFilter.findByPk(filterIdRaw);
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
         }
       } else {
-        const userCredential = await UserCredential.findOne({
-          where: { masterUserID },
-        });
-        SENDER_EMAIL = userCredential ? userCredential.email : null;
-        const masterUser = await MasterUser.findOne({
-          where: { masterUserID },
-        });
-        SENDER_NAME = masterUser ? masterUser.name : null;
+        // Try to parse as JSON object
+        try {
+          filterConfig =
+            typeof filterIdRaw === "string"
+              ? JSON.parse(filterIdRaw)
+              : filterIdRaw;
+        } catch (e) {
+          filterConfig = null;
+        }
       }
-
-      // Prepare email data for scheduling
-      const emailData = {
-        sender: SENDER_EMAIL,
-        senderName: SENDER_NAME,
-        recipient: to,
-        cc,
-        bcc,
-        subject,
-        body: text || html,
-        folder: "outbox",
-        masterUserID,
-        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
-        isDraft: false,
-      };
-      const scheduledEmail = await Email.create(emailData);
-
-      // Save attachments if any
-      if (req.files && req.files.length > 0) {
-        const savedAttachments = req.files.map((file) => ({
-          emailID: scheduledEmail.emailID,
-          filename: file.originalname,
-          path: file.path,
-        }));
-        await Attachment.bulkCreate(savedAttachments);
-      }
-
-      res.status(200).json({
-        message: "Email scheduled successfully.",
-        // email: fullEmail,
-      });
-    } catch (error) {
-      console.error("Error scheduling email:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to schedule email.", error: error.message });
     }
-  },
-];
 
-// Delete all emails and attachments for a given masterUserID
-exports.deleteAllEmailsForUser = async (req, res) => {
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
-  const BATCH_SIZE = 1000;
-  let totalEmailsDeleted = 0;
-  let totalAttachmentsDeleted = 0;
+    let personWhere = {};
+    let leadWhere = {};
+    let dealWhere = {};
+    let organizationWhere = {};
+    let activityWhere = {};
+    // Debug: print filterConfig
+    console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
+    const ops = {
+      eq: Op.eq,
+      ne: Op.ne,
+      like: Op.like,
+      notLike: Op.notLike,
+      gt: Op.gt,
+      gte: Op.gte,
+      lt: Op.lt,
+      lte: Op.lte,
+      in: Op.in,
+      notIn: Op.notIn,
+      is: Op.eq,
+      isNot: Op.ne,
+      isEmpty: Op.is,
+      isNotEmpty: Op.not,
+      between: Op.between,
+      notBetween: Op.notBetween,
+    };
+    const operatorMap = {
+      is: "eq",
+      "is not": "ne",
+      "is empty": "isEmpty",
+      "is not empty": "isNotEmpty",
+      contains: "like",
+      "does not contain": "notLike",
+      "is exactly or earlier than": "lte",
+      "is earlier than": "lt",
+      "is exactly or later than": "gte",
+      "not equals": "ne",
+      "greater than": "gt",
+      "greater than or equal": "gte",
+      "less than": "lt",
+      "less than or equal": "lte",
+    };
 
-  // Use transaction to ensure data consistency
-  const transaction = await Email.sequelize.transaction();
-
-  try {
-    // First, get the total count for verification
-    const totalEmailsCount = await Email.count({
-      where: { masterUserID },
-      transaction,
-    });
-
-    // Get total attachments count by finding all emails first, then counting attachments
-    const allEmailIds = await Email.findAll({
-      where: { masterUserID },
-      attributes: ["emailID"],
-      transaction,
-    });
-
-    const emailIds = allEmailIds.map((email) => email.emailID);
-    const totalAttachmentsCount =
-      emailIds.length > 0
-        ? await Attachment.count({
-            where: { emailID: emailIds },
-            transaction,
-          })
-        : 0;
-
-    console.log(`Starting deletion for user ${masterUserID}:`);
-    console.log(`- Total emails to delete: ${totalEmailsCount}`);
-    console.log(`- Total attachments to delete: ${totalAttachmentsCount}`);
-
-    while (true) {
-      // Fetch a batch of email IDs for the user
-      const emails = await Email.findAll({
-        where: { masterUserID },
-        attributes: ["emailID"],
-        limit: BATCH_SIZE,
-        transaction,
-      });
-
-      if (emails.length === 0) break;
-      const emailIDs = emails.map((e) => e.emailID);
-
-      // Delete all attachments for these emails first
-      const attachmentsDeleted = await Attachment.destroy({
-        where: { emailID: emailIDs },
-        transaction,
-      });
-
-      // Delete all emails for the user in this batch
-      const emailsDeleted = await Email.destroy({
-        where: { emailID: emailIDs },
-        transaction,
-      });
-
-      totalEmailsDeleted += emailsDeleted;
-      totalAttachmentsDeleted += attachmentsDeleted;
-
+    // Helper function to build a single condition - following the pattern from other APIs
+    function buildCondition(cond) {
       console.log(
-        `Batch processed: ${emailsDeleted} emails, ${attachmentsDeleted} attachments`
+        "[DEBUG] buildCondition called with:",
+        JSON.stringify(cond, null, 2)
       );
 
-      if (emails.length < BATCH_SIZE) break;
+      const ops = {
+        eq: Op.eq,
+        ne: Op.ne,
+        like: Op.like,
+        notLike: Op.notLike,
+        gt: Op.gt,
+        gte: Op.gte,
+        lt: Op.lt,
+        lte: Op.lte,
+        in: Op.in,
+        notIn: Op.notIn,
+        is: Op.eq,
+        isNot: Op.ne,
+        isEmpty: Op.is,
+        isNotEmpty: Op.not,
+        between: Op.between,
+        notBetween: Op.notBetween,
+      };
+
+      let operator = cond.operator;
+      console.log("[DEBUG] Original operator:", operator);
+
+      if (operatorMap[operator]) {
+        operator = operatorMap[operator];
+        console.log("[DEBUG] Mapped operator:", operator);
+      }
+
+      // Handle "is empty" and "is not empty"
+      if (operator === "isEmpty" || operator === "is empty") {
+        const result = { [cond.field]: { [Op.is]: null } };
+        console.log(
+          "[DEBUG] isEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "isNotEmpty" || operator === "is not empty") {
+        const result = {
+          [Op.and]: [
+            { [cond.field]: { [Op.not]: null } },
+            { [cond.field]: { [Op.ne]: "" } },
+          ],
+        };
+        console.log(
+          "[DEBUG] isNotEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "contains" and "does not contain" for text fields
+      if (operator === "like" || operator === "contains") {
+        const result = { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] like condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "notLike" || operator === "does not contain") {
+        const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "is" operator for exact match
+      if (operator === "is" || operator === "eq") {
+        const result = { [cond.field]: cond.value };
+        console.log(
+          "[DEBUG] is/eq condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Default condition
+      const finalOperator = ops[operator] || Op.eq;
+      console.log("[DEBUG] Final operator symbol:", finalOperator);
+      console.log("[DEBUG] Condition value:", cond.value);
+      console.log("[DEBUG] Condition field:", cond.field);
+
+      const result = {
+        [cond.field]: {
+          [finalOperator]: cond.value,
+        },
+      };
+      console.log(
+        "[DEBUG] Default condition result:",
+        JSON.stringify(result, null, 2)
+      );
+
+      // Additional validation
+      if (cond.value === undefined || cond.value === null) {
+        console.log("[DEBUG] WARNING: cond.value is undefined or null!");
+        console.log(
+          "[DEBUG] Full condition object:",
+          JSON.stringify(cond, null, 2)
+        );
+      }
+
+      return result;
     }
+
+    // Get model field names for validation
+    const personFields = Object.keys(Person.rawAttributes);
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    let activityFields = [];
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      activityFields = Object.keys(Activity.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Activity model not available:", e.message);
+    }
+
+    console.log("[DEBUG] Available fields:");
+    console.log("- Person fields:", personFields.slice(0, 5), "...");
+    console.log("- Lead fields:", leadFields.slice(0, 5), "...");
+    console.log("- Deal fields:", dealFields.slice(0, 5), "...");
+    console.log(
+      "- Organization fields:",
+      organizationFields.slice(0, 5),
+      "..."
+    );
+    console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+
+    // If filterConfig is provided, build AND/OR logic for all entities
+    if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
+      if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
+        console.log("[DEBUG] Processing 'all' conditions:", filterConfig.all);
+
+        filterConfig.all.forEach(function (cond) {
+          console.log(`[DEBUG] Processing AND condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.and]) personWhere[Op.and] = [];
+                  personWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+                  leadWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+                  dealWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.and])
+                    organizationWhere[Op.and] = [];
+                  organizationWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                console.log(`[DEBUG] Processing activity condition:`, cond);
+                console.log(
+                  `[DEBUG] Available activity fields:`,
+                  activityFields
+                );
+                console.log(
+                  `[DEBUG] Checking if field '${cond.field}' is in activity fields`
+                );
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+                  const condition = buildCondition(cond);
+                  console.log(
+                    `[DEBUG] Built activity condition:`,
+                    JSON.stringify(condition, null, 2)
+                  );
+                  activityWhere[Op.and].push(condition);
+                  console.log(
+                    `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                  console.log(
+                    `[DEBUG] Current activityWhere[Op.and]:`,
+                    JSON.stringify(activityWhere[Op.and], null, 2)
+                  );
+                  console.log(
+                    `[DEBUG] Current activityWhere:`,
+                    JSON.stringify(activityWhere, null, 2)
+                  );
+                } else {
+                  console.log(
+                    `[DEBUG] Field '${cond.field}' NOT found in activity fields:`,
+                    activityFields
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.and]) personWhere[Op.and] = [];
+              personWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person AND condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+              leadWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead AND condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+              dealWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal AND condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+              organizationWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization AND condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              console.log(
+                `[DEBUG] Auto-detecting activity condition for field: ${cond.field}`
+              );
+              if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+              const condition = buildCondition(cond);
+              console.log(
+                `[DEBUG] Built auto-detected activity condition:`,
+                JSON.stringify(condition, null, 2)
+              );
+              activityWhere[Op.and].push(condition);
+              console.log(
+                `[DEBUG] Auto-detected Activity AND condition for field: ${cond.field}`
+              );
+              console.log(
+                `[DEBUG] Current activityWhere after auto-detection:`,
+                JSON.stringify(activityWhere, null, 2)
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+              console.log(`[DEBUG] Available fields summary:`);
+              console.log(`  - Person: ${personFields.length} fields`);
+              console.log(`  - Lead: ${leadFields.length} fields`);
+              console.log(`  - Deal: ${dealFields.length} fields`);
+              console.log(
+                `  - Organization: ${organizationFields.length} fields`
+              );
+              console.log(`  - Activity: ${activityFields.length} fields`);
+            }
+          }
+        });
+      }
+
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        console.log("[DEBUG] Processing 'any' conditions:", filterConfig.any);
+
+        filterConfig.any.forEach(function (cond) {
+          console.log(`[DEBUG] Processing OR condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.or]) personWhere[Op.or] = [];
+                  personWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+                  leadWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+                  dealWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+                  organizationWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+                  activityWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.or]) personWhere[Op.or] = [];
+              personWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person OR condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+              leadWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead OR condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+              dealWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal OR condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+              organizationWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization OR condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+              activityWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity OR condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+    } else if (personSearch) {
+      // Fallback to search logic if no filterConfig
+      if (personSearch.length === 1) {
+        // If personSearch is a single character, filter contactPerson by first letter only
+        personWhere.contactPerson = { [Op.like]: `${personSearch}%` };
+      } else {
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `%${personSearch}%` } },
+          { email: { [Op.like]: `%${personSearch}%` } },
+          { phone: { [Op.like]: `%${personSearch}%` } },
+          { jobTitle: { [Op.like]: `%${personSearch}%` } },
+          { personLabels: { [Op.like]: `%${personSearch}%` } },
+          { organization: { [Op.like]: `%${personSearch}%` } },
+        ];
+      }
+    }
+
+    // Debug: log all where clauses
+    console.log("[DEBUG] Final where clauses:");
+    console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
+    console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
+    console.log(
+      "- organizationWhere:",
+      JSON.stringify(organizationWhere, null, 2)
+    );
+    console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
+
+    // Additional debug for contactPerson filtering
+    if (filterConfig && filterConfig.all && filterConfig.all.length > 0) {
+      const contactPersonFilter = filterConfig.all.find(
+        (cond) => cond.field === "contactPerson" && cond.entity === "Person"
+      );
+      if (contactPersonFilter) {
+        console.log("[DEBUG] Found contactPerson filter:", contactPersonFilter);
+        console.log(
+          "[DEBUG] Checking if personWhere contains contactPerson condition..."
+        );
+
+        // Test the exact query that will be run
+        const testQuery = await Person.findAll({
+          where: { contactPerson: contactPersonFilter.value },
+          attributes: ["personId", "contactPerson"],
+          limit: 5,
+          raw: true,
+        });
+        console.log(
+          "[DEBUG] Test query for exact contactPerson match:",
+          testQuery
+        );
+      }
+    }
+
+    // Check if any conditions exist (including Op.and arrays)
+    const hasActivityFilters =
+      Object.keys(activityWhere).length > 0 ||
+      (activityWhere[Op.and] && activityWhere[Op.and].length > 0);
+    const hasLeadFilters =
+      Object.keys(leadWhere).length > 0 ||
+      (leadWhere[Op.and] && leadWhere[Op.and].length > 0);
+    const hasDealFilters =
+      Object.keys(dealWhere).length > 0 ||
+      (dealWhere[Op.and] && dealWhere[Op.and].length > 0);
+    const hasOrgFilters =
+      Object.keys(organizationWhere).length > 0 ||
+      (organizationWhere[Op.and] && organizationWhere[Op.and].length > 0);
+
+    console.log("[DEBUG] Filter detection:");
+    console.log("- hasActivityFilters:", hasActivityFilters);
+    console.log("- hasLeadFilters:", hasLeadFilters);
+    console.log("- hasDealFilters:", hasDealFilters);
+    console.log("- hasOrgFilters:", hasOrgFilters);
+
+    if (hasActivityFilters) {
+      console.log(
+        "[DEBUG] Activity filter conditions:",
+        activityWhere[Op.and] || activityWhere
+      );
+    }
+
+    // Apply Lead filters to get relevant person IDs
+    let leadFilteredPersonIds = [];
+    const hasLeadFiltersSymbol =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFiltersSymbol) {
+      console.log("[DEBUG] Applying Lead filters to find persons");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get person IDs directly from leads
+      const directPersonIds = leadFilterResults
+        .map((lead) => lead.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from leads, then find persons in those organizations
+      const leadOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (leadOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: leadOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      leadFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Lead-filtered person IDs:",
+        leadFilteredPersonIds.length
+      );
+    }
+
+    // Apply Activity filters to get relevant person IDs
+    let activityFilteredPersonIds = [];
+    const hasActivityFiltersSymbol =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFiltersSymbol) {
+      console.log("[DEBUG] Applying Activity filters to find persons");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get person IDs directly from activities
+        const directPersonIds = activityFilterResults
+          .map((activity) => activity.personId)
+          .filter(Boolean);
+
+        // Get organization IDs from activities, then find persons in those organizations
+        const activityOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        let orgPersonIds = [];
+        if (activityOrgIds.length > 0) {
+          const personsInOrgs = await Person.findAll({
+            where: { leadOrganizationId: { [Op.in]: activityOrgIds } },
+            attributes: ["personId"],
+            raw: true,
+          });
+          orgPersonIds = personsInOrgs.map((p) => p.personId);
+        }
+
+        activityFilteredPersonIds = [
+          ...new Set([...directPersonIds, ...orgPersonIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Activity-filtered person IDs:",
+          activityFilteredPersonIds.length
+        );
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Deal filters to get relevant person IDs
+    let dealFilteredPersonIds = [];
+    const hasDealFiltersSymbol =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFiltersSymbol) {
+      console.log("[DEBUG] Applying Deal filters to find persons");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get person IDs directly from deals
+      const directPersonIds = dealFilterResults
+        .map((deal) => deal.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from deals, then find persons in those organizations
+      const dealOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (dealOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: dealOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      dealFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Deal-filtered person IDs:",
+        dealFilteredPersonIds.length
+      );
+    }
+
+    // Apply Organization filters to get relevant person IDs
+    let orgFilteredPersonIds = [];
+    const hasOrgFiltersSymbol =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFiltersSymbol) {
+      console.log("[DEBUG] Applying Organization filters to find persons");
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs, then find persons in those organizations
+      const orgIds = orgFilterResults.map((org) => org.leadOrganizationId);
+
+      if (orgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: orgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgFilteredPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      console.log(
+        "[DEBUG] Organization-filtered person IDs:",
+        orgFilteredPersonIds.length
+      );
+    }
+
+    // Apply Person filters directly
+    let personFilteredPersonIds = [];
+    const hasPersonFiltersSymbol =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFiltersSymbol) {
+      console.log("[DEBUG] Applying Person filters to find persons");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+        fullPersonWhere: JSON.stringify(personWhere, null, 2),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["personId"],
+          raw: true,
+        });
+      } else {
+        // For non-admin users, we need to be careful about combining filters
+        const userAccessWhere = {
+          [Op.or]: [{ masterUserID: req.adminId }],
+        };
+
+        const combinedWhere = {
+          [Op.and]: [personWhere, userAccessWhere],
+        };
+
+        console.log(
+          "[DEBUG] Combined where for non-admin:",
+          JSON.stringify(combinedWhere, null, 2)
+        );
+
+        personFilterResults = await Person.findAll({
+          where: combinedWhere,
+          attributes: ["personId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get person IDs directly from person filters
+      personFilteredPersonIds = personFilterResults.map(
+        (person) => person.personId
+      );
+
+      console.log(
+        "[DEBUG] Person-filtered person IDs:",
+        personFilteredPersonIds.length
+      );
+    }
+
+    // Role-based filtering logic for organizations
+    let orgWhere = orgSearch
+      ? {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${orgSearch}%` } },
+            { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+            { address: { [Op.like]: `%${orgSearch}%` } },
+          ],
+        }
+      : {};
+
+    // Fetch organizations first - same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin") {
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        raw: true,
+      });
+    } else {
+      organizations = await Organization.findAll({
+        where: {
+          ...orgWhere,
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        raw: true,
+      });
+    }
+
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Apply Lead, Activity, Deal, Organization, and Person filters by restricting to persons found in those entities
+    const allFilteredPersonIds = [
+      ...new Set([
+        ...leadFilteredPersonIds,
+        ...activityFilteredPersonIds,
+        ...dealFilteredPersonIds,
+        ...orgFilteredPersonIds,
+        ...personFilteredPersonIds,
+      ]),
+    ];
+
+    // Merge personWhere from filters with filtered person IDs
+    let finalPersonWhere = { ...personWhere };
+
+    if (allFilteredPersonIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to person IDs:",
+        allFilteredPersonIds.length
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredPersonIds.length,
+        "person IDs"
+      );
+
+      if (Object.keys(finalPersonWhere).length > 0) {
+        // Combine with existing filters using AND
+        finalPersonWhere = {
+          [Op.and]: [
+            finalPersonWhere,
+            { personId: { [Op.in]: allFilteredPersonIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        finalPersonWhere = { personId: { [Op.in]: allFilteredPersonIds } };
+      }
+    } else if (
+      hasLeadFiltersSymbol ||
+      hasActivityFiltersSymbol ||
+      hasDealFiltersSymbol ||
+      hasOrgFiltersSymbol ||
+      hasPersonFiltersSymbol
+    ) {
+      // If entity filters were applied but no matching persons found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching persons found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: personPage,
+        persons: [],
+      });
+    }
+
+    console.log(
+      "[DEBUG] Final finalPersonWhere:",
+      JSON.stringify(finalPersonWhere, null, 2)
+    );
+
+    // Fetch persons using updated filtering logic
+    let persons = [];
+    if (req.role === "admin" && !req.query.masterUserID) {
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    } else if (req.query.masterUserID) {
+      // If masterUserID is provided, filter by that as well
+      finalPersonWhere.masterUserID = req.query.masterUserID;
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    }
+
+    console.log("[DEBUG] persons count:", persons.length);
+    console.log(
+      "[DEBUG] persons sample:",
+      persons && persons.length > 0 ? persons[0] : null
+    );
+
+    // Build org map for quick lookup
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+
+    // Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Add ownerName to persons - same logic as getLeads API
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+    }));
+
+    // Count leads for each person using the same approach as getLeads API
+    const personIds = persons.map((p) => p.personId);
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ personId: personIds }, { leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Add leadCount to persons - same logic as getLeads API
+    persons = persons.map((p) => {
+      let ownerName = null;
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+        }
+      }
+      return {
+        ...p,
+        ownerName,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all persons - same as getLeads API
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const personIdsForCustomFields = persons.map((p) => p.personId);
+    let customFieldValues = [];
+    if (personIdsForCustomFields.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: personIdsForCustomFields,
+          entityType: "person",
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for person entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map personId to their custom field values as { fieldName: value }
+    const personCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!personCustomFieldsMap[cfv.entityId])
+        personCustomFieldsMap[cfv.entityId] = {};
+      personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each person - same as getLeads API
+    persons = persons.map((p) => {
+      const customFields = personCustomFieldsMap[p.personId] || {};
+      return { ...p, ...customFields };
+    });
+
+    // Return persons in EXACT same format as getLeads API
+    res.status(200).json({
+      totalRecords: persons.length,
+      totalPages: Math.ceil(persons.length / personLimit),
+      currentPage: personPage,
+      persons: persons, // Return persons exactly as they are in getLeads API
+    });
+  } catch (error) {
+    console.error("Error fetching persons and organizations:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// Alternative: Soft delete (if you have deletedAt column)
+// exports.softDeleteOrganization = async (req, res) => {
+//   try {
+//     const { leadOrganizationId } = req.params;
+//     const { adminId, role } = req; // Assuming these are set by your authentication middleware
+
+//     const organization = await Organization.findByPk(leadOrganizationId);
+    
+//     if (!organization) {
+//       return res.status(404).json({
+//         success: false,
+//         error: "Organization not found"
+//       });
+//     }
+
+//     // Check permissions
+//     if (role !== "admin" && organization.ownerId !== adminId) {
+//       return res.status(403).json({
+//         success: false,
+//         error: "Permission denied",
+//         message: "You don't have permission to delete this organization"
+//       });
+//     }
+
+//     // Check if already soft deleted
+//     if (organization.active === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Organization already deleted",
+//         message: "This organization has already been deleted"
+//       });
+//     }
+
+//     // Soft delete by updating isActive to false
+//     await organization.update({ 
+//       active: 0,
+//       // deletedAt: new Date() 
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Organization soft deleted successfully",
+//       data: {
+//         leadOrganizationId: organization.leadOrganizationId,
+//         organization: organization.organization,
+//         isActive: organization.isActive,
+//         // deletedAt: organization.deletedAt
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error soft deleting Organization:", error);
+//     return res.status(500).json({
+//       success: false,
+//       error: "Internal server error",
+//       message: error.message
+//     });
+//   }
+// };
+
+
+exports.deleteOrganization = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
+
+  try {
+    const { leadOrganizationId } = req.params;
+    const { adminId, role } = req; 
+
+    const organization = await Organization.findByPk(leadOrganizationId);
+    
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: "Organization not found"
+      });
+    }
+
+    // Check permissions
+    if (role !== "admin" && organization.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this organization"
+      });
+    }
+
+    // 1. Remove leadOrganizationId from LeadPerson records
+    await Person.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 2. Remove leadOrganizationId from Lead records
+    await Lead.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 3. Remove leadOrganizationId from Deal records
+    await Deal.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove leadOrganizationId from Activity records
+    await Activities.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the organization
+    await organization.destroy({ transaction: transaction });
 
     // Commit the transaction
     await transaction.commit();
 
-    // Verify deletion
-    const remainingEmails = await Email.count({ where: { masterUserID } });
-
-    // Check remaining attachments by getting remaining email IDs
-    const remainingEmailIds = await Email.findAll({
-      where: { masterUserID },
-      attributes: ["emailID"],
+    return res.status(200).json({
+      success: true,
+      message: "Organization deleted successfully and all references removed",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        organization: organization.organization,
+      }
     });
-    const remainingEmailIdsList = remainingEmailIds.map(
-      (email) => email.emailID
-    );
-    const remainingAttachments =
-      remainingEmailIdsList.length > 0
-        ? await Attachment.count({
-            where: { emailID: remainingEmailIdsList },
-          })
-        : 0;
 
-    console.log(`Deletion completed for user ${masterUserID}:`);
-    console.log(`- Emails deleted: ${totalEmailsDeleted}`);
-    console.log(`- Attachments deleted: ${totalAttachmentsDeleted}`);
-    console.log(`- Remaining emails: ${remainingEmails}`);
-    console.log(`- Remaining attachments: ${remainingAttachments}`);
-
-    res.status(200).json({
-      message: `All emails and attachments deleted for user ${masterUserID}`,
-      details: {
-        emailsDeleted: totalEmailsDeleted,
-        attachmentsDeleted: totalAttachmentsDeleted,
-        remainingEmails: remainingEmails,
-        remainingAttachments: remainingAttachments,
-      },
-    });
   } catch (error) {
     // Rollback the transaction in case of error
     await transaction.rollback();
-    console.error("Error deleting all emails and attachments:", error);
-    res.status(500).json({
-      message: "Failed to delete all emails and attachments.",
-      error: error.message,
+    
+    console.error("Error deleting Organization:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
     });
   }
 };
 
-// Bulk email operations
-exports.bulkEditEmails = async (req, res) => {
-  const { emailIds, updateData } = req.body;
-  const masterUserID = req.adminId;
-
-  // Validate input
-  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({
-      message: "emailIds must be a non-empty array",
-    });
-  }
-
-  if (!updateData || Object.keys(updateData).length === 0) {
-    return res.status(400).json({
-      message: "updateData must contain at least one field to update",
-    });
-  }
-
-  console.log("Bulk edit emails request:", { emailIds, updateData });
+exports.deletePerson = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
 
   try {
-    // Find emails to update (only user's own emails)
-    const emailsToUpdate = await Email.findAll({
-      where: {
-        emailID: { [Sequelize.Op.in]: emailIds },
-        masterUserID: masterUserID,
-      },
-    });
+    const { personId } = req.params;
+    const { adminId, role } = req; 
 
-    if (emailsToUpdate.length === 0) {
+    const person = await Person.findByPk(personId);
+    
+    if (!person) {
+      await transaction.rollback();
       return res.status(404).json({
-        message:
-          "No emails found to update or you don't have permission to edit them",
+        success: false,
+        error: "Person not found"
       });
     }
 
-    console.log(`Found ${emailsToUpdate.length} emails to update`);
+    // Check permissions
+    if (role !== "admin" && person.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this Person"
+      });
+    }
 
-    const updateResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
-    };
+    // 2. Remove personId from Lead records
+    await Lead.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
 
-    // Process each email
-    for (const email of emailsToUpdate) {
+    // 3. Remove personId from Deal records
+    await Deal.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove personId from Activity records
+    await Activities.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the person
+    await person.destroy({ transaction: transaction });
+
+    // Commit the transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "person deleted successfully and all references removed",
+      data: {
+        personId: person.personId,
+        contactPerson: person.contactPerson,
+      }
+    });
+
+  } catch (error) {
+    // Rollback the transaction in case of error
+    await transaction.rollback();
+    
+    console.error("Error deleting person:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Person Owner API
+exports.updatePersonOwner = async (req, res) => {
+  const { personId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!personId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the person
+    let person;
+    if (req.role === "admin") {
+      person = await Person.findByPk(personId, { transaction });
+    } else {
+      // Non-admin users can only update persons they own or created
+      person = await Person.findOne({
+        where: {
+          personId: personId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!person) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Person not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await person.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Person owner updated successfully.",
+      data: {
+        personId: person.personId,
+        name: person.name,
+        email: person.email,
+        ownerId: person.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating person owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Organization Owner API
+exports.updateOrganizationOwner = async (req, res) => {
+  const { leadOrganizationId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!leadOrganizationId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "leadOrganizationId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the organization
+    let organization;
+    if (req.role === "admin") {
+      organization = await Organization.findByPk(leadOrganizationId, { transaction });
+    } else {
+      // Non-admin users can only update organizations they own or created
+      organization = await Organization.findOne({
+        where: {
+          leadOrganizationId: leadOrganizationId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Organization not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await organization.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization owner updated successfully.",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        name: organization.name,
+        email: organization.email,
+        ownerId: organization.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating organization owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Bulk Update Person Owners API
+exports.bulkUpdatePersonOwners = async (req, res) => {
+  const { personIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!Array.isArray(personIds) || personIds.length === 0 || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personIds array and ownerId are required."
+    });
+  }
+
+  const results = [];
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    for (const personId of personIds) {
+      const transaction = await sequelize.transaction();
+
       try {
-        console.log(`Processing email ${email.emailID}`);
+        // Find the person
+        let person;
+        if (req.role === "admin") {
+          person = await Person.findByPk(personId, { transaction });
+        } else {
+          // Non-admin users can only update persons they own or created
+          person = await Person.findOne({
+            where: {
+              personId: personId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
 
-        // Update the email
-        await email.update(updateData);
+        if (!person) {
+          await transaction.rollback();
+          results.push({
+            personId: personId,
+            success: false,
+            error: "Person not found or you don't have permission to update it."
+          });
+          continue;
+        }
 
-        updateResults.successful.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          sender: email.sender,
-          folder: email.folder,
+        // Update the ownerId
+        await person.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          personId: person.personId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: person.name,
+            email: person.email,
+            ownerId: person.ownerId,
+            ownerName: newOwner.name
+          }
         });
 
-        console.log(`Updated email ${email.emailID}`);
-      } catch (emailError) {
-        console.error(`Error updating email ${email.emailID}:`, emailError);
-
-        updateResults.failed.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          error: emailError.message,
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating person ${personId} owner:`, error);
+        results.push({
+          personId: personId,
+          success: false,
+          error: error.message
         });
       }
     }
 
-    // Check for emails that were requested but not found
-    const foundEmailIds = emailsToUpdate.map((email) => email.emailID);
-    const notFoundEmailIds = emailIds.filter(
-      (id) => !foundEmailIds.includes(id)
-    );
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
 
-    notFoundEmailIds.forEach((emailId) => {
-      updateResults.skipped.push({
-        emailID: emailId,
-        reason: "Email not found or no permission to edit",
-      });
-    });
-
-    console.log("Bulk update results:", updateResults);
-
-    res.status(200).json({
-      message: "Bulk edit operation completed",
-      results: updateResults,
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
       summary: {
-        total: emailIds.length,
-        successful: updateResults.successful.length,
-        failed: updateResults.failed.length,
-        skipped: updateResults.skipped.length,
-      },
+        total: personIds.length,
+        successful: successCount,
+        failed: failureCount
+      }
     });
+
   } catch (error) {
-    console.error("Error in bulk edit emails:", error);
-    res.status(500).json({
-      message: "Internal server error during bulk edit",
-      error: error.message,
+    console.error("Error in bulk update person owners:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
     });
   }
 };
 
-// Bulk delete emails
-exports.bulkDeleteEmails = async (req, res) => {
-  const { emailIds } = req.body;
-  const masterUserID = req.adminId;
+// Bulk Update Organization Owners API
+exports.bulkUpdateOrganizationOwners = async (req, res) => {
+  const { leadOrganizationIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
 
-  // Validate input
-  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+  // Validate required fields
+  if (!Array.isArray(leadOrganizationIds) || leadOrganizationIds.length === 0 || !ownerId) {
     return res.status(400).json({
-      message: "emailIds must be a non-empty array",
+      success: false,
+      message: "leadOrganizationIds array and ownerId are required."
     });
   }
 
-  console.log("Bulk delete emails request:", emailIds);
+  const results = [];
 
   try {
-    // Find emails to delete (only user's own emails)
-    const emailsToDelete = await Email.findAll({
-      where: {
-        emailID: { [Sequelize.Op.in]: emailIds },
-        masterUserID: masterUserID,
-      },
-      attributes: ["emailID", "subject", "sender", "folder"],
-    });
-
-    if (emailsToDelete.length === 0) {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
       return res.status(404).json({
-        message:
-          "No emails found to delete or you don't have permission to delete them",
+        success: false,
+        message: "New owner not found."
       });
     }
 
-    console.log(`Found ${emailsToDelete.length} emails to delete`);
+    for (const orgId of leadOrganizationIds) {
+      const transaction = await sequelize.transaction();
 
-    const deleteResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
-    };
-
-    // Process each email for deletion
-    for (const email of emailsToDelete) {
       try {
-        console.log(`Deleting email ${email.emailID}`);
+        // Find the organization
+        let organization;
+        if (req.role === "admin") {
+          organization = await Organization.findByPk(orgId, { transaction });
+        } else {
+          // Non-admin users can only update organizations they own or created
+          organization = await Organization.findOne({
+            where: {
+              leadOrganizationId: orgId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
 
-        // Delete attachments first
-        await Attachment.destroy({
-          where: { emailID: email.emailID },
+        if (!organization) {
+          await transaction.rollback();
+          results.push({
+            leadOrganizationId: orgId,
+            success: false,
+            error: "Organization not found or you don't have permission to update it."
+          });
+          continue;
+        }
+
+        // Update the ownerId
+        await organization.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          leadOrganizationId: organization.leadOrganizationId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: organization.name,
+            email: organization.email,
+            ownerId: organization.ownerId,
+            ownerName: newOwner.name
+          }
         });
 
-        // Delete the email
-        await Email.destroy({
-          where: { emailID: email.emailID },
-        });
-
-        deleteResults.successful.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          sender: email.sender,
-          folder: email.folder,
-        });
-
-        console.log(`Deleted email ${email.emailID}`);
-      } catch (emailError) {
-        console.error(`Error deleting email ${email.emailID}:`, emailError);
-
-        deleteResults.failed.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          error: emailError.message,
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating organization ${orgId} owner:`, error);
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          error: error.message
         });
       }
     }
 
-    // Check for emails that were requested but not found
-    const foundEmailIds = emailsToDelete.map((email) => email.emailID);
-    const notFoundEmailIds = emailIds.filter(
-      (id) => !foundEmailIds.includes(id)
-    );
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
 
-    notFoundEmailIds.forEach((emailId) => {
-      deleteResults.skipped.push({
-        emailID: emailId,
-        reason: "Email not found or no permission to delete",
-      });
-    });
-
-    console.log("Bulk delete results:", deleteResults);
-
-    res.status(200).json({
-      message: "Bulk delete operation completed",
-      results: deleteResults,
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
       summary: {
-        total: emailIds.length,
-        successful: deleteResults.successful.length,
-        failed: deleteResults.failed.length,
-        skipped: deleteResults.skipped.length,
-      },
-    });
-  } catch (error) {
-    console.error("Error in bulk delete emails:", error);
-    res.status(500).json({
-      message: "Internal server error during bulk delete",
-      error: error.message,
-    });
-  }
-};
-
-// Bulk mark emails as read/unread
-exports.bulkMarkEmails = async (req, res) => {
-  const { emailIds, isRead } = req.body;
-  const masterUserID = req.adminId;
-
-  // Validate input
-  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({
-      message: "emailIds must be a non-empty array",
-    });
-  }
-
-  if (typeof isRead !== "boolean") {
-    return res.status(400).json({
-      message: "isRead must be a boolean value",
-    });
-  }
-
-  console.log("Bulk mark emails request:", { emailIds, isRead });
-
-  try {
-    // Find emails to mark (only user's own emails)
-    const emailsToMark = await Email.findAll({
-      where: {
-        emailID: { [Sequelize.Op.in]: emailIds },
-        masterUserID: masterUserID,
-      },
-      attributes: ["emailID", "subject", "sender", "folder", "isRead"],
-    });
-
-    if (emailsToMark.length === 0) {
-      return res.status(404).json({
-        message:
-          "No emails found to mark or you don't have permission to mark them",
-      });
-    }
-
-    console.log(
-      `Found ${emailsToMark.length} emails to mark as ${
-        isRead ? "read" : "unread"
-      }`
-    );
-
-    const markResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
-    };
-
-    // Process each email for marking
-    for (const email of emailsToMark) {
-      try {
-        console.log(
-          `Marking email ${email.emailID} as ${isRead ? "read" : "unread"}`
-        );
-
-        // Update the email read status
-        await Email.update(
-          { isRead: isRead },
-          { where: { emailID: email.emailID } }
-        );
-
-        markResults.successful.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          sender: email.sender,
-          folder: email.folder,
-          previousStatus: email.isRead,
-          newStatus: isRead,
-        });
-
-        console.log(
-          `Marked email ${email.emailID} as ${isRead ? "read" : "unread"}`
-        );
-      } catch (emailError) {
-        console.error(`Error marking email ${email.emailID}:`, emailError);
-
-        markResults.failed.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          error: emailError.message,
-        });
+        total: leadOrganizationIds.length,
+        successful: successCount,
+        failed: failureCount
       }
-    }
-
-    // Check for emails that were requested but not found
-    const foundEmailIds = emailsToMark.map((email) => email.emailID);
-    const notFoundEmailIds = emailIds.filter(
-      (id) => !foundEmailIds.includes(id)
-    );
-
-    notFoundEmailIds.forEach((emailId) => {
-      markResults.skipped.push({
-        emailID: emailId,
-        reason: "Email not found or no permission to mark",
-      });
     });
 
-    console.log("Bulk mark results:", markResults);
-
-    res.status(200).json({
-      message: `Bulk mark as ${isRead ? "read" : "unread"} operation completed`,
-      results: markResults,
-      summary: {
-        total: emailIds.length,
-        successful: markResults.successful.length,
-        failed: markResults.failed.length,
-        skipped: markResults.skipped.length,
-      },
-    });
   } catch (error) {
-    console.error("Error in bulk mark emails:", error);
-    res.status(500).json({
-      message: "Internal server error during bulk mark",
-      error: error.message,
+    console.error("Error in bulk update organization owners:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
     });
   }
 };
-
-// Bulk move emails to folder
-exports.bulkMoveEmails = async (req, res) => {
-  const { emailIds, targetFolder } = req.body;
-  const masterUserID = req.adminId;
-
-  // Validate input
-  if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
-    return res.status(400).json({
-      message: "emailIds must be a non-empty array",
-    });
-  }
-
-  if (!targetFolder || typeof targetFolder !== "string") {
-    return res.status(400).json({
-      message: "targetFolder must be a non-empty string",
-    });
-  }
-
-  // Validate folder name
-  const validFolders = ["inbox", "sent", "drafts", "trash", "archive"];
-  if (!validFolders.includes(targetFolder.toLowerCase())) {
-    return res.status(400).json({
-      message: `targetFolder must be one of: ${validFolders.join(", ")}`,
-    });
-  }
-
-  console.log("Bulk move emails request:", { emailIds, targetFolder });
-
-  try {
-    // Find emails to move (only user's own emails)
-    const emailsToMove = await Email.findAll({
-      where: {
-        emailID: { [Sequelize.Op.in]: emailIds },
-        masterUserID: masterUserID,
-      },
-      attributes: ["emailID", "subject", "sender", "folder"],
-    });
-
-    if (emailsToMove.length === 0) {
-      return res.status(404).json({
-        message:
-          "No emails found to move or you don't have permission to move them",
-      });
-    }
-
-    console.log(
-      `Found ${emailsToMove.length} emails to move to ${targetFolder}`
-    );
-
-    const moveResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
-    };
-
-    // Process each email for moving
-    for (const email of emailsToMove) {
-      try {
-        console.log(
-          `Moving email ${email.emailID} from ${email.folder} to ${targetFolder}`
-        );
-
-        // Update the email folder
-        await Email.update(
-          { folder: targetFolder },
-          { where: { emailID: email.emailID } }
-        );
-
-        moveResults.successful.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          sender: email.sender,
-          fromFolder: email.folder,
-          toFolder: targetFolder,
-        });
-
-        console.log(`Moved email ${email.emailID} to ${targetFolder}`);
-      } catch (emailError) {
-        console.error(`Error moving email ${email.emailID}:`, emailError);
-
-        moveResults.failed.push({
-          emailID: email.emailID,
-          subject: email.subject,
-          error: emailError.message,
-        });
-      }
-    }
-
-    // Check for emails that were requested but not found
-    const foundEmailIds = emailsToMove.map((email) => email.emailID);
-    const notFoundEmailIds = emailIds.filter(
-      (id) => !foundEmailIds.includes(id)
-    );
-
-    notFoundEmailIds.forEach((emailId) => {
-      moveResults.skipped.push({
-        emailID: emailId,
-        reason: "Email not found or no permission to move",
-      });
-    });
-
-    console.log("Bulk move results:", moveResults);
-
-    res.status(200).json({
-      message: `Bulk move to ${targetFolder} operation completed`,
-      results: moveResults,
-      summary: {
-        total: emailIds.length,
-        successful: moveResults.successful.length,
-        failed: moveResults.failed.length,
-        skipped: moveResults.skipped.length,
-      },
-    });
-  } catch (error) {
-    console.error("Error in bulk move emails:", error);
-    res.status(500).json({
-      message: "Internal server error during bulk move",
-      error: error.message,
-    });
-  }
-};
-
-// Export the processEmailsLightweight function for testing
-exports.processEmailsLightweight = (emails, userID, provider, strategy = 'NORMAL', page = 1, folderType = 'inbox') => 
-  processEmailsLightweight(emails, userID, provider, strategy, page, folderType);
-//hello

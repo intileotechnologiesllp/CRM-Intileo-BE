@@ -746,6 +746,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const MasterUser = require("../../models/master/masterUserModel");
     const CustomField = require("../../models/customFieldModel");
     const CustomFieldValue = require("../../models/customFieldValueModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
 
     // Pagination and search for organizations
     const orgPage = parseInt(req.query.orgPage) || 1;
@@ -1865,13 +1866,49 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
     });
 
-    // Add leadCount and persons array to organizations - EXACT same format as getLeads API
-    organizations = organizations.map((o) => ({
-      ...o,
-      ownerName: ownerMap[o.ownerId] || null,
-      leadCount: orgLeadCountMap[o.leadOrganizationId] || 0,
-      persons: orgPersonsMap[o.leadOrganizationId] || [], // <-- same as getLeads API
-    }));
+    // Get checked columns from OrganizationColumnPreference
+    let checkedStandardColumns = new Set();
+    let checkedCustomFieldNames = new Set();
+    const columnPref = await OrganizationColumnPreference.findOne();
+    if (columnPref) {
+      const prefColumns = typeof columnPref.columns === "string" ? JSON.parse(columnPref.columns) : columnPref.columns;
+      prefColumns.forEach(col => {
+        if (col.check === true) {
+          if (col.fieldSource === "custom") {
+            checkedCustomFieldNames.add(col.key);
+          } else {
+            checkedStandardColumns.add(col.key);
+          }
+        }
+      });
+    }
+
+    // Filter organizations to only include checked fields
+    organizations = organizations.map(org => {
+      const filteredOrg = {};
+      
+      // Always include these essential fields regardless of check status
+      const essentialFields = ["leadOrganizationId", "ownerId", "createdAt", "updatedAt"];
+      essentialFields.forEach(field => {
+        if (org[field] !== undefined) {
+          filteredOrg[field] = org[field];
+        }
+      });
+
+      // Include checked standard fields
+      Object.keys(org).forEach(key => {
+        if (checkedStandardColumns.has(key)) {
+          filteredOrg[key] = org[key];
+        }
+      });
+
+      // Always include these computed fields
+      filteredOrg.ownerName = ownerMap[org.ownerId] || null;
+      filteredOrg.leadCount = orgLeadCountMap[org.leadOrganizationId] || 0;
+      filteredOrg.persons = orgPersonsMap[org.leadOrganizationId] || [];
+      
+      return filteredOrg;
+    });
 
     // Fetch custom field values for all organizations - same as getLeads API
     const orgIdsForCustomFields = organizations.map(
@@ -1899,16 +1936,19 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     const orgCustomFieldIdToName = {};
     allOrgCustomFields.forEach((cf) => {
-      orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+      if (checkedCustomFieldNames.has(cf.fieldName)) {
+        orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+      }
     });
 
     // Map orgId to their custom field values as { fieldName: value }
     const orgCustomFieldsMap = {};
     orgCustomFieldValues.forEach((cfv) => {
-      const fieldName = orgCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
-      if (!orgCustomFieldsMap[cfv.entityId])
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId];
+      if (fieldName && !orgCustomFieldsMap[cfv.entityId]) {
         orgCustomFieldsMap[cfv.entityId] = {};
-      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+        orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+      }
     });
 
     // Attach custom fields as direct properties to each organization - same as getLeads API
