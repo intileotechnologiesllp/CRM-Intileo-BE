@@ -1486,9 +1486,13 @@ const formattedResults = flattened.filter((item) => {
     if (item[name] !== value) return false;
   }
 
+  /**
+   * id based matching of person and organization
+   * maybe uncommented in future
+   */
   // Extra checks
-  if (name === "contactPerson" && item.personId !== id) return false;
-  if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
+  // if (name === "contactPerson" && item.personId !== id) return false;
+  // if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
 
   return true;
 });
