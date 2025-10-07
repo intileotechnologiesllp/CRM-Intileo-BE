@@ -49,8 +49,8 @@ exports.createLeadPerformReport = async (req, res) => {
       "creator",
       "creatorstatus",
     ];
-    
-     const segmentedByOptions = [
+
+    const segmentedByOptions = [
       "none",
       "esplProposalNo",
       "numberOfReportsPrepared",
@@ -253,9 +253,21 @@ exports.createLeadPerformReport = async (req, res) => {
           type: "text",
         },
         { label: "Address", value: "LeadOrganization.address", type: "text" },
-        { label: "Created At", value: "LeadOrganization.createdAt", type: "date" },
-        { label: "Updated At", value: "LeadOrganization.updatedAt", type: "date" },
-        { label: "Add on", value: "LeadOrganization.daterange", type: "daterange" },
+        {
+          label: "Created At",
+          value: "LeadOrganization.createdAt",
+          type: "date",
+        },
+        {
+          label: "Updated At",
+          value: "LeadOrganization.updatedAt",
+          type: "date",
+        },
+        {
+          label: "Add on",
+          value: "LeadOrganization.daterange",
+          type: "daterange",
+        },
       ],
       Person: [
         {
@@ -290,7 +302,7 @@ exports.createLeadPerformReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Lead" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -562,6 +574,34 @@ async function generateExistingLeadPerformanceData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else if (existingxaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "LeadPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.personId");
+    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+  } else if (existingxaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "LeadOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Lead.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("LeadOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Lead.${existingxaxis}`);
@@ -595,6 +635,30 @@ async function generateExistingLeadPerformanceData(
     } else if (existingSegmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (existingSegmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "LeadPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.personId");
+      attributes.push([
+        Sequelize.col("LeadPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (existingSegmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "LeadOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("LeadOrganization.organization"),
+        "segmentValue",
+      ]);
     } else {
       groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
@@ -723,12 +787,36 @@ async function generateExistingLeadPerformanceData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      let xValue = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set id based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -756,10 +844,34 @@ async function generateExistingLeadPerformanceData(
     );
   } else {
     // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
+      }
+
+      // Set id based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -879,6 +991,31 @@ async function generateLeadPerformanceData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else if (xaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "LeadPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.personId");
+    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+  } else if (xaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "LeadOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Lead.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Lead.${xaxis}`);
@@ -908,6 +1045,30 @@ async function generateLeadPerformanceData(
     } else if (segmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (segmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "LeadPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.personId");
+      attributes.push([
+        Sequelize.col("LeadPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (segmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "LeadOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("LeadOrganization.organization"),
+        "segmentValue",
+      ]);
     } else {
       groupBy.push(`Lead.${segmentedBy}`);
       attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
@@ -1031,33 +1192,36 @@ async function generateLeadPerformanceData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
+      let xValue = item.xValue === null ? "Unknown" : item.xValue;
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // if (!groupedData[xValue]) {
-      //   groupedData[xValue] = { label: xValue, segments: [] };
-      // }
-      // groupedData[xValue].segments.push({
-      //   labeltype: segmentValue,
-      //   value: yValue,
-      // });
       if (!groupedData[xValue]) {
-        if (xaxis == "contactPerson") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.personId || null,
-          };
-        } else if (xaxis == "organization") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.leadOrganizationId || null,
-          };
-        } else {
-          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        // Set id based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId;
         }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -1083,26 +1247,33 @@ async function generateLeadPerformanceData(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      if (xaxis == "contactPerson") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.personId || null,
-        };
-      } else if (xaxis == "organization") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.leadOrganizationId || null,
-        };
-      } else {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id:  null,
-        };
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
       }
-    });// Calculate the grand total
+
+      // Set id based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -1144,7 +1315,7 @@ async function generateLeadPerformanceData(
 
 //   // Handle date range filtering for "Add on" (daterange type)
 //   const isDateRangeFilter = fieldName === "daterange";
-  
+
 //   if (isDateRangeFilter && Array.isArray(value)) {
 //     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
 //     const [fromDate, toDate] = value;
@@ -1248,7 +1419,7 @@ async function generateLeadPerformanceData(
 //     // FIX: Return a plain object instead of Sequelize.where()
 //     // This creates a condition object that can be properly combined
 //     const op = getSequelizeOperator(operator);
-    
+
 //     // Handle special operators for related tables
 //     switch (operator) {
 //       case "contains":
@@ -1306,14 +1477,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
-  
+
   if (isDateRangeFilter && Array.isArray(value)) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
-    
+
     // Determine which date field to filter based on the table alias
     let dateField;
-    switch(tableAlias) {
+    switch (tableAlias) {
       case "LeadOrganization":
       case "LeadPerson":
         dateField = "createdAt";
@@ -1321,24 +1492,34 @@ function getConditionObject(column, operator, value, includeModels = []) {
       default:
         dateField = "createdAt";
     }
-    
+
     // For related tables, use the proper Sequelize syntax
     if (tableAlias !== "Lead") {
       // Add the required include model
       addIncludeModel(tableAlias, includeModels);
-      
+
       // Return the condition with proper nested syntax
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [`$${tableAlias}.${dateField}$`]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     } else {
@@ -1346,14 +1527,24 @@ function getConditionObject(column, operator, value, includeModels = []) {
       if (operator === "between" || operator === "=" || operator === "is") {
         return {
           [dateField]: {
-            [Op.between]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.between]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
-      } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
+      } else if (
+        operator === "notBetween" ||
+        operator === "≠" ||
+        operator === "is not"
+      ) {
         return {
           [dateField]: {
-            [Op.notBetween]: [new Date(fromDate + " 00:00:00"), new Date(toDate + " 23:59:59")]
-          }
+            [Op.notBetween]: [
+              new Date(fromDate + " 00:00:00"),
+              new Date(toDate + " 23:59:59"),
+            ],
+          },
         };
       }
     }
@@ -1369,14 +1560,14 @@ function getConditionObject(column, operator, value, includeModels = []) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.between]: [startOfDay, endOfDay]
-          }
+            [Op.between]: [startOfDay, endOfDay],
+          },
         };
       }
     } else if (operator === ">") {
@@ -1387,20 +1578,20 @@ function getConditionObject(column, operator, value, includeModels = []) {
       // For not equal, exclude the entire day
       const startOfDay = new Date(value + " 00:00:00");
       const endOfDay = new Date(value + " 23:59:59");
-      
+
       // For related tables
       if (hasRelation) {
         addIncludeModel(tableAlias, includeModels);
         return {
           [`$${tableAlias}.${fieldName}$`]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       } else {
         return {
           [fieldName]: {
-            [Op.notBetween]: [startOfDay, endOfDay]
-          }
+            [Op.notBetween]: [startOfDay, endOfDay],
+          },
         };
       }
     } else {
@@ -1417,17 +1608,23 @@ function getConditionObject(column, operator, value, includeModels = []) {
   // Handle related table joins
   if (hasRelation) {
     addIncludeModel(tableAlias, includeModels);
-    
+
     const op = getSequelizeOperator(operator);
-    
+
     // Use proper Sequelize syntax for related table conditions
     switch (operator) {
       case "contains":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
+        };
       case "startsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` },
+        };
       case "endsWith":
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
+        return {
+          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` },
+        };
       case "isEmpty":
         return {
           [Op.or]: [
@@ -1595,7 +1792,7 @@ async function generateExistingLeadPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-  
+
   // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
@@ -2264,7 +2461,7 @@ exports.saveLeadPerformReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -2297,38 +2494,38 @@ exports.saveLeadPerformReport = async (req, res) => {
     }
 
     // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
+    reports.push(newReport);
 
     return res.status(201).json({
       success: true,
@@ -2716,7 +2913,8 @@ exports.getLeadPerformReportSummary = async (req, res) => {
           maxValue: maxValue,
           minValue: minValue,
         };
-      }if (reportData.length > 0) {
+      }
+      if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
         if (segmentedBy === "none") {
@@ -2947,7 +3145,7 @@ exports.createLeadConversionReport = async (req, res) => {
       "organization",
       "proposalValueCurrency",
       "creator",
-      "creatorstatus",  
+      "creatorstatus",
     ];
 
     const yaxisArray = ["no of leads", "proposalValue", "value"];
@@ -3053,7 +3251,7 @@ exports.createLeadConversionReport = async (req, res) => {
     // For Activity Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
-    if ((entity && type && !reportId)) {
+    if (entity && type && !reportId) {
       if (entity === "Lead" && type === "Conversion") {
         // Validate required fields for Conversion reports
         if (!xaxis || !yaxis) {
@@ -3149,18 +3347,17 @@ exports.createLeadConversionReport = async (req, res) => {
 
         try {
           // Generate data with pagination
-          const result =
-            await generateExistingLeadConversionData(
-              ownerId,
-              role,
-              existingxaxis,
-              existingyaxis,
-              existingSegmentedBy,
-              existingfilters,
-              page,
-              limit,
-              type
-            );
+          const result = await generateExistingLeadConversionData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters,
+            page,
+            limit,
+            type
+          );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
@@ -3214,7 +3411,7 @@ exports.createLeadConversionReport = async (req, res) => {
       availableOptions: {
         xaxis: xaxisArray,
         yaxis: yaxisArray,
-        segmentedByOptions: segmentedByOptions
+        segmentedByOptions: segmentedByOptions,
       },
       filters: availableFilterColumns,
     });
@@ -3326,6 +3523,34 @@ async function generateExistingLeadConversionData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else if (existingxaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "LeadPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.personId");
+    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+  } else if (existingxaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "LeadOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Lead.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("LeadOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Lead.${existingxaxis}`);
@@ -3355,6 +3580,30 @@ async function generateExistingLeadConversionData(
       });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (existingSegmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "LeadPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.personId");
+      attributes.push([
+        Sequelize.col("LeadPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (existingSegmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "LeadOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("LeadOrganization.organization"),
+        "segmentValue",
+      ]);
     } else {
       groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
@@ -3514,12 +3763,36 @@ async function generateExistingLeadConversionData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      let xValue = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set id based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -3547,10 +3820,34 @@ async function generateExistingLeadConversionData(
     );
   } else {
     // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+     formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
+      }
+
+      // Set id based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -3670,6 +3967,31 @@ async function generateLeadConversionData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else if (xaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "LeadPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.personId");
+    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+  } else if (xaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "LeadOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Lead.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Lead.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the lead table
     groupBy.push(`Lead.${xaxis}`);
@@ -3693,12 +4015,49 @@ async function generateLeadConversionData(
       });
     }
 
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    if (
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
+    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (segmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "LeadPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.personId");
+      attributes.push([
+        Sequelize.col("LeadPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (segmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "LeadOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Lead.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("LeadOrganization.organization"),
+        "segmentValue",
+      ]);
     } else {
       groupBy.push(`Lead.${segmentedBy}`);
       attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
@@ -3838,29 +4197,36 @@ async function generateLeadConversionData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
+      let xValue = item.xValue === null ? "Unknown" : item.xValue;
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // if (!groupedData[xValue]) {
-      //   groupedData[xValue] = { label: xValue, segments: [] };
-      // }
       if (!groupedData[xValue]) {
-        if (xaxis == "contactPerson") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.personId || null,
-          };
-        } else if (xaxis == "organization") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.leadOrganizationId || null,
-          };
-        } else {
-          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        // Set id based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId;
         }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -3885,27 +4251,34 @@ async function generateLeadConversionData(
     );
   } else {
     // Original format for non-segmented data
-   formattedResults = results.map((item) => {
-      if (xaxis == "contactPerson") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.personId || null,
-        };
-      } else if (xaxis == "organization") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.leadOrganizationId || null,
-        };
-      } else {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: null,
-        };
+     formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
       }
-    }); // Calculate the grand total
+
+      // Set id based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -3933,7 +4306,7 @@ async function generateExistingLeadConversionDataForSave(
   filters
 ) {
   let includeModels = [];
-  
+
   // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
@@ -4534,15 +4907,14 @@ exports.saveLeadConversionReport = async (req, res) => {
         }
 
         try {
-          const result =
-            await generateExistingLeadConversionDataForSave(
-              ownerId,
-              role,
-              existingxaxis,
-              existingyaxis,
-              existingSegmentedBy,
-              existingfilters
-            );
+          const result = await generateExistingLeadConversionDataForSave(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingSegmentedBy,
+            existingfilters
+          );
           reportData = result.data;
           paginationInfo = result.pagination;
           totalValue = result.totalValue;
@@ -4629,7 +5001,7 @@ exports.saveLeadConversionReport = async (req, res) => {
         const dashboardIdsArray = Array.isArray(dashboardIds)
           ? dashboardIds
           : [dashboardIds];
-        updateData.dashboardIds = dashboardIdsArray.join(',');
+        updateData.dashboardIds = dashboardIdsArray.join(",");
       }
 
       await Report.update(updateData, { where: { reportId } });
@@ -4661,40 +5033,40 @@ exports.saveLeadConversionReport = async (req, res) => {
       }
     }
 
-      // Find next position
-      const lastReport = await Report.findOne({
-        where: { ownerId },
-        order: [["position", "DESC"]],
-      });
-      const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? lastReport.position || 0 : 0;
 
-      const configObj = {
-        xaxis,
-        yaxis,
-        segmentedBy,
-        filters: filters || {},
-        reportData,
-        totalValue,
-      };
+    const configObj = {
+      xaxis,
+      yaxis,
+      segmentedBy,
+      filters: filters || {},
+      reportData,
+      totalValue,
+    };
 
-      const reportName = description || `${entity} ${type}`;
+    const reportName = description || `${entity} ${type}`;
 
-      const newReport = await Report.create({
-        dashboardIds: dashboardIdsArray.join(','),
-        folderId: folderId || null,
-        entity,
-        type,
-        description: reportName,
-        name: name || reportName,
-        position: nextPosition,
-        config: configObj,
-        ownerId,
-        graphtype,
-        colors,
-      });
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: reportName,
+      name: name || reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype,
+      colors,
+    });
 
-      reports.push(newReport);
-   
+    reports.push(newReport);
+
     return res.status(201).json({
       success: true,
       message: "Reports created successfully",
