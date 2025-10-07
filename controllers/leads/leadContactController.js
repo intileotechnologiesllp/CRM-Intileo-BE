@@ -158,8 +158,11 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
 
 // Update check status for person columns and custom fields, also updates organization columns
 exports.updatePersonColumnChecks = async (req, res) => {
-  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
-  const { columns } = req.body;
+  // Expecting: { 
+  //   columns: [ { key: "columnName", check: true/false, entityType?: "person"|"organization" }, ... ],
+  //   entityType?: "person"|"organization" // Global entityType for all columns if not specified per column
+  // }
+  const { columns, entityType: globalEntityType } = req.body;
 
   if (!Array.isArray(columns)) {
     return res.status(400).json({ message: "Columns array is required." });
@@ -171,224 +174,44 @@ exports.updatePersonColumnChecks = async (req, res) => {
     const CustomField = require("../../models/customFieldModel");
     const { Op } = require("sequelize");
 
-    // Find the global PersonColumnPreference record
-    let personPref = await PersonColumnPreference.findOne();
-    if (!personPref) {
-      return res.status(404).json({ message: "Person preferences not found." });
-    }
+    // Separate columns by entityType
+    const personColumns = [];
+    const organizationColumns = [];
 
-    // Find the global OrganizationColumnPreference record
-    let orgPref = await OrganizationColumnPreference.findOne();
-    if (!orgPref) {
-      return res.status(404).json({ message: "Organization preferences not found." });
-    }
-
-    // Parse person columns if stored as string
-    let personPrefColumns =
-      typeof personPref.columns === "string"
-        ? JSON.parse(personPref.columns)
-        : personPref.columns;
-
-    // Parse organization columns if stored as string
-    let orgPrefColumns =
-      typeof orgPref.columns === "string"
-        ? JSON.parse(orgPref.columns)
-        : orgPref.columns;
-
-    // Get custom fields for both person and organization to validate incoming custom field columns
-    let personCustomFields = [];
-    let orgCustomFields = [];
-    if (req.adminId) {
-      try {
-        // Get person custom fields
-        personCustomFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["person", "both"] },
-            isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-              { fieldSource: "custom" },
-            ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-          ],
-        });
-
-        // Get organization custom fields
-        orgCustomFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["organization", "both"] },
-            isActive: true,
-            [Op.or]: [
-              { masterUserID: req.adminId },
-              { fieldSource: "default" },
-              { fieldSource: "system" },
-              { fieldSource: "custom" },
-            ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-          ],
-        });
-      } catch (customFieldError) {
-        console.error("Error fetching custom fields:", customFieldError);
-      }
-    }
-
-    // Create maps of custom field names for quick lookup
-    const personCustomFieldMap = {};
-    personCustomFields.forEach((field) => {
-      personCustomFieldMap[field.fieldName] = {
-        fieldId: field.fieldId,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        fieldSource: field.fieldSource,
-        entityType: field.entityType,
-      };
-    });
-
-    const orgCustomFieldMap = {};
-    orgCustomFields.forEach((field) => {
-      orgCustomFieldMap[field.fieldName] = {
-        fieldId: field.fieldId,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        fieldSource: field.fieldSource,
-        entityType: field.entityType,
-      };
-    });
-
-    // Update check status for existing person columns
-    personPrefColumns = personPrefColumns.map((col) => {
-      const found = columns.find((c) => c.key === col.key);
-      if (found) {
-        return { ...col, check: !!found.check };
-      }
-      return col;
-    });
-
-    // Update check status for existing organization columns
-    orgPrefColumns = orgPrefColumns.map((col) => {
-      const found = columns.find((c) => c.key === col.key);
-      if (found) {
-        return { ...col, check: !!found.check };
-      }
-      return col;
-    });
-
-    // Handle new custom field columns that don't exist in person preferences yet
-    const existingPersonKeys = new Set(personPrefColumns.map((col) => col.key));
-    const existingOrgKeys = new Set(orgPrefColumns.map((col) => col.key));
-
-    columns.forEach((incomingCol) => {
-      // Add new person custom fields
-      if (
-        !existingPersonKeys.has(incomingCol.key) &&
-        personCustomFieldMap[incomingCol.key]
-      ) {
-        const customFieldInfo = personCustomFieldMap[incomingCol.key];
-        personPrefColumns.push({
-          key: incomingCol.key,
-          label: customFieldInfo.fieldLabel,
-          type: customFieldInfo.fieldType,
-          isCustomField: true,
-          fieldId: customFieldInfo.fieldId,
-          isRequired: customFieldInfo.isRequired,
-          isImportant: customFieldInfo.isImportant,
-          fieldSource: customFieldInfo.fieldSource,
-          entityType: customFieldInfo.entityType,
-          check: !!incomingCol.check,
-        });
-      }
-
-      // Add new organization custom fields
-      if (
-        !existingOrgKeys.has(incomingCol.key) &&
-        orgCustomFieldMap[incomingCol.key]
-      ) {
-        const customFieldInfo = orgCustomFieldMap[incomingCol.key];
-        orgPrefColumns.push({
-          key: incomingCol.key,
-          label: customFieldInfo.fieldLabel,
-          type: customFieldInfo.fieldType,
-          isCustomField: true,
-          fieldId: customFieldInfo.fieldId,
-          isRequired: customFieldInfo.isRequired,
-          isImportant: customFieldInfo.isImportant,
-          fieldSource: customFieldInfo.fieldSource,
-          entityType: customFieldInfo.entityType,
-          check: !!incomingCol.check,
-        });
+    columns.forEach(col => {
+      const entityType = col.entityType || globalEntityType || "person"; // Default to person if not specified
+      if (entityType === "organization") {
+        organizationColumns.push(col);
+      } else {
+        personColumns.push(col);
       }
     });
 
-    // Update check field in CustomField table for both person and organization custom fields
-    const customFieldUpdates = [];
-    columns.forEach((incomingCol) => {
-      // Check person custom fields
-      if (personCustomFieldMap[incomingCol.key]) {
-        const customField = personCustomFields.find(
-          (f) => f.fieldName === incomingCol.key
-        );
-        if (customField && customField.check !== !!incomingCol.check) {
-          customFieldUpdates.push({
-            fieldId: customField.fieldId,
-            check: !!incomingCol.check,
-          });
-        }
+    let results = {};
+
+    // Process Person columns if any
+    if (personColumns.length > 0) {
+      // Find the global PersonColumnPreference record
+      let personPref = await PersonColumnPreference.findOne();
+      if (!personPref) {
+        return res.status(404).json({ message: "Person preferences not found." });
       }
 
-      // Check organization custom fields
-      if (orgCustomFieldMap[incomingCol.key]) {
-        const customField = orgCustomFields.find(
-          (f) => f.fieldName === incomingCol.key
-        );
-        if (customField && customField.check !== !!incomingCol.check) {
-          // Avoid duplicate updates for the same fieldId
-          const existingUpdate = customFieldUpdates.find(
-            (update) => update.fieldId === customField.fieldId
-          );
-          if (!existingUpdate) {
-            customFieldUpdates.push({
-              fieldId: customField.fieldId,
-              check: !!incomingCol.check,
-            });
-          }
-        }
-      }
-    });
+      // Parse person columns if stored as string
+      let personPrefColumns =
+        typeof personPref.columns === "string"
+          ? JSON.parse(personPref.columns)
+          : personPref.columns;
 
-    // Perform bulk update of CustomField check values
-    if (customFieldUpdates.length > 0) {
-      for (const update of customFieldUpdates) {
-        await CustomField.update(
-          { check: update.check },
-          {
+      // Get custom fields for person only to validate incoming custom field columns
+      let personCustomFields = [];
+      if (req.adminId) {
+        try {
+          // Get person custom fields only
+          personCustomFields = await CustomField.findAll({
             where: {
-              fieldId: update.fieldId,
+              entityType: { [Op.in]: ["person", "both"] },
+              isActive: true,
               [Op.or]: [
                 { masterUserID: req.adminId },
                 { fieldSource: "default" },
@@ -396,33 +219,292 @@ exports.updatePersonColumnChecks = async (req, res) => {
                 { fieldSource: "custom" },
               ],
             },
-          }
-        );
+            attributes: [
+              "fieldId",
+              "fieldName",
+              "fieldLabel",
+              "fieldType",
+              "isRequired",
+              "isImportant",
+              "fieldSource",
+              "entityType",
+              "check",
+            ],
+          });
+        } catch (customFieldError) {
+          console.error("Error fetching person custom fields:", customFieldError);
+        }
       }
+
+      // Create map of person custom field names for quick lookup
+      const personCustomFieldMap = {};
+      personCustomFields.forEach((field) => {
+        personCustomFieldMap[field.fieldName] = {
+          fieldId: field.fieldId,
+          fieldLabel: field.fieldLabel,
+          fieldType: field.fieldType,
+          isRequired: field.isRequired,
+          isImportant: field.isImportant,
+          fieldSource: field.fieldSource,
+          entityType: field.entityType,
+        };
+      });
+
+      // Update check status for existing person columns
+      personPrefColumns = personPrefColumns.map((col) => {
+        const found = personColumns.find((c) => c.key === col.key);
+        if (found) {
+          return { ...col, check: !!found.check };
+        }
+        return col;
+      });
+
+      // Handle new custom field columns that don't exist in person preferences yet
+      const existingPersonKeys = new Set(personPrefColumns.map((col) => col.key));
+
+      personColumns.forEach((incomingCol) => {
+        // Add new person custom fields only
+        if (
+          !existingPersonKeys.has(incomingCol.key) &&
+          personCustomFieldMap[incomingCol.key]
+        ) {
+          const customFieldInfo = personCustomFieldMap[incomingCol.key];
+          personPrefColumns.push({
+            key: incomingCol.key,
+            label: customFieldInfo.fieldLabel,
+            type: customFieldInfo.fieldType,
+            isCustomField: true,
+            fieldId: customFieldInfo.fieldId,
+            isRequired: customFieldInfo.isRequired,
+            isImportant: customFieldInfo.isImportant,
+            fieldSource: customFieldInfo.fieldSource,
+            entityType: customFieldInfo.entityType,
+            check: !!incomingCol.check,
+          });
+        }
+      });
+
+      // Update check field in CustomField table for person custom fields only
+      const personCustomFieldUpdates = [];
+      personColumns.forEach((incomingCol) => {
+        // Check person custom fields only
+        if (personCustomFieldMap[incomingCol.key]) {
+          const customField = personCustomFields.find(
+            (f) => f.fieldName === incomingCol.key
+          );
+          if (customField && customField.check !== !!incomingCol.check) {
+            personCustomFieldUpdates.push({
+              fieldId: customField.fieldId,
+              check: !!incomingCol.check,
+            });
+          }
+        }
+      });
+
+      // Perform bulk update of CustomField check values for person fields only
+      if (personCustomFieldUpdates.length > 0) {
+        for (const update of personCustomFieldUpdates) {
+          await CustomField.update(
+            { check: update.check },
+            {
+              where: {
+                fieldId: update.fieldId,
+                entityType: { [Op.in]: ["person", "both"] },
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                  { fieldSource: "custom" },
+                ],
+              },
+            }
+          );
+        }
+      }
+
+      // Save person preferences only
+      personPref.columns = personPrefColumns;
+      await personPref.save();
+
+      results.person = {
+        columns: personPref.columns,
+        customFieldsProcessed: personCustomFields.length,
+        customFieldsUpdated: personCustomFieldUpdates.length,
+        totalColumns: personPrefColumns.length,
+      };
     }
 
-    // Save both preferences
-    personPref.columns = personPrefColumns;
-    await personPref.save();
+    // Process Organization columns if any
+    if (organizationColumns.length > 0) {
+      // Find the global OrganizationColumnPreference record
+      let orgPref = await OrganizationColumnPreference.findOne();
+      if (!orgPref) {
+        return res.status(404).json({ message: "Organization preferences not found." });
+      }
 
-    orgPref.columns = orgPrefColumns;
-    await orgPref.save();
+      // Parse organization columns if stored as string
+      let orgPrefColumns =
+        typeof orgPref.columns === "string"
+          ? JSON.parse(orgPref.columns)
+          : orgPref.columns;
+
+      // Get custom fields for organization only to validate incoming custom field columns
+      let orgCustomFields = [];
+      if (req.adminId) {
+        try {
+          // Get organization custom fields only
+          orgCustomFields = await CustomField.findAll({
+            where: {
+              entityType: { [Op.in]: ["organization", "both"] },
+              isActive: true,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" },
+              ],
+            },
+            attributes: [
+              "fieldId",
+              "fieldName",
+              "fieldLabel",
+              "fieldType",
+              "isRequired",
+              "isImportant",
+              "fieldSource",
+              "entityType",
+              "check",
+            ],
+          });
+        } catch (customFieldError) {
+          console.error("Error fetching organization custom fields:", customFieldError);
+        }
+      }
+
+      // Create map of organization custom field names for quick lookup
+      const orgCustomFieldMap = {};
+      orgCustomFields.forEach((field) => {
+        orgCustomFieldMap[field.fieldName] = {
+          fieldId: field.fieldId,
+          fieldLabel: field.fieldLabel,
+          fieldType: field.fieldType,
+          isRequired: field.isRequired,
+          isImportant: field.isImportant,
+          fieldSource: field.fieldSource,
+          entityType: field.entityType,
+        };
+      });
+
+      // Update check status for existing organization columns
+      orgPrefColumns = orgPrefColumns.map((col) => {
+        const found = organizationColumns.find((c) => c.key === col.key);
+        if (found) {
+          return { ...col, check: !!found.check };
+        }
+        return col;
+      });
+
+      // Handle new custom field columns that don't exist in organization preferences yet
+      const existingOrgKeys = new Set(orgPrefColumns.map((col) => col.key));
+
+      organizationColumns.forEach((incomingCol) => {
+        // Add new organization custom fields only
+        if (
+          !existingOrgKeys.has(incomingCol.key) &&
+          orgCustomFieldMap[incomingCol.key]
+        ) {
+          const customFieldInfo = orgCustomFieldMap[incomingCol.key];
+          orgPrefColumns.push({
+            key: incomingCol.key,
+            label: customFieldInfo.fieldLabel,
+            type: customFieldInfo.fieldType,
+            isCustomField: true,
+            fieldId: customFieldInfo.fieldId,
+            isRequired: customFieldInfo.isRequired,
+            isImportant: customFieldInfo.isImportant,
+            fieldSource: customFieldInfo.fieldSource,
+            entityType: customFieldInfo.entityType,
+            check: !!incomingCol.check,
+          });
+        }
+      });
+
+      // Update check field in CustomField table for organization custom fields only
+      const orgCustomFieldUpdates = [];
+      organizationColumns.forEach((incomingCol) => {
+        // Check organization custom fields only
+        if (orgCustomFieldMap[incomingCol.key]) {
+          const customField = orgCustomFields.find(
+            (f) => f.fieldName === incomingCol.key
+          );
+          if (customField && customField.check !== !!incomingCol.check) {
+            orgCustomFieldUpdates.push({
+              fieldId: customField.fieldId,
+              check: !!incomingCol.check,
+            });
+          }
+        }
+      });
+
+      // Perform bulk update of CustomField check values for organization fields only
+      if (orgCustomFieldUpdates.length > 0) {
+        for (const update of orgCustomFieldUpdates) {
+          await CustomField.update(
+            { check: update.check },
+            {
+              where: {
+                fieldId: update.fieldId,
+                entityType: { [Op.in]: ["organization", "both"] },
+                [Op.or]: [
+                  { masterUserID: req.adminId },
+                  { fieldSource: "default" },
+                  { fieldSource: "system" },
+                  { fieldSource: "custom" },
+                ],
+              },
+            }
+          );
+        }
+      }
+
+      // Save organization preferences only
+      orgPref.columns = orgPrefColumns;
+      await orgPref.save();
+
+      results.organization = {
+        columns: orgPref.columns,
+        customFieldsProcessed: orgCustomFields.length,
+        customFieldsUpdated: orgCustomFieldUpdates.length,
+        totalColumns: orgPrefColumns.length,
+      };
+    }
+
+    // Prepare response based on what was updated
+    let message = "";
+    if (personColumns.length > 0 && organizationColumns.length > 0) {
+      message = "Person and organization columns updated successfully";
+    } else if (personColumns.length > 0) {
+      message = "Person columns updated successfully";
+    } else if (organizationColumns.length > 0) {
+      message = "Organization columns updated successfully";
+    } else {
+      message = "No columns to update";
+    }
 
     res.status(200).json({
-      message: "Person and organization columns updated successfully",
-      personColumns: personPref.columns,
-      organizationColumns: orgPref.columns,
-      personCustomFieldsProcessed: personCustomFields.length,
-      organizationCustomFieldsProcessed: orgCustomFields.length,
-      customFieldsUpdated: customFieldUpdates.length,
-      totalPersonColumns: personPrefColumns.length,
-      totalOrganizationColumns: orgPrefColumns.length,
+      message,
+      results,
+      totalPersonColumns: personColumns.length,
+      totalOrganizationColumns: organizationColumns.length,
     });
   } catch (error) {
-    console.error("Error updating person and organization columns:", error);
-    res.status(500).json({ message: "Error updating person and organization columns" });
+    console.error("Error updating columns:", error);
+    res.status(500).json({ message: "Error updating columns" });
   }
 };
+
+// Update check status for person columns and custom fields ONLY (does not update organization columns)
+
 
 exports.getOrganizationColumnPreference = async (req, res) => {
   try {

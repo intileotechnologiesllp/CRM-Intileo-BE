@@ -126,4 +126,5 @@ router.get("/person-check-columns", verifyToken, validatePrivilege(5, "view"), l
 router.post("/update-person-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonColumnChecks);
 
 
+
 module.exports = router
