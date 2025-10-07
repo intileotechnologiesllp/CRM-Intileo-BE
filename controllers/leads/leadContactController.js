@@ -715,11 +715,13 @@ exports.getBothColumnPreferences = async (req, res) => {
       personColumns = typeof personPref.columns === "string" ? JSON.parse(personPref.columns) : personPref.columns;
     }
 
-    // Parse filterConfig for each column if needed
+    // Parse filterConfig for each column if needed and add entityType
     orgColumns = orgColumns.map((col) => {
       if (col.filterConfig) {
         col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
       }
+      // Add entityType for organization columns
+      col.entityType = "organization";
       return col;
     });
 
@@ -727,6 +729,8 @@ exports.getBothColumnPreferences = async (req, res) => {
       if (col.filterConfig) {
         col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
       }
+      // Add entityType for person columns
+      col.entityType = "person";
       return col;
     });
 
@@ -830,7 +834,7 @@ exports.getBothColumnPreferences = async (req, res) => {
       isRequired: field.isRequired,
       isImportant: field.isImportant,
       fieldSource: field.fieldSource,
-      entityType: field.entityType,
+      entityType: "organization", // Set entityType as organization for org custom fields
       check: field.check || false,
     }));
 
@@ -851,7 +855,7 @@ exports.getBothColumnPreferences = async (req, res) => {
       isRequired: field.isRequired,
       isImportant: field.isImportant,
       fieldSource: field.fieldSource,
-      entityType: field.entityType,
+      entityType: "person", // Set entityType as person for person custom fields
       check: field.check || false,
     }));
 
