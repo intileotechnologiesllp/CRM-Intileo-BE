@@ -8,12 +8,19 @@ const MasterUser = require("../../../models/master/masterUserModel");
 const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
-const { getLeadConditionObject } = require("../../../utils/conditionObject/lead");
-const { getActivityConditionObject } = require("../../../utils/conditionObject/activity");
-const { getDealConditionObject } = require("../../../utils/conditionObject/deal");
-const { getPersonConditionObject } = require("../../../utils/conditionObject/createPerson");
+const {
+  getLeadConditionObject,
+} = require("../../../utils/conditionObject/lead");
+const {
+  getActivityConditionObject,
+} = require("../../../utils/conditionObject/activity");
+const {
+  getDealConditionObject,
+} = require("../../../utils/conditionObject/deal");
+const {
+  getPersonConditionObject,
+} = require("../../../utils/conditionObject/createPerson");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
-
 
 exports.createActivityReport = async (req, res) => {
   try {
@@ -366,6 +373,10 @@ exports.createActivityReport = async (req, res) => {
     // For Activity Performance reports, generate the data
     let reportData = null;
     let paginationInfo = null;
+    let totalValue = 0;
+    let summary = null;
+    let reportConfig = null;
+
     if (entity && type && !reportId) {
       if (entity === "Activity" && type === "Performance") {
         // Validate required fields for performance reports
@@ -395,10 +406,14 @@ exports.createActivityReport = async (req, res) => {
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
             const maxValue = Math.max(
-              ...reportData.map((item) => item.value || 0)
+              ...reportData.map(
+                (item) => item.value || item.totalSegmentValue || 0
+              )
             );
             const minValue = Math.min(
-              ...reportData.map((item) => item.value || 0)
+              ...reportData.map(
+                (item) => item.value || item.totalSegmentValue || 0
+              )
             );
 
             summary = {
@@ -490,10 +505,14 @@ exports.createActivityReport = async (req, res) => {
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
             const maxValue = Math.max(
-              ...reportData.map((item) => item.value || 0)
+              ...reportData.map(
+                (item) => item.value || item.totalSegmentValue || 0
+              )
             );
             const minValue = Math.min(
-              ...reportData.map((item) => item.value || 0)
+              ...reportData.map(
+                (item) => item.value || item.totalSegmentValue || 0
+              )
             );
 
             summary = {
@@ -539,119 +558,6 @@ exports.createActivityReport = async (req, res) => {
     });
   }
 };
-exports.createActivityReportDrillDown = async (req, res) => {
-  try {
-    const {
-      xaxis,
-      yaxis,
-      filters,
-      segmentedBy = "none",
-      page = 1,
-      limit = 8,
-      fieldName,
-      fieldValue,
-      id,
-      moduleId
-    } = req.body;
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    const result = await generateActivityPerformanceDataForDrillDown(
-      ownerId,
-      role,
-      filters,
-      fieldName,
-      fieldValue,
-      id,
-      moduleId
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Data generated successfully",
-      data: result?.data,
-      pagination: result?.data?.length,
-    });
-  } catch (error) {
-    console.error("Error creating reports:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create reports",
-      error: error.message,
-    });
-  }
-};
-
-exports.getInsightReportsData = async (req, res) => {
-  try {
-    // your Activity model
-
-    function buildWhere(data) {
-      const where = {};
-
-      // main fieldName condition
-      where[data.fieldName] = data.fieldValue;
-
-      // loop over conditions
-      if (Array.isArray(data.conditions)) {
-        data.conditions.forEach((cond) => {
-          let op;
-
-          switch (cond.operator) {
-            case "=":
-              op = Op.eq;
-              break;
-            case "!=":
-              op = Op.ne;
-              break;
-            case ">":
-              op = Op.gt;
-              break;
-            case "<":
-              op = Op.lt;
-              break;
-            case ">=":
-              op = Op.gte;
-              break;
-            case "<=":
-              op = Op.lte;
-              break;
-            case "IN":
-              op = Op.in;
-              break;
-            case "NOT IN":
-              op = Op.notIn;
-              break;
-            case "LIKE":
-              op = Op.like;
-              break;
-            default:
-              throw new Error(`Unsupported operator: ${cond.operator}`);
-          }
-
-          where[cond.column] = { [op]: cond.value };
-        });
-      }
-
-      return where;
-    }
-    const where = buildWhere(data);
-
-    console.log(where);
-    // const activities = await Activity.findAll({
-    //   where,
-    //   raw: true, // plain objects instead of Sequelize instances
-    // });
-
-    return res.status(200).json({
-      success: true,
-      message: "Data generated successfully",
-      data: reportData,
-      // totalValue: activities,
-      totalValue: where,
-    });
-  } catch {}
-};
 
 async function generateExistingActivityPerformanceData(
   ownerId,
@@ -671,7 +577,7 @@ async function generateExistingActivityPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
-  // --- (Filter handling code remains the same) ---
+  // --- Filter handling code ---
   if (existingfilters && existingfilters.conditions) {
     const validConditions = existingfilters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -715,7 +621,7 @@ async function generateExistingActivityPerformanceData(
   let groupBy = [];
   let attributes = [];
 
-  // --- (Attribute and GroupBy setup remains the same) ---
+  // --- Attribute and GroupBy setup with special handling for contactPerson and organization ---
   if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
@@ -732,6 +638,34 @@ async function generateExistingActivityPerformanceData(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+  } else if (existingxaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "ActivityPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.personId");
+    attributes.push([Sequelize.col("Activity.personId"), "personId"]);
+    attributes.push([Sequelize.col("ActivityPerson.contactPerson"), "xValue"]);
+  } else if (existingxaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "ActivityOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Activity.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("ActivityOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     groupBy.push(`Activity.${existingxaxis}`);
     attributes.push([Sequelize.col(`Activity.${existingxaxis}`), "xValue"]);
@@ -741,10 +675,35 @@ async function generateExistingActivityPerformanceData(
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-    if (
+
+    // Handle segmentedBy for special cases
+    if (existingSegmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "ActivityPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.personId");
+      attributes.push([
+        Sequelize.col("ActivityPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (existingSegmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "ActivityOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("ActivityOrganization.organization"),
+        "segmentValue",
+      ]);
+    } else if (
       (existingSegmentedBy === "Owner" ||
-        existingSegmentedBy === "assignedTo" ||
-        existingSegmentedBy === "Team") &&
+        existingSegmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
       includeModels.push({
@@ -752,15 +711,14 @@ async function generateExistingActivityPerformanceData(
         as: "assignedUser",
         attributes: [],
       });
-    }
-
-    if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
-    ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team") {
+    } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
@@ -797,7 +755,7 @@ async function generateExistingActivityPerformanceData(
     ]);
   }
 
-  // --- (Pagination and Query logic remains the same) ---
+  // --- Pagination and Query logic ---
   const totalCountResult = await Activity.findAll({
     where: baseWhere,
     attributes: [
@@ -900,19 +858,43 @@ async function generateExistingActivityPerformanceData(
     });
   }
 
-  // --- NEW FORMATTING AND TOTALING LOGIC ---
+  // --- FORMATTING AND TOTALING LOGIC with special handling for contactPerson and organization ---
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     const groupedData = {};
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      let xValue = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set id based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -940,10 +922,34 @@ async function generateExistingActivityPerformanceData(
     );
   } else {
     // Logic for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
+      }
+
+      // Set id based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -999,7 +1005,6 @@ async function generateActivityPerformanceData(
         );
       });
 
-      // console.log(conditions, "CONDITIONs");
       let combinedCondition = conditions[0];
       for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
@@ -1025,8 +1030,9 @@ async function generateActivityPerformanceData(
   }
 
   let groupBy = [];
-  let attributes = ["personId", "leadOrganizationId"];
+  let attributes = [];
 
+  // --- Attribute and GroupBy setup with special handling for contactPerson and organization ---
   if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
@@ -1043,6 +1049,34 @@ async function generateActivityPerformanceData(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+  } else if (xaxis === "contactPerson") {
+    // Special handling for contactPerson - join with Person table
+    includeModels.push({
+      model: Person,
+      as: "ActivityPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.personId");
+    attributes.push([Sequelize.col("Activity.personId"), "personId"]);
+    attributes.push([Sequelize.col("ActivityPerson.contactPerson"), "xValue"]);
+  } else if (xaxis === "organization") {
+    // Special handling for organization - join with Organization table
+    includeModels.push({
+      model: Organization,
+      as: "ActivityOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Activity.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("ActivityOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     groupBy.push(`Activity.${xaxis}`);
     attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
@@ -1052,10 +1086,34 @@ async function generateActivityPerformanceData(
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-    if (
-      (segmentedBy === "Owner" ||
-        segmentedBy === "assignedTo" ||
-        segmentedBy === "Team") &&
+
+    // Handle segmentedBy for special cases
+    if (segmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "ActivityPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.personId");
+      attributes.push([
+        Sequelize.col("ActivityPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (segmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "ActivityOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("ActivityOrganization.organization"),
+        "segmentValue",
+      ]);
+    } else if (
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
       includeModels.push({
@@ -1063,12 +1121,14 @@ async function generateActivityPerformanceData(
         as: "assignedUser",
         attributes: [],
       });
-    }
-
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
+    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
@@ -1212,26 +1272,36 @@ async function generateActivityPerformanceData(
   if (segmentedBy && segmentedBy !== "none") {
     const groupedData = {};
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
+      let xValue = item.xValue === null ? "Unknown" : item.xValue;
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        if (xaxis == "contactPerson") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.personId || null,
-          };
-        } else if (xaxis == "organization") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.leadOrganizationId || null,
-          };
-        } else {
-          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        // Set id based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId;
         }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -1239,60 +1309,57 @@ async function generateActivityPerformanceData(
       });
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+    formattedResults = Object.values(groupedData);
 
+    // Calculate and add total for each segment group
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
         0
       );
-    }); // Sort groups based on their total value
+    });
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    // Sort groups based on their total value
+    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
 
+    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
     );
   } else {
     formattedResults = results.map((item) => {
-      if (xaxis == "contactPerson") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.personId || null,
-        };
-      } else if (xaxis == "organization") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.leadOrganizationId || null,
-        };
-      } else {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: null,
-        };
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
       }
-    }); // Calculate the grand total
+
+      // Set id based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
+
+    // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
-
-  // let finalResult = formattedResults
-  // if(xaxis == "startDateTime" || xaxis == "endDateTime"){
-  //   const formattedData = Object.values(
-  //     formattedResults.reduce((acc, { label, value }) => {
-  //       const date = new Date(label).toISOString().split('T')[0]; // Extract YYYY-MM-DD
-  //       acc[date] = acc[date] || { label: date, value: 0, id: null };
-  //       acc[date].value += value;
-  //       return acc;
-  //     }, {})
-  //   ).sort((a, b) => new Date(a.label) - new Date(b.label)); // Sort by date
-
-  //   // console
-  //   finalResult = formattedData
-  // }
 
   return {
     data: formattedResults,
@@ -1307,6 +1374,775 @@ async function generateActivityPerformanceData(
     },
   };
 }
+
+exports.createActivityReportDrillDown = async (req, res) => {
+  try {
+    const {
+      xaxis,
+      yaxis,
+      filters,
+      segmentedBy = "none",
+      page = 1,
+      limit = 8,
+      fieldName,
+      fieldValue,
+      id,
+      moduleId,
+    } = req.body;
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    const result = await generateActivityPerformanceDataForDrillDown(
+      ownerId,
+      role,
+      filters,
+      fieldName,
+      fieldValue,
+      id,
+      moduleId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: result?.data,
+      pagination: result?.data?.length,
+    });
+  } catch (error) {
+    console.error("Error creating reports:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create reports",
+      error: error.message,
+    });
+  }
+};
+
+exports.getInsightReportsData = async (req, res) => {
+  try {
+    // your Activity model
+
+    function buildWhere(data) {
+      const where = {};
+
+      // main fieldName condition
+      where[data.fieldName] = data.fieldValue;
+
+      // loop over conditions
+      if (Array.isArray(data.conditions)) {
+        data.conditions.forEach((cond) => {
+          let op;
+
+          switch (cond.operator) {
+            case "=":
+              op = Op.eq;
+              break;
+            case "!=":
+              op = Op.ne;
+              break;
+            case ">":
+              op = Op.gt;
+              break;
+            case "<":
+              op = Op.lt;
+              break;
+            case ">=":
+              op = Op.gte;
+              break;
+            case "<=":
+              op = Op.lte;
+              break;
+            case "IN":
+              op = Op.in;
+              break;
+            case "NOT IN":
+              op = Op.notIn;
+              break;
+            case "LIKE":
+              op = Op.like;
+              break;
+            default:
+              throw new Error(`Unsupported operator: ${cond.operator}`);
+          }
+
+          where[cond.column] = { [op]: cond.value };
+        });
+      }
+
+      return where;
+    }
+    const where = buildWhere(data);
+
+    console.log(where);
+    // const activities = await Activity.findAll({
+    //   where,
+    //   raw: true, // plain objects instead of Sequelize instances
+    // });
+
+    return res.status(200).json({
+      success: true,
+      message: "Data generated successfully",
+      data: reportData,
+      // totalValue: activities,
+      totalValue: where,
+    });
+  } catch {}
+};
+
+// async function generateExistingActivityPerformanceData(
+//   ownerId,
+//   role,
+//   existingxaxis,
+//   existingyaxis,
+//   existingSegmentedBy,
+//   existingfilters,
+//   page = 1,
+//   limit = 8
+// ) {
+//   let includeModels = [];
+//   const offset = (page - 1) * limit;
+//   const baseWhere = {};
+
+//   if (role !== "admin") {
+//     baseWhere.masterUserID = ownerId;
+//   }
+
+//   // --- (Filter handling code remains the same) ---
+//   if (existingfilters && existingfilters.conditions) {
+//     const validConditions = existingfilters.conditions.filter(
+//       (cond) => cond.value !== undefined && cond.value !== ""
+//     );
+
+//     if (validConditions.length > 0) {
+//       const filterIncludeModels = [];
+//       const conditions = validConditions.map((cond) => {
+//         return getConditionObject(
+//           cond.column,
+//           cond.operator,
+//           cond.value,
+//           filterIncludeModels
+//         );
+//       });
+
+//       let combinedCondition = conditions[0];
+//       for (let i = 1; i < conditions.length; i++) {
+//         const logicalOp = (
+//           existingfilters.logicalOperators[i - 1] || "AND"
+//         ).toUpperCase();
+//         if (logicalOp === "AND") {
+//           combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+//         } else {
+//           combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+//         }
+//       }
+//       Object.assign(baseWhere, combinedCondition);
+
+//       filterIncludeModels.forEach((newInclude) => {
+//         const exists = includeModels.some(
+//           (existingInclude) => existingInclude.as === newInclude.as
+//         );
+//         if (!exists) {
+//           includeModels.push(newInclude);
+//         }
+//       });
+//     }
+//   }
+
+//   let groupBy = [];
+//   let attributes = [];
+
+//   // --- (Attribute and GroupBy setup remains the same) ---
+//   if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+//     includeModels.push({
+//       model: MasterUser,
+//       as: "assignedUser",
+//       attributes: [],
+//     });
+//     groupBy.push("assignedUser.name");
+//     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+//   } else if (existingxaxis === "Team") {
+//     includeModels.push({
+//       model: MasterUser,
+//       as: "assignedUser",
+//       attributes: [],
+//     });
+//     groupBy.push("assignedUser.team");
+//     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+//   } else {
+//     groupBy.push(`Activity.${existingxaxis}`);
+//     attributes.push([Sequelize.col(`Activity.${existingxaxis}`), "xValue"]);
+//   }
+
+//   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+//     const assignedUserIncludeExists = includeModels.some(
+//       (inc) => inc.as === "assignedUser"
+//     );
+//     if (
+//       (existingSegmentedBy === "Owner" ||
+//         existingSegmentedBy === "assignedTo" ||
+//         existingSegmentedBy === "Team") &&
+//       !assignedUserIncludeExists
+//     ) {
+//       includeModels.push({
+//         model: MasterUser,
+//         as: "assignedUser",
+//         attributes: [],
+//       });
+//     }
+
+//     if (
+//       existingSegmentedBy === "Owner" ||
+//       existingSegmentedBy === "assignedTo"
+//     ) {
+//       groupBy.push("assignedUser.name");
+//       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+//     } else if (existingSegmentedBy === "Team") {
+//       groupBy.push("assignedUser.team");
+//       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+//     } else {
+//       groupBy.push(`Activity.${existingSegmentedBy}`);
+//       attributes.push([
+//         Sequelize.col(`Activity.${existingSegmentedBy}`),
+//         "segmentValue",
+//       ]);
+//     }
+//   }
+
+//   if (existingyaxis === "no of activities") {
+//     attributes.push([
+//       Sequelize.fn("COUNT", Sequelize.col("activityId")),
+//       "yValue",
+//     ]);
+//   } else if (existingyaxis === "duration") {
+//     attributes.push([
+//       Sequelize.fn(
+//         "AVG",
+//         Sequelize.fn(
+//           "TIMESTAMPDIFF",
+//           Sequelize.literal("HOUR"),
+//           Sequelize.col("startDateTime"),
+//           Sequelize.col("endDateTime")
+//         )
+//       ),
+//       "yValue",
+//     ]);
+//   } else {
+//     attributes.push([
+//       Sequelize.fn("SUM", Sequelize.col(`Activity.${existingyaxis}`)),
+//       "yValue",
+//     ]);
+//   }
+
+//   // --- (Pagination and Query logic remains the same) ---
+//   const totalCountResult = await Activity.findAll({
+//     where: baseWhere,
+//     attributes: [
+//       [
+//         Sequelize.fn(
+//           "COUNT",
+//           Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+//         ),
+//         "total",
+//       ],
+//     ],
+//     include: includeModels,
+//     raw: true,
+//   });
+
+//   const totalCount = parseInt(totalCountResult[0]?.total || 0);
+//   const totalPages = Math.ceil(totalCount / limit);
+
+//   let results;
+
+//   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+//     const paginatedGroups = await Activity.findAll({
+//       attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+//       where: baseWhere,
+//       include: includeModels,
+//       group: groupBy[0],
+//       order: [
+//         existingyaxis === "no of activities"
+//           ? [Sequelize.fn("COUNT", Sequelize.col("activityId")), "DESC"]
+//           : existingyaxis === "duration"
+//           ? [
+//               Sequelize.fn(
+//                 "AVG",
+//                 Sequelize.fn(
+//                   "TIMESTAMPDIFF",
+//                   Sequelize.literal("HOUR"),
+//                   Sequelize.col("startDateTime"),
+//                   Sequelize.col("endDateTime")
+//                 )
+//               ),
+//               "DESC",
+//             ]
+//           : [
+//               Sequelize.fn("SUM", Sequelize.col(`Activity.${existingyaxis}`)),
+//               "DESC",
+//             ],
+//       ],
+//       limit: limit,
+//       offset: offset,
+//       raw: true,
+//     });
+
+//     const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+//     if (groupKeys.length === 0) {
+//       results = [];
+//     } else {
+//       const finalWhere = { ...baseWhere };
+//       const whereColumn = groupBy[0].includes(".")
+//         ? `$${groupBy[0]}$`
+//         : groupBy[0];
+
+//       const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+//       const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+//       const orConditions = [];
+//       if (nonNullGroupKeys.length > 0) {
+//         orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+//       }
+//       if (hasNullGroupKey) {
+//         orConditions.push({ [whereColumn]: { [Op.is]: null } });
+//       }
+
+//       if (orConditions.length > 0) {
+//         const groupKeyCondition = { [Op.or]: orConditions };
+//         finalWhere[Op.and] = finalWhere[Op.and]
+//           ? [...finalWhere[Op.and], groupKeyCondition]
+//           : [groupKeyCondition];
+//       }
+
+//       results = await Activity.findAll({
+//         where: finalWhere,
+//         attributes: attributes,
+//         include: includeModels,
+//         group: groupBy,
+//         raw: true,
+//         order: [[Sequelize.literal("yValue"), "DESC"]],
+//       });
+//     }
+//   } else {
+//     results = await Activity.findAll({
+//       where: baseWhere,
+//       attributes: attributes,
+//       include: includeModels,
+//       group: groupBy,
+//       raw: true,
+//       order: [[Sequelize.literal("yValue"), "DESC"]],
+//       limit: limit,
+//       offset: offset,
+//     });
+//   }
+
+//   // --- NEW FORMATTING AND TOTALING LOGIC ---
+//   let formattedResults = [];
+//   let totalValue = 0;
+
+//   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+//     const groupedData = {};
+//     results.forEach((item) => {
+//       const xValue = item.xValue || "Unknown";
+//       const segmentValue = item.segmentValue || "Unknown";
+//       const yValue = Number(item.yValue) || 0;
+
+//       if (!groupedData[xValue]) {
+//         groupedData[xValue] = { label: xValue, segments: [] };
+//       }
+//       groupedData[xValue].segments.push({
+//         labeltype: segmentValue,
+//         value: yValue,
+//       });
+//     });
+
+//     formattedResults = Object.values(groupedData);
+
+//     // Calculate total for each segment group
+//     formattedResults.forEach((group) => {
+//       group.totalSegmentValue = group.segments.reduce(
+//         (sum, seg) => sum + seg.value,
+//         0
+//       );
+//     });
+
+//     // Sort groups based on their total value
+//     formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+
+//     // Calculate the grand total
+//     totalValue = formattedResults.reduce(
+//       (sum, group) => sum + group.totalSegmentValue,
+//       0
+//     );
+//   } else {
+//     // Logic for non-segmented data
+//     formattedResults = results.map((item) => ({
+//       label: item.xValue || "Unknown",
+//       value: Number(item.yValue) || 0,
+//     }));
+
+//     // Calculate the grand total
+//     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+//   }
+
+//   // Return final response with totals
+//   return {
+//     data: formattedResults,
+//     totalValue: totalValue,
+//     pagination: {
+//       currentPage: page,
+//       totalPages: totalPages,
+//       totalItems: totalCount,
+//       itemsPerPage: limit,
+//       hasNextPage: page < totalPages,
+//       hasPrevPage: page > 1,
+//     },
+//   };
+// }
+
+// // Helper function to generate activity performance data with pagination
+// async function generateActivityPerformanceData(
+//   ownerId,
+//   role,
+//   xaxis,
+//   yaxis,
+//   segmentedBy,
+//   filters,
+//   page = 1,
+//   limit = 8
+// ) {
+//   let includeModels = [];
+//   const offset = (page - 1) * limit;
+//   const baseWhere = {};
+
+//   if (role !== "admin") {
+//     baseWhere.masterUserID = ownerId;
+//   }
+
+//   if (filters && filters.conditions) {
+//     const validConditions = filters.conditions.filter(
+//       (cond) => cond.value !== undefined && cond.value !== ""
+//     );
+
+//     if (validConditions.length > 0) {
+//       const filterIncludeModels = [];
+//       const conditions = validConditions.map((cond) => {
+//         return getConditionObject(
+//           cond.column,
+//           cond.operator,
+//           cond.value,
+//           filterIncludeModels
+//         );
+//       });
+
+//       // console.log(conditions, "CONDITIONs");
+//       let combinedCondition = conditions[0];
+//       for (let i = 1; i < conditions.length; i++) {
+//         const logicalOp = (
+//           filters.logicalOperators[i - 1] || "AND"
+//         ).toUpperCase();
+//         if (logicalOp === "AND") {
+//           combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+//         } else {
+//           combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+//         }
+//       }
+//       Object.assign(baseWhere, combinedCondition);
+
+//       filterIncludeModels.forEach((newInclude) => {
+//         const exists = includeModels.some(
+//           (existingInclude) => existingInclude.as === newInclude.as
+//         );
+//         if (!exists) {
+//           includeModels.push(newInclude);
+//         }
+//       });
+//     }
+//   }
+
+//   let groupBy = [];
+//   let attributes = ["personId", "leadOrganizationId"];
+
+//   if (xaxis === "Owner" || xaxis === "assignedTo") {
+//     includeModels.push({
+//       model: MasterUser,
+//       as: "assignedUser",
+//       attributes: [],
+//     });
+//     groupBy.push("assignedUser.name");
+//     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+//   } else if (xaxis === "Team") {
+//     includeModels.push({
+//       model: MasterUser,
+//       as: "assignedUser",
+//       attributes: [],
+//     });
+//     groupBy.push("assignedUser.team");
+//     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+//   } else {
+//     groupBy.push(`Activity.${xaxis}`);
+//     attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
+//   }
+
+//   if (segmentedBy && segmentedBy !== "none") {
+//     const assignedUserIncludeExists = includeModels.some(
+//       (inc) => inc.as === "assignedUser"
+//     );
+//     if (
+//       (segmentedBy === "Owner" ||
+//         segmentedBy === "assignedTo" ||
+//         segmentedBy === "Team") &&
+//       !assignedUserIncludeExists
+//     ) {
+//       includeModels.push({
+//         model: MasterUser,
+//         as: "assignedUser",
+//         attributes: [],
+//       });
+//     }
+
+//     if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+//       groupBy.push("assignedUser.name");
+//       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+//     } else if (segmentedBy === "Team") {
+//       groupBy.push("assignedUser.team");
+//       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+//     } else {
+//       groupBy.push(`Activity.${segmentedBy}`);
+//       attributes.push([
+//         Sequelize.col(`Activity.${segmentedBy}`),
+//         "segmentValue",
+//       ]);
+//     }
+//   }
+
+//   if (yaxis === "no of activities") {
+//     attributes.push([
+//       Sequelize.fn("COUNT", Sequelize.col("activityId")),
+//       "yValue",
+//     ]);
+//   } else if (yaxis === "duration") {
+//     attributes.push([
+//       Sequelize.fn(
+//         "AVG",
+//         Sequelize.fn(
+//           "TIMESTAMPDIFF",
+//           Sequelize.literal("HOUR"),
+//           Sequelize.col("startDateTime"),
+//           Sequelize.col("endDateTime")
+//         )
+//       ),
+//       "yValue",
+//     ]);
+//   } else {
+//     attributes.push([
+//       Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)),
+//       "yValue",
+//     ]);
+//   }
+
+//   const totalCountResult = await Activity.findAll({
+//     where: baseWhere,
+//     attributes: [
+//       [
+//         Sequelize.fn(
+//           "COUNT",
+//           Sequelize.fn("DISTINCT", Sequelize.col(groupBy[0]))
+//         ),
+//         "total",
+//       ],
+//     ],
+//     include: includeModels,
+//     raw: true,
+//   });
+
+//   const totalCount = parseInt(totalCountResult[0]?.total || 0);
+//   const totalPages = Math.ceil(totalCount / limit);
+
+//   let results;
+
+//   if (segmentedBy && segmentedBy !== "none") {
+//     const paginatedGroups = await Activity.findAll({
+//       attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+//       where: baseWhere,
+//       include: includeModels,
+//       group: groupBy[0],
+//       order: [
+//         yaxis === "no of activities"
+//           ? [Sequelize.fn("COUNT", Sequelize.col("activityId")), "DESC"]
+//           : yaxis === "duration"
+//           ? [
+//               Sequelize.fn(
+//                 "AVG",
+//                 Sequelize.fn(
+//                   "TIMESTAMPDIFF",
+//                   Sequelize.literal("HOUR"),
+//                   Sequelize.col("startDateTime"),
+//                   Sequelize.col("endDateTime")
+//                 )
+//               ),
+//               "DESC",
+//             ]
+//           : [Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)), "DESC"],
+//       ],
+//       limit: limit,
+//       offset: offset,
+//       raw: true,
+//     });
+
+//     const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+//     if (groupKeys.length === 0) {
+//       results = [];
+//     } else {
+//       const finalWhere = { ...baseWhere };
+//       const [groupModel, groupColumn] = groupBy[0].includes(".")
+//         ? groupBy[0].split(".")
+//         : ["Activity", groupBy[0]];
+//       const whereColumn = groupBy[0].includes(".")
+//         ? `$${groupBy[0]}$`
+//         : groupColumn;
+
+//       const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
+//       const hasNullGroupKey = groupKeys.some((key) => key === null);
+
+//       const orConditions = [];
+//       if (nonNullGroupKeys.length > 0) {
+//         orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
+//       }
+//       if (hasNullGroupKey) {
+//         orConditions.push({ [whereColumn]: { [Op.is]: null } });
+//       }
+//       if (orConditions.length > 0) {
+//         const groupKeyCondition = { [Op.or]: orConditions };
+//         finalWhere[Op.and] = finalWhere[Op.and]
+//           ? [...finalWhere[Op.and], groupKeyCondition]
+//           : [groupKeyCondition];
+//       }
+
+//       results = await Activity.findAll({
+//         where: finalWhere,
+//         attributes: attributes,
+//         include: includeModels,
+//         group: [...groupBy],
+//         raw: true,
+//         order: [[Sequelize.literal("yValue"), "DESC"]],
+//       });
+//     }
+//   } else {
+//     results = await Activity.findAll({
+//       where: baseWhere,
+//       attributes: attributes,
+//       include: includeModels,
+//       group: groupBy,
+//       raw: true,
+//       order: [[Sequelize.literal("yValue"), "DESC"]],
+//       limit: limit,
+//       offset: offset,
+//     });
+//   }
+
+//   let formattedResults = [];
+//   let totalValue = 0;
+
+//   if (segmentedBy && segmentedBy !== "none") {
+//     const groupedData = {};
+//     results.forEach((item) => {
+//       const xValue = item.xValue === null ? "Unknown" : item.xValue;
+//       const segmentValue = item.segmentValue || "Unknown";
+//       const yValue = Number(item.yValue) || 0;
+
+//       if (!groupedData[xValue]) {
+//         if (xaxis == "contactPerson") {
+//           groupedData[xValue] = {
+//             label: xValue,
+//             segments: [],
+//             id: item?.personId || null,
+//           };
+//         } else if (xaxis == "organization") {
+//           groupedData[xValue] = {
+//             label: xValue,
+//             segments: [],
+//             id: item?.leadOrganizationId || null,
+//           };
+//         } else {
+//           groupedData[xValue] = { label: xValue, segments: [], id: null };
+//         }
+//       }
+//       groupedData[xValue].segments.push({
+//         labeltype: segmentValue,
+//         value: yValue,
+//       });
+//     });
+
+//     formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+
+//     formattedResults.forEach((group) => {
+//       group.totalSegmentValue = group.segments.reduce(
+//         (sum, seg) => sum + seg.value,
+//         0
+//       );
+//     }); // Sort groups based on their total value
+
+//     formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+
+//     totalValue = formattedResults.reduce(
+//       (sum, group) => sum + group.totalSegmentValue,
+//       0
+//     );
+//   } else {
+//     formattedResults = results.map((item) => {
+//       if (xaxis == "contactPerson") {
+//         return {
+//           label: item.xValue || "Unknown",
+//           value: Number(item.yValue) || 0,
+//           id: item?.personId || null,
+//         };
+//       } else if (xaxis == "organization") {
+//         return {
+//           label: item.xValue || "Unknown",
+//           value: Number(item.yValue) || 0,
+//           id: item?.leadOrganizationId || null,
+//         };
+//       } else {
+//         return {
+//           label: item.xValue || "Unknown",
+//           value: Number(item.yValue) || 0,
+//           id: null,
+//         };
+//       }
+//     }); // Calculate the grand total
+//     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
+//   }
+
+//   // let finalResult = formattedResults
+//   // if(xaxis == "startDateTime" || xaxis == "endDateTime"){
+//   //   const formattedData = Object.values(
+//   //     formattedResults.reduce((acc, { label, value }) => {
+//   //       const date = new Date(label).toISOString().split('T')[0]; // Extract YYYY-MM-DD
+//   //       acc[date] = acc[date] || { label: date, value: 0, id: null };
+//   //       acc[date].value += value;
+//   //       return acc;
+//   //     }, {})
+//   //   ).sort((a, b) => new Date(a.label) - new Date(b.label)); // Sort by date
+
+//   //   // console
+//   //   finalResult = formattedData
+//   // }
+
+//   return {
+//     data: formattedResults,
+//     totalValue: totalValue,
+//     pagination: {
+//       currentPage: page,
+//       totalPages: totalPages,
+//       totalItems: totalCount,
+//       itemsPerPage: limit,
+//       hasNextPage: page < totalPages,
+//       hasPrevPage: page > 1,
+//     },
+//   };
+// }
 
 async function generateActivityPerformanceDataForDrillDown(
   ownerId,
@@ -1332,8 +2168,8 @@ async function generateActivityPerformanceDataForDrillDown(
     1: getLeadConditionObject,
     2: getDealConditionObject,
     3: getPersonConditionObject,
-    4: getPersonConditionObject
-  }
+    4: getPersonConditionObject,
+  };
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -1382,53 +2218,59 @@ async function generateActivityPerformanceDataForDrillDown(
     4: Organization,
     5: Deal,
     6: Lead,
-  }
+  };
 
-  const tableName = entityData[entity]
+  const tableName = entityData[entity];
   const columnNames = Object.keys(tableName.rawAttributes);
   attributes = [...attributes, ...columnNames];
 
   let results;
-  
+
   let addIncludeModel = includeModels;
-  if(entity != 4 && entity != 3){
-    if(entity == 1 || entity == 6){
-      addIncludeModel = [...includeModels,
-       {
-        model: MasterUser,
-        as: 'Owner', // For masterUserID
-        attributes: ['masterUserID', 'name'],
-      }]
-    }else if(entity == 2 || entity == 5){
-      addIncludeModel = [...includeModels,
-       {
-        model: MasterUser,
-        as: 'Owner', // For masterUserID
-        attributes: ['masterUserID', 'name'],
-      }]
-    }
-    else{
-      addIncludeModel = [...includeModels,
-        {
-      model: MasterUser,
-      as: 'assignedUser', // For masterUserID
-      attributes: ['masterUserID', 'name'],
-    },
-    {
-      model: MasterUser,
-      as: 'assignee', // For assignedTo
-      attributes: [ 'masterUserID', 'name'],
-    }]
-  }
-  }else{
-    if(entity == 4){
-      addIncludeModel = [...includeModels,
+  if (entity != 4 && entity != 3) {
+    if (entity == 1 || entity == 6) {
+      addIncludeModel = [
+        ...includeModels,
         {
           model: MasterUser,
-          as: 'MasterUser',
+          as: "Owner", // For masterUserID
+          attributes: ["masterUserID", "name"],
+        },
+      ];
+    } else if (entity == 2 || entity == 5) {
+      addIncludeModel = [
+        ...includeModels,
+        {
+          model: MasterUser,
+          as: "Owner", // For masterUserID
+          attributes: ["masterUserID", "name"],
+        },
+      ];
+    } else {
+      addIncludeModel = [
+        ...includeModels,
+        {
+          model: MasterUser,
+          as: "assignedUser", // For masterUserID
+          attributes: ["masterUserID", "name"],
+        },
+        {
+          model: MasterUser,
+          as: "assignee", // For assignedTo
+          attributes: ["masterUserID", "name"],
+        },
+      ];
+    }
+  } else {
+    if (entity == 4) {
+      addIncludeModel = [
+        ...includeModels,
+        {
+          model: MasterUser,
+          as: "MasterUser",
           required: false, // LEFT JOIN
         },
-      ]
+      ];
     }
   }
 
@@ -1436,85 +2278,92 @@ async function generateActivityPerformanceDataForDrillDown(
     where: baseWhere,
     attributes: attributes,
     include: [...addIncludeModel],
-    groupBy: groupBy
+    groupBy: groupBy,
   });
-  
+
   // console.log(results)
   // Recursive flatten function
   function flattenObject(obj, parentKey = "", res = {}) {
     for (let key in obj) {
       const newKey = parentKey ? `${parentKey}_${key}` : key;
-      
-    if (typeof obj[key] === "object" && obj[key] !== null && !Array.isArray(obj[key])) {
-      flattenObject(obj[key], newKey, res);
-    } else {
-      res[newKey] = obj[key];
-    } 
-  }
-  return res;
-}
 
-const flattened = JSON.parse(JSON.stringify(results, null, 2)).map(item => flattenObject(item));
-
-const formattedResults = flattened.filter((item) => {
-  if (name === "startDateTime") {
-    /* for date only comparison */
-    // const dateTimeString = value;
-    // const dateOnly = dateTimeString.split('T')[0];
-
-    // const dateTimeString2 = item?.startDateTime;
-    // const dateOnly2 = dateTimeString2.split('T')[0];
-    return (
-      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
-    );
-  }
-
-  if (name === "endDateTime") {
-    return (
-      new Date(value).getTime() === new Date(item?.endDateTime).getTime()
-    );
-  }
-  if (name === "Owner") {
-    return (
-      item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase()
-    );
-  }
-
-  // Handle string fields safely
-  if (typeof item[name] === "string" && typeof value === "string") {
-    // console.log(item[name], value)
-    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
-  } else {
-    if (item[name] !== value) return false;
-  }
-
-  /**
-   * id based matching of person and organization
-   * maybe uncommented in future
-   */
-  // Extra checks
-  // if (name === "contactPerson" && item.personId !== id) return false;
-  // if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
-
-  return true;
-});
-
-let dealConvertion = formattedResults;
-if(entity == 5 || entity == 6){
-  let convertion = []
-  for(let i = 0; i < formattedResults?.length; i++){
-    if(formattedResults[i].status == "won" || formattedResults[i]?.status == "lost"){
-      convertion.push(formattedResults[i])
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
     }
+    return res;
   }
 
-  dealConvertion = convertion
-}
+  const flattened = JSON.parse(JSON.stringify(results, null, 2)).map((item) =>
+    flattenObject(item)
+  );
 
-return {
-  data: dealConvertion,
-  totalValue: formattedResults?.length
-};
+  const formattedResults = flattened.filter((item) => {
+    if (name === "startDateTime") {
+      /* for date only comparison */
+      // const dateTimeString = value;
+      // const dateOnly = dateTimeString.split('T')[0];
+
+      // const dateTimeString2 = item?.startDateTime;
+      // const dateOnly2 = dateTimeString2.split('T')[0];
+      return (
+        new Date(value).getTime() === new Date(item?.startDateTime).getTime()
+      );
+    }
+
+    if (name === "endDateTime") {
+      return (
+        new Date(value).getTime() === new Date(item?.endDateTime).getTime()
+      );
+    }
+    if (name === "Owner") {
+      return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
+    }
+
+    // Handle string fields safely
+    if (typeof item[name] === "string" && typeof value === "string") {
+      // console.log(item[name], value)
+      if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+    } else {
+      if (item[name] !== value) return false;
+    }
+
+    /**
+     * id based matching of person and organization
+     * maybe uncommented in future
+     */
+    // Extra checks
+    // if (name === "contactPerson" && item.personId !== id) return false;
+    // if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
+
+    return true;
+  });
+
+  let dealConvertion = formattedResults;
+  if (entity == 5 || entity == 6) {
+    let convertion = [];
+    for (let i = 0; i < formattedResults?.length; i++) {
+      if (
+        formattedResults[i].status == "won" ||
+        formattedResults[i]?.status == "lost"
+      ) {
+        convertion.push(formattedResults[i]);
+      }
+    }
+
+    dealConvertion = convertion;
+  }
+
+  return {
+    data: dealConvertion,
+    totalValue: formattedResults?.length,
+  };
 }
 
 // Enhanced helper function to handle related table conditions and date filtering

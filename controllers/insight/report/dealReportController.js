@@ -520,7 +520,35 @@ async function generateExistingDealPerformanceData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else {
+  } else if (existingxaxis === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (existingxaxis === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
+    } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Deal.${existingxaxis}`);
     attributes.push([Sequelize.col(`Deal.${existingxaxis}`), "xValue"]);
@@ -553,6 +581,34 @@ async function generateExistingDealPerformanceData(
     } else if (existingSegmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (existingSegmentedBy === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (existingSegmentedBy === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
     } else {
       groupBy.push(`Deal.${existingSegmentedBy}`);
       attributes.push([
@@ -681,12 +737,36 @@ async function generateExistingDealPerformanceData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
+      let xValue = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
       const segmentValue = item.segmentValue || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set id based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -714,10 +794,34 @@ async function generateExistingDealPerformanceData(
     );
   } else {
     // Original format for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
+      }
+
+      // Set id based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -837,7 +941,35 @@ async function generateDealPerformanceData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else {
+  } else if (xaxis === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (xaxis === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
+    }  else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Deal.${xaxis}`);
     attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
@@ -866,6 +998,34 @@ async function generateDealPerformanceData(
     } else if (segmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (segmentedBy === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (segmentedBy === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
     } else {
       groupBy.push(`Deal.${segmentedBy}`);
       attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
@@ -987,32 +1147,37 @@ async function generateDealPerformanceData(
     // Group by xValue and then by segmentValue
     const groupedData = {};
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
-      const segmentValue = item.segmentValue || "Unknown";
-      const yValue = Number(item.yValue) || 0;
-      
-      // if (!groupedData[xValue]) {
-      //   groupedData[xValue] = { label: xValue, segments: [] };
-      // }
-      
-      if (!groupedData[xValue]) {
-        if (xaxis == "contactPerson") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.personId || null,
-          };
-        } else if (xaxis == "organization") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.leadOrganizationId || null,
-          };
-        } else {
-          groupedData[xValue] = { label: xValue, segments: [], id: null };
-        }
+      let xValue = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
       }
 
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
+      if (!groupedData[xValue]) {
+        // Set id based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
+      }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
         value: yValue,
@@ -1037,26 +1202,33 @@ async function generateDealPerformanceData(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      if (xaxis == "contactPerson") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.personId || null,
-        };
-      } else if (xaxis == "organization") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: item?.leadOrganizationId || null,
-        };
-      } else {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          id: null,
-        };
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
       }
-    }); // Calculate the grand total
+
+      // Set id based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -6704,6 +6876,34 @@ async function generateExistingDealDurationData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+  } else if (existingxaxis === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+  } else if (existingxaxis === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Deal.${existingxaxis}`);
@@ -6737,6 +6937,34 @@ async function generateExistingDealDurationData(
     } else if (existingSegmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (existingSegmentedBy === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (existingSegmentedBy === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
     } else {
       groupBy.push(`Deal.${existingSegmentedBy}`);
       attributes.push([
@@ -6935,14 +7163,38 @@ async function generateExistingDealDurationData(
     // Group by xValue and then by segmentValue
     const groupedData = {};
 
-    results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
-      const segmentValue = item.segmentValue || "Unknown";
-      const yValue = Number(item.yValue) || 0;
+     results.forEach((item) => {
+      let xValue = item.xValue || "Unknown";
       const dealCount = Number(item.dealCount) || 0;
 
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set id based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -6950,6 +7202,21 @@ async function generateExistingDealDurationData(
         deals: dealCount,
       });
     });
+    // results.forEach((item) => {
+    //   const xValue = item.xValue || "Unknown";
+    //   const segmentValue = item.segmentValue || "Unknown";
+    //   const yValue = Number(item.yValue) || 0;
+    //   const dealCount = Number(item.dealCount) || 0;
+
+    //   if (!groupedData[xValue]) {
+    //     groupedData[xValue] = { label: xValue, segments: [] };
+    //   }
+    //   groupedData[xValue].segments.push({
+    //     labeltype: segmentValue,
+    //     value: yValue,
+    //     deals: dealCount,
+    //   });
+    // });
 
     formattedResults = Object.values(groupedData);
 
@@ -6975,11 +7242,41 @@ async function generateExistingDealDurationData(
     );
   } else {
     // Format for non-segmented data with deal count
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-      deals: Number(item.dealCount) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        existingxaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
+      }
+
+      // Set id based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+        deals: Number(item.dealCount) || 0,
+      };
+    });
+
+    // formattedResults = results.map((item) => ({
+    //   label: item.xValue || "Unknown",
+    //   value: Number(item.yValue) || 0,
+    //   deals: Number(item.dealCount) || 0,
+    // }));
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -7099,7 +7396,35 @@ async function generateDealDurationData(
     });
     groupBy.push("assignedUser.creatorstatus");
     attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else {
+  } else if (xaxis === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (xaxis === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
+    } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Deal.${xaxis}`);
     attributes.push([Sequelize.col(`Deal.${xaxis}`), "xValue"]);
@@ -7128,6 +7453,34 @@ async function generateDealDurationData(
     } else if (segmentedBy === "Team") {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+    } else if (segmentedBy === "contactPerson") {
+      // Special handling for contactPerson - join with Person table
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (segmentedBy === "organization") {
+      // Special handling for organization - join with Organization table
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([
+        Sequelize.col("Organization.organization"),
+        "xValue",
+      ]);
     } else {
       groupBy.push(`Deal.${segmentedBy}`);
       attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
@@ -7320,30 +7673,37 @@ async function generateDealDurationData(
     const groupedData = {};
 
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
-      const segmentValue = item.segmentValue || "Unknown";
-      const yValue = Number(item.yValue) || 0;
+      let xValue = item.xValue || "Unknown";
       const dealCount = Number(item.dealCount) || 0;
 
-      // if (!groupedData[xValue]) {
-      //   groupedData[xValue] = { label: xValue, segments: [] };
-      // }
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        xValue = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        xValue = "Unknown Organization";
+      }
+
+      const segmentValue = item.segmentValue || "Unknown";
+      const yValue = Number(item.yValue) || 0;
+
       if (!groupedData[xValue]) {
-        if (xaxis == "contactPerson") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.personId || null,
-          };
-        } else if (xaxis == "organization") {
-          groupedData[xValue] = {
-            label: xValue,
-            segments: [],
-            id: item?.leadOrganizationId || null,
-          };
-        } else {
-          groupedData[xValue] = { label: xValue, segments: [], id: null };
+        // Set id based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId;
         }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -7351,6 +7711,38 @@ async function generateDealDurationData(
         deals: dealCount,
       });
     });
+    // results.forEach((item) => {
+    //   const xValue = item.xValue === null ? "Unknown" : item.xValue;
+    //   const segmentValue = item.segmentValue || "Unknown";
+    //   const yValue = Number(item.yValue) || 0;
+    //   const dealCount = Number(item.dealCount) || 0;
+
+    //   // if (!groupedData[xValue]) {
+    //   //   groupedData[xValue] = { label: xValue, segments: [] };
+    //   // }
+    //   if (!groupedData[xValue]) {
+    //     if (xaxis == "contactPerson") {
+    //       groupedData[xValue] = {
+    //         label: xValue,
+    //         segments: [],
+    //         id: item?.personId || null,
+    //       };
+    //     } else if (xaxis == "organization") {
+    //       groupedData[xValue] = {
+    //         label: xValue,
+    //         segments: [],
+    //         id: item?.leadOrganizationId || null,
+    //       };
+    //     } else {
+    //       groupedData[xValue] = { label: xValue, segments: [], id: null };
+    //     }
+    //   }
+    //   groupedData[xValue].segments.push({
+    //     labeltype: segmentValue,
+    //     value: yValue,
+    //     deals: dealCount,
+    //   });
+    // });
 
     formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
 
@@ -7373,30 +7765,59 @@ async function generateDealDurationData(
     );
   } else {
     // Format for non-segmented data with deal count
-    formattedResults = results.map((item) => {
-      if (xaxis == "contactPerson") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          deals: Number(item.dealCount) || 0,
-          id: item?.personId || null,
-        };
-      } else if (xaxis == "organization") {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          deals: Number(item.dealCount) || 0,
-          id: item?.leadOrganizationId || null,
-        };
-      } else {
-        return {
-          label: item.xValue || "Unknown",
-          value: Number(item.yValue) || 0,
-          deals: Number(item.dealCount) || 0,
-          id: null,
-        };
+     formattedResults = results.map((item) => {
+      let label = item.xValue || "Unknown";
+
+      // Handle null values for special cases
+      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
+        label = "Unknown Contact";
+      } else if (
+        xaxis === "organization" &&
+        !item.xValue &&
+        item.leadOrganizationId
+      ) {
+        label = "Unknown Organization";
       }
-    }); // Calculate the grand total
+
+      // Set id based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+        deals: Number(item.dealCount) || 0,
+      };
+    });
+    // formattedResults = results.map((item) => {
+    //   if (xaxis == "contactPerson") {
+    //     return {
+    //       label: item.xValue || "Unknown",
+    //       value: Number(item.yValue) || 0,
+    //       deals: Number(item.dealCount) || 0,
+    //       id: item?.personId || null,
+    //     };
+    //   } else if (xaxis == "organization") {
+    //     return {
+    //       label: item.xValue || "Unknown",
+    //       value: Number(item.yValue) || 0,
+    //       deals: Number(item.dealCount) || 0,
+    //       id: item?.leadOrganizationId || null,
+    //     };
+    //   } else {
+    //     return {
+    //       label: item.xValue || "Unknown",
+    //       value: Number(item.yValue) || 0,
+    //       deals: Number(item.dealCount) || 0,
+    //       id: null,
+    //     };
+    //   }
+    // });
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
