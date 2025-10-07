@@ -155,6 +155,275 @@ exports.updateOrganizationColumnChecks = async (req, res) => {
     res.status(500).json({ message: "Error updating organization columns" });
   }
 };
+
+// Update check status for person columns and custom fields, also updates organization columns
+exports.updatePersonColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
+
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
+
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Find the global PersonColumnPreference record
+    let personPref = await PersonColumnPreference.findOne();
+    if (!personPref) {
+      return res.status(404).json({ message: "Person preferences not found." });
+    }
+
+    // Find the global OrganizationColumnPreference record
+    let orgPref = await OrganizationColumnPreference.findOne();
+    if (!orgPref) {
+      return res.status(404).json({ message: "Organization preferences not found." });
+    }
+
+    // Parse person columns if stored as string
+    let personPrefColumns =
+      typeof personPref.columns === "string"
+        ? JSON.parse(personPref.columns)
+        : personPref.columns;
+
+    // Parse organization columns if stored as string
+    let orgPrefColumns =
+      typeof orgPref.columns === "string"
+        ? JSON.parse(orgPref.columns)
+        : orgPref.columns;
+
+    // Get custom fields for both person and organization to validate incoming custom field columns
+    let personCustomFields = [];
+    let orgCustomFields = [];
+    if (req.adminId) {
+      try {
+        // Get person custom fields
+        personCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+        });
+
+        // Get organization custom fields
+        orgCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    }
+
+    // Create maps of custom field names for quick lookup
+    const personCustomFieldMap = {};
+    personCustomFields.forEach((field) => {
+      personCustomFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
+    });
+
+    const orgCustomFieldMap = {};
+    orgCustomFields.forEach((field) => {
+      orgCustomFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
+    });
+
+    // Update check status for existing person columns
+    personPrefColumns = personPrefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    // Update check status for existing organization columns
+    orgPrefColumns = orgPrefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    // Handle new custom field columns that don't exist in person preferences yet
+    const existingPersonKeys = new Set(personPrefColumns.map((col) => col.key));
+    const existingOrgKeys = new Set(orgPrefColumns.map((col) => col.key));
+
+    columns.forEach((incomingCol) => {
+      // Add new person custom fields
+      if (
+        !existingPersonKeys.has(incomingCol.key) &&
+        personCustomFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = personCustomFieldMap[incomingCol.key];
+        personPrefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+
+      // Add new organization custom fields
+      if (
+        !existingOrgKeys.has(incomingCol.key) &&
+        orgCustomFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = orgCustomFieldMap[incomingCol.key];
+        orgPrefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+    });
+
+    // Update check field in CustomField table for both person and organization custom fields
+    const customFieldUpdates = [];
+    columns.forEach((incomingCol) => {
+      // Check person custom fields
+      if (personCustomFieldMap[incomingCol.key]) {
+        const customField = personCustomFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          customFieldUpdates.push({
+            fieldId: customField.fieldId,
+            check: !!incomingCol.check,
+          });
+        }
+      }
+
+      // Check organization custom fields
+      if (orgCustomFieldMap[incomingCol.key]) {
+        const customField = orgCustomFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          // Avoid duplicate updates for the same fieldId
+          const existingUpdate = customFieldUpdates.find(
+            (update) => update.fieldId === customField.fieldId
+          );
+          if (!existingUpdate) {
+            customFieldUpdates.push({
+              fieldId: customField.fieldId,
+              check: !!incomingCol.check,
+            });
+          }
+        }
+      }
+    });
+
+    // Perform bulk update of CustomField check values
+    if (customFieldUpdates.length > 0) {
+      for (const update of customFieldUpdates) {
+        await CustomField.update(
+          { check: update.check },
+          {
+            where: {
+              fieldId: update.fieldId,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" },
+              ],
+            },
+          }
+        );
+      }
+    }
+
+    // Save both preferences
+    personPref.columns = personPrefColumns;
+    await personPref.save();
+
+    orgPref.columns = orgPrefColumns;
+    await orgPref.save();
+
+    res.status(200).json({
+      message: "Person and organization columns updated successfully",
+      personColumns: personPref.columns,
+      organizationColumns: orgPref.columns,
+      personCustomFieldsProcessed: personCustomFields.length,
+      organizationCustomFieldsProcessed: orgCustomFields.length,
+      customFieldsUpdated: customFieldUpdates.length,
+      totalPersonColumns: personPrefColumns.length,
+      totalOrganizationColumns: orgPrefColumns.length,
+    });
+  } catch (error) {
+    console.error("Error updating person and organization columns:", error);
+    res.status(500).json({ message: "Error updating person and organization columns" });
+  }
+};
+
 exports.getOrganizationColumnPreference = async (req, res) => {
   try {
     const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
@@ -288,6 +557,382 @@ exports.getOrganizationColumnPreference = async (req, res) => {
     });
   }
 };
+
+// Get person column preferences with custom fields
+exports.getPersonColumnPreference = async (req, res) => {
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+    const pref = await PersonColumnPreference.findOne({ where: {} });
+
+    let columns = [];
+    if (pref) {
+      columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for persons (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Create a map of available custom field names from CustomFields table
+    const availableCustomFieldNames = new Set(customFields.map(field => field.fieldName));
+
+    // Filter out custom field columns that don't exist in CustomFields table
+    const validColumns = columns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    columns = validColumns;
+
+    // Format custom fields for column preferences
+    const customFieldColumns = customFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    customFieldColumns.forEach((customCol) => {
+      const existingCol = columns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    const allColumns = [...columns, ...customFieldColumns];
+    const uniqueColumns = [];
+    const seenKeys = new Set();
+    allColumns.forEach((col) => {
+      if (!seenKeys.has(col.key)) {
+        seenKeys.add(col.key);
+        uniqueColumns.push(col);
+      }
+    });
+
+    const originalColumnsCount = pref ? (typeof pref.columns === "string" ? JSON.parse(pref.columns).length : pref.columns.length) : 0;
+    const filteredColumnsCount = columns.length;
+    if (pref && originalColumnsCount > filteredColumnsCount) {
+      try {
+        pref.columns = uniqueColumns;
+        await pref.save();
+        console.log(`Updated preferences: removed ${originalColumnsCount - filteredColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      columns: uniqueColumns,
+      customFieldsCount: customFields.length,
+      message: "Person column preferences with custom fields fetched successfully",
+      hasCustomFields: customFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
+      removedFieldsCount: originalColumnsCount - filteredColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching person column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching person preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+
+// Get both organization and person column preferences in separate arrays
+exports.getBothColumnPreferences = async (req, res) => {
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Fetch organization preferences
+    const orgPref = await OrganizationColumnPreference.findOne({ where: {} });
+    let orgColumns = [];
+    if (orgPref) {
+      orgColumns = typeof orgPref.columns === "string" ? JSON.parse(orgPref.columns) : orgPref.columns;
+    }
+
+    // Fetch person preferences
+    const personPref = await PersonColumnPreference.findOne({ where: {} });
+    let personColumns = [];
+    if (personPref) {
+      personColumns = typeof personPref.columns === "string" ? JSON.parse(personPref.columns) : personPref.columns;
+    }
+
+    // Parse filterConfig for each column if needed
+    orgColumns = orgColumns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    personColumns = personColumns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for both organizations and persons (only if user is authenticated)
+    let orgCustomFields = [];
+    let personCustomFields = [];
+    
+    if (req.adminId) {
+      try {
+        // Organization custom fields
+        orgCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+
+        // Person custom fields
+        personCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Process organization columns
+    const availableOrgCustomFieldNames = new Set(orgCustomFields.map(field => field.fieldName));
+    const validOrgColumns = orgColumns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableOrgCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid organization custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    // Process person columns
+    const availablePersonCustomFieldNames = new Set(personCustomFields.map(field => field.fieldName));
+    const validPersonColumns = personColumns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availablePersonCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid person custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    // Format organization custom fields for column preferences
+    const orgCustomFieldColumns = orgCustomFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    orgCustomFieldColumns.forEach((customCol) => {
+      const existingCol = validOrgColumns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    // Format person custom fields for column preferences
+    const personCustomFieldColumns = personCustomFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    personCustomFieldColumns.forEach((customCol) => {
+      const existingCol = validPersonColumns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    // Combine and deduplicate organization columns
+    const allOrgColumns = [...validOrgColumns, ...orgCustomFieldColumns];
+    const uniqueOrgColumns = [];
+    const seenOrgKeys = new Set();
+    allOrgColumns.forEach((col) => {
+      if (!seenOrgKeys.has(col.key)) {
+        seenOrgKeys.add(col.key);
+        uniqueOrgColumns.push(col);
+      }
+    });
+
+    // Combine and deduplicate person columns
+    const allPersonColumns = [...validPersonColumns, ...personCustomFieldColumns];
+    const uniquePersonColumns = [];
+    const seenPersonKeys = new Set();
+    allPersonColumns.forEach((col) => {
+      if (!seenPersonKeys.has(col.key)) {
+        seenPersonKeys.add(col.key);
+        uniquePersonColumns.push(col);
+      }
+    });
+
+    // Update preferences if needed (cleanup invalid fields)
+    const originalOrgColumnsCount = orgPref ? (typeof orgPref.columns === "string" ? JSON.parse(orgPref.columns).length : orgPref.columns.length) : 0;
+    const filteredOrgColumnsCount = validOrgColumns.length;
+    if (orgPref && originalOrgColumnsCount > filteredOrgColumnsCount) {
+      try {
+        orgPref.columns = uniqueOrgColumns;
+        await orgPref.save();
+        console.log(`Updated organization preferences: removed ${originalOrgColumnsCount - filteredOrgColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned organization preferences:", saveError);
+      }
+    }
+
+    const originalPersonColumnsCount = personPref ? (typeof personPref.columns === "string" ? JSON.parse(personPref.columns).length : personPref.columns.length) : 0;
+    const filteredPersonColumnsCount = validPersonColumns.length;
+    if (personPref && originalPersonColumnsCount > filteredPersonColumnsCount) {
+      try {
+        personPref.columns = uniquePersonColumns;
+        await personPref.save();
+        console.log(`Updated person preferences: removed ${originalPersonColumnsCount - filteredPersonColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned person preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      organizationColumns: uniqueOrgColumns,
+      personColumns: uniquePersonColumns,
+      organizationCustomFieldsCount: orgCustomFields.length,
+      personCustomFieldsCount: personCustomFields.length,
+      message: "Both organization and person column preferences with custom fields fetched successfully",
+      hasOrganizationCustomFields: orgCustomFields.length > 0,
+      hasPersonCustomFields: personCustomFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      organizationCleanedInvalidFields: originalOrgColumnsCount > filteredOrgColumnsCount,
+      organizationRemovedFieldsCount: originalOrgColumnsCount - filteredOrgColumnsCount,
+      personCleanedInvalidFields: originalPersonColumnsCount > filteredPersonColumnsCount,
+      personRemovedFieldsCount: originalPersonColumnsCount - filteredPersonColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching both column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching both column preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+
 // Save all organization fields with check status to OrganizationColumnPreference
 exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
   let Organization;
@@ -334,6 +979,55 @@ exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
   } catch (error) {
     console.log("Error saving all organization columns:", error);
     res.status(500).json({ message: "Error saving all organization columns" });
+  }
+};
+
+// Save all person fields with check status to PersonColumnPreference
+exports.saveAllPersonFieldsWithCheck = async (req, res) => {
+  let Person;
+  try {
+    Person = require("../../models/leads/leadPersonModel");
+  } catch (e) {
+    Person = null;
+  }
+
+  // Get all field names from Person model
+  const personFields = Person ? Object.keys(Person.rawAttributes) : [];
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = personFields.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    let pref = await PersonColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await PersonColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res
+      .status(200)
+      .json({ message: "All person columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all person columns:", error);
+    res.status(500).json({ message: "Error saving all person columns" });
   }
 };
 // Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
@@ -3940,6 +4634,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     const { Lead, LeadDetails, Person, Organization } = require("../../models");
     const Deal = require("../../models/deals/dealsModels");
     const MasterUser = require("../../models/master/masterUserModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
     // const CustomField = require("../../models/customFieldModel");
     // const CustomFieldValue = require("../../models/customFieldValueModel");
     const { Op } = require("sequelize");
@@ -5152,12 +5848,119 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       return { ...p, ...customFields };
     });
 
-    // Return persons in EXACT same format as getLeads API
+    // Fetch custom field values for organizations
+    const orgIdsForCustomFields = organizations.map((org) => org.leadOrganizationId);
+    let orgCustomFieldValues = [];
+    if (orgIdsForCustomFields.length > 0) {
+      orgCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: orgIdsForCustomFields,
+          entityType: "organization",
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for organization entity
+    const allOrgCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const orgCustomFieldIdToName = {};
+    allOrgCustomFields.forEach((cf) => {
+      orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map organizationId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    orgCustomFieldValues.forEach((cfv) => {
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization
+    organizations = organizations.map((org) => {
+      const customFields = orgCustomFieldsMap[org.leadOrganizationId] || {};
+      return { ...org, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const personColumnPref = await PersonColumnPreference.findOne({ where: {} });
+    const orgColumnPref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = entityType === 'person' 
+        ? ['personId', 'leadOrganizationId', 'organization', 'ownerName', 'leadCount']
+        : ['leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter persons based on person column preferences
+    const filteredPersons = filterDataByColumnPreference(persons, personColumnPref, 'person');
+
+    // Similarly filter organizations and add organization data
+    let filteredOrganizations = [];
+    if (organizations && organizations.length > 0) {
+      // Add leadCount and other computed fields to organizations
+      organizations = organizations.map((org) => {
+        return {
+          ...org,
+          ownerName: ownerMap[org.ownerId] || null,
+          leadCount: orgLeadCountMap[org.leadOrganizationId] || 0,
+        };
+      });
+
+      // Filter organizations based on organization column preferences
+      filteredOrganizations = filterDataByColumnPreference(organizations, orgColumnPref, 'organization');
+    }
+
+    // Return both filtered datasets in separate arrays
     res.status(200).json({
-      totalRecords: persons.length,
-      totalPages: Math.ceil(persons.length / personLimit),
+      totalRecords: filteredPersons.length + filteredOrganizations.length,
+      totalPages: Math.ceil((filteredPersons.length + filteredOrganizations.length) / personLimit),
       currentPage: personPage,
-      persons: persons, // Return persons exactly as they are in getLeads API
+      persons: filteredPersons, // Filtered person data with entity: 'person'
+      organizations: filteredOrganizations, // Filtered organization data with entity: 'organization'
+      summary: {
+        personCount: filteredPersons.length,
+        organizationCount: filteredOrganizations.length,
+        totalCount: filteredPersons.length + filteredOrganizations.length
+      }
     });
   } catch (error) {
     console.error("Error fetching persons and organizations:", error);

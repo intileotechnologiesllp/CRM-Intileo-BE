@@ -121,6 +121,9 @@ router.delete('/deleteperson/:personId', verifyToken, leadContactsController.del
 router.post("/save-organization-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllOrganizationFieldsWithCheck);
 router.get("/organization-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationColumnPreference);
 router.post("/update-organization-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationColumnChecks);
+router.post("/save-person-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllPersonFieldsWithCheck);
+router.get("/person-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getBothColumnPreferences);
+router.post("/update-person-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonColumnChecks);
 
 
 module.exports = router
