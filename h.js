@@ -1,4416 +1,3237 @@
-const Deal = require("../../models/deals/dealsModels");
-const Lead = require("../../models/leads/leadsModel");
-const Person = require("../../models/leads/leadPersonModel");
-const Organization = require("../../models/leads/leadOrganizationModel");
-const CustomField = require("../../models/customFieldModel");
-const CustomFieldValue = require("../../models/customFieldValueModel");
-const { Op } = require("sequelize");
-const { fn, col, literal } = require("sequelize");
-// const sequelize = require("../../config/db");
-const DealDetails = require("../../models/deals/dealsDetailModel");
-const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
-const DealParticipant = require("../../models/deals/dealPartcipentsModel");
-const MasterUser = require("../../models/master/masterUserModel");
-const DealNote = require("../../models/deals/delasNoteModel");
-const LeadNote = require("../../models/leads/leadNoteModel");
-const Email = require("../../models/email/emailModel");
-const Attachment = require("../../models/email/attachmentModel");
-const LeadFilter = require("../../models/leads/leadFiltersModel");
-const { convertRelativeDate } = require("../../utils/helper");
-const Activity = require("../../models/activity/activityModel");
-const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
-const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
-const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
-const { sendEmail } = require("../../utils/emailSend"); // Add email service import
-const sequelize = require("../../config/db");
-const { getProgramId } = require("../../utils/programCache");
-const PipelineStage = require("../../models/deals/pipelineStageModel");
-const Currency = require("../../models/admin/masters/currencyModel")
-// Create a new deal with validation
+// Update check status for organization columns and custom fields
+exports.updateOrganizationColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
 
-exports.createDeal = async (req, res) => {
-  try {
-  const dealProgramId = getProgramId("DEALS");
-  // Declare ownerId at the top before any usage
-  let ownerId = req.user?.id || req.adminId || req.body.ownerId;
-    const {
-      contactPerson,
-      organization,
-      title,
-      value,
-      currency,
-      pipeline,
-      pipelineStage,
-      expectedCloseDate,
-      sourceChannel,
-      sourceChannelId,
-      serviceType,
-      proposalValue,
-      proposalCurrency,
-      esplProposalNo,
-      projectLocation,
-      organizationCountry,
-      proposalSentDate,
-      sourceRequired,
-      questionerShared,
-      sectorialSector,
-      sbuClass,
-      phone,
-      email,
-      sourceOrgin,
-      source,
-      label
-      // Custom fields will be processed from remaining req.body fields
-    } = req.body;
-    // --- Enhanced validation similar to createLead ---
-    // Validate required fields
-    if (!contactPerson || !organization || !title || !email) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: contactPerson, organization, title, and email are required.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "contactPerson, organization, title, and email are required.",
-      });
-    }
-
-    // Validate contactPerson
-    if (typeof contactPerson !== "string" || !contactPerson.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: contactPerson must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "contactPerson must be a non-empty string.",
-      });
-    }
-
-    // Validate organization
-    if (typeof organization !== "string" || !organization.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: organization must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "organization must be a non-empty string.",
-      });
-    }
-
-    // Validate title
-    if (typeof title !== "string" || !title.trim()) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: title must be a non-empty string.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "title must be a non-empty string.",
-      });
-    }
-
-    // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid email format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid email format.",
-      });
-    }
-
-    // Validate phone if provided
-    if (phone && !/^\+?\d{7,15}$/.test(phone)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid phone number format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid phone number format.",
-      });
-    }
-
-    // Validate and sanitize proposalValue
-    let sanitizedProposalValue = proposalValue;
-    if (proposalValue === '' || proposalValue === null || proposalValue === undefined) {
-      sanitizedProposalValue = null;
-    } else if (proposalValue && proposalValue < 0) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Proposal value must be positive.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Proposal value must be positive.",
-      });
-    }
-
-    // Validate and sanitize value
-    let sanitizedValue = value;
-    if (value === '' || value === null || value === undefined) {
-      sanitizedValue = null;
-    } else if (value && value < 0) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Deal value must be positive.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Deal value must be positive.",
-      });
-    }
-
-    // Sanitize other numeric fields
-    let sanitizedSourceChannelId = sourceChannelId;
-    if (sourceChannelId === '' || sourceChannelId === undefined) {
-      sanitizedSourceChannelId = null;
-    }
-
-    let sanitizedSourceOrgin = sourceOrgin;
-    if (sourceOrgin === '' || sourceOrgin === undefined) {
-      sanitizedSourceOrgin = null;
-    }
-
-    let sanitizedCurrency = currency;
-    if (currency === '' || currency === undefined) {
-      sanitizedCurrency = null;
-    }
-
-    let sanitizedProposalCurrency = proposalCurrency;
-    if (proposalCurrency === '' || proposalCurrency === undefined) {
-      sanitizedProposalCurrency = null;
-    }
-
-    // Sanitize date fields
-    let sanitizedExpectedCloseDate = expectedCloseDate;
-    if (expectedCloseDate === '' || expectedCloseDate === 'Invalid date' || expectedCloseDate === undefined || expectedCloseDate === null) {
-      sanitizedExpectedCloseDate = null;
-    } else if (expectedCloseDate && new Date(expectedCloseDate).toString() === 'Invalid Date') {
-      sanitizedExpectedCloseDate = null;
-    }
-
-    let sanitizedProposalSentDate = proposalSentDate;
-    if (proposalSentDate === '' || proposalSentDate === 'Invalid date' || proposalSentDate === undefined || proposalSentDate === null) {
-      sanitizedProposalSentDate = null;
-    } else if (proposalSentDate && new Date(proposalSentDate).toString() === 'Invalid Date') {
-      sanitizedProposalSentDate = null;
-    }
-    // Find or create Person and Organization here...
-    // Check for duplicate combination of contactPerson, organization, AND title (similar to createLead)
-    const existingContactOrgTitleDeal = await Deal.findOne({
-      where: {
-        contactPerson: contactPerson,
-        organization: organization,
-        title: title,
-      },
-    });
-    if (existingContactOrgTitleDeal) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: A deal with this exact combination of contact person, organization, and title already exists.`,
-        req.adminId
-      );
-      return res.status(409).json({
-        message:
-          "A deal with this exact combination of contact person, organization, and title already exists. Please use a different title for a new deal with the same contact.",
-        existingDealId: existingContactOrgTitleDeal.dealId,
-        existingDealTitle: existingContactOrgTitleDeal.title,
-      });
-    }
-    // 1. Set masterUserID at the top, before using it anywhere
-    const masterUserID = req.adminId;
-    // 1. Check if a matching lead exists
-
-    let existingLead = null;
-
-    // 2. If sourceOrgin is '2', require and use leadId
-    let leadId = req.body.leadId;
-    if (leadId === '') {
-      leadId = null;
-    }
-    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
-      if (!leadId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "leadId is required when sourceOrgin is 2." });
-      }
-      existingLead = await Lead.findByPk(leadId);
-      if (!existingLead) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: Lead with leadId ${leadId} not found.`,
-          req.adminId
-        );
-        return res.status(404).json({ message: "Lead not found." });
-      }
-      ownerId = existingLead.ownerId; // assign, don't redeclare
-      leadId = existingLead.leadId; // assign, don't redeclare
-      // Optionally, update the lead after deal creation
-    }
-    // 1. Find or create Organization
-    let org = null;
-    if (organization) {
-      org = await Organization.findOne({ where: { organization } });
-      if (!org) {
-        org = await Organization.create({
-          organization,
-          masterUserID, // make sure this is set
-        });
-      }
-    }
-    // 2. Find or create Person
-    let person = null;
-    if (contactPerson) {
-      const masterUserID = req.adminId;
-
-      person = await Person.findOne({ where: { email } });
-      if (!person) {
-        person = await Person.create({
-          contactPerson,
-          email,
-          phone,
-          leadOrganizationId: org ? org.leadOrganizationId : null,
-          masterUserID,
-        });
-      }
-    }
-    // Create the lead
-    console.log(person.personId, " before deal creation");
-    // Before saving to DB
-    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
-      if (!leadId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: leadId is required when sourceOrgin is 2.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "leadId is required when sourceOrgin is 2." });
-      }
-      existingLead = await Lead.findByPk(leadId);
-      if (!existingLead) {
-        return res.status(404).json({ message: "Lead not found." });
-      }
-      // Prevent conversion if already converted to a deal
-      if (existingLead.dealId) {
-        await logAuditTrail(
-          dealProgramId,
-          "DEAL_CREATION",
-          req.role,
-          `Deal creation failed: This lead is already converted to a deal.`,
-          req.adminId
-        );
-        return res
-          .status(400)
-          .json({ message: "This lead is already converted to a deal." });
-      }
-      ownerId = existingLead.ownerId;
-      leadId = existingLead.leadId;
-    }
-    const deal = await Deal.create({
-      // contactPerson: person ? person.contactPerson : null,
-      contactPerson: person ? person.contactPerson : contactPerson,
-      organization: org ? org.organization : null,
-      personId: person ? person.personId : null,
-      leadOrganizationId: org ? org.leadOrganizationId : null,
-      //       personId: person.personId,
-      // leadOrganizationId: org.leadOrganizationId,
-      leadId, // link to the lead if found
-      title,
-      value: sanitizedValue,
-      currency: sanitizedCurrency,
-      pipeline,
-      pipelineStage,
-      expectedCloseDate: sanitizedExpectedCloseDate,
-      sourceChannel,
-      sourceChannelId: sanitizedSourceChannelId,
-      serviceType,
-      proposalValue: sanitizedProposalValue,
-      proposalCurrency: sanitizedProposalCurrency,
-      esplProposalNo,
-      projectLocation,
-      organizationCountry,
-      proposalSentDate: sanitizedProposalSentDate,
-      sourceRequired,
-      questionerShared,
-      sectorialSector,
-      sbuClass,
-      phone,
-      email,
-      sourceOrgin: sanitizedSourceOrgin,
-      masterUserID: req.adminId, // Ensure masterUserID is set from the request
-      ownerId,
-      status: "open", // Default status
-      source,
-      valueCurrency: req.body.valueCurrency || "INR",
-      proposalValueCurrency: req.body.proposalValueCurrency || "INR",
-      label
-      // Add personId, organizationId, etc. as needed
-    });
-    let responsiblePerson = null;
-    if (sanitizedSourceOrgin === "2" || sanitizedSourceOrgin === 2) {
-      // Use ownerId for responsible person
-      const owner = await MasterUser.findOne({
-        where: { masterUserID: ownerId },
-      });
-      responsiblePerson = owner ? owner.name : null;
-    } else {
-      // Use masterUserID for responsible person
-      const user = await MasterUser.findOne({
-        where: { masterUserID: req.adminId },
-      });
-      responsiblePerson = user ? user.name : null;
-    }
-
-    if ((sanitizedSourceOrgin === 0 || sanitizedSourceOrgin === "0") && req.body.emailID) {
-      await Email.update(
-        { dealId: deal.dealId },
-        { where: { emailID: req.body.emailID } }
-      );
-    }
-    await DealDetails.create({
-      dealId: deal.dealId, // or deal.id depending on your PK
-      responsiblePerson,
-      ownerName: responsiblePerson, // or any other field you want to set
-      // ...other dealDetails fields if needed
-    });
-    // Optionally, update the lead with the new dealId
-    await DealStageHistory.create({
-      dealId: deal.dealId,
-      stageName: deal.pipelineStage,
-      enteredAt: deal.createdAt, // or new Date()
-    });
-    if (person || org) {
-      await DealParticipant.create({
-        dealId: deal.dealId,
-        personId: person ? person.personId : null,
-        leadOrganizationId: org ? org.leadOrganizationId : null,
-      });
-    }
-
-    if (existingLead) {
-      await existingLead.update({ dealId: deal.dealId });
-    } else if (leadId) {
-      // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
-      const leadToUpdate = await Lead.findByPk(leadId);
-      if (leadToUpdate) {
-        await leadToUpdate.update({ dealId: deal.dealId });
-      }
-    }
-
-    // Handle custom fields - extract from req.body directly
-    const savedCustomFields = {};
-
-    // Define standard Deal model fields that should not be treated as custom fields
-    // const standardDealFields = [
-    //   'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline',
-    //   'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'sourceChannelId',
-    //   'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo',
-    //   'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired',
-    //   'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email',
-    //   'sourceOrgin', 'source', 'leadId', 'ownerId', 'emailID'
-    // ];
-    const standardDealFields = [
-      "title",
-      "ownerId",
-      "sourceChannel",
-      "sourceChannelID",
-    ];
-
-    // Extract potential custom fields from req.body
-    const potentialCustomFields = {};
-    for (const [key, value] of Object.entries(req.body)) {
-      if (
-        !standardDealFields.includes(key) &&
-        value !== null &&
-        value !== undefined &&
-        value !== ""
-      ) {
-        potentialCustomFields[key] = value;
-      }
-    }
-
-    console.log("=== CUSTOM FIELDS DEBUG ===");
-    console.log("Potential custom fields extracted:", potentialCustomFields);
-    console.log("req.adminId:", req.adminId);
-    console.log("deal.dealId:", deal ? deal.dealId : "Deal not created yet");
-
-    // Check if CustomField and CustomFieldValue models are loaded
-    console.log("CustomField model available:", typeof CustomField);
-    console.log("CustomFieldValue model available:", typeof CustomFieldValue);
-
-    if (Object.keys(potentialCustomFields).length > 0) {
-      try {
-        console.log(
-          "Processing",
-          Object.keys(potentialCustomFields).length,
-          "potential custom fields"
-        );
-
-        for (const [fieldKey, value] of Object.entries(potentialCustomFields)) {
-          console.log(`\n--- Processing field: ${fieldKey} = ${value} ---`);
-          let customField;
-
-          // Check if it's a fieldId (numeric) or fieldName (string)
-          if (isNaN(fieldKey)) {
-            // It's a fieldName - search by fieldName
-            console.log("Searching by fieldName:", fieldKey);
-            customField = await CustomField.findOne({
-              where: {
-                fieldName: fieldKey,
-                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                isActive: true,
-                // [Op.or]: [
-                //   { masterUserID: req.adminId },
-                //   { fieldSource: "default" },
-                //   { fieldSource: "system" },
-                // ],
-              },
-            });
-          } else {
-            // It's a fieldId - search by fieldId
-            console.log("Searching by fieldId:", parseInt(fieldKey));
-            customField = await CustomField.findOne({
-              where: {
-                fieldId: parseInt(fieldKey),
-                entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support deal, both, and lead fields
-                isActive: true,
-                // [Op.or]: [
-                //   { masterUserID: req.adminId },
-                //   { fieldSource: "default" },
-                //   { fieldSource: "system" },
-                // ],
-              },
-            });
-          }
-
-          console.log(
-            "CustomField found:",
-            customField
-              ? {
-                  fieldId: customField.fieldId,
-                  fieldName: customField.fieldName,
-                  fieldType: customField.fieldType,
-                  entityType: customField.entityType,
-                  isActive: customField.isActive,
-                  masterUserID: customField.masterUserID,
-                  fieldSource: customField.fieldSource,
-                }
-              : "NOT FOUND"
-          );
-
-          if (
-            customField &&
-            value !== null &&
-            value !== undefined &&
-            value !== ""
-          ) {
-            // Validate value based on field type
-            let processedValue = value;
-
-            if (
-              customField.fieldType === "number" &&
-              value !== null &&
-              value !== ""
-            ) {
-              processedValue = parseFloat(value);
-              if (isNaN(processedValue)) {
-                console.warn(
-                  `Invalid number value for field "${customField.fieldLabel}"`
-                );
-                continue;
-              }
-            }
-
-            if (customField.fieldType === "email" && value) {
-              const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-              if (!emailRegex.test(value)) {
-                console.warn(
-                  `Invalid email format for field "${customField.fieldLabel}"`
-                );
-                continue;
-              }
-            }
-
-            console.log("Creating CustomFieldValue:", {
-              fieldId: customField.fieldId,
-              entityId: deal.dealId,
-              entityType: "deal",
-              value:
-                typeof processedValue === "object"
-                  ? JSON.stringify(processedValue)
-                  : String(processedValue),
-              masterUserID: req.adminId,
-            });
-
-            await CustomFieldValue.create({
-              fieldId: customField.fieldId,
-              entityId: deal.dealId,
-              entityType: "deal",
-              value:
-                typeof processedValue === "object"
-                  ? JSON.stringify(processedValue)
-                  : String(processedValue),
-              masterUserID: req.adminId,
-            });
-
-            // Store the saved custom field for response using fieldName as key
-            savedCustomFields[customField.fieldName] = {
-              fieldName: customField.fieldName,
-              fieldType: customField.fieldType,
-              value: processedValue,
-            };
-
-            console.log(
-              "✅ Custom field saved successfully:",
-              customField.fieldName
-            );
-          } else if (!customField) {
-            console.warn(`❌ Custom field not found for key: ${fieldKey}`);
-          } else {
-            console.warn(`❌ Invalid value for field ${fieldKey}:`, value);
-          }
-        }
-        console.log(
-          `🎉 Saved ${
-            Object.keys(savedCustomFields).length
-          } custom field values for deal ${deal.dealId}`
-        );
-      } catch (customFieldError) {
-        console.error("❌ Error saving custom fields:", customFieldError);
-        // Don't fail the deal creation, just log the error
-      }
-    } else {
-      console.log("❌ No potential custom fields found in request body");
-    }
-
-    await historyLogger(
-      dealProgramId,
-      "DEAL_CREATION",
-      deal.masterUserID,
-      deal.dealId,
-      null,
-      `Deal is created by ${req.role}`,
-      null
-    );
-
-    // Prepare response with both default and custom fields
-    const dealResponse = {
-      ...deal.toJSON(),
-      customFields: savedCustomFields,
-    };
-
-    res.status(201).json({
-      message: "deal created successfully",
-      deal: dealResponse,
-      customFieldsSaved: Object.keys(savedCustomFields).length,
-    });
-  } catch (error) {
-    console.log("Error creating deal:", error);
-
-    res.status(500).json({ message: "Internal server error" });
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
   }
-};
-
-exports.getDeals = async (req, res) => {
-  const {
-    page = 1,
-    limit = 20,
-    search,
-    sortBy = "createdAt",
-    order = "DESC",
-    pipeline,
-    pipelineStage,
-    ownerId,
-    masterUserID,
-    isArchived,
-    filterId,
-  } = req.query;
-
-  const offset = (page - 1) * limit;
 
   try {
-    // Build the base where clause
-    let where = {};
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
 
-    // --- Handle column preferences ---
-    const pref = await DealColumnPreference.findOne();
-    let attributes = [];
-    let dealDetailsAttributes = [];
-
-    if (pref && pref.columns) {
-      const columns =
-        typeof pref.columns === "string"
-          ? JSON.parse(pref.columns)
-          : pref.columns;
-
-      // Get all Deal and DealDetails fields
-      const dealFields = Object.keys(Deal.rawAttributes);
-      const dealDetailsFields = DealDetails
-        ? Object.keys(DealDetails.rawAttributes)
-        : [];
-
-      // Filter checked columns by table
-      const checkedColumns = columns.filter((col) => col.check);
-
-      dealFields.forEach((field) => {
-        const col = checkedColumns.find((c) => c.key === field);
-        if (col) attributes.push(field);
-      });
-
-      dealDetailsFields.forEach((field) => {
-        const col = checkedColumns.find((c) => c.key === field);
-        if (col) dealDetailsAttributes.push(field);
-      });
-
-      // Always include dealId for relationships
-      if (!attributes.includes("dealId")) {
-        attributes.unshift("dealId");
-      }
-      // Always include status column from database
-      if (!attributes.includes("status")) {
-        attributes.push("status");
-      }
-
-      if (attributes.length === 0) attributes = undefined;
-      if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
+    // Find the global OrganizationColumnPreference record
+    let pref = await OrganizationColumnPreference.findOne();
+    if (!pref) {
+      return res.status(404).json({ message: "Preferences not found." });
     }
 
-    // --- Handle dynamic filtering ---
-    let include = [];
-    let customFieldsConditions = { all: [], any: [] };
+    // Parse columns if stored as string
+    let prefColumns =
+      typeof pref.columns === "string"
+        ? JSON.parse(pref.columns)
+        : pref.columns;
 
-    if (filterId) {
-      console.log("Processing filter with filterId:", filterId);
-
-      // Fetch the saved filter
-      const filter = await LeadFilter.findByPk(filterId);
-      if (!filter) {
-        return res.status(404).json({ message: "Filter not found." });
-      }
-
-      console.log("Found filter:", filter.filterName);
-
-      const filterConfig =
-        typeof filter.filterConfig === "string"
-          ? JSON.parse(filter.filterConfig)
-          : filter.filterConfig;
-
-      console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
-
-      const { all = [], any = [] } = filterConfig;
-      const dealFields = Object.keys(Deal.rawAttributes);
-      const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-
-      let filterWhere = {};
-      let dealDetailsWhere = {};
-
-      console.log("Available deal fields:", dealFields);
-      console.log("Available dealDetails fields:", dealDetailsFields);
-
-      // Process 'all' conditions (AND logic)
-      if (all.length > 0) {
-        console.log("Processing 'all' conditions:", all);
-
-        filterWhere[Op.and] = [];
-        dealDetailsWhere[Op.and] = [];
-
-        all.forEach((cond) => {
-          console.log("Processing condition:", cond);
-
-          if (dealFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in Deal fields`);
-            filterWhere[Op.and].push(buildCondition(cond));
-          } else if (dealDetailsFields.includes(cond.field)) {
-            console.log(`Field '${cond.field}' found in DealDetails fields`);
-            dealDetailsWhere[Op.and].push(buildCondition(cond));
-          } else {
-            console.log(
-              `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-            );
-            // Handle custom fields
-            customFieldsConditions.all.push(cond);
-          }
-        });
-
-        if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-        if (dealDetailsWhere[Op.and].length === 0)
-          delete dealDetailsWhere[Op.and];
-      }
-
-      // Process 'any' conditions (OR logic)
-      if (any.length > 0) {
-        console.log("Processing 'any' conditions:", any);
-
-        filterWhere[Op.or] = [];
-        dealDetailsWhere[Op.or] = [];
-
-        any.forEach((cond) => {
-          if (dealFields.includes(cond.field)) {
-            filterWhere[Op.or].push(buildCondition(cond));
-          } else if (dealDetailsFields.includes(cond.field)) {
-            dealDetailsWhere[Op.or].push(buildCondition(cond));
-          } else {
-            // Handle custom fields
-            customFieldsConditions.any.push(cond);
-          }
-        });
-
-        if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-        if (dealDetailsWhere[Op.or].length === 0)
-          delete dealDetailsWhere[Op.or];
-      }
-
-      // Apply masterUserID filtering logic for filters
-      if (req.role === "admin") {
-        // Admin can filter by specific masterUserID or see all deals
-        if (masterUserID && masterUserID !== "all") {
-          if (filterWhere[Op.or]) {
-            // If there's already an Op.or condition from filters, combine properly
-            filterWhere[Op.and] = [
-              { [Op.or]: filterWhere[Op.or] },
-              {
-                [Op.or]: [
-                  { masterUserID: masterUserID },
-                  { ownerId: masterUserID },
-                ],
-              },
-            ];
-            delete filterWhere[Op.or];
-          } else {
-            filterWhere[Op.or] = [
-              { masterUserID: masterUserID },
-              { ownerId: masterUserID },
-            ];
-          }
-        }
-      } else {
-        // Non-admin users: filter by their own deals or specific user if provided
-        const userId =
-          masterUserID && masterUserID !== "all" ? masterUserID : req.adminId;
-
-        if (filterWhere[Op.or]) {
-          // If there's already an Op.or condition from filters, combine properly
-          filterWhere[Op.and] = [
-            { [Op.or]: filterWhere[Op.or] },
-            { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
-          ];
-          delete filterWhere[Op.or];
-        } else {
-          filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
-        }
-      }
-
-      // Add DealDetails include with filtering
-      if (Object.keys(dealDetailsWhere).length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          where: dealDetailsWhere,
-          required: true,
-          attributes: dealDetailsAttributes,
-        });
-      } else if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          required: false,
-          attributes: dealDetailsAttributes,
-        });
-      }
-
-      // Handle custom field filtering
-      if (
-        customFieldsConditions.all.length > 0 ||
-        customFieldsConditions.any.length > 0
-      ) {
-        console.log(
-          "Processing custom field conditions:",
-          customFieldsConditions
-        );
-
-        // Debug: Show all custom fields in the database
-        const allCustomFields = await CustomField.findAll({
+    // Get custom fields to validate incoming custom field columns
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
           where: {
+            entityType: { [Op.in]: ["organization", "both"] },
             isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
           },
           attributes: [
             "fieldId",
             "fieldName",
-            "entityType",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
             "fieldSource",
-            "isActive",
-            "masterUserID",
+            "entityType",
+            "check",
           ],
         });
-
-        console.log(
-          "All custom fields in database:",
-          allCustomFields.map((f) => ({
-            fieldId: f.fieldId,
-            fieldName: f.fieldName,
-            entityType: f.entityType,
-            fieldSource: f.fieldSource,
-            isActive: f.isActive,
-            masterUserID: f.masterUserID,
-          }))
-        );
-
-        const customFieldFilters = await buildCustomFieldFilters(
-          customFieldsConditions,
-          req.adminId
-        );
-        console.log("Built custom field filters:", customFieldFilters);
-
-        if (customFieldFilters.length > 0) {
-          // Apply custom field filtering by finding deals that match the custom field conditions
-          const matchingDealIds = await getDealIdsByCustomFieldFilters(
-            customFieldFilters,
-            req.adminId
-          );
-
-          console.log(
-            "Matching deal IDs from custom field filtering:",
-            matchingDealIds
-          );
-
-          if (matchingDealIds.length > 0) {
-            // If we already have other conditions, combine them
-            if (filterWhere[Op.and]) {
-              filterWhere[Op.and].push({
-                dealId: { [Op.in]: matchingDealIds },
-              });
-            } else if (filterWhere[Op.or]) {
-              filterWhere[Op.and] = [
-                { [Op.or]: filterWhere[Op.or] },
-                { dealId: { [Op.in]: matchingDealIds } },
-              ];
-              delete filterWhere[Op.or];
-            } else {
-              filterWhere.dealId = { [Op.in]: matchingDealIds };
-            }
-          } else {
-            // No deals match the custom field conditions, so return empty result
-            console.log(
-              "No matching deals found for custom field filters, setting empty result"
-            );
-            filterWhere.dealId = { [Op.in]: [] };
-          }
-        } else {
-          // Custom field conditions exist but no valid filters were built (field not found)
-          console.log(
-            "Custom field conditions exist but no valid filters found, setting empty result"
-          );
-          filterWhere.dealId = { [Op.in]: [] };
-        }
-      }
-
-      where = filterWhere;
-    } else {
-      // --- Standard filtering without filterId ---
-      // Handle masterUserID filtering based on role
-      if (req.role !== "admin") {
-        where[Op.or] = [
-          { masterUserID: req.adminId },
-          { ownerId: req.adminId },
-        ];
-      } else if (masterUserID && masterUserID !== "all") {
-        where[Op.or] = [
-          { masterUserID: masterUserID },
-          { ownerId: masterUserID },
-        ];
-      }
-
-      // Basic search functionality
-      if (search) {
-        where[Op.or] = [
-          { title: { [Op.like]: `%${search}%` } },
-          { contactPerson: { [Op.like]: `%${search}%` } },
-          { organization: { [Op.like]: `%${search}%` } },
-        ];
-      }
-
-      // Filter by pipeline
-      if (pipeline) {
-        where.pipeline = pipeline;
-      }
-
-      // Filter by pipelineStage
-      if (pipelineStage) {
-        where.pipelineStage = pipelineStage;
-      }
-
-      // Filter by ownerId
-      if (ownerId) {
-        where.ownerId = ownerId;
-      }
-
-      // Add isArchived filter if provided
-      if (typeof isArchived !== "undefined") {
-        where.isArchived = isArchived === "true";
-      }
-
-      // Add default DealDetails include if not added by filtering
-      if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-        include.push({
-          model: DealDetails,
-          as: "details",
-          attributes: dealDetailsAttributes,
-          required: false,
-        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
       }
     }
 
-    console.log("→ Final where clause:", JSON.stringify(where, null, 2));
-    console.log("→ Final include:", JSON.stringify(include, null, 2));
-
-    const { rows: deals, count: total } = await Deal.findAndCountAll({
-      where,
-      limit: parseInt(limit),
-      offset,
-      order: [[sortBy, order.toUpperCase()]],
-      attributes,
-      include,
+    // Create a map of custom field names for quick lookup
+    const customFieldMap = {};
+    customFields.forEach((field) => {
+      customFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
     });
 
-    console.log("→ Query executed. Total records:", total);
-
-    // FETCH CURRENCY DETAILS FOR ALL DEALS
-    // Get all unique currency IDs from the deals
-    const currencyIds = new Set();
-    const proposalCurrencyIds = new Set();
-    
-    deals.forEach(deal => {
-      if (deal.currency) currencyIds.add(deal.currency);
-      if (deal.proposalCurrency) proposalCurrencyIds.add(deal.proposalCurrency);
+    // Update check status for existing columns
+    prefColumns = prefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
     });
 
-    // Fetch currency details
-    const currencies = await Currency.findAll({
-      where: {
-        currencyId: {
-          [Op.in]: [...currencyIds, ...proposalCurrencyIds].filter(Boolean)
+    // Handle new custom field columns that don't exist in preferences yet
+    const existingKeys = new Set(prefColumns.map((col) => col.key));
+
+    columns.forEach((incomingCol) => {
+      // If this column doesn't exist in preferences but is a custom field, add it
+      if (
+        !existingKeys.has(incomingCol.key) &&
+        customFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = customFieldMap[incomingCol.key];
+        prefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+    });
+
+    // Update check field in CustomField table for custom fields
+    const customFieldUpdates = [];
+    columns.forEach((incomingCol) => {
+      if (customFieldMap[incomingCol.key]) {
+        const customField = customFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          customFieldUpdates.push({
+            fieldId: customField.fieldId,
+            check: !!incomingCol.check,
+          });
         }
-      },
-      attributes: ['currencyId', 'currency_desc']
+      }
     });
 
-    // Create a map for quick lookup
-    const currencyMap = {};
-    currencies.forEach(currency => {
-      currencyMap[currency.currencyId] = currency.currency_desc;
+    // Perform bulk update of CustomField check values
+    if (customFieldUpdates.length > 0) {
+      for (const update of customFieldUpdates) {
+        await CustomField.update(
+          { check: update.check },
+          {
+            where: {
+              fieldId: update.fieldId,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" },
+              ],
+            },
+          }
+        );
+      }
+    }
+
+    pref.columns = prefColumns;
+    await pref.save();
+
+    res.status(200).json({
+      message: "Organization columns updated",
+      columns: pref.columns,
+      customFieldsProcessed: customFields.length,
+      customFieldsUpdated: customFieldUpdates.length,
+      totalColumns: prefColumns.length,
     });
+  } catch (error) {
+    console.error("Error updating organization columns:", error);
+    res.status(500).json({ message: "Error updating organization columns" });
+  }
+};
 
-    // Fetch custom field values for all deals
-    const dealIds = deals.map((deal) => deal.dealId);
+// Update check status for person columns and custom fields, also updates organization columns
+exports.updatePersonColumnChecks = async (req, res) => {
+  // Expecting: { columns: [ { key: "columnName", check: true/false }, ... ] }
+  const { columns } = req.body;
 
-    console.log("🔍 === CUSTOM FIELDS DEBUG START ===");
-    console.log("→ Fetching custom fields for dealIds:", dealIds);
-    console.log("→ Current user adminId:", req.adminId);
-    console.log("→ Number of deals to process:", dealIds.length);
+  if (!Array.isArray(columns)) {
+    return res.status(400).json({ message: "Columns array is required." });
+  }
 
-    // First, let's check if there are any custom field values for these deals
-    const allCustomFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityType: "deal",
-        entityId: dealIds,
-      },
-      attributes: [
-        "fieldId",
-        "entityId",
-        "entityType",
-        "value",
-        "masterUserID",
-      ],
-    });
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
 
-    console.log(
-      "→ All custom field values for these deals:",
-      allCustomFieldValues.length
-    );
-    allCustomFieldValues.forEach((value) => {
-      console.log(
-        `  - Deal ${value.entityId}: Field ${value.fieldId} = ${value.value} (MasterUserID: ${value.masterUserID})`
-      );
-    });
+    // Find the global PersonColumnPreference record
+    let personPref = await PersonColumnPreference.findOne();
+    if (!personPref) {
+      return res.status(404).json({ message: "Person preferences not found." });
+    }
 
+    // Find the global OrganizationColumnPreference record
+    let orgPref = await OrganizationColumnPreference.findOne();
+    if (!orgPref) {
+      return res.status(404).json({ message: "Organization preferences not found." });
+    }
 
+    // Parse person columns if stored as string
+    let personPrefColumns =
+      typeof personPref.columns === "string"
+        ? JSON.parse(personPref.columns)
+        : personPref.columns;
 
-    const allCustomFields = await CustomField.findAll({
-      where: {
-        isActive: true,
-        entityType: { [Op.in]: ["deal", "both", "lead"] },
-        check: true, // Only include custom fields where check is true
-      },
-      attributes: [
-        "fieldId",
-        "fieldName",
-        "fieldLabel",
-        "fieldType",
-        "entityType",
-        "fieldSource",
-        "masterUserID",
-        "isActive",
-        "isImportant",
-        "check",
-      ],
-    });
+    // Parse organization columns if stored as string
+    let orgPrefColumns =
+      typeof orgPref.columns === "string"
+        ? JSON.parse(orgPref.columns)
+        : orgPref.columns;
 
-    console.log(
-      "→ Available custom fields with check=true:",
-      allCustomFields.length
-    );
-    allCustomFields.forEach((field) => {
-      console.log(
-        `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, check: ${field.check})`
-      );
-    });
-
-    const customFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityType: "deal",
-        entityId: dealIds,
-      },
-      include: [
-        {
-          model: CustomField,
-          as: "CustomField",
+    // Get custom fields for both person and organization to validate incoming custom field columns
+    let personCustomFields = [];
+    let orgCustomFields = [];
+    if (req.adminId) {
+      try {
+        // Get person custom fields
+        personCustomFields = await CustomField.findAll({
           where: {
+            entityType: { [Op.in]: ["person", "both"] },
             isActive: true,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            check: true, // Only include custom fields where check is true
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
           },
           attributes: [
             "fieldId",
-            "fieldName", 
+            "fieldName",
             "fieldLabel",
             "fieldType",
+            "isRequired",
             "isImportant",
+            "fieldSource",
             "entityType",
-            "check"
+            "check",
           ],
-          required: true,
-        },
-      ],
-    });
+        });
 
-    console.log("→ Found custom field values:", customFieldValues.length);
-    
-    // DEBUG: Log each custom field value found
-    customFieldValues.forEach((value, index) => {
-      console.log(`🔍 CustomFieldValue ${index + 1}:`, {
-        entityId: value.entityId,
-        fieldId: value.fieldId,
-        value: value.value,
-        fieldName: value.CustomField?.fieldName,
-        fieldLabel: value.CustomField?.fieldLabel,
-        fieldType: value.CustomField?.fieldType,
-        isImportant: value.CustomField?.isImportant
-      });
-    });
-
-    // Group custom field values by dealId
-    const customFieldsByDeal = {};
-    customFieldValues.forEach((value) => {
-      if (!customFieldsByDeal[value.entityId]) {
-        customFieldsByDeal[value.entityId] = {};
-      }
-      customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
-        label: value.CustomField.fieldLabel,
-        value: value.value,
-        type: value.CustomField.fieldType,
-        isImportant: value.CustomField.isImportant,
-      };
-    });
-
-    console.log(
-      "→ Grouped custom fields by deal:",
-      Object.keys(customFieldsByDeal).length,
-      "deals have custom fields"
-    );
-
-    // Debug each deal's custom fields
-    Object.keys(customFieldsByDeal).forEach((dealId) => {
-      console.log(
-        `  - Deal ${dealId} has custom fields:`,
-        Object.keys(customFieldsByDeal[dealId])
-      );
-    });
-
-    // Attach custom fields and status to each deal
-    // Build a map of all active custom fields (deal/both/lead, dealCheck: true)
-    const allActiveCustomFields = {};
-    allCustomFields.forEach((field) => {
-      allActiveCustomFields[field.fieldName] = {
-        label: field.fieldLabel,
-        value: "",
-        type: field.fieldType,
-        isImportant: field.isImportant,
-      };
-    });
-    
-    console.log("🔍 All active custom fields template:", Object.keys(allActiveCustomFields));
-    console.log("🔍 Deals with custom field data:", Object.keys(customFieldsByDeal));
-
-    const dealsWithCustomFields = deals.map((deal) => {
-      const dealObj = deal.toJSON();
-
-      // Flatten dealDetails into the main deal object if present
-      if (dealObj.details) {
-        Object.assign(dealObj, dealObj.details);
-        delete dealObj.details;
-      }
-      
-      // For proposal currency - keep both ID and description
-      if (dealObj.proposalCurrency) {
-        dealObj.proposalCurrencyId = dealObj.proposalCurrency;
-        dealObj.proposalCurrency = currencyMap[dealObj.proposalCurrency] || null;
-      } else {
-        dealObj.proposalCurrencyId = null;
-        dealObj.proposalCurrency = null;
-      }
-
-      // For value currency - keep both ID and description
-      if (dealObj.currency) {
-        dealObj.currencyId = dealObj.currency;
-        dealObj.currency = currencyMap[dealObj.currency] || null;
-      } else {
-        dealObj.currencyId = null;
-        dealObj.currency = null;
-      }
-
-      // DEBUG: Log for the first deal being processed
-      if (deal === deals[0]) {
-        console.log(`🔍 Processing first deal ID: ${dealObj.dealId}`);
-        console.log(`🔍 Custom fields available for deal ${dealObj.dealId}:`, customFieldsByDeal[dealObj.dealId]);
-      }
-      
-      // Add custom fields directly to the deal object (not wrapped in customFields) - same as getLeads
-      const customFieldsData = customFieldsByDeal[dealObj.dealId] || {};
-      console.log(`🔍 Deal ${dealObj.dealId} - Custom fields data:`, customFieldsData);
-      
-      Object.entries(customFieldsData).forEach(([fieldName, fieldData]) => {
-        dealObj[fieldName] = fieldData.value;
-        console.log(`🔍 Deal ${dealObj.dealId} - Added custom field: ${fieldName} = ${fieldData.value}`);
-      });
-
-      // Merge all active custom fields with values for this deal (for backward compatibility)
-      const customFieldsForDeal = { ...allActiveCustomFields };
-      const valuesForDeal = customFieldsByDeal[dealObj.dealId] || {};
-      Object.keys(valuesForDeal).forEach((fieldName) => {
-        customFieldsForDeal[fieldName] = {
-          ...customFieldsForDeal[fieldName],
-          ...valuesForDeal[fieldName],
-        };
-      });
-      // Keep the customFields property for backward compatibility (same as getLeads)
-      dealObj.customFields = customFieldsForDeal;
-      
-      console.log(`🔍 Deal ${dealObj.dealId} - Final customFields object:`, dealObj.customFields);
-
-      // Ensure status is present (from deal or details)
-      if (!("status" in dealObj)) {
-        dealObj.status = deal.status || null;
-      }
-
-      return dealObj;
-    });
-
-    console.log("🔍 === CUSTOM FIELDS DEBUG END ===");
-    console.log(`🔍 Processed ${dealsWithCustomFields.length} deals with custom fields`);
-    
-    // DEBUG: Show final result for first deal
-    if (dealsWithCustomFields.length > 0) {
-      const firstDeal = dealsWithCustomFields[0];
-      console.log(`🔍 First deal final result - dealId: ${firstDeal.dealId}`);
-      console.log(`🔍 First deal customFields keys:`, Object.keys(firstDeal.customFields));
-      console.log(`🔍 First deal has direct custom field properties:`, 
-        Object.keys(firstDeal).filter(key => 
-          !['dealId', 'contactPerson', 'organization', 'title', 'value', 'currency', 'pipeline', 'pipelineStage', 'expectedCloseDate', 'sourceChannel', 'serviceType', 'proposalValue', 'proposalCurrency', 'esplProposalNo', 'projectLocation', 'organizationCountry', 'proposalSentDate', 'sourceRequired', 'questionerShared', 'sectorialSector', 'sbuClass', 'phone', 'email', 'sourceOrgin', 'status', 'source', 'createdAt', 'updatedAt', 'masterUserID', 'ownerId', 'isArchived', 'label', 'nextActivityDate', 'wonTime', 'lostTime', 'dealClosedOn', 'ownerName', 'scopeOfServiceType', 'proposalCurrencyId', 'currencyId', 'customFields'].includes(key)
-        )
-      );
-    }
-
-    // --- Deal summary calculation (like getDealSummary) ---
-    // Use the filtered deals for summary
-    const summaryDeals = dealsWithCustomFields;
-    // If dealsWithCustomFields is empty, summary will be zeroed
-    let totalValue = 0;
-    let totalWeightedValue = 0;
-    let totalDealCount = 0;
-    const currencySummaryMap = {};
-
-    // Fetch pipeline stage probabilities
-    let stageProbabilities = {};
-    try {
-      const pipelineStages = await PipelineStage.findAll({
-        attributes: ["stageName", "probability"],
-        where: { isActive: true },
-      });
-      stageProbabilities = pipelineStages.reduce((acc, stage) => {
-        acc[stage.stageName] = stage.probability || 0;
-        return acc;
-      }, {});
-    } catch (e) {
-      // fallback: all probabilities 0
-    }
-
-    summaryDeals.forEach((deal) => {
-      const currencyId = deal.currencyId || deal.currency; // Use currencyId if available, otherwise fallback
-      const currencyDesc = deal.currency || 'Unknown'; // Use the currency description
-      const value = deal.value || 0;
-      const pipelineStage = deal.pipelineStage;
-      
-      if (!currencySummaryMap[currencyDesc]) {
-        currencySummaryMap[currencyDesc] = {
-          totalValue: 0,
-          weightedValue: 0,
-          dealCount: 0,
-          currencyId: currencyId
-        };
-      }
-      currencySummaryMap[currencyDesc].totalValue += value;
-      currencySummaryMap[currencyDesc].weightedValue +=
-        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-      currencySummaryMap[currencyDesc].dealCount += 1;
-      totalValue += value;
-      totalWeightedValue +=
-        (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-      totalDealCount += 1;
-    });
-
-    const summary = Object.entries(currencySummaryMap).map(([currency, data]) => ({
-      currency,
-      currencyId: data.currencyId,
-      totalValue: data.totalValue,
-      weightedValue: data.weightedValue,
-      dealCount: data.dealCount,
-    }));
-    summary.sort((a, b) => b.totalValue - a.totalValue);
-
-    res.status(200).json({
-      message: "Deals fetched successfully",
-      totalDeals: total,
-      totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page),
-      deals: dealsWithCustomFields,
-      role: req.role,
-      totalValue,
-      totalWeightedValue,
-      totalDealCount,
-      summary,
-    });
-  } catch (error) {
-    console.error("Error fetching deals:", error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-// exports.getDeals = async (req, res) => {
-//   const {
-//     page = 1,
-//     limit = 20,
-//     search,
-//     sortBy = "createdAt",
-//     order = "DESC",
-//     pipeline,
-//     pipelineStage,
-//     ownerId,
-//     masterUserID,
-//     isArchived,
-//     filterId,
-//   } = req.query;
-
-//   const offset = (page - 1) * limit;
-
-//   try {
-//     // Build the base where clause
-//     let where = {};
-
-//     // --- Handle column preferences ---
-//     const pref = await DealColumnPreference.findOne();
-//     let attributes = [];
-//     let dealDetailsAttributes = [];
-
-//     if (pref && pref.columns) {
-//       const columns =
-//         typeof pref.columns === "string"
-//           ? JSON.parse(pref.columns)
-//           : pref.columns;
-
-//       // Get all Deal and DealDetails fields
-//       const dealFields = Object.keys(Deal.rawAttributes);
-//       const dealDetailsFields = DealDetails
-//         ? Object.keys(DealDetails.rawAttributes)
-//         : [];
-
-//       // Filter checked columns by table
-//       const checkedColumns = columns.filter((col) => col.check);
-
-//       dealFields.forEach((field) => {
-//         const col = checkedColumns.find((c) => c.key === field);
-//         if (col) attributes.push(field);
-//       });
-
-//       dealDetailsFields.forEach((field) => {
-//         const col = checkedColumns.find((c) => c.key === field);
-//         if (col) dealDetailsAttributes.push(field);
-//       });
-
-//       // Always include dealId for relationships
-//       if (!attributes.includes("dealId")) {
-//         attributes.unshift("dealId");
-//       }
-//       // Always include status column from database
-//       if (!attributes.includes("status")) {
-//         attributes.push("status");
-//       }
-
-//       if (attributes.length === 0) attributes = undefined;
-//       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
-//     }
-
-//     // --- Handle dynamic filtering ---
-//     let include = [];
-//     let customFieldsConditions = { all: [], any: [] };
-
-//     if (filterId) {
-//       console.log("Processing filter with filterId:", filterId);
-
-//       // Fetch the saved filter
-//       const filter = await LeadFilter.findByPk(filterId);
-//       if (!filter) {
-//         return res.status(404).json({ message: "Filter not found." });
-//       }
-
-//       console.log("Found filter:", filter.filterName);
-
-//       const filterConfig =
-//         typeof filter.filterConfig === "string"
-//           ? JSON.parse(filter.filterConfig)
-//           : filter.filterConfig;
-
-//       console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
-
-//       const { all = [], any = [] } = filterConfig;
-//       const dealFields = Object.keys(Deal.rawAttributes);
-//       const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-
-//       let filterWhere = {};
-//       let dealDetailsWhere = {};
-
-//       console.log("Available deal fields:", dealFields);
-//       console.log("Available dealDetails fields:", dealDetailsFields);
-
-//       // Process 'all' conditions (AND logic)
-//       if (all.length > 0) {
-//         console.log("Processing 'all' conditions:", all);
-
-//         filterWhere[Op.and] = [];
-//         dealDetailsWhere[Op.and] = [];
-
-//         all.forEach((cond) => {
-//           console.log("Processing condition:", cond);
-
-//           if (dealFields.includes(cond.field)) {
-//             console.log(`Field '${cond.field}' found in Deal fields`);
-//             filterWhere[Op.and].push(buildCondition(cond));
-//           } else if (dealDetailsFields.includes(cond.field)) {
-//             console.log(`Field '${cond.field}' found in DealDetails fields`);
-//             dealDetailsWhere[Op.and].push(buildCondition(cond));
-//           } else {
-//             console.log(
-//               `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-//             );
-//             // Handle custom fields
-//             customFieldsConditions.all.push(cond);
-//           }
-//         });
-
-//         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-//         if (dealDetailsWhere[Op.and].length === 0)
-//           delete dealDetailsWhere[Op.and];
-//       }
-
-//       // Process 'any' conditions (OR logic)
-//       if (any.length > 0) {
-//         console.log("Processing 'any' conditions:", any);
-
-//         filterWhere[Op.or] = [];
-//         dealDetailsWhere[Op.or] = [];
-
-//         any.forEach((cond) => {
-//           if (dealFields.includes(cond.field)) {
-//             filterWhere[Op.or].push(buildCondition(cond));
-//           } else if (dealDetailsFields.includes(cond.field)) {
-//             dealDetailsWhere[Op.or].push(buildCondition(cond));
-//           } else {
-//             // Handle custom fields
-//             customFieldsConditions.any.push(cond);
-//           }
-//         });
-
-//         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-//         if (dealDetailsWhere[Op.or].length === 0)
-//           delete dealDetailsWhere[Op.or];
-//       }
-
-//       // Apply masterUserID filtering logic for filters
-//       if (req.role === "admin") {
-//         // Admin can filter by specific masterUserID or see all deals
-//         if (masterUserID && masterUserID !== "all") {
-//           if (filterWhere[Op.or]) {
-//             // If there's already an Op.or condition from filters, combine properly
-//             filterWhere[Op.and] = [
-//               { [Op.or]: filterWhere[Op.or] },
-//               {
-//                 [Op.or]: [
-//                   { masterUserID: masterUserID },
-//                   { ownerId: masterUserID },
-//                 ],
-//               },
-//             ];
-//             delete filterWhere[Op.or];
-//           } else {
-//             filterWhere[Op.or] = [
-//               { masterUserID: masterUserID },
-//               { ownerId: masterUserID },
-//             ];
-//           }
-//         }
-//       } else {
-//         // Non-admin users: filter by their own deals or specific user if provided
-//         const userId =
-//           masterUserID && masterUserID !== "all" ? masterUserID : req.adminId;
-
-//         if (filterWhere[Op.or]) {
-//           // If there's already an Op.or condition from filters, combine properly
-//           filterWhere[Op.and] = [
-//             { [Op.or]: filterWhere[Op.or] },
-//             { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
-//           ];
-//           delete filterWhere[Op.or];
-//         } else {
-//           filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
-//         }
-//       }
-
-//       // Add DealDetails include with filtering
-//       if (Object.keys(dealDetailsWhere).length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           where: dealDetailsWhere,
-//           required: true,
-//           attributes: dealDetailsAttributes,
-//         });
-//       } else if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           required: false,
-//           attributes: dealDetailsAttributes,
-//         });
-//       }
-
-//       // Handle custom field filtering
-//       if (
-//         customFieldsConditions.all.length > 0 ||
-//         customFieldsConditions.any.length > 0
-//       ) {
-//         console.log(
-//           "Processing custom field conditions:",
-//           customFieldsConditions
-//         );
-
-//         // Debug: Show all custom fields in the database
-//         const allCustomFields = await CustomField.findAll({
-//           where: {
-//             isActive: true,
-//           },
-//           attributes: [
-//             "fieldId",
-//             "fieldName",
-//             "entityType",
-//             "fieldSource",
-//             "isActive",
-//             "masterUserID",
-//           ],
-//         });
-
-//         console.log(
-//           "All custom fields in database:",
-//           allCustomFields.map((f) => ({
-//             fieldId: f.fieldId,
-//             fieldName: f.fieldName,
-//             entityType: f.entityType,
-//             fieldSource: f.fieldSource,
-//             isActive: f.isActive,
-//             masterUserID: f.masterUserID,
-//           }))
-//         );
-
-//         const customFieldFilters = await buildCustomFieldFilters(
-//           customFieldsConditions,
-//           req.adminId
-//         );
-//         console.log("Built custom field filters:", customFieldFilters);
-
-//         if (customFieldFilters.length > 0) {
-//           // Apply custom field filtering by finding deals that match the custom field conditions
-//           const matchingDealIds = await getDealIdsByCustomFieldFilters(
-//             customFieldFilters,
-//             req.adminId
-//           );
-
-//           console.log(
-//             "Matching deal IDs from custom field filtering:",
-//             matchingDealIds
-//           );
-
-//           if (matchingDealIds.length > 0) {
-//             // If we already have other conditions, combine them
-//             if (filterWhere[Op.and]) {
-//               filterWhere[Op.and].push({
-//                 dealId: { [Op.in]: matchingDealIds },
-//               });
-//             } else if (filterWhere[Op.or]) {
-//               filterWhere[Op.and] = [
-//                 { [Op.or]: filterWhere[Op.or] },
-//                 { dealId: { [Op.in]: matchingDealIds } },
-//               ];
-//               delete filterWhere[Op.or];
-//             } else {
-//               filterWhere.dealId = { [Op.in]: matchingDealIds };
-//             }
-//           } else {
-//             // No deals match the custom field conditions, so return empty result
-//             console.log(
-//               "No matching deals found for custom field filters, setting empty result"
-//             );
-//             filterWhere.dealId = { [Op.in]: [] };
-//           }
-//         } else {
-//           // Custom field conditions exist but no valid filters were built (field not found)
-//           console.log(
-//             "Custom field conditions exist but no valid filters found, setting empty result"
-//           );
-//           filterWhere.dealId = { [Op.in]: [] };
-//         }
-//       }
-
-//       where = filterWhere;
-//     } else {
-//       // --- Standard filtering without filterId ---
-//       // Handle masterUserID filtering based on role
-//       if (req.role !== "admin") {
-//         where[Op.or] = [
-//           { masterUserID: req.adminId },
-//           { ownerId: req.adminId },
-//         ];
-//       } else if (masterUserID && masterUserID !== "all") {
-//         where[Op.or] = [
-//           { masterUserID: masterUserID },
-//           { ownerId: masterUserID },
-//         ];
-//       }
-
-//       // Basic search functionality
-//       if (search) {
-//         where[Op.or] = [
-//           { title: { [Op.like]: `%${search}%` } },
-//           { contactPerson: { [Op.like]: `%${search}%` } },
-//           { organization: { [Op.like]: `%${search}%` } },
-//         ];
-//       }
-
-//       // Filter by pipeline
-//       if (pipeline) {
-//         where.pipeline = pipeline;
-//       }
-
-//       // Filter by pipelineStage
-//       if (pipelineStage) {
-//         where.pipelineStage = pipelineStage;
-//       }
-
-//       // Filter by ownerId
-//       if (ownerId) {
-//         where.ownerId = ownerId;
-//       }
-
-//       // Add isArchived filter if provided
-//       if (typeof isArchived !== "undefined") {
-//         where.isArchived = isArchived === "true";
-//       }
-
-//       // Add default DealDetails include if not added by filtering
-//       if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           attributes: dealDetailsAttributes,
-//           required: false,
-//         });
-//       }
-//     }
-
-//     console.log("→ Final where clause:", JSON.stringify(where, null, 2));
-//     console.log("→ Final include:", JSON.stringify(include, null, 2));
-
-//     const { rows: deals, count: total } = await Deal.findAndCountAll({
-//       where,
-//       limit: parseInt(limit),
-//       offset,
-//       order: [[sortBy, order.toUpperCase()]],
-//       attributes,
-//       include,
-//     });
-
-//     console.log("→ Query executed. Total records:", total);
-
-//     // FETCH CURRENCY DETAILS FOR ALL DEALS
-//     // Get all unique currency IDs from the deals
-//     const currencyIds = new Set();
-//     const proposalCurrencyIds = new Set();
-    
-//     deals.forEach(deal => {
-//       if (deal.currency) currencyIds.add(deal.currency);
-//       if (deal.proposalCurrency) proposalCurrencyIds.add(deal.proposalCurrency);
-//     });
-
-//     // Fetch currency details
-//     const currencies = await Currency.findAll({
-//       where: {
-//         currencyId: {
-//           [Op.in]: [...currencyIds, ...proposalCurrencyIds].filter(Boolean)
-//         }
-//       },
-//       attributes: ['currencyId', 'currency_desc']
-//     });
-
-//     // Create a map for quick lookup
-//     const currencyMap = {};
-//     currencies.forEach(currency => {
-//       currencyMap[currency.currencyId] = currency.currency_desc;
-//     });
-
-//     // Fetch custom field values for all deals
-//     const dealIds = deals.map((deal) => deal.dealId);
-
-//     console.log("→ Fetching custom fields for dealIds:", dealIds);
-//     console.log("→ Current user adminId:", req.adminId);
-
-//     // First, let's check if there are any custom field values for these deals
-//     const allCustomFieldValues = await CustomFieldValue.findAll({
-//       where: {
-//         entityType: "deal",
-//         entityId: dealIds,
-//       },
-//       attributes: [
-//         "fieldId",
-//         "entityId",
-//         "entityType",
-//         "value",
-//         "masterUserID",
-//       ],
-//     });
-
-//     console.log(
-//       "→ All custom field values for these deals:",
-//       allCustomFieldValues.length
-//     );
-//     allCustomFieldValues.forEach((value) => {
-//       console.log(
-//         `  - Deal ${value.entityId}: Field ${value.fieldId} = ${value.value} (MasterUserID: ${value.masterUserID})`
-//       );
-//     });
-
-//     // Now check custom fields that match our criteria and have dealCheck = true
-//     const allCustomFields = await CustomField.findAll({
-//       where: {
-//         isActive: true,
-//         entityType: { [Op.in]: ["deal", "both", "lead"] },
-//         dealCheck: true, // Only include custom fields where dealCheck is true
-//       },
-//       attributes: [
-//         "fieldId",
-//         "fieldName",
-//         "entityType",
-//         "fieldSource",
-//         "masterUserID",
-//         "isActive",
-//         "dealCheck",
-//       ],
-//     });
-
-//     console.log(
-//       "→ Available custom fields with dealCheck=true:",
-//       allCustomFields.length
-//     );
-//     allCustomFields.forEach((field) => {
-//       console.log(
-//         `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, dealCheck: ${field.dealCheck})`
-//       );
-//     });
-
-//     const customFieldValues = await CustomFieldValue.findAll({
-//       where: {
-//         entityType: "deal",
-//         entityId: dealIds,
-//       },
-//       include: [
-//         {
-//           model: CustomField,
-//           as: "CustomField",
-//           where: {
-//             isActive: true,
-//             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-//             dealCheck: true, // Only include custom fields where dealCheck is true
-//           },
-//           required: true,
-//         },
-//       ],
-//     });
-
-//     console.log("→ Found custom field values:", customFieldValues.length);
-
-//     // Group custom field values by dealId
-//     const customFieldsByDeal = {};
-//     customFieldValues.forEach((value) => {
-//       if (!customFieldsByDeal[value.entityId]) {
-//         customFieldsByDeal[value.entityId] = {};
-//       }
-//       customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
-//         label: value.CustomField.fieldLabel,
-//         value: value.value,
-//         type: value.CustomField.fieldType,
-//         isImportant: value.CustomField.isImportant,
-//       };
-//     });
-
-//     console.log(
-//       "→ Grouped custom fields by deal:",
-//       Object.keys(customFieldsByDeal).length,
-//       "deals have custom fields"
-//     );
-
-//     // Debug each deal's custom fields
-//     Object.keys(customFieldsByDeal).forEach((dealId) => {
-//       console.log(
-//         `  - Deal ${dealId} has custom fields:`,
-//         Object.keys(customFieldsByDeal[dealId])
-//       );
-//     });
-
-//     // Attach custom fields and status to each deal
-//     // Build a map of all active custom fields (deal/both/lead, dealCheck: true)
-//     const allActiveCustomFields = {};
-//     allCustomFields.forEach((field) => {
-//       allActiveCustomFields[field.fieldName] = {
-//         label: field.fieldLabel,
-//         value: "",
-//         type: field.fieldType,
-//         isImportant: field.isImportant,
-//       };
-//     });
-
-//     const dealsWithCustomFields = deals.map((deal) => {
-//       const dealObj = deal.toJSON();
-
-//       // Flatten dealDetails into the main deal object if present
-//       if (dealObj.details) {
-//         Object.assign(dealObj, dealObj.details);
-//         delete dealObj.details;
-//       }
-      
-//       if (
-//         dealObj.proposalCurrency &&
-//         currencies[dealObj.proposalCurrency]
-//       ) {
-//         dealObj.proposalCurrencyId = dealObj.proposalCurrency;
-//         dealObj.proposalCurrency =
-//           currencies[dealObj.proposalCurrency];
-//       } else {
-//         dealObj.proposalCurrencyId = null;
-//         dealObj.proposalCurrency = null;
-//       }
-
-//       // For value currency
-//       if (dealObj.currency && currencies[dealObj.currency]) {
-//         dealObj.currencyId = dealObj.currency;
-//         dealObj.currency = currencies[dealObj.currency];
-//       } else {
-//         dealObj.currencyId = null;
-//         dealObj.currency = null;
-//       }
-
-//       // Merge all active custom fields with values for this deal
-//       const customFieldsForDeal = { ...allActiveCustomFields };
-//       const valuesForDeal = customFieldsByDeal[dealObj.dealId] || {};
-//       Object.keys(valuesForDeal).forEach((fieldName) => {
-//         customFieldsForDeal[fieldName] = {
-//           ...customFieldsForDeal[fieldName],
-//           ...valuesForDeal[fieldName],
-//         };
-//       });
-//       dealObj.customFields = customFieldsForDeal;
-
-//       // Ensure status is present (from deal or details)
-//       if (!("status" in dealObj)) {
-//         dealObj.status = deal.status || null;
-//       }
-
-//       return dealObj;
-//     });
-
-//     // --- Deal summary calculation (like getDealSummary) ---
-//     // Use the filtered deals for summary
-//     const summaryDeals = dealsWithCustomFields;
-//     // If dealsWithCustomFields is empty, summary will be zeroed
-//     let totalValue = 0;
-//     let totalWeightedValue = 0;
-//     let totalDealCount = 0;
-//     const currencySummaryMap = {};
-
-//     // Fetch pipeline stage probabilities
-//     let stageProbabilities = {};
-//     try {
-//       const pipelineStages = await PipelineStage.findAll({
-//         attributes: ["stageName", "probability"],
-//         where: { isActive: true },
-//       });
-//       stageProbabilities = pipelineStages.reduce((acc, stage) => {
-//         acc[stage.stageName] = stage.probability || 0;
-//         return acc;
-//       }, {});
-//     } catch (e) {
-//       // fallback: all probabilities 0
-//     }
-
-//     summaryDeals.forEach((deal) => {
-//       const currencyId = deal.currency;
-//       const currencyDesc = currencyMap[currencyId] || 'Unknown';
-//       const value = deal.value || 0;
-//       const pipelineStage = deal.pipelineStage;
-      
-//       if (!currencySummaryMap[currencyDesc]) {
-//         currencySummaryMap[currencyDesc] = {
-//           totalValue: 0,
-//           weightedValue: 0,
-//           dealCount: 0,
-//           currencyId: currencyId
-//         };
-//       }
-//       currencySummaryMap[currencyDesc].totalValue += value;
-//       currencySummaryMap[currencyDesc].weightedValue +=
-//         (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-//       currencySummaryMap[currencyDesc].dealCount += 1;
-//       totalValue += value;
-//       totalWeightedValue +=
-//         (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-//       totalDealCount += 1;
-//     });
-
-//     const summary = Object.entries(currencySummaryMap).map(([currency, data]) => ({
-//       currency,
-//       currencyId: data.currencyId,
-//       totalValue: data.totalValue,
-//       weightedValue: data.weightedValue,
-//       dealCount: data.dealCount,
-//     }));
-//     summary.sort((a, b) => b.totalValue - a.totalValue);
-
-//     res.status(200).json({
-//       message: "Deals fetched successfully",
-//       totalDeals: total,
-//       totalPages: Math.ceil(total / limit),
-//       currentPage: parseInt(page),
-//       deals: dealsWithCustomFields,
-//       role: req.role,
-//       totalValue,
-//       totalWeightedValue,
-//       totalDealCount,
-//       summary,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching deals:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// exports.getDeals = async (req, res) => {
-//   const {
-//     page = 1,
-//     limit = 20,
-//     search,
-//     sortBy = "createdAt",
-//     order = "DESC",
-//     pipeline,
-//     pipelineStage,
-//     ownerId,
-//     masterUserID,
-//     isArchived,
-//     filterId,
-//   } = req.query;
-
-//   const offset = (page - 1) * limit;
-
-//   try {
-//     // Build the base where clause
-//     let where = {};
-
-//     // --- Handle column preferences ---
-//     const pref = await DealColumnPreference.findOne();
-//     let attributes = [];
-//     let dealDetailsAttributes = [];
-
-//     if (pref && pref.columns) {
-//       const columns =
-//         typeof pref.columns === "string"
-//           ? JSON.parse(pref.columns)
-//           : pref.columns;
-
-//       // Get all Deal and DealDetails fields
-//       const dealFields = Object.keys(Deal.rawAttributes);
-//       const dealDetailsFields = DealDetails
-//         ? Object.keys(DealDetails.rawAttributes)
-//         : [];
-
-//       // Filter checked columns by table
-//       const checkedColumns = columns.filter((col) => col.check);
-
-//       dealFields.forEach((field) => {
-//         const col = checkedColumns.find((c) => c.key === field);
-//         if (col) attributes.push(field);
-//       });
-
-//       dealDetailsFields.forEach((field) => {
-//         const col = checkedColumns.find((c) => c.key === field);
-//         if (col) dealDetailsAttributes.push(field);
-//       });
-
-//       // Always include dealId for relationships
-//       if (!attributes.includes("dealId")) {
-//         attributes.unshift("dealId");
-//       }
-//       // Always include status column from database
-//       if (!attributes.includes("status")) {
-//         attributes.push("status");
-//       }
-
-//       if (attributes.length === 0) attributes = undefined;
-//       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
-//     }
-
-//     // --- Handle dynamic filtering ---
-//     let include = [];
-//     let customFieldsConditions = { all: [], any: [] };
-
-//     if (filterId) {
-//       console.log("Processing filter with filterId:", filterId);
-
-//       // Fetch the saved filter
-//       const filter = await LeadFilter.findByPk(filterId);
-//       if (!filter) {
-//         return res.status(404).json({ message: "Filter not found." });
-//       }
-
-//       console.log("Found filter:", filter.filterName);
-
-//       const filterConfig =
-//         typeof filter.filterConfig === "string"
-//           ? JSON.parse(filter.filterConfig)
-//           : filter.filterConfig;
-
-//       console.log("Filter config:", JSON.stringify(filterConfig, null, 2));
-
-//       const { all = [], any = [] } = filterConfig;
-//       const dealFields = Object.keys(Deal.rawAttributes);
-//       const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-
-//       let filterWhere = {};
-//       let dealDetailsWhere = {};
-
-//       console.log("Available deal fields:", dealFields);
-//       console.log("Available dealDetails fields:", dealDetailsFields);
-
-//       // Process 'all' conditions (AND logic)
-//       if (all.length > 0) {
-//         console.log("Processing 'all' conditions:", all);
-
-//         filterWhere[Op.and] = [];
-//         dealDetailsWhere[Op.and] = [];
-
-//         all.forEach((cond) => {
-//           console.log("Processing condition:", cond);
-
-//           if (dealFields.includes(cond.field)) {
-//             console.log(`Field '${cond.field}' found in Deal fields`);
-//             filterWhere[Op.and].push(buildCondition(cond));
-//           } else if (dealDetailsFields.includes(cond.field)) {
-//             console.log(`Field '${cond.field}' found in DealDetails fields`);
-//             dealDetailsWhere[Op.and].push(buildCondition(cond));
-//           } else {
-//             console.log(
-//               `Field '${cond.field}' NOT found in standard fields, treating as custom field`
-//             );
-//             // Handle custom fields
-//             customFieldsConditions.all.push(cond);
-//           }
-//         });
-
-//         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
-//         if (dealDetailsWhere[Op.and].length === 0)
-//           delete dealDetailsWhere[Op.and];
-//       }
-
-//       // Process 'any' conditions (OR logic)
-//       if (any.length > 0) {
-//         console.log("Processing 'any' conditions:", any);
-
-//         filterWhere[Op.or] = [];
-//         dealDetailsWhere[Op.or] = [];
-
-//         any.forEach((cond) => {
-//           if (dealFields.includes(cond.field)) {
-//             filterWhere[Op.or].push(buildCondition(cond));
-//           } else if (dealDetailsFields.includes(cond.field)) {
-//             dealDetailsWhere[Op.or].push(buildCondition(cond));
-//           } else {
-//             // Handle custom fields
-//             customFieldsConditions.any.push(cond);
-//           }
-//         });
-
-//         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
-//         if (dealDetailsWhere[Op.or].length === 0)
-//           delete dealDetailsWhere[Op.or];
-//       }
-
-//       // Apply masterUserID filtering logic for filters
-//       if (req.role === "admin") {
-//         // Admin can filter by specific masterUserID or see all deals
-//         if (masterUserID && masterUserID !== "all") {
-//           if (filterWhere[Op.or]) {
-//             // If there's already an Op.or condition from filters, combine properly
-//             filterWhere[Op.and] = [
-//               { [Op.or]: filterWhere[Op.or] },
-//               {
-//                 [Op.or]: [
-//                   { masterUserID: masterUserID },
-//                   { ownerId: masterUserID },
-//                 ],
-//               },
-//             ];
-//             delete filterWhere[Op.or];
-//           } else {
-//             filterWhere[Op.or] = [
-//               { masterUserID: masterUserID },
-//               { ownerId: masterUserID },
-//             ];
-//           }
-//         }
-//       } else {
-//         // Non-admin users: filter by their own deals or specific user if provided
-//         const userId =
-//           masterUserID && masterUserID !== "all" ? masterUserID : req.adminId;
-
-//         if (filterWhere[Op.or]) {
-//           // If there's already an Op.or condition from filters, combine properly
-//           filterWhere[Op.and] = [
-//             { [Op.or]: filterWhere[Op.or] },
-//             { [Op.or]: [{ masterUserID: userId }, { ownerId: userId }] },
-//           ];
-//           delete filterWhere[Op.or];
-//         } else {
-//           filterWhere[Op.or] = [{ masterUserID: userId }, { ownerId: userId }];
-//         }
-//       }
-
-//       // Add DealDetails include with filtering
-//       if (Object.keys(dealDetailsWhere).length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           where: dealDetailsWhere,
-//           required: true,
-//           attributes: dealDetailsAttributes,
-//         });
-//       } else if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           required: false,
-//           attributes: dealDetailsAttributes,
-//         });
-//       }
-
-//       // Handle custom field filtering
-//       if (
-//         customFieldsConditions.all.length > 0 ||
-//         customFieldsConditions.any.length > 0
-//       ) {
-//         console.log(
-//           "Processing custom field conditions:",
-//           customFieldsConditions
-//         );
-
-//         // Debug: Show all custom fields in the database
-//         const allCustomFields = await CustomField.findAll({
-//           where: {
-//             isActive: true,
-//             // [Op.or]: [
-//             //   { masterUserID: req.adminId },
-//             //   { fieldSource: "default" },
-//             //   { fieldSource: "system" },
-//             // ],
-//           },
-//           attributes: [
-//             "fieldId",
-//             "fieldName",
-//             "entityType",
-//             "fieldSource",
-//             "isActive",
-//             "masterUserID",
-//           ],
-//         });
-
-//         console.log(
-//           "All custom fields in database:",
-//           allCustomFields.map((f) => ({
-//             fieldId: f.fieldId,
-//             fieldName: f.fieldName,
-//             entityType: f.entityType,
-//             fieldSource: f.fieldSource,
-//             isActive: f.isActive,
-//             masterUserID: f.masterUserID,
-//           }))
-//         );
-
-//         const customFieldFilters = await buildCustomFieldFilters(
-//           customFieldsConditions,
-//           req.adminId
-//         );
-//         console.log("Built custom field filters:", customFieldFilters);
-
-//         if (customFieldFilters.length > 0) {
-//           // Apply custom field filtering by finding deals that match the custom field conditions
-//           const matchingDealIds = await getDealIdsByCustomFieldFilters(
-//             customFieldFilters,
-//             req.adminId
-//           );
-
-//           console.log(
-//             "Matching deal IDs from custom field filtering:",
-//             matchingDealIds
-//           );
-
-//           if (matchingDealIds.length > 0) {
-//             // If we already have other conditions, combine them
-//             if (filterWhere[Op.and]) {
-//               filterWhere[Op.and].push({
-//                 dealId: { [Op.in]: matchingDealIds },
-//               });
-//             } else if (filterWhere[Op.or]) {
-//               filterWhere[Op.and] = [
-//                 { [Op.or]: filterWhere[Op.or] },
-//                 { dealId: { [Op.in]: matchingDealIds } },
-//               ];
-//               delete filterWhere[Op.or];
-//             } else {
-//               filterWhere.dealId = { [Op.in]: matchingDealIds };
-//             }
-//           } else {
-//             // No deals match the custom field conditions, so return empty result
-//             console.log(
-//               "No matching deals found for custom field filters, setting empty result"
-//             );
-//             filterWhere.dealId = { [Op.in]: [] };
-//           }
-//         } else {
-//           // Custom field conditions exist but no valid filters were built (field not found)
-//           console.log(
-//             "Custom field conditions exist but no valid filters found, setting empty result"
-//           );
-//           filterWhere.dealId = { [Op.in]: [] };
-//         }
-//       }
-
-//       where = filterWhere;
-//     } else {
-//       // --- Standard filtering without filterId ---
-//       // Handle masterUserID filtering based on role
-//       if (req.role !== "admin") {
-//         where[Op.or] = [
-//           { masterUserID: req.adminId },
-//           { ownerId: req.adminId },
-//         ];
-//       } else if (masterUserID && masterUserID !== "all") {
-//         where[Op.or] = [
-//           { masterUserID: masterUserID },
-//           { ownerId: masterUserID },
-//         ];
-//       }
-
-//       // Basic search functionality
-//       if (search) {
-//         where[Op.or] = [
-//           { title: { [Op.like]: `%${search}%` } },
-//           { contactPerson: { [Op.like]: `%${search}%` } },
-//           { organization: { [Op.like]: `%${search}%` } },
-//         ];
-//       }
-
-//       // Filter by pipeline
-//       if (pipeline) {
-//         where.pipeline = pipeline;
-//       }
-
-//       // Filter by pipelineStage
-//       if (pipelineStage) {
-//         where.pipelineStage = pipelineStage;
-//       }
-
-//       // Filter by ownerId
-//       if (ownerId) {
-//         where.ownerId = ownerId;
-//       }
-
-//       // Add isArchived filter if provided
-//       if (typeof isArchived !== "undefined") {
-//         where.isArchived = isArchived === "true";
-//       }
-
-//       // Add default DealDetails include if not added by filtering
-//       if (dealDetailsAttributes && dealDetailsAttributes.length > 0) {
-//         include.push({
-//           model: DealDetails,
-//           as: "details",
-//           attributes: dealDetailsAttributes,
-//           required: false,
-//         });
-//       }
-//     }
-
-//     console.log("→ Final where clause:", JSON.stringify(where, null, 2));
-//     console.log("→ Final include:", JSON.stringify(include, null, 2));
-
-//     const { rows: deals, count: total } = await Deal.findAndCountAll({
-//       where,
-//       limit: parseInt(limit),
-//       offset,
-//       order: [[sortBy, order.toUpperCase()]],
-//       attributes,
-//       include,
-//     });
-
-//     console.log("→ Query executed. Total records:", total);
-
-//     // Fetch custom field values for all deals
-//     const dealIds = deals.map((deal) => deal.dealId);
-
-//     console.log("→ Fetching custom fields for dealIds:", dealIds);
-//     console.log("→ Current user adminId:", req.adminId);
-
-//     // First, let's check if there are any custom field values for these deals
-//     const allCustomFieldValues = await CustomFieldValue.findAll({
-//       where: {
-//         entityType: "deal",
-//         entityId: dealIds,
-//       },
-//       attributes: [
-//         "fieldId",
-//         "entityId",
-//         "entityType",
-//         "value",
-//         "masterUserID",
-//       ],
-//     });
-
-//     console.log(
-//       "→ All custom field values for these deals:",
-//       allCustomFieldValues.length
-//     );
-//     allCustomFieldValues.forEach((value) => {
-//       console.log(
-//         `  - Deal ${value.entityId}: Field ${value.fieldId} = ${value.value} (MasterUserID: ${value.masterUserID})`
-//       );
-//     });
-
-//     // Now check custom fields that match our criteria and have dealCheck = true
-//     const allCustomFields = await CustomField.findAll({
-//       where: {
-//         isActive: true,
-//         entityType: { [Op.in]: ["deal", "both", "lead"] },
-//         dealCheck: true, // Only include custom fields where dealCheck is true
-//         // [Op.or]: [
-//         //   { masterUserID: req.adminId },
-//         //   { fieldSource: "default" },
-//         //   { fieldSource: "system" },
-//         // ],
-//       },
-//       attributes: [
-//         "fieldId",
-//         "fieldName",
-//         "entityType",
-//         "fieldSource",
-//         "masterUserID",
-//         "isActive",
-//         "dealCheck",
-//       ],
-//     });
-
-//     console.log(
-//       "→ Available custom fields with dealCheck=true:",
-//       allCustomFields.length
-//     );
-//     allCustomFields.forEach((field) => {
-//       console.log(
-//         `  - ${field.fieldName} (ID: ${field.fieldId}, EntityType: ${field.entityType}, Source: ${field.fieldSource}, MasterUserID: ${field.masterUserID}, dealCheck: ${field.dealCheck})`
-//       );
-//     });
-
-//     const customFieldValues = await CustomFieldValue.findAll({
-//       where: {
-//         entityType: "deal",
-//         entityId: dealIds,
-//       },
-//       include: [
-//         {
-//           model: CustomField,
-//           as: "CustomField",
-//           where: {
-//             isActive: true,
-//             entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-//             dealCheck: true, // Only include custom fields where dealCheck is true
-//             // [Op.or]: [
-//             //   { masterUserID: req.adminId },
-//             //   { fieldSource: "default" },
-//             //   { fieldSource: "system" },
-//             // ],
-//           },
-//           required: true,
-//         },
-//       ],
-//     });
-
-//     console.log("→ Found custom field values:", customFieldValues.length);
-
-//     console.log("→ Found custom field values:", customFieldValues.length);
-
-//     // Group custom field values by dealId
-//     const customFieldsByDeal = {};
-//     customFieldValues.forEach((value) => {
-//       if (!customFieldsByDeal[value.entityId]) {
-//         customFieldsByDeal[value.entityId] = {};
-//       }
-//       customFieldsByDeal[value.entityId][value.CustomField.fieldName] = {
-//         label: value.CustomField.fieldLabel,
-//         value: value.value,
-//         type: value.CustomField.fieldType,
-//         isImportant: value.CustomField.isImportant,
-//       };
-//     });
-
-//     console.log(
-//       "→ Grouped custom fields by deal:",
-//       Object.keys(customFieldsByDeal).length,
-//       "deals have custom fields"
-//     );
-
-//     // Debug each deal's custom fields
-//     Object.keys(customFieldsByDeal).forEach((dealId) => {
-//       console.log(
-//         `  - Deal ${dealId} has custom fields:`,
-//         Object.keys(customFieldsByDeal[dealId])
-//       );
-//     });
-
-//     // Attach custom fields and status to each deal
-//     // Build a map of all active custom fields (deal/both/lead, dealCheck: true)
-//     const allActiveCustomFields = {};
-//     allCustomFields.forEach((field) => {
-//       allActiveCustomFields[field.fieldName] = {
-//         label: field.fieldLabel,
-//         value: "",
-//         type: field.fieldType,
-//         isImportant: field.isImportant,
-//       };
-//     });
-
-//     const dealsWithCustomFields = deals.map((deal) => {
-//       const dealObj = deal.toJSON();
-
-//       // Flatten dealDetails into the main deal object if present
-//       if (dealObj.details) {
-//         Object.assign(dealObj, dealObj.details);
-//         delete dealObj.details;
-//       }
-
-//       // Merge all active custom fields with values for this deal
-//       const customFieldsForDeal = { ...allActiveCustomFields };
-//       const valuesForDeal = customFieldsByDeal[dealObj.dealId] || {};
-//       Object.keys(valuesForDeal).forEach((fieldName) => {
-//         customFieldsForDeal[fieldName] = {
-//           ...customFieldsForDeal[fieldName],
-//           ...valuesForDeal[fieldName],
-//         };
-//       });
-//       dealObj.customFields = customFieldsForDeal;
-
-//       // Ensure status is present (from deal or details)
-//       if (!("status" in dealObj)) {
-//         dealObj.status = deal.status || null;
-//       }
-
-//       return dealObj;
-//     });
-
-//     // --- Deal summary calculation (like getDealSummary) ---
-//     // Use the filtered deals for summary
-//     const summaryDeals = dealsWithCustomFields;
-//     // If dealsWithCustomFields is empty, summary will be zeroed
-//     let totalValue = 0;
-//     let totalWeightedValue = 0;
-//     let totalDealCount = 0;
-//     const currencyMap = {};
-
-//     // Fetch pipeline stage probabilities
-//     let stageProbabilities = {};
-//     try {
-//       const pipelineStages = await PipelineStage.findAll({
-//         attributes: ["stageName", "probability"],
-//         where: { isActive: true },
-//       });
-//       stageProbabilities = pipelineStages.reduce((acc, stage) => {
-//         acc[stage.stageName] = stage.probability || 0;
-//         return acc;
-//       }, {});
-//     } catch (e) {
-//       // fallback: all probabilities 0
-//     }
-
-//     summaryDeals.forEach((deal) => {
-//       const currency = deal.currency;
-//       const value = deal.value || 0;
-//       const pipelineStage = deal.pipelineStage;
-//       if (!currencyMap[currency]) {
-//         currencyMap[currency] = {
-//           totalValue: 0,
-//           weightedValue: 0,
-//           dealCount: 0,
-//         };
-//       }
-//       currencyMap[currency].totalValue += value;
-//       currencyMap[currency].weightedValue +=
-//         (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-//       currencyMap[currency].dealCount += 1;
-//       totalValue += value;
-//       totalWeightedValue +=
-//         (value * (stageProbabilities[pipelineStage] || 0)) / 100;
-//       totalDealCount += 1;
-//     });
-
-//     const summary = Object.entries(currencyMap).map(([currency, data]) => ({
-//       currency,
-//       totalValue: data.totalValue,
-//       weightedValue: data.weightedValue,
-//       dealCount: data.dealCount,
-//     }));
-//     summary.sort((a, b) => b.totalValue - a.totalValue);
-
-//     res.status(200).json({
-//       message: "Deals fetched successfully",
-//       totalDeals: total,
-//       totalPages: Math.ceil(total / limit),
-//       currentPage: parseInt(page),
-//       deals: dealsWithCustomFields,
-//       role: req.role,
-//       totalValue,
-//       totalWeightedValue,
-//       totalDealCount,
-//       summary,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching deals:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// Helper functions for custom field filtering
-async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
-  const filters = [];
-
-  // Handle 'all' conditions (AND logic)
-  if (customFieldsConditions.all.length > 0) {
-    for (const cond of customFieldsConditions.all) {
-      console.log("Processing 'all' condition:", cond);
-
-      // Try to find the custom field by fieldName first, then by fieldId
-      let customField = null;
-
-      // First try to find by fieldName
-      customField = await CustomField.findOne({
-        where: {
-          fieldName: cond.field,
-          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-          isActive: true,
-          dealCheck: true, // Only include custom fields where dealCheck is true
-          // [Op.or]: [
-          //   { masterUserID: masterUserID },
-          //   { fieldSource: "default" },
-          //   { fieldSource: "system" },
-          // ],
-        },
-      });
-
-      // If not found by fieldName, try by fieldId
-      if (!customField) {
-        customField = await CustomField.findOne({
+        // Get organization custom fields
+        orgCustomFields = await CustomField.findAll({
           where: {
-            fieldId: cond.field,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
+            entityType: { [Op.in]: ["organization", "both"] },
             isActive: true,
-            dealCheck: true, // Only include custom fields where dealCheck is true
-            // [Op.or]: [
-            //   { masterUserID: masterUserID },
-            //   { fieldSource: "default" },
-            //   { fieldSource: "system" },
-            // ],
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
           },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
         });
-      }
-
-      console.log(
-        "Custom field search result:",
-        customField
-          ? {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              entityType: customField.entityType,
-              fieldSource: customField.fieldSource,
-            }
-          : "NOT FOUND"
-      );
-
-      if (customField) {
-        console.log(
-          "Found custom field for 'all' condition:",
-          customField.fieldName,
-          "entityType:",
-          customField.entityType
-        );
-        filters.push({
-          fieldId: customField.fieldId,
-          condition: cond,
-          logicType: "all",
-          entityType: customField.entityType,
-        });
-      } else {
-        console.log("Custom field not found for 'all' condition:", cond.field);
-      }
-    }
-  }
-
-  // Handle 'any' conditions (OR logic) - any condition can be met
-  if (customFieldsConditions.any.length > 0) {
-    for (const cond of customFieldsConditions.any) {
-      console.log("Processing 'any' condition:", cond);
-
-      // Try to find the custom field by fieldName first, then by fieldId
-      let customField = null;
-
-      // First try to find by fieldName
-      customField = await CustomField.findOne({
-        where: {
-          fieldName: cond.field,
-          entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-          isActive: true,
-          dealCheck: true, // Only include custom fields where dealCheck is true
-          // [Op.or]: [
-          //   { masterUserID: masterUserID },
-          //   { fieldSource: "default" },
-          //   { fieldSource: "system" },
-          // ],
-        },
-      });
-
-      // If not found by fieldName, try by fieldId
-      if (!customField) {
-        customField = await CustomField.findOne({
-          where: {
-            fieldId: cond.field,
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields including lead
-            isActive: true,
-            dealCheck: true, // Only include custom fields where dealCheck is true
-            // [Op.or]: [
-            //   { masterUserID: masterUserID },
-            //   { fieldSource: "default" },
-            //   { fieldSource: "system" },
-            // ],
-          },
-        });
-      }
-
-      console.log(
-        "Custom field search result:",
-        customField
-          ? {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              entityType: customField.entityType,
-              fieldSource: customField.fieldSource,
-            }
-          : "NOT FOUND"
-      );
-
-      if (customField) {
-        console.log(
-          "Found custom field for 'any' condition:",
-          customField.fieldName,
-          "entityType:",
-          customField.entityType
-        );
-        filters.push({
-          fieldId: customField.fieldId,
-          condition: cond,
-          logicType: "any",
-          entityType: customField.entityType,
-        });
-      } else {
-        console.log("Custom field not found for 'any' condition:", cond.field);
-      }
-    }
-  }
-
-  return filters;
-}
-
-async function getDealIdsByCustomFieldFilters(
-  customFieldFilters,
-  masterUserID
-) {
-  if (customFieldFilters.length === 0) return [];
-
-  const allFilters = customFieldFilters.filter((f) => f.logicType === "all");
-  const anyFilters = customFieldFilters.filter((f) => f.logicType === "any");
-
-  let dealIds = [];
-
-  // Handle 'all' filters (AND logic) - all conditions must be met
-  if (allFilters.length > 0) {
-    let allConditionDealIds = null;
-
-    for (const filter of allFilters) {
-      const whereCondition = buildCustomFieldCondition(
-        filter.condition,
-        filter.fieldId
-      );
-
-      console.log(
-        "Searching for custom field values with condition:",
-        whereCondition
-      );
-      console.log("Filter fieldId:", filter.fieldId);
-      console.log("Filter condition:", filter.condition);
-
-      // Search for custom field values - handle different entity types
-      const customFieldValues = await CustomFieldValue.findAll({
-        where: {
-          fieldId: filter.fieldId,
-          // Look for values in both deal and lead entity types since some fields might be unified
-          entityType: { [Op.in]: ["deal", "lead"] },
-          ...whereCondition,
-        },
-        attributes: ["entityId", "entityType", "value"],
-      });
-
-      console.log("Found custom field values:", customFieldValues.length);
-      customFieldValues.forEach((cfv) => {
-        console.log(
-          `  - EntityType: ${cfv.entityType}, EntityId: ${cfv.entityId}, Value: ${cfv.value}`
-        );
-      });
-
-      let currentDealIds = [];
-
-      // Process each custom field value
-      for (const cfv of customFieldValues) {
-        if (cfv.entityType === "deal") {
-          // Direct deal association
-          currentDealIds.push(cfv.entityId);
-        } else if (cfv.entityType === "lead") {
-          // Lead association - need to find corresponding deal
-          // Since leads can be converted to deals, we need to find deals that have this leadId
-          try {
-            const dealsFromLead = await Deal.findAll({
-              where: { leadId: cfv.entityId },
-              attributes: ["dealId"],
-            });
-
-            dealsFromLead.forEach((deal) => {
-              currentDealIds.push(deal.dealId);
-            });
-
-            console.log(
-              `  - Found ${dealsFromLead.length} deals from lead ${cfv.entityId}`
-            );
-          } catch (error) {
-            console.error("Error finding deals from lead:", error);
-          }
-        }
-      }
-
-      // Remove duplicates
-      currentDealIds = [...new Set(currentDealIds)];
-      console.log("Current deal IDs for filter:", currentDealIds);
-
-      if (allConditionDealIds === null) {
-        allConditionDealIds = currentDealIds;
-      } else {
-        // Intersection - only keep deals that match all conditions
-        allConditionDealIds = allConditionDealIds.filter((id) =>
-          currentDealIds.includes(id)
-        );
-      }
-    }
-
-    dealIds = allConditionDealIds || [];
-  }
-
-  // Handle 'any' filters (OR logic) - any condition can be met
-  if (anyFilters.length > 0) {
-    let anyConditionDealIds = [];
-
-    for (const filter of anyFilters) {
-      const whereCondition = buildCustomFieldCondition(
-        filter.condition,
-        filter.fieldId
-      );
-
-      const customFieldValues = await CustomFieldValue.findAll({
-        where: {
-          fieldId: filter.fieldId,
-          entityType: { [Op.in]: ["deal", "lead"] }, // Look for values in both deal and lead entity types
-          ...whereCondition,
-        },
-        attributes: ["entityId", "entityType", "value"],
-      });
-
-      let currentDealIds = [];
-
-      for (const cfv of customFieldValues) {
-        if (cfv.entityType === "deal") {
-          currentDealIds.push(cfv.entityId);
-        } else if (cfv.entityType === "lead") {
-          // Lead association - need to find corresponding deal
-          try {
-            const dealsFromLead = await Deal.findAll({
-              where: { leadId: cfv.entityId },
-              attributes: ["dealId"],
-            });
-
-            dealsFromLead.forEach((deal) => {
-              currentDealIds.push(deal.dealId);
-            });
-          } catch (error) {
-            console.error("Error finding deals from lead:", error);
-          }
-        }
-      }
-
-      currentDealIds = [...new Set(currentDealIds)];
-      anyConditionDealIds = [...anyConditionDealIds, ...currentDealIds];
-    }
-
-    // Remove duplicates
-    anyConditionDealIds = [...new Set(anyConditionDealIds)];
-
-    if (dealIds.length > 0) {
-      // If we have both 'all' and 'any' conditions, combine them with AND logic
-      dealIds = dealIds.filter((id) => anyConditionDealIds.includes(id));
-    } else {
-      dealIds = anyConditionDealIds;
-    }
-  }
-
-  console.log("Final deal IDs from custom field filtering:", dealIds);
-  return dealIds;
-}
-
-function buildCustomFieldCondition(condition, fieldId) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
-
-  let operator = condition.operator;
-
-  // Map operator names to internal operators
-  const operatorMap = {
-    is: "eq",
-    "is not": "ne",
-    "is empty": "isEmpty",
-    "is not empty": "isNotEmpty",
-    contains: "like",
-    "does not contain": "notLike",
-    "is exactly or earlier than": "lte",
-    "is earlier than": "lt",
-    "is exactly or later than": "gte",
-    "is later than": "gt",
-  };
-
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "isEmpty") {
-    return { value: { [Op.is]: null } };
-  }
-  if (operator === "isNotEmpty") {
-    return { value: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle "contains" and "does not contain" for text fields
-  if (operator === "like") {
-    return { value: { [Op.like]: `%${condition.value}%` } };
-  }
-  if (operator === "notLike") {
-    return { value: { [Op.notLike]: `%${condition.value}%` } };
-  }
-
-  // Default condition
-  return {
-    value: {
-      [ops[operator] || Op.eq]: condition.value,
-    },
-  };
-}
-
-// Operator label to backend key mapping
-const operatorMap = {
-  is: "eq",
-  "is not": "ne",
-  "is empty": "is empty",
-  "is not empty": "is not empty",
-  "is exactly or earlier than": "lte",
-  "is earlier than": "lt",
-  "is exactly or later than": "gte",
-  "is later than": "gt",
-  // New mappings for frontend operators
-  "is before": "lt",
-  "is after": "gt",
-  "is exactly on or before": "lte",
-  "is exactly on or after": "gte",
-};
-
-// Helper to build a single condition
-function buildCondition(cond) {
-  const ops = {
-    eq: Op.eq,
-    ne: Op.ne,
-    like: Op.like,
-    notLike: Op.notLike,
-    gt: Op.gt,
-    gte: Op.gte,
-    lt: Op.lt,
-    lte: Op.lte,
-    in: Op.in,
-    notIn: Op.notIn,
-    is: Op.eq,
-    isNot: Op.ne,
-    isEmpty: Op.is,
-    isNotEmpty: Op.not,
-  };
-
-  let operator = cond.operator;
-  if (operatorMap[operator]) {
-    operator = operatorMap[operator];
-  }
-
-  // Handle "is empty" and "is not empty"
-  if (operator === "is empty") {
-    return { [cond.field]: { [Op.is]: null } };
-  }
-  if (operator === "is not empty") {
-    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
-  }
-
-  // Handle date fields
-  const dealDateFields = Object.entries(Deal.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const dealDetailsDateFields = Object.entries(DealDetails.rawAttributes)
-    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
-    .map(([key]) => key);
-
-  const allDateFields = [...dealDateFields, ...dealDetailsDateFields];
-
-  if (allDateFields.includes(cond.field)) {
-    // Support new date operators
-    const dateStr = cond.value;
-    if (!dateStr) return {};
-    // For exact date (full day)
-    if (cond.useExactDate || operator === "eq") {
-      const start = new Date(dateStr + "T00:00:00");
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.between]: [start, end],
-        },
-      };
-    }
-    // is before: strictly less than start of day
-    if (operator === "lt") {
-      const start = new Date(dateStr + "T00:00:00");
-      if (isNaN(start.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.lt]: start,
-        },
-      };
-    }
-    // is after: strictly greater than end of day
-    if (operator === "gt") {
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.gt]: end,
-        },
-      };
-    }
-    // is exactly on or before: less than or equal to end of day
-    if (operator === "lte") {
-      const end = new Date(dateStr + "T23:59:59.999");
-      if (isNaN(end.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.lte]: end,
-        },
-      };
-    }
-    // is exactly on or after: greater than or equal to start of day
-    if (operator === "gte") {
-      const start = new Date(dateStr + "T00:00:00");
-      if (isNaN(start.getTime())) return {};
-      return {
-        [cond.field]: {
-          [Op.gte]: start,
-        },
-      };
-    }
-    // Otherwise, use relative date conversion
-    const dateRange = convertRelativeDate(cond.value);
-    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
-
-    if (
-      dateRange &&
-      isValidDate(dateRange.start) &&
-      isValidDate(dateRange.end)
-    ) {
-      return {
-        [cond.field]: {
-          [Op.between]: [dateRange.start, dateRange.end],
-        },
-      };
-    }
-    if (dateRange && isValidDate(dateRange.start)) {
-      return {
-        [cond.field]: {
-          [ops[operator] || Op.eq]: dateRange.start,
-        },
-      };
-    }
-  }
-
-  // Handle "contains" for text fields
-  if (operator === "like") {
-    return { [cond.field]: { [Op.like]: `%${cond.value}%` } };
-  }
-
-  // Default condition
-  return {
-    [cond.field]: {
-      [ops[operator] || Op.eq]: cond.value,
-    },
-  };
-}
-
-exports.changeDealOwner = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { newOwnerId } = req.body;
-
-    // Validate input
-    if (!newOwnerId) {
-      return res.status(400).json({
-        message: "newOwnerId is required in the request body",
-      });
-    }
-
-    // Check if new owner exists
-    const newOwner = await MasterUser.findByPk(newOwnerId);
-    if (!newOwner) {
-      return res.status(404).json({
-        message: "New owner not found",
-      });
-    }
-
-    // Find the deal
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({
-        message: "Deal not found",
-      });
-    }
-
-    // Check permissions - only admin or current owner can change ownership
-    const isAdmin = req.role === 'admin';
-    const isCurrentOwner = deal.ownerId === req.adminId;
-    
-    if (!isAdmin && !isCurrentOwner) {
-      return res.status(403).json({
-        message: "You don't have permission to change ownership of this deal",
-      });
-    }
-
-    // Store old owner ID for logging
-    const oldOwnerId = deal.ownerId;
-
-    // Update the deal owner
-    await deal.update({ ownerId: newOwnerId });
-
-    // Log the ownership change
-    await historyLogger(
-      getProgramId("DEALS"),
-      "DEAL_OWNER_CHANGE",
-      req.adminId,
-      dealId,
-      null,
-      `Deal ownership changed from ${oldOwnerId} to ${newOwnerId} by ${req.role}`,
-      {
-        oldOwnerId,
-        newOwnerId,
-        changedBy: req.adminId
-      }
-    );
-
-    res.status(200).json({
-      message: "Deal owner updated successfully",
-      data: {
-        dealId: parseInt(dealId),
-        oldOwnerId: oldOwnerId,
-        newOwnerId: parseInt(newOwnerId),
-        changedBy: req.adminId
-      }
-    });
-
-  } catch (error) {
-    console.error("Error changing deal owner:", error);
-    
-    // Log the error
-    await logAuditTrail(
-      getProgramId("DEALS"),
-      "DEAL_OWNER_CHANGE_ERROR",
-      req.role,
-      `Error changing deal owner: ${error.message}`,
-      req.adminId
-    );
-
-    res.status(500).json({
-      message: "Internal server error",
-      error: error.message
-    });
-  }
-};
-
-exports.updateDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-
-    // Debug: Log the complete request body
-    console.log("=== UPDATE DEAL REQUEST DEBUG ===");
-    console.log("dealId:", dealId);
-    console.log("req.body:", JSON.stringify(req.body, null, 2));
-    console.log("req.body type:", typeof req.body);
-    console.log("req.body keys:", Object.keys(req.body));
-    console.log("req.adminId:", req.adminId);
-    console.log("req.role:", req.role);
-    console.log("req.user:", req.user);
-
-    const updateFields = { ...req.body };
-
-    // Separate DealDetails fields
-    const dealDetailsFields = {};
-    if ("statusSummary" in updateFields)
-      dealDetailsFields.statusSummary = updateFields.statusSummary;
-    if ("responsiblePerson" in updateFields)
-      dealDetailsFields.responsiblePerson = updateFields.responsiblePerson;
-    if ("rfpReceivedDate" in updateFields)
-      dealDetailsFields.rfpReceivedDate = updateFields.rfpReceivedDate;
-
-    // Remove DealDetails fields from main update
-    delete updateFields.statusSummary;
-    delete updateFields.responsiblePerson;
-    delete updateFields.rfpReceivedDate;
-
-    // Update Deal
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      await logAuditTrail(
-        getProgramId("DEALS"),
-        "DEAL_UPDATE",
-        req.role,
-        `Deal update failed: Deal with ID ${dealId} not found.`,
-        req.adminId
-      );
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    // Check if pipelineStage is changing
-    // Only check for pipelineStage if it's in the request body
-    if (
-      updateFields.pipelineStage &&
-      updateFields.pipelineStage !== deal.pipelineStage
-    ) {
-      await DealStageHistory.create({
-        dealId: deal.dealId,
-        stageName: updateFields.pipelineStage,
-        enteredAt: new Date(),
-      });
-    }
-    await deal.update({ ...updateFields });
-
-    // Update or create DealDetails
-    if (Object.keys(dealDetailsFields).length > 0) {
-      let dealDetails = await DealDetails.findOne({ where: { dealId } });
-      if (dealDetails) {
-        await dealDetails.update(dealDetailsFields);
-      } else {
-        await DealDetails.create({ dealId, ...dealDetailsFields });
-      }
-    }
-
-    // Update all fields of Person
-    if (deal.personId) {
-      const person = await Person.findByPk(deal.personId);
-      if (person) {
-        // Only update fields that exist in the Person model
-        const personAttributes = Object.keys(Person.rawAttributes);
-        const personUpdate = {};
-        for (const key of personAttributes) {
-          if (key in req.body) {
-            personUpdate[key] = req.body[key];
-          }
-        }
-        if (Object.keys(personUpdate).length > 0) {
-          await person.update(personUpdate);
-        }
-      }
-    }
-
-    // Update all fields of Organization
-    if (deal.leadOrganizationId) {
-      const org = await Organization.findByPk(deal.leadOrganizationId);
-      if (org) {
-        // Only update fields that exist in the Organization model
-        const orgAttributes = Object.keys(Organization.rawAttributes);
-        const orgUpdate = {};
-        for (const key of orgAttributes) {
-          if (key in req.body) {
-            orgUpdate[key] = req.body[key];
-          }
-        }
-        if (Object.keys(orgUpdate).length > 0) {
-          await org.update(orgUpdate);
-        }
-      }
-    }
-
-    // Handle custom fields update - Check for custom fields directly in req.body
-    let updatedCustomFields = {};
-
-    console.log("=== CUSTOM FIELDS UPDATE DEBUG ===");
-    console.log("req.adminId:", req.adminId);
-    console.log("dealId:", dealId);
-
-    // First, let's check ALL custom fields in database
-    const allCustomFields = await CustomField.findAll({
-      attributes: ['fieldId', 'fieldName', 'entityType', 'isActive', 'dealCheck', 'fieldSource', 'masterUserID']
-    });
-    
-    console.log("🔍 ALL CUSTOM FIELDS IN DATABASE:", allCustomFields.length);
-    allCustomFields.forEach(field => {
-      console.log(`  - ${field.fieldName} | entityType: ${field.entityType} | isActive: ${field.isActive} | dealCheck: ${field.dealCheck} | source: ${field.fieldSource}`);
-    });
-
-    // Check specifically for your field
-    const targetField = allCustomFields.find(f => f.fieldName === 'espl_proposal_no');
-    if (targetField) {
-      console.log("🎯 FOUND TARGET FIELD 'espl_proposal_no':", {
-        fieldId: targetField.fieldId,
-        fieldName: targetField.fieldName,
-        entityType: targetField.entityType,
-        isActive: targetField.isActive,
-        dealCheck: targetField.dealCheck,
-        fieldSource: targetField.fieldSource,
-        masterUserID: targetField.masterUserID
-      });
-    } else {
-      console.log("❌ TARGET FIELD 'espl_proposal_no' NOT FOUND in database");
-    }
-
-    // Get all available custom fields (minimal restrictions)
-    const availableCustomFields = await CustomField.findAll({
-      where: {
-        isActive: true,
-        // No entityType restriction - all entity types allowed
-        // No dealCheck restriction - all active custom fields can be updated
-        // No masterUserID restriction - all users can update any custom field
-      },
-    });
-
-    console.log(
-      "Available custom fields with dealCheck=true:",
-      availableCustomFields.map((f) => ({
-        fieldId: f.fieldId,
-        fieldName: f.fieldName,
-        entityType: f.entityType,
-        dealCheck: f.dealCheck,
-        masterUserID: f.masterUserID,
-        fieldSource: f.fieldSource
-      }))
-    );
-
-    console.log("Request body keys:", Object.keys(req.body));
-    console.log("Matching fields in request body:");
-    
-    // Check which request body keys match available custom fields
-    Object.keys(req.body).forEach(bodyKey => {
-      const matchingField = availableCustomFields.find(f => f.fieldName === bodyKey);
-      if (matchingField) {
-        console.log(`✅ MATCH FOUND: ${bodyKey} = ${req.body[bodyKey]} (fieldId: ${matchingField.fieldId})`);
-      } else {
-        console.log(`❌ NO MATCH: ${bodyKey} not found in custom fields`);
-      }
-    });
-
-    if (availableCustomFields.length > 0) {
-      try {
-        // Check each available custom field to see if it's in the request body
-        for (const customField of availableCustomFields) {
-          const fieldName = customField.fieldName;
-
-          // Check if this field is in the request body
-          if (fieldName in req.body) {
-            const value = req.body[fieldName];
-
-            console.log(`\n--- Processing field: ${fieldName} = ${value} ---`);
-            console.log("CustomField found:", {
-              fieldId: customField.fieldId,
-              fieldName: customField.fieldName,
-              fieldType: customField.fieldType,
-              entityType: customField.entityType,
-              isActive: customField.isActive,
-              masterUserID: customField.masterUserID,
-              fieldSource: customField.fieldSource,
-            });
-
-            if (value !== null && value !== undefined) {
-              // Validate value based on field type
-              let processedValue = value;
-
-              if (
-                customField.fieldType === "number" &&
-                value !== null &&
-                value !== ""
-              ) {
-                processedValue = parseFloat(value);
-                if (isNaN(processedValue)) {
-                  console.warn(
-                    `Invalid number value for field "${customField.fieldLabel}"`
-                  );
-                  continue;
-                }
-              }
-
-              if (customField.fieldType === "email" && value) {
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!emailRegex.test(value)) {
-                  console.warn(
-                    `Invalid email format for field "${customField.fieldLabel}"`
-                  );
-                  continue;
-                }
-              }
-
-              // Handle empty values (allow clearing fields)
-              if (value === "" || value === null) {
-                processedValue = null;
-              }
-
-              console.log("Processing custom field value:", {
-                fieldId: customField.fieldId,
-                fieldName: customField.fieldName,
-                dealId: dealId,
-                entityId: dealId, // dealId should match entityId
-                processedValue: processedValue,
-                originalValue: value,
-              });
-
-              // Find or create the field value - ensure dealId matches entityId
-              let fieldValue = await CustomFieldValue.findOne({
-                where: {
-                  fieldId: customField.fieldId,
-                  entityId: parseInt(dealId), // Ensure dealId is integer to match entityId
-                  entityType: "deal",
-                },
-              });
-
-              console.log(`🔍 Looking for existing CustomFieldValue: fieldId=${customField.fieldId}, entityId=${dealId}, entityType=deal`);
-              console.log(`🔍 Found existing value:`, fieldValue ? {
-                id: fieldValue.id,
-                fieldId: fieldValue.fieldId,
-                entityId: fieldValue.entityId,
-                entityType: fieldValue.entityType,
-                currentValue: fieldValue.value
-              } : 'None');
-
-              if (fieldValue) {
-                // Update existing value
-                if (processedValue === null || processedValue === "") {
-                  // Delete the field value if it's being cleared
-                  await fieldValue.destroy();
-                  console.log(
-                    `✅ Deleted custom field value for: ${customField.fieldName}`
-                  );
-                } else {
-                  await fieldValue.update({
-                    value:
-                      typeof processedValue === "object"
-                        ? JSON.stringify(processedValue)
-                        : String(processedValue),
-                  });
-                  console.log(
-                    `✅ Updated custom field value for: ${customField.fieldName}`
-                  );
-                }
-              } else if (processedValue !== null && processedValue !== "") {
-                // Create new value only if it's not empty
-                const newFieldValue = await CustomFieldValue.create({
-                  fieldId: customField.fieldId,
-                  entityId: parseInt(dealId), // Ensure dealId is integer
-                  entityType: "deal",
-                  value:
-                    typeof processedValue === "object"
-                      ? JSON.stringify(processedValue)
-                      : String(processedValue),
-                  masterUserID: req.adminId,
-                });
-                console.log(
-                  `✅ Created new custom field value for: ${customField.fieldName}`,
-                  {
-                    id: newFieldValue.id,
-                    fieldId: newFieldValue.fieldId,
-                    entityId: newFieldValue.entityId,
-                    value: newFieldValue.value
-                  }
-                );
-              }
-
-              // Store the updated custom field for response
-              updatedCustomFields[customField.fieldName] = {
-                fieldName: customField.fieldName,
-                fieldType: customField.fieldType,
-                value: processedValue,
-              };
-
-              // Remove the custom field from updateFields to prevent it from being updated in the main Deal table
-              delete updateFields[fieldName];
-            } else {
-              console.warn(`❌ Invalid value for field ${fieldName}:`, value);
-            }
-          }
-        }
-
-        console.log(
-          `🎉 Updated ${
-            Object.keys(updatedCustomFields).length
-          } custom field values for deal ${dealId}`
-        );
       } catch (customFieldError) {
-        console.error("❌ Error updating custom fields:", customFieldError);
-        // Don't fail the deal update, just log the error
+        console.error("Error fetching custom fields:", customFieldError);
       }
-    } else {
-      console.log("❌ No custom fields available for this user");
     }
 
-    // After all updates and before sending the response:
-    const updatedDeal = await Deal.findByPk(dealId, {
-      include: [
-        { model: DealDetails, as: "details" },
-        { model: Person, as: "Person" },
-        { model: Organization, as: "Organization" },
-      ],
+    // Create maps of custom field names for quick lookup
+    const personCustomFieldMap = {};
+    personCustomFields.forEach((field) => {
+      personCustomFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
     });
 
-    // Calculate pipeline stage days
-    const stageHistory = await DealStageHistory.findAll({
-      where: { dealId },
-      order: [["enteredAt", "ASC"]],
+    const orgCustomFieldMap = {};
+    orgCustomFields.forEach((field) => {
+      orgCustomFieldMap[field.fieldName] = {
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        isRequired: field.isRequired,
+        isImportant: field.isImportant,
+        fieldSource: field.fieldSource,
+        entityType: field.entityType,
+      };
     });
 
-    const now = new Date();
-    const pipelineStages = [];
-    for (let i = 0; i < stageHistory.length; i++) {
-      const stage = stageHistory[i];
-      const nextStage = stageHistory[i + 1];
-      const start = new Date(stage.enteredAt);
-      const end = nextStage ? new Date(nextStage.enteredAt) : now;
-      const days = Math.max(
-        0,
-        Math.floor((end - start) / (1000 * 60 * 60 * 24))
-      );
-      pipelineStages.push({
-        stageName: stage.stageName,
-        days,
-      });
-    }
-    const pipelineOrder = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-    ];
+    // Update check status for existing person columns
+    personPrefColumns = personPrefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
 
-    const stageDaysMap = new Map();
-    for (const stage of pipelineStages) {
-      if (!stageDaysMap.has(stage.stageName)) {
-        stageDaysMap.set(stage.stageName, stage.days);
-      } else {
-        stageDaysMap.set(
-          stage.stageName,
-          stageDaysMap.get(stage.stageName) + stage.days
+    // Update check status for existing organization columns
+    orgPrefColumns = orgPrefColumns.map((col) => {
+      const found = columns.find((c) => c.key === col.key);
+      if (found) {
+        return { ...col, check: !!found.check };
+      }
+      return col;
+    });
+
+    // Handle new custom field columns that don't exist in person preferences yet
+    const existingPersonKeys = new Set(personPrefColumns.map((col) => col.key));
+    const existingOrgKeys = new Set(orgPrefColumns.map((col) => col.key));
+
+    columns.forEach((incomingCol) => {
+      // Add new person custom fields
+      if (
+        !existingPersonKeys.has(incomingCol.key) &&
+        personCustomFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = personCustomFieldMap[incomingCol.key];
+        personPrefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+
+      // Add new organization custom fields
+      if (
+        !existingOrgKeys.has(incomingCol.key) &&
+        orgCustomFieldMap[incomingCol.key]
+      ) {
+        const customFieldInfo = orgCustomFieldMap[incomingCol.key];
+        orgPrefColumns.push({
+          key: incomingCol.key,
+          label: customFieldInfo.fieldLabel,
+          type: customFieldInfo.fieldType,
+          isCustomField: true,
+          fieldId: customFieldInfo.fieldId,
+          isRequired: customFieldInfo.isRequired,
+          isImportant: customFieldInfo.isImportant,
+          fieldSource: customFieldInfo.fieldSource,
+          entityType: customFieldInfo.entityType,
+          check: !!incomingCol.check,
+        });
+      }
+    });
+
+    // Update check field in CustomField table for both person and organization custom fields
+    const customFieldUpdates = [];
+    columns.forEach((incomingCol) => {
+      // Check person custom fields
+      if (personCustomFieldMap[incomingCol.key]) {
+        const customField = personCustomFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          customFieldUpdates.push({
+            fieldId: customField.fieldId,
+            check: !!incomingCol.check,
+          });
+        }
+      }
+
+      // Check organization custom fields
+      if (orgCustomFieldMap[incomingCol.key]) {
+        const customField = orgCustomFields.find(
+          (f) => f.fieldName === incomingCol.key
+        );
+        if (customField && customField.check !== !!incomingCol.check) {
+          // Avoid duplicate updates for the same fieldId
+          const existingUpdate = customFieldUpdates.find(
+            (update) => update.fieldId === customField.fieldId
+          );
+          if (!existingUpdate) {
+            customFieldUpdates.push({
+              fieldId: customField.fieldId,
+              check: !!incomingCol.check,
+            });
+          }
+        }
+      }
+    });
+
+    // Perform bulk update of CustomField check values
+    if (customFieldUpdates.length > 0) {
+      for (const update of customFieldUpdates) {
+        await CustomField.update(
+          { check: update.check },
+          {
+            where: {
+              fieldId: update.fieldId,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { fieldSource: "default" },
+                { fieldSource: "system" },
+                { fieldSource: "custom" },
+              ],
+            },
+          }
         );
       }
     }
 
-    let currentStageName = pipelineStages.length
-      ? pipelineStages[pipelineStages.length - 1].stageName
-      : null;
+    // Save both preferences
+    personPref.columns = personPrefColumns;
+    await personPref.save();
 
-    let pipelineStagesUnique = [];
-    if (currentStageName && pipelineOrder.includes(currentStageName)) {
-      const currentIdx = pipelineOrder.indexOf(currentStageName);
-      pipelineStagesUnique = pipelineOrder
-        .slice(0, currentIdx + 1)
-        .map((stageName) => ({
-          stageName,
-          days: stageDaysMap.get(stageName) || 0,
-        }));
+    orgPref.columns = orgPrefColumns;
+    await orgPref.save();
+
+    res.status(200).json({
+      message: "Person and organization columns updated successfully",
+      personColumns: personPref.columns,
+      organizationColumns: orgPref.columns,
+      personCustomFieldsProcessed: personCustomFields.length,
+      organizationCustomFieldsProcessed: orgCustomFields.length,
+      customFieldsUpdated: customFieldUpdates.length,
+      totalPersonColumns: personPrefColumns.length,
+      totalOrganizationColumns: orgPrefColumns.length,
+    });
+  } catch (error) {
+    console.error("Error updating person and organization columns:", error);
+    res.status(500).json({ message: "Error updating person and organization columns" });
+  }
+};
+
+exports.getOrganizationColumnPreference = async (req, res) => {
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+    const pref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    let columns = [];
+    if (pref) {
+      columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
     }
 
-    //res.status(200).json({ message: "Deal, person, and organization updated successfully",deal });
-    await historyLogger(
-      getProgramId("DEALS"),
-      "DEAL_UPDATE",
-      req.adminId,
-      deal.dealId,
-      null,
-      `Deal updated by ${req.role}`,
-      null
-    );
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
 
-    // Prepare response with updated custom fields
-    const dealResponse = {
-      ...updatedDeal.toJSON(),
-      customFields: updatedCustomFields,
+    // Fetch custom fields for organizations (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Create a map of available custom field names from CustomFields table
+    const availableCustomFieldNames = new Set(customFields.map(field => field.fieldName));
+
+    // Filter out custom field columns that don't exist in CustomFields table
+    const validColumns = columns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    columns = validColumns;
+
+    // Format custom fields for column preferences
+    const customFieldColumns = customFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    customFieldColumns.forEach((customCol) => {
+      const existingCol = columns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    const allColumns = [...columns, ...customFieldColumns];
+    const uniqueColumns = [];
+    const seenKeys = new Set();
+    allColumns.forEach((col) => {
+      if (!seenKeys.has(col.key)) {
+        seenKeys.add(col.key);
+        uniqueColumns.push(col);
+      }
+    });
+
+    const originalColumnsCount = pref ? (typeof pref.columns === "string" ? JSON.parse(pref.columns).length : pref.columns.length) : 0;
+    const filteredColumnsCount = columns.length;
+    if (pref && originalColumnsCount > filteredColumnsCount) {
+      try {
+        pref.columns = uniqueColumns;
+        await pref.save();
+        console.log(`Updated preferences: removed ${originalColumnsCount - filteredColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      columns: uniqueColumns,
+      customFieldsCount: customFields.length,
+      message: "Organization column preferences with custom fields fetched successfully",
+      hasCustomFields: customFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
+      removedFieldsCount: originalColumnsCount - filteredColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching organization column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching organization preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+
+// Get person column preferences with custom fields
+exports.getPersonColumnPreference = async (req, res) => {
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+    const pref = await PersonColumnPreference.findOne({ where: {} });
+
+    let columns = [];
+    if (pref) {
+      columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+    }
+
+    // Optionally: parse filterConfig for each column if needed
+    columns = columns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for persons (only if user is authenticated)
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Create a map of available custom field names from CustomFields table
+    const availableCustomFieldNames = new Set(customFields.map(field => field.fieldName));
+
+    // Filter out custom field columns that don't exist in CustomFields table
+    const validColumns = columns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    columns = validColumns;
+
+    // Format custom fields for column preferences
+    const customFieldColumns = customFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    customFieldColumns.forEach((customCol) => {
+      const existingCol = columns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    const allColumns = [...columns, ...customFieldColumns];
+    const uniqueColumns = [];
+    const seenKeys = new Set();
+    allColumns.forEach((col) => {
+      if (!seenKeys.has(col.key)) {
+        seenKeys.add(col.key);
+        uniqueColumns.push(col);
+      }
+    });
+
+    const originalColumnsCount = pref ? (typeof pref.columns === "string" ? JSON.parse(pref.columns).length : pref.columns.length) : 0;
+    const filteredColumnsCount = columns.length;
+    if (pref && originalColumnsCount > filteredColumnsCount) {
+      try {
+        pref.columns = uniqueColumns;
+        await pref.save();
+        console.log(`Updated preferences: removed ${originalColumnsCount - filteredColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      columns: uniqueColumns,
+      customFieldsCount: customFields.length,
+      message: "Person column preferences with custom fields fetched successfully",
+      hasCustomFields: customFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      cleanedInvalidFields: originalColumnsCount > filteredColumnsCount,
+      removedFieldsCount: originalColumnsCount - filteredColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching person column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching person preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+
+// Get both organization and person column preferences in separate arrays
+exports.getBothColumnPreferences = async (req, res) => {
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Fetch organization preferences
+    const orgPref = await OrganizationColumnPreference.findOne({ where: {} });
+    let orgColumns = [];
+    if (orgPref) {
+      orgColumns = typeof orgPref.columns === "string" ? JSON.parse(orgPref.columns) : orgPref.columns;
+    }
+
+    // Fetch person preferences
+    const personPref = await PersonColumnPreference.findOne({ where: {} });
+    let personColumns = [];
+    if (personPref) {
+      personColumns = typeof personPref.columns === "string" ? JSON.parse(personPref.columns) : personPref.columns;
+    }
+
+    // Parse filterConfig for each column if needed
+    orgColumns = orgColumns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    personColumns = personColumns.map((col) => {
+      if (col.filterConfig) {
+        col.filterConfig = typeof col.filterConfig === "string" ? JSON.parse(col.filterConfig) : col.filterConfig;
+      }
+      return col;
+    });
+
+    // Fetch custom fields for both organizations and persons (only if user is authenticated)
+    let orgCustomFields = [];
+    let personCustomFields = [];
+    
+    if (req.adminId) {
+      try {
+        // Organization custom fields
+        orgCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+
+        // Person custom fields
+        personCustomFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName",
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+            "check",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    } else {
+      console.warn("No adminId found in request - skipping custom fields");
+    }
+
+    // Process organization columns
+    const availableOrgCustomFieldNames = new Set(orgCustomFields.map(field => field.fieldName));
+    const validOrgColumns = orgColumns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availableOrgCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid organization custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    // Process person columns
+    const availablePersonCustomFieldNames = new Set(personCustomFields.map(field => field.fieldName));
+    const validPersonColumns = personColumns.filter(col => {
+      if (!col.fieldSource || col.fieldSource !== "custom") {
+        return true;
+      }
+      const isValid = availablePersonCustomFieldNames.has(col.key);
+      if (!isValid) {
+        console.log(`Removing invalid person custom field from preferences: ${col.key}`);
+      }
+      return isValid;
+    });
+
+    // Format organization custom fields for column preferences
+    const orgCustomFieldColumns = orgCustomFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    orgCustomFieldColumns.forEach((customCol) => {
+      const existingCol = validOrgColumns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    // Format person custom fields for column preferences
+    const personCustomFieldColumns = personCustomFields.map((field) => ({
+      key: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      check: field.check || false,
+    }));
+
+    personCustomFieldColumns.forEach((customCol) => {
+      const existingCol = validPersonColumns.find((col) => col.key === customCol.key);
+      if (existingCol) {
+        customCol.check = existingCol.check;
+      }
+    });
+
+    // Combine and deduplicate organization columns
+    const allOrgColumns = [...validOrgColumns, ...orgCustomFieldColumns];
+    const uniqueOrgColumns = [];
+    const seenOrgKeys = new Set();
+    allOrgColumns.forEach((col) => {
+      if (!seenOrgKeys.has(col.key)) {
+        seenOrgKeys.add(col.key);
+        uniqueOrgColumns.push(col);
+      }
+    });
+
+    // Combine and deduplicate person columns
+    const allPersonColumns = [...validPersonColumns, ...personCustomFieldColumns];
+    const uniquePersonColumns = [];
+    const seenPersonKeys = new Set();
+    allPersonColumns.forEach((col) => {
+      if (!seenPersonKeys.has(col.key)) {
+        seenPersonKeys.add(col.key);
+        uniquePersonColumns.push(col);
+      }
+    });
+
+    // Update preferences if needed (cleanup invalid fields)
+    const originalOrgColumnsCount = orgPref ? (typeof orgPref.columns === "string" ? JSON.parse(orgPref.columns).length : orgPref.columns.length) : 0;
+    const filteredOrgColumnsCount = validOrgColumns.length;
+    if (orgPref && originalOrgColumnsCount > filteredOrgColumnsCount) {
+      try {
+        orgPref.columns = uniqueOrgColumns;
+        await orgPref.save();
+        console.log(`Updated organization preferences: removed ${originalOrgColumnsCount - filteredOrgColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned organization preferences:", saveError);
+      }
+    }
+
+    const originalPersonColumnsCount = personPref ? (typeof personPref.columns === "string" ? JSON.parse(personPref.columns).length : personPref.columns.length) : 0;
+    const filteredPersonColumnsCount = validPersonColumns.length;
+    if (personPref && originalPersonColumnsCount > filteredPersonColumnsCount) {
+      try {
+        personPref.columns = uniquePersonColumns;
+        await personPref.save();
+        console.log(`Updated person preferences: removed ${originalPersonColumnsCount - filteredPersonColumnsCount} invalid custom fields`);
+      } catch (saveError) {
+        console.error("Error saving cleaned person preferences:", saveError);
+      }
+    }
+
+    res.status(200).json({
+      organizationColumns: uniqueOrgColumns,
+      personColumns: uniquePersonColumns,
+      organizationCustomFieldsCount: orgCustomFields.length,
+      personCustomFieldsCount: personCustomFields.length,
+      message: "Both organization and person column preferences with custom fields fetched successfully",
+      hasOrganizationCustomFields: orgCustomFields.length > 0,
+      hasPersonCustomFields: personCustomFields.length > 0,
+      userAuthenticated: !!req.adminId,
+      organizationCleanedInvalidFields: originalOrgColumnsCount > filteredOrgColumnsCount,
+      organizationRemovedFieldsCount: originalOrgColumnsCount - filteredOrgColumnsCount,
+      personCleanedInvalidFields: originalPersonColumnsCount > filteredPersonColumnsCount,
+      personRemovedFieldsCount: originalPersonColumnsCount - filteredPersonColumnsCount,
+    });
+  } catch (error) {
+    console.error("Error fetching both column preferences:", error);
+    res.status(500).json({
+      message: "Error fetching both column preferences",
+      error: error.message,
+      userAuthenticated: !!req.adminId,
+    });
+  }
+};
+
+// Save all organization fields with check status to OrganizationColumnPreference
+exports.saveAllOrganizationFieldsWithCheck = async (req, res) => {
+  let Organization;
+  try {
+    Organization = require("../../models/leads/leadOrganizationModel");
+  } catch (e) {
+    Organization = null;
+  }
+
+  // Get all field names from Organization model
+  const orgFields = Organization ? Object.keys(Organization.rawAttributes) : [];
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = orgFields.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    let pref = await OrganizationColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await OrganizationColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res
+      .status(200)
+      .json({ message: "All organization columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all organization columns:", error);
+    res.status(500).json({ message: "Error saving all organization columns" });
+  }
+};
+
+// Save all person fields with check status to PersonColumnPreference
+exports.saveAllPersonFieldsWithCheck = async (req, res) => {
+  let Person;
+  try {
+    Person = require("../../models/leads/leadPersonModel");
+  } catch (e) {
+    Person = null;
+  }
+
+  // Get all field names from Person model
+  const personFields = Person ? Object.keys(Person.rawAttributes) : [];
+  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
+  const filteredFieldNames = personFields.filter(
+    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
+  );
+
+  // Accept array of { value, check } from req.body
+  const { checkedFields } = req.body || {};
+
+  // Build columns array to save: always include all fields, set check from checkedFields if provided
+  let columnsToSave = filteredFieldNames.map((field) => {
+    let check = false;
+    if (Array.isArray(checkedFields)) {
+      const found = checkedFields.find((item) => item.value === field);
+      check = found ? !!found.check : false;
+    }
+    return { key: field, check };
+  });
+
+  try {
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    let pref = await PersonColumnPreference.findOne();
+    if (!pref) {
+      // Create the record if it doesn't exist
+      pref = await PersonColumnPreference.create({ columns: columnsToSave });
+    } else {
+      // Update the existing record
+      pref.columns = columnsToSave;
+      await pref.save();
+    }
+    res
+      .status(200)
+      .json({ message: "All person columns saved", columns: pref.columns });
+  } catch (error) {
+    console.log("Error saving all person columns:", error);
+    res.status(500).json({ message: "Error saving all person columns" });
+  }
+};
+// Bulk update organizations with custom fields (accepts { leadOrganizationId: [], updateData: {} })
+exports.bulkUpdateOrganizations = async (req, res) => {
+  const { leadOrganizationId, updateData } = req.body; // { leadOrganizationId: [1,2,3], updateData: { field1: value1, ... } }
+  const adminId = req.adminId;
+  const entityType = "organization";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const sequelize = require("../../config/db");
+
+  if (
+    !Array.isArray(leadOrganizationId) ||
+    leadOrganizationId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res.status(400).json({
+      message:
+        "'leadOrganizationId' array and 'updateData' object are required.",
+    });
+  }
+
+  const results = [];
+  // Get all organization model fields
+  const orgFields = Object.keys(Organization.rawAttributes);
+  for (const orgId of leadOrganizationId) {
+    const fields = { ...updateData };
+    const transaction = await sequelize.transaction();
+    try {
+      // Admins can update any organization, others only their own
+      let organization;
+      if (req.role === "admin") {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId },
+          transaction,
+        });
+      } else {
+        organization = await Organization.findOne({
+          where: { leadOrganizationId: orgId, masterUserID: adminId },
+          transaction,
+        });
+      }
+      if (!organization) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          error: "Organization not found.",
+        });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        if (orgFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await organization.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field \"${customField.fieldLabel}\" is required.`
+          );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: orgId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: orgId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          errors: validationErrors,
+        });
+        continue;
+      }
+      await transaction.commit();
+      results.push({
+        leadOrganizationId: orgId,
+        success: true,
+        updatedFields: updatedValues,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({
+        leadOrganizationId: orgId,
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
+// Bulk update persons with custom fields (accepts { personId: [], updateData: {} })
+exports.bulkUpdatePersons = async (req, res) => {
+  const { personId, updateData } = req.body; // { personId: [1,2,3], updateData: { field1: value1, ... } }
+  const adminId = req.adminId;
+  const entityType = "person";
+  const CustomField = require("../../models/customFieldModel");
+  const CustomFieldValue = require("../../models/customFieldValueModel");
+  const Person = require("../../models/leads/leadPersonModel");
+  const sequelize = require("../../config/db");
+
+  if (
+    !Array.isArray(personId) ||
+    personId.length === 0 ||
+    !updateData ||
+    typeof updateData !== "object" ||
+    Object.keys(updateData).length === 0
+  ) {
+    return res.status(400).json({
+      message: "'personId' array and 'updateData' object are required.",
+    });
+  }
+
+  const results = [];
+  // Get all person model fields
+  const personFields = Object.keys(Person.rawAttributes);
+  for (const pId of personId) {
+    const fields = { ...updateData };
+    const transaction = await sequelize.transaction();
+    try {
+      // Admins can update any person, others only their own
+      let person;
+      if (req.role === "admin") {
+        person = await Person.findOne({
+          where: { personId: pId },
+          transaction,
+        });
+      } else {
+        person = await Person.findOne({
+          where: { personId: pId, masterUserID: adminId },
+          transaction,
+        });
+      }
+      if (!person) {
+        await transaction.rollback();
+        results.push({
+          personId: pId,
+          success: false,
+          error: "Person not found.",
+        });
+        continue;
+      }
+      const updatedValues = [];
+      const validationErrors = [];
+
+      // Separate standard and custom fields
+      const standardFieldUpdates = {};
+      const customFieldUpdates = {};
+      for (const [fieldKey, value] of Object.entries(fields)) {
+        if (personFields.includes(fieldKey)) {
+          standardFieldUpdates[fieldKey] = value;
+        } else {
+          customFieldUpdates[fieldKey] = value;
+        }
+      }
+
+      // Update standard fields if any
+      if (Object.keys(standardFieldUpdates).length > 0) {
+        await person.update(standardFieldUpdates, { transaction });
+        // Add updated standard fields to updatedValues for response
+        for (const [fieldKey, value] of Object.entries(standardFieldUpdates)) {
+          updatedValues.push({
+            fieldName: fieldKey,
+            value,
+            isStandard: true,
+          });
+        }
+      }
+
+      // Update custom fields as before
+      for (const [fieldKey, value] of Object.entries(customFieldUpdates)) {
+        let customField;
+        if (isNaN(fieldKey)) {
+          customField = await CustomField.findOne({
+            where: { fieldName: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        } else {
+          customField = await CustomField.findOne({
+            where: { fieldId: fieldKey, masterUserID: adminId, entityType },
+            transaction,
+          });
+        }
+        if (!customField) continue;
+        if (
+          customField.isRequired &&
+          (value === null || value === "" || value === undefined)
+        ) {
+          validationErrors.push(
+            `Field \"${customField.fieldLabel}\" is required.`
+          );
+          continue;
+        }
+        let processedValue = value;
+        if (
+          customField.fieldType === "number" &&
+          value !== null &&
+          value !== ""
+        ) {
+          processedValue = parseFloat(value);
+          if (isNaN(processedValue)) {
+            validationErrors.push(
+              `Invalid number value for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "email" && value) {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(value)) {
+            validationErrors.push(
+              `Invalid email format for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        if (customField.fieldType === "select" && customField.options) {
+          const validOptions = Array.isArray(customField.options)
+            ? customField.options
+            : [];
+          if (value && !validOptions.includes(value)) {
+            validationErrors.push(
+              `Invalid option \"${value}\" for field \"${customField.fieldLabel}\".`
+            );
+            continue;
+          }
+        }
+        let fieldValue = await CustomFieldValue.findOne({
+          where: {
+            fieldId: customField.fieldId,
+            entityId: pId.toString(),
+            entityType,
+            masterUserID: adminId,
+          },
+          transaction,
+        });
+        if (fieldValue) {
+          await fieldValue.update({ value: processedValue }, { transaction });
+        } else {
+          fieldValue = await CustomFieldValue.create(
+            {
+              fieldId: customField.fieldId,
+              entityId: pId.toString(),
+              entityType,
+              value: processedValue,
+              masterUserID: adminId,
+            },
+            { transaction }
+          );
+        }
+        updatedValues.push({
+          fieldId: customField.fieldId,
+          fieldName: customField.fieldName,
+          fieldLabel: customField.fieldLabel,
+          fieldType: customField.fieldType,
+          value: processedValue,
+          isRequired: customField.isRequired,
+          isImportant: customField.isImportant,
+        });
+      }
+
+      if (validationErrors.length > 0) {
+        await transaction.rollback();
+        results.push({
+          personId: pId,
+          success: false,
+          errors: validationErrors,
+        });
+        continue;
+      }
+      await transaction.commit();
+      results.push({
+        personId: pId,
+        success: true,
+        updatedFields: updatedValues,
+      });
+    } catch (error) {
+      await transaction.rollback();
+      results.push({ personId: pId, success: false, error: error.message });
+    }
+  }
+  res.status(200).json({
+    message: "Bulk update completed.",
+    results,
+    total: results.length,
+    successCount: results.filter((r) => r.success).length,
+    failureCount: results.filter((r) => !r.success).length,
+  });
+};
+
+exports.getOrganizationsAndPersons = async (req, res) => {
+  try {
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+
+    // Pagination and search for organizations
+    const orgPage = parseInt(req.query.orgPage) || 1;
+    const orgLimit = parseInt(req.query.orgLimit) || 20;
+    const orgOffset = (orgPage - 1) * orgLimit;
+    const orgSearch = req.query.orgSearch || "";
+
+    // Sorting parameters
+    const sortBy = req.query.sortBy || "createdAt";
+    const sortOrder = req.query.sortOrder || "DESC";
+
+    // Dynamic filter config (from body or query)
+    const LeadFilter = require("../../models/leads/leadFiltersModel");
+    let filterConfig = null;
+    let filterIdRaw = null;
+    if (req.body && req.body.filterId !== undefined) {
+      filterIdRaw = req.body.filterId;
+    } else if (req.query && req.query.filterId !== undefined) {
+      filterIdRaw = req.query.filterId;
+    }
+    if (filterIdRaw !== null && filterIdRaw !== undefined) {
+      if (typeof filterIdRaw === "string" && /^\d+$/.test(filterIdRaw)) {
+        const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else if (typeof filterIdRaw === "number") {
+        const filterRow = await LeadFilter.findByPk(filterIdRaw);
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else {
+        try {
+          filterConfig =
+            typeof filterIdRaw === "string"
+              ? JSON.parse(filterIdRaw)
+              : filterIdRaw;
+        } catch (e) {
+          filterConfig = null;
+        }
+      }
+    }
+
+    let organizationWhere = {};
+    let personWhere = {};
+    let leadWhere = {};
+    let dealWhere = {};
+    let activityWhere = {};
+
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Debug: print filterConfig
+    console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
+    console.log("[DEBUG] Available model fields:");
+    console.log("[DEBUG] - Lead fields:", Object.keys(Lead.rawAttributes));
+    console.log("[DEBUG] - Person fields:", Object.keys(Person.rawAttributes));
+    console.log(
+      "[DEBUG] - Organization fields:",
+      Object.keys(Organization.rawAttributes)
+    );
+    const ops = {
+      eq: Op.eq,
+      ne: Op.ne,
+      like: Op.like,
+      notLike: Op.notLike,
+      gt: Op.gt,
+      gte: Op.gte,
+      lt: Op.lt,
+      lte: Op.lte,
+      in: Op.in,
+      notIn: Op.notIn,
+      is: Op.eq,
+      isNot: Op.ne,
+      isEmpty: Op.is,
+      isNotEmpty: Op.not,
+      between: Op.between,
+      notBetween: Op.notBetween,
+    };
+    const operatorMap = {
+      is: "eq",
+      "is not": "ne",
+      "is empty": "isEmpty",
+      "is not empty": "isNotEmpty",
+      contains: "like",
+      "does not contain": "notLike",
+      "is exactly or earlier than": "lte",
+      "is earlier than": "lt",
+      "is exactly or later than": "gte",
+      "not equals": "ne",
+      "greater than": "gt",
+      "greater than or equal": "gte",
+      "less than": "lt",
+      "less than or equal": "lte",
     };
 
-    res.status(200).json({
-      message: "Deal, person, and organization updated successfully",
-      deal: dealResponse,
-      person: updatedDeal.Person ? [updatedDeal.Person] : [],
-      organization: updatedDeal.Organization ? [updatedDeal.Organization] : [],
-      pipelineStages: pipelineStagesUnique,
-      currentStage: currentStageName,
-      customFieldsUpdated: Object.keys(updatedCustomFields).length,
+    // Helper function to build a single condition - following the pattern from other APIs
+    function buildCondition(cond) {
+      console.log(
+        "[DEBUG] buildCondition called with:",
+        JSON.stringify(cond, null, 2)
+      );
+
+      const ops = {
+        eq: Op.eq,
+        ne: Op.ne,
+        like: Op.like,
+        notLike: Op.notLike,
+        gt: Op.gt,
+        gte: Op.gte,
+        lt: Op.lt,
+        lte: Op.lte,
+        in: Op.in,
+        notIn: Op.notIn,
+        is: Op.eq,
+        isNot: Op.ne,
+        isEmpty: Op.is,
+        isNotEmpty: Op.not,
+        between: Op.between,
+        notBetween: Op.notBetween,
+      };
+
+      let operator = cond.operator;
+      console.log("[DEBUG] Original operator:", operator);
+
+      if (operatorMap[operator]) {
+        operator = operatorMap[operator];
+        console.log("[DEBUG] Mapped operator:", operator);
+      }
+
+      // Handle "is empty" and "is not empty"
+      if (operator === "isEmpty" || operator === "is empty") {
+        const result = { [cond.field]: { [Op.is]: null } };
+        console.log(
+          "[DEBUG] isEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "isNotEmpty" || operator === "is not empty") {
+        const result = { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+        console.log(
+          "[DEBUG] isNotEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Handle "contains" and "does not contain" for text fields
+      if (operator === "like" || operator === "contains") {
+        const result = { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] like condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "notLike" || operator === "does not contain") {
+        const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+
+      // Default condition
+      const finalOperator = ops[operator] || Op.eq;
+      console.log("[DEBUG] Final operator symbol:", finalOperator.toString());
+      console.log("[DEBUG] Condition value:", cond.value);
+      console.log("[DEBUG] Condition field:", cond.field);
+
+      const result = {
+        [cond.field]: {
+          [finalOperator]: cond.value,
+        },
+      };
+
+      // Special logging for sequelize operators (they don't serialize well with JSON.stringify)
+      console.log("[DEBUG] Default condition result:", {
+        field: cond.field,
+        operator: finalOperator.toString(),
+        value: cond.value,
+        resultStructure: `{ ${cond.field}: { ${finalOperator.toString()}: "${
+          cond.value
+        }" } }`,
+      });
+
+      // Additional validation
+      if (cond.value === undefined || cond.value === null) {
+        console.log("[DEBUG] WARNING: cond.value is undefined or null!");
+      }
+
+      return result;
+    }
+
+    // Get model field names for validation
+    const personFields = Object.keys(Person.rawAttributes);
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    let activityFields = [];
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      activityFields = Object.keys(Activity.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Activity model not available:", e.message);
+    }
+
+    console.log("[DEBUG] Available fields:");
+    console.log("- Person fields:", personFields.slice(0, 5), "...");
+    console.log("- Lead fields:", leadFields.slice(0, 5), "...");
+    console.log("- Deal fields:", dealFields.slice(0, 5), "...");
+    console.log(
+      "- Organization fields:",
+      organizationFields.slice(0, 5),
+      "..."
+    );
+    console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+
+    // If filterConfig is provided, build AND/OR logic for all entities
+    if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
+      if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
+        console.log("[DEBUG] Processing 'all' conditions:", filterConfig.all);
+
+        filterConfig.all.forEach(function (cond) {
+          console.log(`[DEBUG] Processing AND condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.and]) personWhere[Op.and] = [];
+                  personWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+                  leadWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+                  dealWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.and])
+                    organizationWhere[Op.and] = [];
+                  organizationWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+                  activityWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.and]) personWhere[Op.and] = [];
+              personWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person AND condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+              leadWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead AND condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+              dealWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal AND condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+              organizationWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization AND condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+              activityWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity AND condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        console.log("[DEBUG] Processing 'any' conditions:", filterConfig.any);
+
+        filterConfig.any.forEach(function (cond) {
+          console.log(`[DEBUG] Processing OR condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.or]) personWhere[Op.or] = [];
+                  personWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+                  leadWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+                  dealWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+                  organizationWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+                  activityWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.or]) personWhere[Op.or] = [];
+              personWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person OR condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+              leadWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead OR condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+              dealWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal OR condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+              organizationWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization OR condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+              activityWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity OR condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+    } else if (orgSearch) {
+      // Fallback to search logic if no filterConfig
+      organizationWhere[Op.or] = [
+        { organization: { [Op.like]: `%${orgSearch}%` } },
+        { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+        { address: { [Op.like]: `%${orgSearch}%` } },
+      ];
+    }
+
+    // Debug: log all where clauses
+    console.log("[DEBUG] Final where clauses:");
+    console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
+    console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- leadWhere keys:", Object.keys(leadWhere));
+    console.log("- leadWhere[Op.and]:", leadWhere[Op.and]);
+    console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
+    console.log(
+      "- organizationWhere:",
+      JSON.stringify(organizationWhere, null, 2)
+    );
+    console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
+
+    // Apply Lead filters to get relevant organization IDs
+    let leadFilteredOrgIds = [];
+    const hasLeadFilters =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFilters) {
+      console.log("[DEBUG] Applying Lead filters to find organizations");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get organization IDs from leads
+      leadFilteredOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from leads that don't have leadOrganizationId but have organization name
+      const leadOrgNames = leadFilterResults
+        .map((lead) => lead.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Lead-filtered org IDs:", leadFilteredOrgIds);
+      console.log("[DEBUG] Lead organization names:", leadOrgNames);
+
+      // If we have organization names from leads, also find organizations by name
+      if (leadOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: leadOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        leadFilteredOrgIds = [
+          ...new Set([...leadFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from lead org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined lead-filtered org IDs:",
+          leadFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Activity filters to get relevant organization IDs
+    let activityFilteredOrgIds = [];
+    const hasActivityFilters =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFilters) {
+      console.log("[DEBUG] Applying Activity filters to find organizations");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["leadOrganizationId", "organization"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get organization IDs from activities
+        activityFilteredOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        // Also get organization names directly from activities that don't have leadOrganizationId but have organization name
+        const activityOrgNames = activityFilterResults
+          .map((activity) => activity.organization)
+          .filter(Boolean);
+
+        console.log(
+          "[DEBUG] Activity-filtered org IDs:",
+          activityFilteredOrgIds
+        );
+        console.log("[DEBUG] Activity organization names:", activityOrgNames);
+
+        // If we have organization names from activities, also find organizations by name
+        if (activityOrgNames.length > 0) {
+          const orgsByName = await Organization.findAll({
+            where: {
+              organization: { [Op.in]: activityOrgNames },
+            },
+            attributes: ["leadOrganizationId"],
+            raw: true,
+          });
+
+          const additionalOrgIds = orgsByName.map(
+            (org) => org.leadOrganizationId
+          );
+          activityFilteredOrgIds = [
+            ...new Set([...activityFilteredOrgIds, ...additionalOrgIds]),
+          ];
+
+          console.log(
+            "[DEBUG] Additional org IDs from activity org names:",
+            additionalOrgIds
+          );
+          console.log(
+            "[DEBUG] Combined activity-filtered org IDs:",
+            activityFilteredOrgIds
+          );
+        }
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Person filters to get relevant organization IDs
+    let personFilteredOrgIds = [];
+    const hasPersonFilters =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFilters) {
+      console.log("[DEBUG] Applying Person filters to find organizations");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }else {
+        personFilterResults = await Person.findAll({
+          where: {
+            ...personWhere,
+            [Op.or]: [{ masterUserID: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get organization IDs from persons
+      personFilteredOrgIds = personFilterResults
+        .map((person) => person.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from persons that don't have leadOrganizationId but have organization name
+      const personOrgNames = personFilterResults
+        .map((person) => person.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Person-filtered org IDs:", personFilteredOrgIds);
+      console.log("[DEBUG] Person organization names:", personOrgNames);
+
+      // If we have organization names from persons, also find organizations by name
+      if (personOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: personOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        personFilteredOrgIds = [
+          ...new Set([...personFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from person org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined person-filtered org IDs:",
+          personFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Deal filters to get relevant organization IDs
+    let dealFilteredOrgIds = [];
+    const hasDealFilters =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFilters) {
+      console.log("[DEBUG] Applying Deal filters to find organizations");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId", "organization"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get organization IDs from deals
+      dealFilteredOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      // Also get organization names directly from deals that don't have leadOrganizationId but have organization name
+      const dealOrgNames = dealFilterResults
+        .map((deal) => deal.organization)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Deal-filtered org IDs:", dealFilteredOrgIds);
+      console.log("[DEBUG] Deal organization names:", dealOrgNames);
+
+      // If we have organization names from deals, also find organizations by name
+      if (dealOrgNames.length > 0) {
+        const orgsByName = await Organization.findAll({
+          where: {
+            organization: { [Op.in]: dealOrgNames },
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+
+        const additionalOrgIds = orgsByName.map(
+          (org) => org.leadOrganizationId
+        );
+        dealFilteredOrgIds = [
+          ...new Set([...dealFilteredOrgIds, ...additionalOrgIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Additional org IDs from deal org names:",
+          additionalOrgIds
+        );
+        console.log(
+          "[DEBUG] Combined deal-filtered org IDs:",
+          dealFilteredOrgIds
+        );
+      }
+    }
+
+    // Apply Organization filters directly
+    let orgFilteredOrgIds = [];
+    const hasOrgFilters =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFilters) {
+      console.log(
+        "[DEBUG] Applying Organization filters to find organizations"
+      );
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+      else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs from organizations
+      orgFilteredOrgIds = orgFilterResults
+        .map((org) => org.leadOrganizationId)
+        .filter(Boolean);
+
+      console.log("[DEBUG] Organization-filtered org IDs:", orgFilteredOrgIds);
+    }
+
+    // Role-based filtering logic for organizations - same as getLeads API
+    let orgWhere = {};
+    if (orgSearch) {
+      // If orgSearch is a single character, search by first letter
+      if (orgSearch.length === 1) {
+        orgWhere = {
+          organization: { [Op.like]: `${orgSearch}%` }
+        };
+      } else {
+        orgWhere = {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${orgSearch}%` } },
+            { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+            { address: { [Op.like]: `%${orgSearch}%` } },
+          ],
+        };
+      }
+    }
+
+    // Merge organizationWhere from filters with orgWhere from search
+    if (Object.keys(organizationWhere).length > 0) {
+      orgWhere = { ...orgWhere, ...organizationWhere };
+    }
+
+    // Apply Lead, Activity, Person, Deal, and Organization filters by restricting to organizations found in those entities
+    const allFilteredOrgIds = [
+      ...new Set([
+        ...leadFilteredOrgIds,
+        ...activityFilteredOrgIds,
+        ...personFilteredOrgIds,
+        ...dealFilteredOrgIds,
+        ...orgFilteredOrgIds,
+      ]),
+    ];
+
+    if (allFilteredOrgIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to org IDs:",
+        allFilteredOrgIds
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredOrgIds.length,
+        "org IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredOrgIds.length,
+        "org IDs"
+      );
+
+      if (Object.keys(orgWhere).length > 0) {
+        // Combine with existing filters using AND
+        orgWhere = {
+          [Op.and]: [
+            orgWhere,
+            { leadOrganizationId: { [Op.in]: allFilteredOrgIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        orgWhere = { leadOrganizationId: { [Op.in]: allFilteredOrgIds } };
+      }
+    } else if (
+      hasLeadFilters ||
+      hasActivityFilters ||
+      hasPersonFilters ||
+      hasDealFilters ||
+      hasOrgFilters
+    ) {
+      // If entity filters were applied but no matching organizations found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching organizations found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: orgPage,
+        organizations: [],
+      });
+    }
+
+    console.log("[DEBUG] Final orgWhere:", JSON.stringify(orgWhere, null, 2));
+
+    // Prepare sorting options
+    const validSortFields = Object.keys(Organization.rawAttributes);
+    const validSortOrders = ["ASC", "DESC"];
+    
+    // Validate sortBy parameter
+    const finalSortBy = validSortFields.includes(sortBy) ? sortBy : "createdAt";
+    
+    // Validate sortOrder parameter
+    const finalSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) 
+      ? sortOrder.toUpperCase() 
+      : "DESC";
+    
+    console.log(`[DEBUG] Sorting by: ${finalSortBy} ${finalSortOrder}`);
+
+    // Fetch organizations using EXACT same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin"&&!req.query.masterUserID) {
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }else if (req.query.masterUserID) {
+      orgWhere.masterUserID = req.query.masterUserID;
+      organizations = await Organization.findAll({
+        where:orgWhere,
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }else {
+      organizations = await Organization.findAll({
+        where: {
+          ...orgWhere,
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        order: [[finalSortBy, finalSortOrder]],
+        raw: true,
+      });
+    }
+
+    console.log(
+      "[DEBUG] Found",
+      organizations.length,
+      "organizations after filtering"
+    );
+    if (organizations.length > 0) {
+      console.log(
+        "[DEBUG] Sample organizations:",
+        organizations.slice(0, 3).map((o) => ({
+          id: o.leadOrganizationId,
+          name: o.organization,
+          createdAt: o.createdAt,
+        }))
+      );
+    }
+
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Merge personWhere from filters with role-based filtering - same as getLeads API
+    let finalPersonWhere = { ...personWhere };
+
+    // Fetch persons using EXACT same logic as getLeads API
+    let persons = [];
+    if (req.role === "admin") {
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        raw: true,
+      });
+    }
+
+    // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] } - same as getLeads API
+    const orgPersonsMap = {};
+    persons.forEach((p) => {
+      if (p.leadOrganizationId) {
+        if (!orgPersonsMap[p.leadOrganizationId])
+          orgPersonsMap[p.leadOrganizationId] = [];
+        orgPersonsMap[p.leadOrganizationId].push({
+          personId: p.personId,
+          contactPerson: p.contactPerson,
+        });
+      }
     });
-  } catch (error) {
-    console.log(error);
 
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
+    // Get all unique ownerIds from persons and organizations - same as getLeads API
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
 
-// exports.getDealSummary = async (req, res) => {
-//   try {
-//     // 1. Per-currency summary
-//     const currencySummary = await Deal.findAll({
-//       attributes: [
-//         "currency",
-//         [fn("SUM", col("value")), "totalValue"],
-//         // Replace with your actual weighted value logic if needed
-//         [fn("SUM", col("value")), "weightedValue"],
-//         [fn("COUNT", col("dealId")), "dealCount"]
-//       ],
-//       group: ["currency"]
-//     });
+    // Fetch owner names from MasterUser - same as getLeads API
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
 
-//     // 2. Overall summary
-//     const overall = await Deal.findAll({
-//       attributes: [
-//         [fn("SUM", col("value")), "totalValue"],
-//         [fn("SUM", col("value")), "weightedValue"],
-//         [fn("COUNT", col("dealId")), "dealCount"]
-//       ]
-//     });
+    // Add ownerName to organizations - same as getLeads API
+    organizations = organizations.map((o) => ({
+      ...o,
+      ownerName: ownerMap[o.ownerId] || null,
+    }));
 
-//     res.status(200).json({
-//       overall: overall[0],         // { totalValue, weightedValue, dealCount }
-//       currencySummary              // array of per-currency summaries
-//     });
-//   } catch (error) {
-//     console.log(error);
-
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-exports.getDealSummary = async (req, res) => {
-  try {
-    // Fetch all deals with value, currency, and pipelineStage
-    const deals = await Deal.findAll({
-      attributes: ["value", "currency", "pipelineStage"],
+    // Count leads for each organization - same as getLeads API
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
       raw: true,
     });
 
-    // Probabilities for each stage
-    // Fetch dynamic probabilities from pipeline stages
-    const pipelineStages = await PipelineStage.findAll({
-      attributes: ["stageName", "probability"],
-      where: { isActive: true },
+    // Build maps for quick lookup
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
     });
 
-    const stageProbabilities = pipelineStages.reduce((acc, stage) => {
-      acc[stage.stageName] = stage.probability || 0;
-      return acc;
-    }, {});
-
-    // Group deals by currency
-    const currencyMap = {};
-
-    let totalValue = 0;
-    let totalWeightedValue = 0;
-    let totalDealCount = 0;
-
-    deals.forEach((deal) => {
-      const { currency, value, pipelineStage } = deal;
-      if (!currencyMap[currency]) {
-        currencyMap[currency] = {
-          totalValue: 0,
-          weightedValue: 0,
-          dealCount: 0,
-        };
-      }
-      currencyMap[currency].totalValue += value || 0;
-      currencyMap[currency].weightedValue +=
-        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
-      currencyMap[currency].dealCount += 1;
-
-      totalValue += value || 0;
-      totalWeightedValue +=
-        ((value || 0) * (stageProbabilities[pipelineStage] || 0)) / 100;
-      totalDealCount += 1;
-    });
-
-    // Format result as array
-    const summary = Object.entries(currencyMap).map(([currency, data]) => ({
-      currency,
-      totalValue: data.totalValue,
-      weightedValue: data.weightedValue,
-      dealCount: data.dealCount,
-    }));
-
-    // Optionally, sort by totalValue descending
-    summary.sort((a, b) => b.totalValue - a.totalValue);
-
-    res.status(200).json({
-      totalValue,
-      totalWeightedValue,
-      totalDealCount,
-      summary,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.archiveDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    await deal.update({ isArchived: true });
-    res.status(200).json({ message: "Deal archived successfully.", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-exports.unarchiveDeal = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-    await deal.update({ isArchived: false });
-    res.status(200).json({ message: "Deal unarchived successfully.", deal });
-  } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getDealsByStage = async (req, res) => {
-  try {
-    const allStages = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-      // ...add all your stages here
-    ];
-
-    const result = [];
-    let totalDeals = 0;
-
-    for (const stage of allStages) {
-      const deals = await Deal.findAll({
-        where: { pipelineStage: stage },
-        order: [["createdAt", "DESC"]],
-      });
-
-      const totalValue = deals.reduce(
-        (sum, deal) => sum + (deal.value || 0),
-        0
-      );
-      const dealCount = deals.length;
-      totalDeals += dealCount;
-
-      result.push({
-        stage,
-        totalValue,
-        dealCount,
-        deals,
-      });
-    }
-
-    res.status(200).json({
-      totalDeals,
-      stages: result,
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-//this latest version of getDealsByStage function is used to get deals by stage with rotten days logic
-
-// exports.getDealsByStage = async (req, res) => {
-//   try {
-//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
-//     const Pipeline = require("../../models/deals/pipelineModel");
-//     const PipelineStage = require("../../models/deals/pipelineStageModel");
-
-//     let allStages = [
-//       "Qualified",
-//       "Contact Made",
-//       "Proposal Made",
-//       "Negotiations Started",
-//     ];
-
-//     // Apply user filtering for non-admin users
-//     let baseWhere = {};
-//     if (req.role !== "admin") {
-//       baseWhere.masterUserID = req.adminId;
-//     }
-
-//     // Try to get stages from pipeline system with rotten days info
-//     let stageRottenDaysMap = new Map();
-//     try {
-//       const masterUserID = req.adminId;
-//       const defaultPipeline = await Pipeline.findOne({
-//         where: {
-//           masterUserID,
-//           isDefault: true,
-//           isActive: true,
-//         },
-//         include: [
-//           {
-//             model: PipelineStage,
-//             as: "stages",
-//             where: { isActive: true },
-//             required: false,
-//             order: [["stageOrder", "ASC"]],
-//           },
-//         ],
-//       });
-
-//       if (
-//         defaultPipeline &&
-//         defaultPipeline.stages &&
-//         defaultPipeline.stages.length > 0
-//       ) {
-//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
-//         // Create map of stage name to rotten days
-//         defaultPipeline.stages.forEach((stage) => {
-//           stageRottenDaysMap.set(stage.stageName, {
-//             dealRottenDays: stage.dealRottenDays,
-//             stageColor: stage.color,
-//           });
-//         });
-//       }
-//     } catch (pipelineError) {
-//       console.log(
-//         "Pipeline system not available, using hardcoded stages:",
-//         pipelineError.message
-//       );
-//     }
-
-//     const result = [];
-//     let totalDeals = 0;
-
-//     for (const stage of allStages) {
-//       const deals = await Deal.findAll({
-//         where: {
-//           ...baseWhere,
-//           pipelineStage: stage,
-//         },
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       // Process deals with rotten logic
-//       const processedDeals = deals.map((deal) => {
-//         const dealObj = deal.toJSON();
-//         const stageInfo = stageRottenDaysMap.get(stage);
-
-//         if (stageInfo && stageInfo.dealRottenDays) {
-//           // Calculate days since deal entered this stage
-//           const daysSinceCreated = Math.floor(
-//             (new Date() - new Date(deal.createdAt)) / (1000 * 60 * 60 * 24)
-//           );
-
-//           const isRotten = daysSinceCreated > stageInfo.dealRottenDays;
-
-//           // Add rotten deal indicators
-//           dealObj.daysSinceCreated = daysSinceCreated;
-//           dealObj.isRotten = isRotten;
-//           dealObj.dealRottenDays = stageInfo.dealRottenDays;
-//           dealObj.daysOverdue = isRotten
-//             ? daysSinceCreated - stageInfo.dealRottenDays
-//             : 0;
-
-//           // Change color for rotten deals
-//           dealObj.displayColor = isRotten ? "#FF4444" : stageInfo.stageColor; // Red for rotten
-//           dealObj.rottenStatus = isRotten ? "rotten" : "fresh";
-//         } else {
-//           // No rotten days configured
-//           dealObj.isRotten = false;
-//           dealObj.rottenStatus = "fresh";
-//           dealObj.displayColor = stageInfo?.stageColor || "#007BFF";
-//         }
-
-//         return dealObj;
-//       });
-
-//       // Calculate stage statistics including rotten deals
-//       const rottenDealsCount = processedDeals.filter(
-//         (deal) => deal.isRotten
-//       ).length;
-//       const totalValue = processedDeals.reduce(
-//         (sum, deal) => sum + (deal.value || 0),
-//         0
-//       );
-//       const dealCount = processedDeals.length;
-//       totalDeals += dealCount;
-
-//       // Get stage info for display
-//       const stageInfo = stageRottenDaysMap.get(stage);
-
-//       result.push({
-//         stage,
-//         totalValue,
-//         dealCount,
-//         rottenDealsCount,
-//         freshDealsCount: dealCount - rottenDealsCount,
-//         rottenPercentage:
-//           dealCount > 0 ? Math.round((rottenDealsCount / dealCount) * 100) : 0,
-//         deals: processedDeals,
-//         stageInfo: {
-//           dealRottenDays: stageInfo?.dealRottenDays || null,
-//           stageColor: stageInfo?.stageColor || "#007BFF",
-//           hasRottenDaysConfigured: !!stageInfo?.dealRottenDays,
-//         },
-//       });
-//     }
-
-//     res.status(200).json({
-//       totalDeals,
-//       stages: result,
-//       rottenDealsInfo: {
-//         description:
-//           "Deals are marked as 'rotten' when they exceed the configured days for their stage",
-//         colorCoding: {
-//           fresh: "Original stage color",
-//           rotten: "#FF4444 (Red)",
-//         },
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error in getDealsByStage:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// this function is latest version of getDealsByStage
-
-// exports.getDealsByStage = async (req, res) => {
-//   try {
-//     // Get dynamic stages from pipeline system, fallback to hardcoded if needed
-//     const Pipeline = require("../../models/deals/pipelineModel");
-//     const PipelineStage = require("../../models/deals/pipelineStageModel");
-
-//     let allStages = [
-//       "Qualified",
-//       "Contact Made",
-//       "Proposal Made",
-//       "Negotiations Started",
-//     ];
-
-//     // Try to get stages from pipeline system
-//     try {
-//       const masterUserID = req.adminId;
-//       const defaultPipeline = await Pipeline.findOne({
-//         where: {
-//           masterUserID,
-//           isDefault: true,
-//           isActive: true,
-//         },
-//         include: [
-//           {
-//             model: PipelineStage,
-//             as: "stages",
-//             where: { isActive: true },
-//             required: false,
-//             order: [["stageOrder", "ASC"]],
-//           },
-//         ],
-//       });
-
-//       if (
-//         defaultPipeline &&
-//         defaultPipeline.stages &&
-//         defaultPipeline.stages.length > 0
-//       ) {
-//         allStages = defaultPipeline.stages.map((stage) => stage.stageName);
-//       }
-//     } catch (pipelineError) {
-//       console.log(
-//         "Pipeline system not available, using hardcoded stages:",
-//         pipelineError.message
-//       );
-//     }
-
-//     const result = [];
-//     let totalDeals = 0;
-
-//     // Apply user filtering for non-admin users
-//     let baseWhere = {};
-//     if (req.role !== "admin") {
-//       baseWhere.masterUserID = req.adminId;
-//     }
-
-//     for (const stage of allStages) {
-//       const deals = await Deal.findAll({
-//         where: {
-//           ...baseWhere,
-//           pipelineStage: stage,
-//         },
-//         order: [["createdAt", "DESC"]],
-//       });
-
-//       const totalValue = deals.reduce(
-//         (sum, deal) => sum + (deal.value || 0),
-//         0
-//       );
-//       const dealCount = deals.length;
-//       totalDeals += dealCount;
-
-//       result.push({
-//         stage,
-//         totalValue,
-//         dealCount,
-//         deals,
-//       });
-//     }
-
-//     res.status(200).json({
-//       totalDeals,
-//       stages: result,
-//     });
-//   } catch (error) {
-//     console.error("Error in getDealsByStage:", error);
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-// ...existing code...
-exports.getDealDetail = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-
-    // Email optimization parameters
-    const { emailPage = 1, emailLimit = 10 } = req.query;
-    const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
-    const MAX_EMAIL_LIMIT = 50;
-    const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
-
-    const deal = await Deal.findByPk(dealId, {
-      include: [
-        { model: DealDetails, as: "details" },
-        { model: Person, as: "Person" },
-        { model: Organization, as: "Organization" },
-      ],
-    });
-
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
-    }
-
-    const ownerId = deal.ownerId;
-    const owner = await MasterUser.findOne({ 
-       where: { masterUserID: ownerId } 
-    });
-
-    // Enhanced Pipeline Stage Processing like Pipedrive
-    const stageHistory = await DealStageHistory.findAll({
-      where: { dealId },
-      order: [["enteredAt", "ASC"]],
-    });
-
-    const now = new Date();
-    const dealCreatedAt = new Date(deal.createdAt);
-
-    // Define your complete pipeline order (customize as needed)
-    const pipelineOrder = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-      "Won",
-      "Lost",
-    ];
-
-    // Initialize pipeline stages with comprehensive tracking
-    let pipelineStagesDetail = [];
-    let currentStageName = deal.pipelineStage || "Qualified";
-    let totalDealDays = Math.floor(
-      (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
-    );
-
-    // Process stage history to calculate time spent in each stage
-    if (stageHistory.length > 0) {
-      // Calculate time spent in each historical stage
-      for (let i = 0; i < stageHistory.length; i++) {
-        const stage = stageHistory[i];
-        const nextStage = stageHistory[i + 1];
-        const stageStart = new Date(stage.enteredAt);
-        const stageEnd = nextStage ? new Date(nextStage.enteredAt) : now;
-
-        // Calculate days spent in this stage
-        const daysInStage = Math.max(
-          0,
-          Math.floor((stageEnd - stageStart) / (1000 * 60 * 60 * 24))
-        );
-
-        // Calculate hours and minutes for more precision
-        const totalMinutes = Math.floor((stageEnd - stageStart) / (1000 * 60));
-        const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-        const minutes = totalMinutes % 60;
-
-        pipelineStagesDetail.push({
-          stageName: stage.stageName,
-          enteredAt: stage.enteredAt,
-          exitedAt: nextStage ? nextStage.enteredAt : null,
-          days: daysInStage,
-          hours: hours,
-          minutes: minutes,
-          totalMinutes: totalMinutes,
-          isActive: !nextStage, // Current stage if no next stage
-          stageOrder: pipelineOrder.indexOf(stage.stageName),
-        });
-      }
-
-      // Update current stage name from the last history entry
-      currentStageName = stageHistory[stageHistory.length - 1].stageName;
-    } else {
-      // If no stage history, deal is still in initial stage
-      const daysInCurrentStage = Math.floor(
-        (now - dealCreatedAt) / (1000 * 60 * 60 * 24)
-      );
-      const totalMinutes = Math.floor((now - dealCreatedAt) / (1000 * 60));
-      const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-      const minutes = totalMinutes % 60;
-
-      pipelineStagesDetail.push({
-        stageName: currentStageName,
-        enteredAt: deal.createdAt,
-        exitedAt: null,
-        days: daysInCurrentStage,
-        hours: hours,
-        minutes: minutes,
-        totalMinutes: totalMinutes,
-        isActive: true,
-        stageOrder: pipelineOrder.indexOf(currentStageName),
-      });
-    }
-
-    // Create aggregated stages map for duplicate stage handling
-    const stageDaysMap = new Map();
-    const stageDetailsMap = new Map();
-
-    pipelineStagesDetail.forEach((stage) => {
-      if (!stageDaysMap.has(stage.stageName)) {
-        stageDaysMap.set(stage.stageName, stage.days);
-        stageDetailsMap.set(stage.stageName, {
-          ...stage,
-          totalDays: stage.days,
-          visits: 1,
-          firstEntry: stage.enteredAt,
-          lastEntry: stage.enteredAt,
-        });
-      } else {
-        // Handle multiple visits to the same stage
-        const existingDays = stageDaysMap.get(stage.stageName);
-        const existingDetails = stageDetailsMap.get(stage.stageName);
-
-        stageDaysMap.set(stage.stageName, existingDays + stage.days);
-        stageDetailsMap.set(stage.stageName, {
-          ...existingDetails,
-          totalDays: existingDays + stage.days,
-          visits: existingDetails.visits + 1,
-          lastEntry: stage.enteredAt,
-          isActive: stage.isActive || existingDetails.isActive,
-        });
-      }
-    });
-
-    // Create pipeline stages for frontend (Pipedrive-like structure)
-    const currentStageIndex = pipelineOrder.indexOf(currentStageName);
-
-    const pipelineStagesUnique = pipelineOrder.map((stageName, index) => {
-      const stageData = stageDetailsMap.get(stageName);
-      const days = stageDaysMap.get(stageName) || 0;
-
-      // Determine if this stage should be shown based on current stage
-      const shouldShow = index <= currentStageIndex;
-
-      // For stages that haven't been visited but are before current stage,
-      // show them as completed with 0 days
-      const hasBeenVisited = stageDetailsMap.has(stageName);
-      const isBeforeCurrentStage = index < currentStageIndex;
-      const isCurrentStage = index === currentStageIndex;
-
-      return {
-        stageName,
-        days,
-        hours: stageData?.hours || 0,
-        minutes: stageData?.minutes || 0,
-        totalMinutes: stageData?.totalMinutes || 0,
-        isActive: stageData?.isActive || false,
-        isCurrent: isCurrentStage,
-        isPassed: isBeforeCurrentStage || (hasBeenVisited && !isCurrentStage),
-        isFuture: index > currentStageIndex,
-        visits: stageData?.visits || 0,
-        firstEntry: stageData?.firstEntry || null,
-        lastEntry: stageData?.lastEntry || null,
-        stageOrder: index,
-        hasBeenVisited,
-        shouldShow,
-        // Add percentage of total time spent
-        percentage:
-          totalDealDays > 0 ? Math.round((days / totalDealDays) * 100) : 0,
-      };
-    });
-
-    // Add pipeline insights (like Pipedrive)
-    const visitedStages = pipelineStagesUnique.filter((s) => s.hasBeenVisited);
-
-    const pipelineInsights = {
-      totalDealAge: totalDealDays,
-      currentStage: currentStageName,
-      currentStageIndex: currentStageIndex,
-      currentStageDays:
-        pipelineStagesUnique.find((s) => s.isCurrent)?.days || 0,
-      stagesCompleted: pipelineStagesUnique.filter((s) => s.isPassed).length,
-      stagesVisited: visitedStages.length,
-      totalStages: pipelineOrder.length,
-      progressPercentage: Math.round(
-        ((currentStageIndex + 1) / pipelineOrder.length) * 100
-      ),
-      stageChanges: pipelineStagesDetail.length,
-      averageDaysPerStage:
-        visitedStages.length > 0
-          ? Math.round(totalDealDays / visitedStages.length)
-          : 0,
-      // Add stage completion timeline
-      stageTimeline: pipelineStagesUnique.map((stage) => ({
-        stageName: stage.stageName,
-        status: stage.isCurrent
-          ? "current"
-          : stage.isPassed
-          ? "completed"
-          : "future",
-        days: stage.days,
-        percentage: stage.percentage,
-      })),
-    };
-
-    // Calculate avgTimeToWon for all won deals
-    const wonDeals = await Deal.findAll({ where: { status: "won" } });
-    let avgTimeToWon = 0;
-    if (wonDeals.length) {
-      const totalDays = wonDeals.reduce((sum, d) => {
-        if (d.wonDate && d.createdAt) {
-          const days = Math.floor(
-            (d.wonDate - d.createdAt) / (1000 * 60 * 60 * 24)
-          );
-          return sum + days;
-        }
-        return sum;
-      }, 0);
-      avgTimeToWon = Math.round(totalDays / wonDeals.length);
-    }
-
-    // Overview calculations
-    const createdAt = deal.createdAt;
-    const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-    const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
-    const inactiveDays = 0; // Placeholder until you have activities
-
-    // Send all person data
-    const personArr = deal.Person
-      ? [deal.Person.toJSON ? deal.Person.toJSON() : deal.Person]
-      : [];
-
-    // Send all organization data
-    const orgArr = deal.Organization
-      ? [
-          deal.Organization.toJSON
-            ? deal.Organization.toJSON()
-            : deal.Organization,
-        ]
-      : [];
-
-    // Flat deal object (as before)
-    const dealObj = {
-      dealId: deal.dealId,
-      title: deal.title,
-      value: deal.value,
-      valueCurrency: deal.valueCurrency || deal.currency, // Use newer field first, fallback to legacy
-      pipeline: deal.pipeline,
-      ownerId: deal.ownerId,
-      pipelineStage: deal.pipelineStage,
-      status: deal.status || "open",
-      createdAt: deal.createdAt,
-      expectedCloseDate: deal.expectedCloseDate,
-      serviceType: deal.serviceType,
-      proposalValue: deal.proposalValue,
-      proposalValueCurrency: deal.proposalValueCurrency || deal.proposalCurrency, // Use newer field first, fallback to legacy
-      esplProposalNo: deal.esplProposalNo,
-      projectLocation: deal.projectLocation,
-      organizationCountry: deal.organizationCountry,
-      proposalSentDate: deal.proposalSentDate,
-      sourceOrgin: deal.sourceOrgin,
-      sourceChannel: deal.sourceChannel,
-      sourceChannelId: deal.sourceChannelId,
-      statusSummary: deal.details?.statusSummary,
-      responsiblePerson: deal.details?.responsiblePerson,
-      rfpReceivedDate: deal.details?.rfpReceivedDate,
-      wonTime: deal.details?.wonTime,
-      lostTime: deal.details?.lostTime,
-      lostReason: deal.details?.lostReason,
-      // ...other deal fields
-    };
-
-        // FETCH CURRENCY DETAILS
-        let valueCurrencyDetails = null;
-        let proposalValueCurrencyDetails = null;
-    
-        // Check for value currency (prioritize newer field, fallback to older field)
-        const valueCurrencyCode = deal.valueCurrency || deal.currency;
-        if (valueCurrencyCode) {
-          valueCurrencyDetails = await Currency.findOne({
-            where: { currency_desc: valueCurrencyCode },
-            attributes: ['currencyId', 'currency_desc']
-          });
-        }
-    
-        // Check for proposal currency (prioritize newer field, fallback to older field)
-        const proposalCurrencyCode = deal.proposalValueCurrency || deal.proposalCurrency;
-        if (proposalCurrencyCode) {
-          proposalValueCurrencyDetails = await Currency.findOne({
-            where: { currency_desc: proposalCurrencyCode },
-            attributes: ['currencyId', 'currency_desc']
-          });
-        }
-
-    // Fetch participants for this deal
-    const participants = await DealParticipant.findAll({
-      where: { dealId },
-      include: [
-        {
-          model: Person,
-          as: "Person",
-          attributes: ["personId", "contactPerson", "email"],
-        },
-        {
-          model: Organization,
-          as: "Organization",
-          attributes: ["leadOrganizationId", "organization", "masterUserID"],
-        },
-      ],
-    });
-
-    const participantArr = await Promise.all(
-      participants.map(async (p) => {
-        const person = p.Person;
-        const organization = p.Organization;
-
-        let closedDeals = 0,
-          openDeals = 0,
-          ownerName = null;
-
-        if (person) {
-          closedDeals = await Deal.count({
-            where: { personId: person.personId, status: "won" },
-          });
-          openDeals = await Deal.count({
-            where: { personId: person.personId, status: "open" },
-          });
-          console.log(
-            "Person found:",
-            person.contactPerson,
-            "Closed Deals:",
-            closedDeals,
-            "Open Deals:",
-            openDeals
-          );
-
-          // Use ownerId or masterUserID from organization
-          console.log(organization.masterUserID, " organization masterUserID");
-          console.log(organization, " organization");
-
-          let ownerIdToUse = organization
-            ? organization.ownerId || organization.masterUserID
-            : null;
-          console.log(ownerIdToUse, " ownerIdToUse");
-
-          if (ownerIdToUse) {
-            const owner = await MasterUser.findOne({
-              where: { masterUserID: ownerIdToUse },
-            });
-            ownerName = owner ? owner.name : null;
+    // Get checked columns from OrganizationColumnPreference
+    let checkedStandardColumns = new Set();
+    let checkedCustomFieldNames = new Set();
+    const columnPref = await OrganizationColumnPreference.findOne();
+    if (columnPref) {
+      const prefColumns = typeof columnPref.columns === "string" ? JSON.parse(columnPref.columns) : columnPref.columns;
+      prefColumns.forEach(col => {
+        if (col.check === true) {
+          if (col.fieldSource === "custom") {
+            checkedCustomFieldNames.add(col.key);
+          } else {
+            checkedStandardColumns.add(col.key);
           }
         }
+      });
+    }
 
-        return {
-          name: person ? person.contactPerson : null,
-          organization: organization ? organization.organization : null,
-          email: person ? person.email : null,
-          phone: person ? person.phone : null,
-          closedDeals,
-          openDeals,
-          owner: ownerName,
-        };
-      })
+    // Filter organizations to only include checked fields
+    organizations = organizations.map(org => {
+      const filteredOrg = {};
+      
+      // Always include these essential fields regardless of check status
+      const essentialFields = ["leadOrganizationId", "ownerId", "createdAt", "updatedAt"];
+      essentialFields.forEach(field => {
+        if (org[field] !== undefined) {
+          filteredOrg[field] = org[field];
+        }
+      });
+
+      // Include checked standard fields
+      Object.keys(org).forEach(key => {
+        if (checkedStandardColumns.has(key)) {
+          filteredOrg[key] = org[key];
+        }
+      });
+
+      // Always include these computed fields
+      filteredOrg.ownerName = ownerMap[org.ownerId] || null;
+      filteredOrg.leadCount = orgLeadCountMap[org.leadOrganizationId] || 0;
+      filteredOrg.persons = orgPersonsMap[org.leadOrganizationId] || [];
+      
+      return filteredOrg;
+    });
+
+    // Fetch custom field values for all organizations - same as getLeads API
+    const orgIdsForCustomFields = organizations.map(
+      (o) => o.leadOrganizationId
     );
+    let orgCustomFieldValues = [];
+    if (orgIdsForCustomFields.length > 0) {
+      orgCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: orgIdsForCustomFields,
+          entityType: "organization",
+        },
+        raw: true,
+      });
+    }
 
-    // Optimized email fetching with pagination
+    // Fetch all custom fields for organization entity
+    const allOrgCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const orgCustomFieldIdToName = {};
+    allOrgCustomFields.forEach((cf) => {
+      if (checkedCustomFieldNames.has(cf.fieldName)) {
+        orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+      }
+    });
+
+    // Map orgId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    orgCustomFieldValues.forEach((cfv) => {
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId];
+      if (fieldName && !orgCustomFieldsMap[cfv.entityId]) {
+        orgCustomFieldsMap[cfv.entityId] = {};
+        orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+      }
+    });
+
+    // Attach custom fields as direct properties to each organization - same as getLeads API
+    organizations = organizations.map((o) => {
+      const customFields = orgCustomFieldsMap[o.leadOrganizationId] || {};
+      return { ...o, ...customFields };
+    });
+
+    // Return organizations in EXACT same format as getLeads API
+    res.status(200).json({
+      totalRecords: organizations.length,
+      totalPages: Math.ceil(organizations.length / orgLimit),
+      currentPage: orgPage,
+      sortBy: finalSortBy,
+      sortOrder: finalSortOrder,
+      organizations: organizations, // Return organizations exactly as they are in getLeads API
+    });
+  } catch (error) {
+    console.error("Error fetching organizations and persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+// Get organizations with persons, leadCount, and ownerName, supporting dynamic filtering
+
+const { Op } = require("sequelize");
+const Sequelize = require("sequelize");
+const Email = require("../../models/email/emailModel");
+const LeadNote = require("../../models/leads/leadNoteModel");
+const DealNote = require("../../models/deals/delasNoteModel");
+// const PersonNote = require("../../models/leads/personNoteModel");
+const MasterUser = require("../../models/master/masterUserModel");
+const Attachment = require("../../models/email/attachmentModel");
+const OrganizationNote = require("../../models/leads/organizationNoteModel");
+const PersonNote = require("../../models/leads/personNoteModel");
+const Deal = require("../../models/deals/dealsModels");
+const Organization = require("../../models/leads/leadOrganizationModel");
+const Person = require("../../models/leads/leadPersonModel");
+const Lead = require("../../models/leads/leadsModel")
+const Activities = require("../../models/activity/activityModel")
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
+const sequelize = require("../../config/db");
+
+/**
+ * Create a person with support for multiple emails and phones
+ * Request body format:
+ * {
+ *   contactPerson: "John Doe", // Required
+ *   email: "john@example.com", // Optional if emails array is provided
+ *   emails: [                  // Optional array format
+ *     { email: "john@work.com", type: "Work" },
+ *     { email: "john@personal.com", type: "Personal" }
+ *   ],
+ *   phone: "1234567890",      // Optional if phones array is provided
+ *   phones: [                 // Optional array format
+ *     { phone: "1234567890", type: "Work" },
+ *     { phone: "0987654321", type: "Mobile" }
+ *   ],
+ *   organization: "Company Name",
+ *   jobTitle: "Manager",
+ *   notes: "Additional notes",
+ *   // ... other standard fields
+ * }
+ */
+exports.createPerson = async (req, res) => {
+  try {
+    const masterUserID = req.adminId;
+    if (!req.body || !req.body.contactPerson) {
+      return res
+        .status(400)
+        .json({ message: "Contact person is required." });
+    }
+    
+    const {
+      contactPerson,
+      email,
+      emails, // Array of email objects: [{ email: "test@example.com", type: "Work" }]
+      phone,
+      phones, // Array of phone objects: [{ phone: "123456789", type: "Work" }]
+      notes,
+      postalAddress,
+      birthday,
+      jobTitle,
+      personLabels,
+      organization, // may be undefined or empty
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
+      ...rest
+    } = req.body;
+
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && typeof emailObj.email === 'string' && emailObj.email.trim());
+    } else if (email && typeof email === 'string' && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Require at least one email
+    if (emailList.length === 0) {
+      return res.status(400).json({ 
+        message: "At least one email address is required." 
+      });
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && typeof phoneObj.phone === 'string' && phoneObj.phone.trim());
+    } else if (phone && typeof phone === 'string' && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Use primary email for uniqueness check (first email in the list)
+    const primaryEmail = emailList[0].email;
+    const primaryPhone = phoneList.length > 0 ? phoneList[0].phone : null;
+
+    // Check for duplicate primary email (primary email must be unique across all persons)
+    const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
+    if (existingEmailPerson) {
+      return res.status(409).json({
+        message: "A person with this email address already exists.",
+        person: {
+          personId: existingEmailPerson.personId,
+          contactPerson: existingEmailPerson.contactPerson,
+          email: existingEmailPerson.email,
+          organization: existingEmailPerson.organization,
+        },
+      });
+    }
+
+    // Check for duplicate person in the same organization (or globally if no org)
+    const whereClause = organization
+      ? { contactPerson, organization }
+      : { contactPerson, organization: null };
+
+    const existingPerson = await Person.findOne({ where: whereClause });
+    if (existingPerson) {
+      return res.status(409).json({
+        message:
+          "Person already exists" +
+          (organization ? " in this organization." : "."),
+        person: existingPerson,
+      });
+    }
+
+    let org = null;
+    if (organization) {
+      // Only create/find organization if provided
+      [org] = await Organization.findOrCreate({
+        where: { organization },
+        defaults: { organization, masterUserID, ownerId: masterUserID },
+      });
+    }
+
+    // Get all person model fields
+    const personFields = Object.keys(Person.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!personFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
+    }
+
+    // Create the person with primary email and phone + arrays in table fields
+    const person = await Person.create({
+      contactPerson,
+      email: primaryEmail, // Store primary email in the main field
+      phone: primaryPhone, // Store primary phone in the main field
+      emails: emailList, // Store all emails array directly in table
+      phones: phoneList.length > 0 ? phoneList : null, // Store all phones array directly in table
+      notes,
+      postalAddress,
+      birthday,
+      jobTitle,
+      personLabels,
+      organization: org ? org.organization : null,
+      leadOrganizationId: org ? org.leadOrganizationId : null,
+      masterUserID,
+      ownerId: masterUserID, // Automatically set owner to the user creating the person
+    });
+
+    // Save custom fields if any
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["person", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: person.personId,
+          entityType: "person",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
+
+    // Link activity to person if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to person ${person.personId}`);
+        const activityUpdateResult = await Activities.update(
+          { personId: person.personId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to person:", activityError);
+        // Don't fail the person creation, just log the error
+      }
+    }
+
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      emails: emailList, // Include all emails in response
+      phones: phoneList, // Include all phones in response
+    };
+
+    const response = {
+      message: activityId 
+        ? "Person created and linked to activity successfully" 
+        : "Person created successfully",
+      person: personResponse
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error("Error creating person:", error);
+
+    // Handle database constraint violations
+    if (error.name === "SequelizeUniqueConstraintError") {
+      const field = error.errors[0]?.path || "unknown";
+      const value = error.errors[0]?.value || "unknown";
+
+      if (field === "email") {
+        return res.status(409).json({
+          message: `A person with email address "${value}" already exists.`,
+          field: "email",
+          value: value,
+        });
+      }
+
+      return res.status(409).json({
+        message: `A person with this ${field} already exists.`,
+        field: field,
+        value: value,
+      });
+    }
+
+    res
+      .status(500)
+      .json({ message: "Internal server error", error: error.message });
+  }
+};
+
+/**
+ * Get a person by ID with all emails and phones
+ */
+exports.getPerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Find the person
+    const person = await Person.findOne({
+      where: { 
+        personId,
+        // Role-based access control
+        ...(req.role !== "admin" && { masterUserID })
+      }
+    });
+
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    // Get emails and phones directly from the person record
+    let emails = person.emails || [];
+    let phones = person.phones || [];
+
+    // If no arrays stored, create from primary email/phone (backward compatibility)
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
+    }
+
+    // Prepare response
+    const personResponse = {
+      ...person.toJSON(),
+      emails,
+      phones,
+    };
+
+    res.status(200).json({
+      message: "Person fetched successfully",
+      person: personResponse
+    });
+
+  } catch (error) {
+    console.error("Error fetching person:", error);
+    res.status(500).json({ message: "Internal server error", error: error.message });
+  }
+};
+
+exports.createOrganization = async (req, res) => {
+  try {
+    const masterUserID = req.adminId; // Get the master user ID from the request
+    const ownerId = req.body.ownerId || masterUserID; // Default to masterUserID if not provided
+    if (!req.body || !req.body.organization) {
+      return res
+        .status(400)
+        .json({ message: "Organization name is required." });
+    }
+    const { 
+      organization, 
+      organizationLabels, 
+      address, 
+      visibleTo, 
+      // Activity ID to link existing activity (similar to emailID)
+      activityId,
+      ...rest 
+    } = req.body;
+
+    // Check if organization already exists
+    const existingOrg = await Organization.findOne({ where: { organization } });
+    if (existingOrg) {
+      return res.status(409).json({
+        message: "Organization already exists.",
+        organization: existingOrg,
+      });
+    }
+
+    // Get all organization model fields
+    const orgFields = Object.keys(Organization.rawAttributes);
+
+    // Split custom fields from standard fields
+    const customFields = {};
+    for (const key in rest) {
+      if (!orgFields.includes(key)) {
+        customFields[key] = rest[key];
+      }
+    }
+
+    // Create the organization
+    const org = await Organization.create({
+      organization,
+      organizationLabels,
+      address,
+      visibleTo,
+      masterUserID,
+      ownerId, // Set the owner ID if provided
+    });
+
+    // Save custom fields if any
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const Sequelize = require("sequelize");
+    for (const [fieldKey, value] of Object.entries(customFields)) {
+      if (value === undefined || value === null || value === "") continue;
+      // Find custom field by fieldId or fieldName
+      let customField = await CustomField.findOne({
+        where: {
+          [Sequelize.Op.or]: [{ fieldId: fieldKey }, { fieldName: fieldKey }],
+          entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+          isActive: true,
+        },
+      });
+      if (customField) {
+        await CustomFieldValue.create({
+          fieldId: customField.fieldId,
+          entityId: org.leadOrganizationId,
+          entityType: "organization",
+          value: value,
+          masterUserID,
+        });
+      }
+    }
+
+    // Link activity to organization if activityId is provided (similar to emailID linking)
+    if (activityId) {
+      try {
+        console.log(`Linking activity ${activityId} to organization ${org.leadOrganizationId}`);
+        const activityUpdateResult = await Activities.update(
+          { leadOrganizationId: org.leadOrganizationId },
+          { where: { activityId: activityId } }
+        );
+        console.log(`Activity link result: ${activityUpdateResult[0]} rows updated`);
+
+        if (activityUpdateResult[0] === 0) {
+          console.warn(`No activity found with activityId: ${activityId}`);
+        }
+      } catch (activityError) {
+        console.error("Error linking activity to organization:", activityError);
+        // Don't fail the organization creation, just log the error
+      }
+    }
+
+    const response = {
+      message: activityId 
+        ? "Organization created and linked to activity successfully" 
+        : "Organization created successfully",
+      organization: org,
+    };
+
+    // Add activity information to response if activity was linked
+    if (activityId) {
+      response.activityLinked = true;
+      response.linkedActivityId = activityId;
+    } else {
+      response.activityLinked = false;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error("Error creating organization:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getContactTimeline = async (req, res) => {
+  try {
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    // Search
+    const search = req.query.search || "";
+    const searchFilter = search
+      ? {
+          [Op.or]: [
+            { contactPerson: { [Op.like]: `%${search}%` } },
+            { email: { [Op.like]: `%${search}%` } },
+            { phone: { [Op.like]: `%${search}%` } },
+            { jobTitle: { [Op.like]: `%${search}%` } },
+            { personLabels: { [Op.like]: `%${search}%` } },
+            { organization: { [Op.like]: `%${search}%` } }, // Assuming organization is a field in Person
+          ],
+        }
+      : {};
+
+    // Date filter (monthsBack)
+    const monthsBack = parseInt(req.query.monthsBack) || 3;
+    const fromDate = new Date();
+    fromDate.setMonth(fromDate.getMonth() - monthsBack);
+
+    // Main query
+    const { count, rows: persons } = await Person.findAndCountAll({
+      where: {
+        ...searchFilter,
+        createdAt: { [Op.gte]: fromDate },
+      },
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "leadOrganizationId",
+        "createdAt",
+      ],
+      order: [["contactPerson", "ASC"]],
+      limit,
+      offset,
+    });
+
+    res.status(200).json({
+      message: "Contact timeline fetched successfully",
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+      filter: { monthsBack, fromDate },
+      search,
+      persons,
+    });
+  } catch (error) {
+    console.error("Error fetching contact timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonTimeline = async (req, res) => {
+  const { personId } = req.params;
+
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
+
+  try {
+    const person = await Person.findByPk(personId, {
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization",
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+    });
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // Fetch related leads
+    const leads = await Lead.findAll({ where: { personId } });
+    const deals = await Deal.findAll({ where: { personId } });
+
+    // Optimized email fetching with pagination and essential fields only
+    const leadIds = leads.map((l) => l.leadId);
+
     // Get total email count first
     const totalEmailsCount = await Email.count({
       where: {
         [Op.or]: [
-          { dealId },
-          ...(deal.email
-            ? [
-                { sender: deal.email },
-                { recipient: { [Op.like]: `%${deal.email}%` } },
-              ]
-            : []),
+          ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } },
         ],
       },
     });
 
-    // Fetch emails linked to this deal with pagination and essential fields only
-    const emailsByDeal = await Email.findAll({
-      where: { dealId },
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
+
+    // Fetch emails where person's email is sender or recipient
+    const emailsByAddress = await Email.findAll({
+      where: {
+        [Op.or]: [
+          { sender: person.email },
+          { recipient: { [Op.like]: `%${person.email}%` } },
+        ],
+      },
       attributes: [
         "emailID",
         "messageId",
@@ -4431,40 +3252,9 @@ exports.getDealDetail = async (req, res) => {
       offset: Math.floor(emailOffset / 2),
     });
 
-    // Fetch emails by address with pagination and essential fields only
-    let emailsByAddress = [];
-    if (deal.email) {
-      emailsByAddress = await Email.findAll({
-        where: {
-          [Op.or]: [
-            { sender: deal.email },
-            { recipient: { [Op.like]: `%${deal.email}%` } },
-          ],
-        },
-        attributes: [
-          "emailID",
-          "messageId",
-          "sender",
-          "senderName",
-          "recipient",
-          "cc",
-          "bcc",
-          "subject",
-          "createdAt",
-          "folder",
-          "isRead",
-          "leadId",
-          "dealId",
-        ],
-        order: [["createdAt", "DESC"]],
-        limit: Math.ceil(safeEmailLimit / 2),
-        offset: Math.floor(emailOffset / 2),
-      });
-    }
-
     // Merge and deduplicate emails
     const allEmailsMap = new Map();
-    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
 
@@ -4527,146 +3317,124 @@ exports.getDealDetail = async (req, res) => {
       });
     }
 
-    // Fetch notes for this deal
-    let notes = await DealNote.findAll({
-      where: { dealId },
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes
+    const personNotes = await PersonNote.findAll({
+      where: { personId: personId },
       limit: 20,
       order: [["createdAt", "DESC"]],
     });
-    let leadNotes = [];
-    if (deal.leadId) {
-      leadNotes = await LeadNote.findAll({
-        where: { leadId: deal.leadId },
-        limit: 20,
-        order: [["createdAt", "DESC"]],
-      });
-    }
-    if (leadNotes.length > 0) {
-      const noteMap = new Map();
-      notes.forEach((n) => noteMap.set(n.noteId || n.id, n));
-      leadNotes.forEach((n) => noteMap.set(n.noteId || n.id, n));
-      notes = Array.from(noteMap.values());
-    }
 
-    // Fetch activities for this deal and its linked lead (if any)
-    // Fetch activities for this deal and its linked lead (if any) using Activity model
-    let activities = await Activity.findAll({
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities
+    const personActivities = await Activities.findAll({
+      where: { personId: personId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch custom field values for the person
+    let personCustomFieldValues = [];
+    personCustomFieldValues = await CustomFieldValue.findAll({
       where: {
-        [Op.or]: [
-          { dealId },
-          deal.leadId ? { leadId: deal.leadId } : null,
-        ].filter(Boolean),
+        entityId: personId,
+        entityType: "person",
       },
-      limit: 40, // fetch more to cover both
-      order: [["startDateTime", "DESC"]],
+      raw: true,
     });
-    // Deduplicate activities by activityId or id
-    if (activities.length > 0) {
-      const actMap = new Map();
-      activities.forEach((a) => actMap.set(a.activityId || a.id, a));
-      activities = Array.from(actMap.values());
+
+    // Fetch all custom fields for person entity
+    const allPersonCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const personCustomFieldIdToName = {};
+    allPersonCustomFields.forEach((cf) => {
+      personCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const personCustomFields = {};
+    personCustomFieldValues.forEach((cfv) => {
+      const fieldName = personCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      personCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to person object
+    if (Object.keys(personCustomFields).length > 0) {
+      person.dataValues = { ...person.dataValues, ...personCustomFields };
     }
 
-    // Fetch custom field values for this deal
-    const customFieldValues = await CustomFieldValue.findAll({
-      where: {
-        entityId: dealId.toString(),
-        entityType: "deal",
-        masterUserID: req.adminId,
-      },
-      include: [
-        {
-          model: CustomField,
-          as: "CustomField",
-          where: { isActive: true },
-          required: true,
-        },
-      ],
-      order: [
-        [{ model: CustomField, as: "CustomField" }, "category", "ASC"],
-        [{ model: CustomField, as: "CustomField" }, "fieldGroup", "ASC"],
-        [{ model: CustomField, as: "CustomField" }, "displayOrder", "ASC"],
-      ],
-    });
-
-    // Format custom fields
-    const formattedCustomFields = {};
-    const fieldsByCategory = {};
-    const fieldsByGroup = {};
-
-    customFieldValues.forEach((value) => {
-      const field = value.CustomField;
-      const category = field.category || "Details";
-      const fieldGroup = field.fieldGroup || "Default";
-
-      formattedCustomFields[field.fieldId] = {
-        fieldId: field.fieldId,
-        fieldName: field.fieldName,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        value: value.value,
-        options: field.options,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        category: category,
-        fieldGroup: fieldGroup,
-      };
-
-      if (!fieldsByCategory[category]) {
-        fieldsByCategory[category] = [];
-      }
-      fieldsByCategory[category].push(formattedCustomFields[field.fieldId]);
-
-      if (!fieldsByGroup[fieldGroup]) {
-        fieldsByGroup[fieldGroup] = [];
-      }
-      fieldsByGroup[fieldGroup].push(formattedCustomFields[field.fieldId]);
-    });
-
     console.log(
-      `Deal detail: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes, ${activities.length} activities`
-    );
-    console.log(
-      `Pipeline: ${currentStageName} (${pipelineInsights.currentStageDays} days), Total: ${pipelineInsights.totalDealAge} days, Progress: ${pipelineInsights.progressPercentage}%`
-    );
-    console.log(
-      `Stages:`,
-      pipelineStagesUnique.map((s) => `${s.stageName}:${s.days}d`).join(", ")
+      `Person timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person), ${Object.keys(personCustomFields).length} custom fields`
     );
 
     res.status(200).json({
-      deal: dealObj,
-      currencyDetails: {
-        valueCurrency: valueCurrencyDetails ? {
-          currencyId: valueCurrencyDetails.currencyId,
-          currency_desc: valueCurrencyDetails.currency_desc
-        } : null,
-        proposalValueCurrency: proposalValueCurrencyDetails ? {
-          currencyId: proposalValueCurrencyDetails.currencyId,
-          currency_desc: proposalValueCurrencyDetails.currency_desc
-        } : null
-      },
-      person: personArr,
-      organization: orgArr,
-      pipelineStages: pipelineStagesUnique, // Enhanced pipeline stages like Pipedrive (but maintains frontend compatibility)
-      currentStage: currentStageName,
-      overview: {
-        dealAge: `${totalDealDays} days`,
-        avgTimeToWon,
-        inactiveDays,
-        createdAt,
-        totalDealDays,
-      },
-      participants: participantArr,
+      person,
+      leads,
+      deals,
       emails: optimizedEmails,
       notes,
       activities,
       files,
-      customFields: {
-        values: formattedCustomFields,
-        fieldsByCategory,
-        fieldsByGroup,
-      },
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
         totalEmails: totalEmailsCount,
@@ -4678,1919 +3446,3153 @@ exports.getDealDetail = async (req, res) => {
           (e) => e.body && e.body.includes("[truncated]")
         ),
       },
-      // Enhanced pipeline data (optional for frontend to use)
-      _pipelineMetadata: {
-        pipelineStagesDetail: pipelineStagesDetail, // Detailed stage history
-        pipelineInsights: pipelineInsights, // Pipeline analytics
-        stageTimeline: pipelineInsights.stageTimeline, // Stage completion timeline
-      },
-      owner : {
-        ownerName : owner.name,
-        ownerId : owner.masterUserID
-      }
     });
   } catch (error) {
-    console.log(error);
-
+    console.error("Error fetching person timeline:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// exports.deleteDeal = async (req, res) => {
-//   try {
-//     const { dealId } = req.params;
-//     const deal = await Deal.findByPk(dealId);
+exports.getOrganizationTimeline = async (req, res) => {
+  const { organizationId } = req.params;
 
-//     if (!deal) {
-//       return res.status(404).json({ message: "Deal not found." });
-//     }
-
-//     await deal.destroy();
-
-//     res.status(200).json({ message: "Deal deleted successfully." });
-//   } catch (error) {
-//     console.log(error);
-
-//     res.status(500).json({ message: "Internal server error" });
-//   }
-// };
-
-exports.deleteDeal = async (req, res) => {
-  const { dealId } = req.params;
-  const masterUserID = req.adminId;
-  const role = req.role;
-  const entityType = "deal";
+  // Email optimization parameters
+  const { emailPage = 1, emailLimit = 50 } = req.query;
+  const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
+  const MAX_EMAIL_LIMIT = 50;
+  const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
 
   try {
-    // Build the where condition based on role
-    const whereCondition = { dealId };
-    
-    // Only include masterUserID if role is not admin
-    if (role !== 'admin') {
-      whereCondition.masterUserID = masterUserID;
+    // Fetch the organization
+    const organization = await Organization.findByPk(organizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
     }
 
-    // Check if deal exists
-    const deal = await Deal.findOne({
-      where: whereCondition,
+    // Fetch all persons in this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId: organizationId },
     });
-
-    if (!deal) {
-      return res.status(404).json({
-        message: "Deal not found.",
-      });
-    }
-
-    // Start a transaction
-    const transaction = await sequelize.transaction();
-
-    try {
-      // Build where condition for custom field values deletion
-      const customFieldWhereCondition = {
-        entityId: dealId.toString(),
-        entityType,
-      };
-      
-      // Only include masterUserID if role is not admin
-      if (role !== 'admin') {
-        customFieldWhereCondition.masterUserID = masterUserID;
-      }
-
-      // Delete all custom field values
-      await CustomFieldValue.destroy({
-        where: customFieldWhereCondition,
-        transaction,
-      });
-
-      // Delete deal stage histories
-      const dealStageHistoryWhereCondition = { dealId };
-      
-      await DealStageHistory.destroy({
-        where: dealStageHistoryWhereCondition,
-        transaction,
-      });
-
-       // Delete deal details
-      const dealDetailsWhereCondition = { dealId };
-      
-      await DealDetails.destroy({
-        where: dealDetailsWhereCondition,
-        transaction,
-      });
-
-      await DealNote.destroy({
-         where: { dealId },
-        transaction,
-      });
-
-      await DealParticipant.destroy({
-         where: { dealId },
-        transaction,
-      });
-
-      // Delete the deal
-      await deal.destroy({ transaction });
-
-      // Commit the transaction
-      await transaction.commit();
-
-
-      res.status(200).json({
-        message: "Deal deleted successfully.",
-        dealId: dealId,
-      });
-    } catch (error) {
-      await transaction.rollback();
-      throw error;
-    }
-  } catch (error) {
-    console.error("Error deleting deal:", error);
-    res.status(500).json({
-      message: "Failed to delete deal.",
-      error: error.message,
-    });
-  }
-};
-
-exports.linkParticipant = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { personId } = req.body;
-
-    // Require at least personId
-    if (!dealId || !personId) {
-      return res
-        .status(400)
-        .json({ message: "dealId and personId are required." });
-    }
-
-    // Optionally, check if participant already linked
-    const exists = await DealParticipant.findOne({
-      where: { dealId, personId },
-    });
-    if (exists) {
-      return res
-        .status(409)
-        .json({ message: "Participant already linked to this deal." });
-    }
-
-    const participant = await DealParticipant.create({
-      dealId,
-      personId,
-    });
-
-    res
-      .status(201)
-      .json({ message: "Participant linked successfully.", participant });
-  } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.createNote = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const { content } = req.body;
-    const createdBy = req.user?.masterUserID || req.adminId; // Adjust as per your auth
-
-    if (!content) {
-      return res.status(400).json({ message: "Note content is required." });
-    }
-
-    const note = await DealNote.create({
-      dealId,
-      content,
-      createdBy,
-    });
-
-    res.status(201).json({ message: "Note created successfully.", note });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.getNotes = async (req, res) => {
-  try {
-    const { dealId } = req.params;
-    const notes = await DealNote.findAll({
-      where: { dealId },
-      order: [["createdAt", "DESC"]],
-    });
-    res.status(200).json({ notes });
-  } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-exports.saveAllDealFieldsWithCheck = async (req, res) => {
-  // Get all field names from Deal and DealDetails models
-  const dealFields = Object.keys(Deal.rawAttributes);
-  const dealDetailsFields = DealDetails
-    ? Object.keys(DealDetails.rawAttributes)
-    : [];
-  const allFieldNames = Array.from(
-    new Set([...dealFields, ...dealDetailsFields])
-  );
-
-  // Exclude fields that are likely IDs (case-insensitive, ends with 'id' or is 'id')
-  const filteredFieldNames = allFieldNames.filter(
-    (field) => !/^id$/i.test(field) && !/id$/i.test(field)
-  );
-
-  // Accept array of { value, check } from req.body
-  const { checkedFields } = req.body || {};
-
-  // Build columns array to save: always include all fields, set check from checkedFields if provided
-  let columnsToSave = filteredFieldNames.map((field) => {
-    let check = false;
-    if (Array.isArray(checkedFields)) {
-      const found = checkedFields.find((item) => item.value === field);
-      check = found ? !!found.check : false;
-    }
-    return { key: field, check };
-  });
-
-  try {
-    let pref = await DealColumnPreference.findOne();
-    if (!pref) {
-      // Create the record if it doesn't exist
-      pref = await DealColumnPreference.create({ columns: columnsToSave });
-    } else {
-      // Update the existing record
-      pref.columns = columnsToSave;
-      await pref.save();
-    }
-    res
-      .status(200)
-      .json({ message: "All deal columns saved", columns: pref.columns });
-  } catch (error) {
-    console.log("Error saving all deal columns:", error);
-    res.status(500).json({ message: "Error saving all deal columns" });
-  }
-};
-exports.getDealFields = async (req, res) => {
-  try {
-    // Get deal column preferences
-    const pref = await DealColumnPreference.findOne({ where: {} });
-
-    let columns = [];
-    if (pref) {
-      // Parse columns if it's a string
-      columns =
-        typeof pref.columns === "string"
-          ? JSON.parse(pref.columns)
-          : pref.columns;
-    }
-
-    // Define labels for deal fields
-    const dealFieldLabels = {
-      // Basic Deal Information
-      dealId: "Deal ID",
-      title: "Deal Title",
-      value: "Deal Value",
-      currency: "Currency",
-      valueCurrency: "Value Currency",
-      proposalValue: "Proposal Value",
-      proposalCurrency: "Proposal Currency",
-      proposalValueCurrency: "Proposal Value Currency",
-      
-      // Pipeline & Status
-      pipeline: "Pipeline",
-      pipelineStage: "Pipeline Stage",
-      status: "Deal Status",
-      probability: "Probability",
-      
-      // Dates
-      createdAt: "Created Date",
-      updatedAt: "Last Updated",
-      expectedCloseDate: "Expected Close Date",
-      proposalSentDate: "Proposal Sent Date",
-      rfpReceivedDate: "RFP Received Date",
-      wonTime: "Won Date",
-      lostTime: "Lost Date",
-      dealClosedOn: "Deal Closed Date",
-      closeTime: "Close Time",
-      archiveTime: "Archive Time",
-      nextActivityDate: "Next Activity Date",
-      nextActivityTime: "Next Activity Time",
-      addTime: "Add Time",
-      updateTime: "Update Time",
-      stageChangeTime: "Stage Change Time",
-      lastActivityDate: "Last Activity Date",
-      
-      // Ownership & Visibility
-      ownerId: "Owner ID",
-      ownerName: "Owner Name",
-      masterUserID: "Creator",
-      visibleTo: "Visible To",
-      assignedTo: "Assigned To",
-      responsiblePerson: "Responsible Person",
-      
-      // Service & Project Details
-      serviceType: "Service Type",
-      scopeOfServiceType: "Scope of Service Type",
-      projectLocation: "Project Location",
-      organizationCountry: "Organization Country",
-      stateAndCountryProjectLocation: "State & Country Project Location",
-      
-      // References & External IDs
-      esplProposalNo: "ESPL Proposal No",
-      leadId: "Lead ID",
-      personId: "Person ID",
-      organizationId: "Organization ID",
-      sourceOrgin: "Source Origin",
-      sourceChannel: "Source Channel",
-      sourceChannelId: "Source Channel ID",
-      
-      // Activities
-      nextActivityId: "Next Activity ID",
-      lastActivityId: "Last Activity ID",
-      
-      // Status & Tracking
-      statusSummary: "Status Summary",
-      lostReason: "Lost Reason",
-      label: "Label",
-      active: "Active",
-      deleted: "Deleted",
-      isArchived: "Archived",
-      
-      // Display Options
-      orgHidden: "Organization Hidden",
-      personHidden: "Person Hidden",
-      
-      // Additional Fields
-      ccEmail: "CC Email",
-      bccEmail: "BCC Email",
-      description: "Description",
-      notes: "Notes",
-      tags: "Tags",
-      priority: "Priority",
-      dealSource: "Deal Source",
-      competitorInfo: "Competitor Info",
-      budgetRange: "Budget Range",
-      decisionMaker: "Decision Maker",
-      timeline: "Timeline"
-    };
-
-    // Parse filterConfig and add labels for each column
-    columns = columns.map((col) => {
-      if (col.filterConfig) {
-        col.filterConfig =
-          typeof col.filterConfig === "string"
-            ? JSON.parse(col.filterConfig)
-            : col.filterConfig;
-      }
-      
-      // Add label if not already present
-      if (!col.label && dealFieldLabels[col.key]) {
-        col.label = dealFieldLabels[col.key];
-      }
-      
-      // Fallback: generate label from key if no predefined label exists
-      if (!col.label) {
-        col.label = col.key
-          .replace(/([A-Z])/g, " $1") // Add space before capital letters
-          .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
-          .replace(/Id/g, "ID") // Replace "Id" with "ID"
-          .replace(/Url/g, "URL") // Replace "Url" with "URL"
-          .replace(/Api/g, "API"); // Replace "Api" with "API"
-      }
-      
-      return col;
-    });
-
-    // Fetch custom fields for deals (only if user is authenticated)
-    let customFields = [];
-    if (req.adminId) {
-      try {
-        customFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
-            isActive: true,
-            // [Op.or]: [
-            //   { masterUserID: req.adminId },
-            //   { fieldSource: "default" },
-            //   { fieldSource: "system" },
-            // ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-            "dealCheck", // Add dealCheck field
-          ],
-          order: [["fieldName", "ASC"]],
-        });
-      } catch (customFieldError) {
-        console.error("Error fetching custom fields:", customFieldError);
-        // Continue without custom fields if there's an error
-      }
-    } else {
-      console.warn("No adminId found in request - skipping custom fields");
-    }
-
-    // Format custom fields for column preferences
-    const customFieldColumns = customFields.map((field) => ({
-      key: field.fieldName,
-      label: field.fieldLabel,
-      type: field.fieldType,
-      isCustomField: true,
-      fieldId: field.fieldId,
-      isRequired: field.isRequired,
-      isImportant: field.isImportant,
-      fieldSource: field.fieldSource,
-      entityType: field.entityType,
-      check: field.check || false, // Include check field for leads
-      dealCheck: field.dealCheck || false, // Include dealCheck field for deals
+    // Add array of { personId, contactPerson } to organization object
+    organization.dataValues.persons = persons.map((p) => ({
+      personId: p.personId,
+      contactPerson: p.contactPerson,
     }));
 
-    // Check if custom fields already exist in preferences and sync their dealCheck status
-    customFieldColumns.forEach((customCol) => {
-      const existingCol = columns.find((col) => col.key === customCol.key);
-      if (existingCol) {
-        // Keep the dealCheck value from database, don't override it
-        // existingCol.check is for leads, customCol.dealCheck is for deals
-        existingCol.dealCheck = customCol.dealCheck;
-      }
-    });
-
-    // Merge regular columns with custom field columns
-    const allColumns = [...columns, ...customFieldColumns];
-
-    // Remove duplicates (custom fields might already be in preferences)
-    const uniqueColumns = [];
-    const seenKeys = new Set();
-
-    allColumns.forEach((col) => {
-      if (!seenKeys.has(col.key)) {
-        seenKeys.add(col.key);
-        
-        // Ensure all columns have proper structure with labels
-        const enhancedCol = {
-          ...col,
-          // Ensure label exists
-          label: col.label || col.key
-            .replace(/([A-Z])/g, " $1")
-            .replace(/^./, str => str.toUpperCase())
-            .replace(/Id/g, "ID")
-            .replace(/Url/g, "URL")
-            .replace(/Api/g, "API"),
-          // Add additional metadata for better frontend handling
-          isStandardField: !col.isCustomField,
-          fieldCategory: col.isCustomField ? 'custom' : 'standard',
-          displayOrder: col.displayOrder || 999,
-          isVisible: col.check !== undefined ? col.check : true,
-          isDealVisible: col.dealCheck !== undefined ? col.dealCheck : true
-        };
-        
-        uniqueColumns.push(enhancedCol);
-      }
-    });
-
-    // Sort columns for better organization
-    const sortedColumns = uniqueColumns.sort((a, b) => {
-      // Custom fields at the end
-      if (a.isCustomField !== b.isCustomField) {
-        return a.isCustomField ? 1 : -1;
-      }
-      // Sort by display order, then by label
-      if (a.displayOrder !== b.displayOrder) {
-        return (a.displayOrder || 999) - (b.displayOrder || 999);
-      }
-      return (a.label || '').localeCompare(b.label || '');
-    });
-
-    // Create categorized columns for better UI organization
-    const categorizedColumns = {
-      basic: sortedColumns.filter(col => 
-        ['dealId', 'title', 'value', 'currency', 'status', 'pipeline', 'pipelineStage'].includes(col.key)
-      ),
-      dates: sortedColumns.filter(col => 
-        ['createdAt', 'updatedAt', 'expectedCloseDate', 'proposalSentDate', 'wonTime', 'lostTime'].includes(col.key)
-      ),
-      financial: sortedColumns.filter(col => 
-        ['value', 'proposalValue', 'currency', 'valueCurrency', 'proposalValueCurrency'].includes(col.key)
-      ),
-      ownership: sortedColumns.filter(col => 
-        ['ownerId', 'masterUserID', 'assignedTo', 'responsiblePerson', 'visibleTo'].includes(col.key)
-      ),
-      project: sortedColumns.filter(col => 
-        ['serviceType', 'projectLocation', 'organizationCountry', 'esplProposalNo'].includes(col.key)
-      ),
-      custom: sortedColumns.filter(col => col.isCustomField),
-      other: sortedColumns.filter(col => 
-        !['dealId', 'title', 'value', 'currency', 'status', 'pipeline', 'pipelineStage',
-          'createdAt', 'updatedAt', 'expectedCloseDate', 'proposalSentDate', 'wonTime', 'lostTime',
-          'value', 'proposalValue', 'currency', 'valueCurrency', 'proposalValueCurrency',
-          'ownerId', 'masterUserID', 'assignedTo', 'responsiblePerson', 'visibleTo',
-          'serviceType', 'projectLocation', 'organizationCountry', 'esplProposalNo'].includes(col.key) 
-        && !col.isCustomField
-      )
-    };
-
-    res.status(200).json({
-      success: true,
-      columns: sortedColumns,
-      categorizedColumns,
-      metadata: {
-        customFieldsCount: customFields.length,
-        totalColumns: sortedColumns.length,
-        regularColumns: columns.length,
-        standardFieldsCount: sortedColumns.filter(col => !col.isCustomField).length,
-        visibleColumns: sortedColumns.filter(col => col.isDealVisible).length,
-        categories: {
-          basic: categorizedColumns.basic.length,
-          dates: categorizedColumns.dates.length,
-          financial: categorizedColumns.financial.length,
-          ownership: categorizedColumns.ownership.length,
-          project: categorizedColumns.project.length,
-          custom: categorizedColumns.custom.length,
-          other: categorizedColumns.other.length
-        }
+    // Fetch all leads for this organization (directly or via persons)
+    const personIds = persons.map((p) => p.personId);
+    const leads = await Lead.findAll({
+      where: {
+        [Op.or]: [
+          { leadOrganizationId: organizationId },
+          { personId: personIds },
+        ],
       },
-      // Backward compatibility
-      customFieldsCount: customFields.length,
-      totalColumns: sortedColumns.length,
-      regularColumns: columns.length,
-    });
-  } catch (error) {
-    console.error("Error fetching deal fields:", error);
-    res.status(500).json({ message: "Error fetching deal fields" });
-  }
-};
-exports.updateDealColumnChecks = async (req, res) => {
-  // Expecting: { columns: [ { key: "columnName", check: true/false, dealCheck: true/false }, ... ] }
-  const { columns } = req.body;
-
-  if (!Array.isArray(columns)) {
-    return res.status(400).json({ message: "Columns array is required." });
-  }
-
-  try {
-    console.log("=== UPDATE DEAL COLUMN CHECKS DEBUG ===");
-    console.log("Incoming columns:", JSON.stringify(columns, null, 2));
-    console.log("adminId:", req.adminId);
-
-    // Find the global DealColumnPreference record
-    let pref = await DealColumnPreference.findOne();
-    if (!pref) {
-      return res.status(404).json({ message: "Preferences not found." });
-    }
-
-    // Parse columns if stored as string
-    let prefColumns =
-      typeof pref.columns === "string"
-        ? JSON.parse(pref.columns)
-        : pref.columns;
-
-    // Get custom fields to validate incoming custom field columns
-    let customFields = [];
-    if (req.adminId) {
-      try {
-        customFields = await CustomField.findAll({
-          where: {
-            entityType: { [Op.in]: ["deal", "both", "lead"] }, // Support unified fields
-            isActive: true,
-            // [Op.or]: [
-            //   { masterUserID: req.adminId },
-            //   { fieldSource: "default" },
-            //   { fieldSource: "system" },
-            // ],
-          },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "fieldLabel",
-            "fieldType",
-            "isRequired",
-            "isImportant",
-            "fieldSource",
-            "entityType",
-            "check",
-            "dealCheck", // Add dealCheck field
-          ],
-        });
-      } catch (customFieldError) {
-        console.error("Error fetching custom fields:", customFieldError);
-      }
-    }
-
-    console.log("Found custom fields:", customFields.length);
-    console.log(
-      "Custom field names:",
-      customFields.map((f) => f.fieldName)
-    );
-
-    // Create a map of custom field names for quick lookup
-    const customFieldMap = {};
-    customFields.forEach((field) => {
-      customFieldMap[field.fieldName] = {
-        fieldId: field.fieldId,
-        fieldLabel: field.fieldLabel,
-        fieldType: field.fieldType,
-        isRequired: field.isRequired,
-        isImportant: field.isImportant,
-        fieldSource: field.fieldSource,
-        entityType: field.entityType,
-      };
     });
 
-    console.log("Custom field map keys:", Object.keys(customFieldMap));
-
-    // Update check and dealCheck status for existing columns
-    prefColumns = prefColumns.map((col) => {
-      const found = columns.find((c) => c.key === col.key);
-      if (found) {
-        return {
-          ...col,
-          check: found.check !== undefined ? !!found.check : col.check,
-          dealCheck:
-            found.dealCheck !== undefined ? !!found.dealCheck : col.dealCheck,
-        };
-      }
-      return col;
+    // Fetch all deals for this organization
+    const deals = await Deal.findAll({
+      where: { leadOrganizationId: organizationId },
     });
 
-    // Handle new custom field columns that don't exist in preferences yet
-    const existingKeys = new Set(prefColumns.map((col) => col.key));
+    // Optimized email fetching with pagination
+    const leadIds = leads.map((l) => l.leadId);
+    const personEmails = persons.map((p) => p.email).filter(Boolean);
 
-    columns.forEach((incomingCol) => {
-      // If this column doesn't exist in preferences but is a custom field, add it
-      if (
-        !existingKeys.has(incomingCol.key) &&
-        customFieldMap[incomingCol.key]
-      ) {
-        const customFieldInfo = customFieldMap[incomingCol.key];
-        prefColumns.push({
-          key: incomingCol.key,
-          label: customFieldInfo.fieldLabel,
-          type: customFieldInfo.fieldType,
-          isCustomField: true,
-          fieldId: customFieldInfo.fieldId,
-          isRequired: customFieldInfo.isRequired,
-          isImportant: customFieldInfo.isImportant,
-          fieldSource: customFieldInfo.fieldSource,
-          entityType: customFieldInfo.entityType,
-          check: incomingCol.check !== undefined ? !!incomingCol.check : false,
-          dealCheck:
-            incomingCol.dealCheck !== undefined
-              ? !!incomingCol.dealCheck
-              : false,
-        });
-      }
-    });
-
-    // Update check and dealCheck fields in CustomField table for custom fields
-    // 'check' field is for leads, 'dealCheck' field is for deals
-    const customFieldUpdates = [];
-
-    console.log("Processing custom field updates...");
-    columns.forEach((incomingCol) => {
-      console.log(`Processing column: ${incomingCol.key}`);
-
-      if (customFieldMap[incomingCol.key]) {
-        console.log(`Found custom field mapping for: ${incomingCol.key}`);
-
-        const customField = customFields.find(
-          (f) => f.fieldName === incomingCol.key
-        );
-
-        if (customField) {
-          console.log(
-            `Found custom field in database: ${customField.fieldName}, current check: ${customField.check}, current dealCheck: ${customField.dealCheck}`
-          );
-
-          const updates = {};
-
-          // Update check field if provided (for leads)
-          if (
-            incomingCol.check !== undefined &&
-            customField.check !== !!incomingCol.check
-          ) {
-            updates.check = !!incomingCol.check;
-            console.log(`Will update check field to: ${updates.check}`);
-          }
-
-          // Update dealCheck field if provided (for deals)
-          if (
-            incomingCol.dealCheck !== undefined &&
-            customField.dealCheck !== !!incomingCol.dealCheck
-          ) {
-            updates.dealCheck = !!incomingCol.dealCheck;
-            console.log(`Will update dealCheck field to: ${updates.dealCheck}`);
-          }
-
-          // Only add to updates if there are changes
-          if (Object.keys(updates).length > 0) {
-            customFieldUpdates.push({
-              fieldId: customField.fieldId,
-              updates: updates,
-            });
-            console.log(
-              `Added update for fieldId: ${customField.fieldId}`,
-              updates
-            );
-          } else {
-            console.log(`No changes needed for field: ${incomingCol.key}`);
-          }
-        } else {
-          console.log(
-            `Custom field not found in database for: ${incomingCol.key}`
-          );
-        }
-      } else {
-        console.log(`No custom field mapping found for: ${incomingCol.key}`);
-      }
-    });
-
-    console.log(
-      "Total custom field updates to process:",
-      customFieldUpdates.length
-    );
-
-    // Perform bulk update of CustomField check and dealCheck values
-    // 'check' field affects leads, 'dealCheck' field affects deals
-    if (customFieldUpdates.length > 0) {
-      console.log("Executing custom field updates...");
-
-      for (const update of customFieldUpdates) {
-        console.log(`Updating fieldId ${update.fieldId} with:`, update.updates);
-
-        // First, let's check what record we're trying to update
-        const existingRecord = await CustomField.findOne({
-          where: { fieldId: update.fieldId },
-          attributes: [
-            "fieldId",
-            "fieldName",
-            "masterUserID",
-            "fieldSource",
-            "check",
-            "dealCheck",
-          ],
-        });
-
-        console.log(
-          `Current record for fieldId ${update.fieldId}:`,
-          existingRecord ? existingRecord.toJSON() : "NOT FOUND"
-        );
-
-        const result = await CustomField.update(update.updates, {
-          where: {
-            fieldId: update.fieldId,
-            // Make the WHERE clause more flexible - either the user owns it OR it's a default/system field
-            // [Op.or]: [
-            //   { masterUserID: req.adminId },
-            //   { fieldSource: "default" },
-            //   { fieldSource: "system" },
-            //   { fieldSource: "custom" }, // Add custom fields that might belong to this user
-            // ],
-          },
-        });
-
-        console.log(`Update result for fieldId ${update.fieldId}:`, result);
-
-        // If no rows were updated, try a more relaxed update
-        if (result[0] === 0) {
-          console.log(
-            `No rows updated with restrictive WHERE clause, trying more relaxed update...`
-          );
-
-          const relaxedResult = await CustomField.update(update.updates, {
-            where: {
-              fieldId: update.fieldId,
-              // Only check fieldId - less restrictive
+    // Get total email count first
+    const emailWhereConditions = [
+      ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+      ...(personEmails.length > 0
+        ? [
+            { sender: { [Op.in]: personEmails } },
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
             },
-          });
+          ]
+        : []),
+    ];
 
-          console.log(
-            `Relaxed update result for fieldId ${update.fieldId}:`,
-            relaxedResult
-          );
-        }
-      }
+    const totalEmailsCount =
+      emailWhereConditions.length > 0
+        ? await Email.count({
+            where: { [Op.or]: emailWhereConditions },
+          })
+        : 0;
 
-      console.log(
-        `Updated ${customFieldUpdates.length} custom field check/dealCheck values`
-      );
-    } else {
-      console.log("No custom field updates to process");
+    // Fetch emails with pagination and essential fields only
+    const emailsByLead =
+      leadIds.length > 0
+        ? await Email.findAll({
+            where: { leadId: leadIds },
+            attributes: [
+              "emailID",
+              "messageId",
+              "sender",
+              "senderName",
+              "recipient",
+              "cc",
+              "bcc",
+              "subject",
+              "createdAt",
+              "folder",
+              "isRead",
+              "leadId",
+              "dealId",
+            ],
+            order: [["createdAt", "DESC"]],
+            limit: Math.ceil(safeEmailLimit / 2),
+            offset: Math.floor(emailOffset / 2),
+          })
+        : [];
+
+    // Fetch emails where any person's email is sender or recipient
+    let emailsByAddress = [];
+    if (personEmails.length > 0) {
+      emailsByAddress = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { sender: { [Op.in]: personEmails } },
+            {
+              recipient: {
+                [Op.or]: personEmails.map((email) => ({
+                  [Op.like]: `%${email}%`,
+                })),
+              },
+            },
+          ],
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "sender",
+          "senderName",
+          "recipient",
+          "cc",
+          "bcc",
+          "subject",
+          "createdAt",
+          "folder",
+          "isRead",
+          "leadId",
+          "dealId",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(safeEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
+      });
     }
 
-    // Save updated preferences
-    pref.columns = prefColumns;
-    await pref.save();
+    // Merge and deduplicate emails by emailID
+    const allEmailsMap = new Map();
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    const allEmails = Array.from(allEmailsMap.values());
+
+    // Limit final email results and add optimization metadata
+    const limitedEmails = allEmails.slice(0, safeEmailLimit);
+
+    // Process emails for optimization
+    const optimizedEmails = limitedEmails.map((email) => {
+      const emailData = email.toJSON();
+
+      // Truncate email body if present (for memory optimization)
+      if (emailData.body) {
+        emailData.body =
+          emailData.body.length > 1000
+            ? emailData.body.substring(0, 1000) + "... [truncated]"
+            : emailData.body;
+      }
+
+      return emailData;
+    });
+
+    // Optimized file/attachment fetching with size limits
+    const emailIDs = limitedEmails.map((email) => email.emailID);
+    let files = [];
+    if (emailIDs.length > 0) {
+      files = await Attachment.findAll({
+        where: { emailID: emailIDs },
+        attributes: [
+          "attachmentID",
+          "emailID",
+          "filename",
+          "contentType",
+          "size",
+          "filePath",
+          "createdAt",
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: 20, // Limit attachments to prevent large responses
+      });
+
+      // Build a map for quick email lookup
+      const emailMap = new Map();
+      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
+
+      // Combine each attachment with minimal email data
+      files = files.map((file) => {
+        const email = emailMap.get(file.emailID);
+        return {
+          ...file.toJSON(),
+          email: email
+            ? {
+                emailID: email.emailID,
+                subject: email.subject,
+                createdAt: email.createdAt,
+                sender: email.sender,
+                senderName: email.senderName,
+              }
+            : null,
+        };
+      });
+    }
+
+    // Fetch related notes from multiple sources
+    const dealIds = deals.map((deal) => deal.dealId);
+    
+    // Fetch Lead notes
+    const leadNotes = leadIds.length > 0 ? await LeadNote.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal notes
+    const dealNotes = dealIds.length > 0 ? await DealNote.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person notes for all persons in the organization
+    const personNotes = personIds.length > 0 ? await PersonNote.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization notes
+    const organizationNotes = await OrganizationNote.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all notes and add source type
+    const allNotes = [
+      ...leadNotes.map(note => ({ ...note.toJSON(), sourceType: 'lead' })),
+      ...dealNotes.map(note => ({ ...note.toJSON(), sourceType: 'deal' })),
+      ...personNotes.map(note => ({ ...note.toJSON(), sourceType: 'person' })),
+      ...organizationNotes.map(note => ({ ...note.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined notes by creation date (most recent first) and limit
+    const notes = allNotes
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch related activities from multiple sources
+    // Fetch Lead activities
+    const leadActivities = leadIds.length > 0 ? await Activities.findAll({
+      where: { leadId: leadIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Deal activities
+    const dealActivities = dealIds.length > 0 ? await Activities.findAll({
+      where: { dealId: dealIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Person activities for all persons in the organization
+    const personActivities = personIds.length > 0 ? await Activities.findAll({
+      where: { personId: personIds },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    }) : [];
+
+    // Fetch Organization activities
+    const organizationActivities = await Activities.findAll({
+      where: { leadOrganizationId: organizationId },
+      limit: 20,
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Combine all activities and add source type
+    const allActivities = [
+      ...leadActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'lead' })),
+      ...dealActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'deal' })),
+      ...personActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'person' })),
+      ...organizationActivities.map(activity => ({ ...activity.toJSON(), sourceType: 'organization' }))
+    ];
+
+    // Sort combined activities by creation date (most recent first) and limit
+    const activities = allActivities
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+
+    // Fetch custom field values for the organization
+    let organizationCustomFieldValues = [];
+    organizationCustomFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: organizationId,
+        entityType: "organization",
+      },
+      raw: true,
+    });
+
+    // Fetch all custom fields for organization entity
+    const allOrganizationCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const organizationCustomFieldIdToName = {};
+    allOrganizationCustomFields.forEach((cf) => {
+      organizationCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map custom field values as { fieldName: value }
+    const organizationCustomFields = {};
+    organizationCustomFieldValues.forEach((cfv) => {
+      const fieldName = organizationCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      organizationCustomFields[fieldName] = cfv.value;
+    });
+
+    // Attach custom fields to organization object
+    if (Object.keys(organizationCustomFields).length > 0) {
+      Object.assign(organization.dataValues, organizationCustomFields);
+    }
+
+    console.log(
+      `Organization timeline: ${optimizedEmails.length} emails, ${files.length} files, ${notes.length} notes (${leadNotes.length} lead, ${dealNotes.length} deal, ${personNotes.length} person, ${organizationNotes.length} org), ${activities.length} activities (${leadActivities.length} lead, ${dealActivities.length} deal, ${personActivities.length} person, ${organizationActivities.length} org), ${Object.keys(organizationCustomFields).length} custom fields`
+    );
 
     res.status(200).json({
-      message: "Deal columns updated",
-      columns: pref.columns,
-      customFieldsUpdated: customFieldUpdates.length,
-      totalColumns: prefColumns.length,
-      updatedFields: {
-        checkUpdates: customFieldUpdates.filter(
-          (u) => u.updates.check !== undefined
-        ).length,
-        dealCheckUpdates: customFieldUpdates.filter(
-          (u) => u.updates.dealCheck !== undefined
-        ).length,
+      organization,
+      persons,
+      leads,
+      deals,
+      emails: optimizedEmails,
+      notes,
+      activities,
+      files, // Attachments with related email data
+      // Add metadata for debugging and pagination (maintaining response structure)
+      _emailMetadata: {
+        totalEmails: totalEmailsCount,
+        returnedEmails: optimizedEmails.length,
+        emailPage: parseInt(emailPage),
+        emailLimit: safeEmailLimit,
+        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        truncatedBodies: optimizedEmails.some(
+          (e) => e.body && e.body.includes("[truncated]")
+        ),
       },
     });
   } catch (error) {
-    console.error("Error updating deal columns:", error);
-    res.status(500).json({ message: "Error updating columns" });
+    console.error("Error fetching organization timeline:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonFields = async (req, res) => {
+  try {
+    // You can customize or fetch this list from your model or config if needed
+    const fields = [
+      { value: "contactPerson", label: "Name" },
+      // { key: "firstName", label: "First name" },
+      // { key: "lastName", label: "Last name" },
+      { value: "email", label: "Email" },
+      { value: "phone", label: "Phone" },
+      { value: "jobTitle", label: "Job title" },
+      { value: "birthday", label: "Birthday" },
+      { value: "personLabels", label: "Labels" },
+      { value: "organization", label: "Organization" },
+      // { value: "owner", label: "Owner" },
+      // { value: "notes", label: "Notes" },
+      { value: "postalAddress", label: "Postal address" },
+      // { value: "postalAddressDetails", label: "Postal address (details)" },
+      // { value: "visibleTo", label: "Visible to" },
+      { value: "createdAt", label: "Person created" },
+      { value: "updatedAt", label: "Update time" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
+      // { key: "instantMessenger", label: "Instant messenger" },
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching person fields:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.markDealAsWon = async (req, res) => {
+exports.getOrganizationFields = async (req, res) => {
   try {
-    const { dealId } = req.params;
+    const fields = [
+      { value: "organization", label: "Organization name" },
+      { value: "organizationLabels", label: "Labels" },
+      { value: "address", label: "Address" },
+      // { value: "addressDetails", label: "Address (details)" },
+      // { value: "visibleTo", label: "Visible to" },
+      { value: "createdAt", label: "Organization created" },
+      { value: "updatedAt", label: "Update time" },
+      { value: "ownerId", label: "Owner" },
+      // { key: "people", label: "People" },
+      // { key: "notes", label: "Notes" },
+      // { key: "activitiesToDo", label: "Activities to do" },
+      // { key: "doneActivities", label: "Done activities" },
+      // { key: "closedDeals", label: "Closed deals" },
+      // { key: "openDeals", label: "Open deals" },
+      // { key: "wonDeals", label: "Won deals" },
+      // { key: "lostDeals", label: "Lost deals" },
+      // { key: "totalActivities", label: "Total activities" },
+      // { key: "lastActivityDate", label: "Last activity date" },
+      // { key: "nextActivityDate", label: "Next activity date" },
+      // { key: "lastEmailReceived", label: "Last email received" },
+      // { key: "lastEmailSent", label: "Last email sent" },
+      // { key: "emailMessagesCount", label: "Email messages count" },
+    ];
+    res.status(200).json({ fields });
+  } catch (error) {
+    console.error("Error fetching organization fields:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.updateOrganization = async (req, res) => {
+  try {
+    const { leadOrganizationId } = req.params; // Use leadOrganizationId from params
+    const updateFields = req.body;
 
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
+    // Find the organization by leadOrganizationId
+    const org = await Organization.findByPk(leadOrganizationId);
+    if (!org) {
+      return res.status(404).json({ message: "Organization not found" });
     }
 
-    // Update status to 'won'
-    await deal.update({ status: "won" });
+    // Update all fields provided in req.body
+    await org.update(updateFields);
 
-    // Update DealDetails: wonTime and dealClosedOn
-    const now = new Date();
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        wonTime: now,
-        dealClosedOn: now,
-      });
-    } else {
-      await DealDetails.create({
-        dealId,
-        wonTime: now,
-        dealClosedOn: now,
-      });
-    }
-
-    // Add a new entry to DealStageHistory
-    await DealStageHistory.create({
-      dealId,
-      stageName: deal.pipelineStage, // keep current stage
-      enteredAt: now,
-      note: "Marked as won",
+    res.status(200).json({
+      message: "Organization updated successfully",
+      organization: org,
     });
+  } catch (error) {
+    console.error("Error updating organization:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+/**
+ * Update person with support for multiple emails and phones
+ * Request body can include:
+ * - emails: [{ email: "new@email.com", type: "Work" }]
+ * - phones: [{ phone: "1234567890", type: "Work" }]
+ * - Any other standard person fields
+ */
+exports.updatePerson = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const { emails, phones, email, phone, ...updateFields } = req.body;
+    const masterUserID = req.adminId;
 
-    // --- Activity popup settings logic (for frontend popup) ---
-    const popup = req.activityPopupSettings || {};
-    const activityPopupSettings = {
-      defaultActivityType: popup.defaultActivityType || 'Task',
-      followUpTime: popup.followUpTime || 'in 3 months',
-      allowUserDisable: typeof popup.allowUserDisable === 'boolean' ? popup.allowUserDisable : true,
+    // Find the person
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
+    }
+
+    // Handle multiple emails - use emails array if provided, otherwise use single email
+    let emailList = [];
+    if (emails && Array.isArray(emails) && emails.length > 0) {
+      emailList = emails.filter(emailObj => emailObj.email && emailObj.email.trim());
+    } else if (email && email.trim()) {
+      emailList = [{ email: email.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Handle multiple phones - use phones array if provided, otherwise use single phone
+    let phoneList = [];
+    if (phones && Array.isArray(phones) && phones.length > 0) {
+      phoneList = phones.filter(phoneObj => phoneObj.phone && phoneObj.phone.trim());
+    } else if (phone && phone.trim()) {
+      phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // If emails are being updated, validate primary email uniqueness
+    if (emailList.length > 0) {
+      const primaryEmail = emailList[0].email;
+      const existingEmailPerson = await Person.findOne({ 
+        where: { 
+          email: primaryEmail,
+          personId: { [Sequelize.Op.ne]: personId } // Exclude current person
+        } 
+      });
+      if (existingEmailPerson) {
+        return res.status(409).json({
+          message: "A person with this email address already exists.",
+          person: {
+            personId: existingEmailPerson.personId,
+            contactPerson: existingEmailPerson.contactPerson,
+            email: existingEmailPerson.email,
+          },
+        });
+      }
+      updateFields.email = primaryEmail;
+      updateFields.primaryEmailType = emailList[0].type || 'Work';
+    }
+
+    // If phones are being updated, set primary phone
+    if (phoneList.length > 0) {
+      updateFields.phone = phoneList[0].phone;
+      updateFields.primaryPhoneType = phoneList[0].type || 'Work';
+    }
+
+    // If ownerId is being updated, also update it in the related organization
+    if (updateFields.ownerId && person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org) {
+        await org.update({ ownerId: updateFields.ownerId });
+      }
+    }
+
+    // Update all fields provided in req.body for the person
+    await person.update(updateFields);
+
+    // Update or create custom field values for multiple emails and phones
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+
+    if (emailList.length > 0) {
+      // Remove existing emails custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new emails if more than one or if explicitly provided as array
+      if (emailList.length > 1 || emails) {
+        await CustomFieldValue.create({
+          fieldId: 'person_emails',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(emailList),
+          masterUserID,
+        });
+      }
+    }
+
+    if (phoneList.length > 0) {
+      // Remove existing phones custom field
+      await CustomFieldValue.destroy({
+        where: {
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person'
+        }
+      });
+
+      // Store new phones if more than one or if explicitly provided as array
+      if (phoneList.length > 1 || phones) {
+        await CustomFieldValue.create({
+          fieldId: 'person_phones',
+          entityId: personId,
+          entityType: 'person',
+          value: JSON.stringify(phoneList),
+          masterUserID,
+        });
+      }
+    }
+
+    // Fetch ownerName via organization.ownerId and MasterUser
+    let ownerName = null;
+    if (person.leadOrganizationId) {
+      const org = await Organization.findByPk(person.leadOrganizationId);
+      if (org && org.ownerId) {
+        const owner = await MasterUser.findByPk(org.ownerId);
+        if (owner) {
+          ownerName = owner.name;
+        }
+      }
+    }
+
+    // Prepare response with multiple emails and phones
+    const personResponse = {
+      ...person.toJSON(),
+      ownerName,
+      emails: emailList.length > 0 ? emailList : undefined,
+      phones: phoneList.length > 0 ? phoneList : undefined,
     };
 
     res.status(200).json({
-      message: "Deal marked as won",
-      deal,
-      activityPopupSettings,
+      message: "Person updated successfully",
+      person: personResponse,
     });
   } catch (error) {
-    console.log(error);
+    console.error("Error updating person:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
-exports.markDealAsLost = async (req, res) => {
+/**
+ * Helper function to get person with multiple emails and phones
+ * @param {number} personId - The person ID
+ * @returns {Object} Person object with emails and phones arrays
+ */
+const getPersonWithContactInfo = async (personId) => {
   try {
-    const { dealId } = req.params;
-    const { lostReason } = req.body; // Accept lostReason from request body
+    const person = await Person.findByPk(personId);
+    if (!person) return null;
 
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
+    // Get custom field values for emails and phones
+    const customFieldValues = await CustomFieldValue.findAll({
+      where: {
+        entityId: personId,
+        entityType: 'person',
+        fieldId: ['person_emails', 'person_phones']
+      }
+    });
+
+    let emails = [];
+    let phones = [];
+
+    // Parse custom field values
+    customFieldValues.forEach(cfv => {
+      if (cfv.fieldId === 'person_emails' && cfv.value) {
+        try {
+          emails = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person emails:', e);
+        }
+      }
+      if (cfv.fieldId === 'person_phones' && cfv.value) {
+        try {
+          phones = JSON.parse(cfv.value);
+        } catch (e) {
+          console.warn('Failed to parse person phones:', e);
+        }
+      }
+    });
+
+    // If no custom field arrays found, use the primary email/phone
+    if (emails.length === 0 && person.email) {
+      emails = [{ email: person.email, type: 'Work' }];
+    }
+    if (phones.length === 0 && person.phone) {
+      phones = [{ phone: person.phone, type: 'Work' }];
     }
 
-    await deal.update({ status: "lost" });
-
-    // Update DealDetails: lostTime and lostReason
-    const now = new Date();
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        lostTime: now,
-        lostReason: lostReason || dealDetails.lostReason,
-      });
-    } else {
-      await DealDetails.create({
-        dealId,
-        lostTime: now,
-        lostReason: lostReason || null,
-      });
-    }
-
-    res.status(200).json({ message: "Deal marked as lost", deal });
+    return {
+      ...person.toJSON(),
+      emails,
+      phones
+    };
   } catch (error) {
-    console.log(error);
-
-    res.status(500).json({ message: "Internal server error" });
+    console.error('Error getting person with contact info:', error);
+    return null;
   }
 };
 
-exports.markDealAsOpen = async (req, res) => {
+/**
+ * Get a single person by ID with multiple emails and phones
+ */
+exports.getPerson = async (req, res) => {
   try {
-    const { dealId } = req.params;
-    const initialStage = "Qualified"; // Set your initial pipeline stage here
-
-    const deal = await Deal.findByPk(dealId);
-    if (!deal) {
-      return res.status(404).json({ message: "Deal not found." });
+    const { personId } = req.params;
+    
+    const person = await getPersonWithContactInfo(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found" });
     }
 
-    // Update deal status and reset pipelineStage
-    await deal.update({ status: "open", pipelineStage: initialStage });
-
-    // Reset closure fields in DealDetails
-    let dealDetails = await DealDetails.findOne({ where: { dealId } });
-    if (dealDetails) {
-      await dealDetails.update({
-        wonTime: null,
-        lostTime: null,
-        dealClosedOn: null,
-        lostReason: null,
-      });
-    }
-
-    // Add a new entry to DealStageHistory to track reopening
-    await DealStageHistory.create({
-      dealId,
-      stageName: initialStage,
-      enteredAt: new Date(),
+    res.status(200).json({
+      message: "Person retrieved successfully",
+      person
     });
-
-    res.status(200).json({ message: "Deal marked as open", deal });
   } catch (error) {
-    console.log(error);
-
+    console.error("Error getting person:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
-exports.getDealFieldsForFilter = (req, res) => {
-  const fields = [
-    { value: "dealId", label: "Deal ID" },
-    { value: "title", label: "Title" },
-    { value: "value", label: "Value" },
-    { value: "pipeline", label: "Pipeline" },
-    { value: "pipelineStage", label: "Pipeline Stage" },
-    { value: "status", label: "Status" },
-    { value: "expectedCloseDate", label: "Expected Close Date" },
-    { value: "serviceType", label: "Service Type" },
-    { value: "scopeOfServiceType", label: "Scope of Service Type" },
-    { value: "proposalValue", label: "Proposal Value" },
-    { value: "esplProposalNo", label: "ESPL Proposal No." },
-    { value: "projectLocation", label: "Project Location" },
-    { value: "organizationCountry", label: "Organization Country" },
-    { value: "proposalSentDate", label: "Proposal Sent Date" },
-    { value: "ownerId", label: "Owner" },
-    { value: "createdAt", label: "Deal Created" },
-    { value: "updatedAt", label: "Last Updated" },
-    { value: "masterUserID", label: "Creator" },
-    { value: "currency", label: "Currency" },
-    { value: "nextActivityDate", label: "Next Activity Date" },
-    { value: "responsiblePerson", label: "Responsible Person" },
-    { value: "rfpReceivedDate", label: "RFP Received Date" },
-    { value: "statusSummary", label: "Status Summary" },
-    { value: "wonTime", label: "Won Time" },
-    { value: "lostTime", label: "Lost Time" },
-    { value: "dealClosedOn", label: "Deal Closed On" },
-    { value: "lostReason", label: "Lost Reason" },
-    {
-      value: "stateAndCountryProjectLocation",
-      label: "State and Country Project Location",
-    },
-    { value: "visibleTo", label: "Visible To" },
-    { value: "archiveTime", label: "Archive Time" },
-    // ...add more as needed
-  ];
-  res.status(200).json({ fields });
-};
+exports.linkPersonToOrganization = async (req, res) => {
+  const { personId, leadOrganizationId } = req.body;
+  try {
+    const person = await Person.findByPk(personId);
+    if (!person) return res.status(404).json({ message: "Person not found" });
 
-// Bulk edit deals functionality
-exports.bulkEditDeals = async (req, res) => {
-  const { dealIds, updateData } = req.body;
-
-  // Validate input
-  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
-    return res.status(400).json({
-      message: "dealIds must be a non-empty array",
-    });
-  }
-
-  if (!updateData || Object.keys(updateData).length === 0) {
-    return res.status(400).json({
-      message: "updateData must contain at least one field to update",
-    });
-  }
-
-  // Check for potential duplicate issues when updating multiple deals with same values
-  if (dealIds.length > 1) {
-    const duplicateChecks = [];
-
-    // Check title uniqueness if updating title
-    if (updateData.title) {
-      const existingTitleCount = await Deal.count({
-        where: {
-          title: updateData.title,
-          dealId: { [Op.notIn]: dealIds },
-        },
-      });
-
-      if (existingTitleCount > 0) {
-        duplicateChecks.push({
-          field: "title",
-          value: updateData.title,
-          message: "Title already exists for another deal",
-        });
-      }
-    }
-
-    // Check other unique fields if they exist (add more as needed)
-    if (updateData.esplProposalNo) {
-      const existingProposalCount = await Deal.count({
-        where: {
-          esplProposalNo: updateData.esplProposalNo,
-          dealId: { [Op.notIn]: dealIds },
-        },
-      });
-
-      if (existingProposalCount > 0) {
-        duplicateChecks.push({
-          field: "esplProposalNo",
-          value: updateData.esplProposalNo,
-          message: "ESPL Proposal Number already exists for another deal",
-        });
-      }
-    }
-
-    // If we found duplicate issues, return error
-    if (duplicateChecks.length > 0) {
+    if (
+      person.leadOrganizationId &&
+      person.leadOrganizationId !== leadOrganizationId
+    ) {
       return res.status(400).json({
-        message:
-          "Cannot update multiple deals due to duplicate value constraints",
-        duplicateIssues: duplicateChecks,
-        suggestion:
-          "Please ensure unique values for fields that require uniqueness, or update deals individually",
+        message: "Person is already linked to another organization.",
+        currentOrganizationId: person.leadOrganizationId,
       });
     }
+
+    // Fetch the organization name
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    person.leadOrganizationId = leadOrganizationId;
+    person.organization = organization.organization; // Update the organization column
+    await person.save();
+
+    res.status(200).json({
+      message: "Person linked to organization",
+      person,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
   }
-
-  console.log("Bulk edit deals request:", { dealIds, updateData });
-
+};
+exports.addPersonNote = async (req, res) => {
+  const { personId } = req.params; // Get personId from params
+  if (!personId) {
+    return res.status(400).json({ message: "Person ID is required." });
+  }
+  const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
   try {
-    // Check access permissions
-    if (!["admin", "general", "master"].includes(req.role)) {
-      await logAuditTrail(
-        getProgramId("DEALS"),
-        "BULK_DEAL_UPDATE",
-        null,
-        "Access denied. You do not have permission to bulk edit deals.",
-        req.adminId
-      );
-      return res.status(403).json({
-        message:
-          "Access denied. You do not have permission to bulk edit deals.",
-      });
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
     }
 
-    // Get all columns for different models
-    const dealFields = Object.keys(Deal.rawAttributes);
-    const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
-    const personFields = Object.keys(Person.rawAttributes);
-    const organizationFields = Object.keys(Organization.rawAttributes);
-
-    // Split the update data by model
-    const dealData = {};
-    const dealDetailsData = {};
-    const personData = {};
-    const organizationData = {};
-    const customFields = {};
-
-    for (const key in updateData) {
-      if (dealFields.includes(key)) {
-        dealData[key] = updateData[key];
-      } else if (personFields.includes(key)) {
-        personData[key] = updateData[key];
-      } else if (organizationFields.includes(key)) {
-        organizationData[key] = updateData[key];
-      } else if (dealDetailsFields.includes(key)) {
-        dealDetailsData[key] = updateData[key];
-      } else {
-        // Treat as custom field
-        customFields[key] = updateData[key];
-      }
-    }
-
-    console.log("Processed update data:", {
-      dealData,
-      dealDetailsData,
-      personData,
-      organizationData,
-      customFields,
+    const note = await PersonNote.create({
+      personId,
+      masterUserID: req.adminId,
+      content: content.trim(),
+      createdBy: req.adminId,
     });
 
-    // Find deals to update
-    let whereClause = { dealId: { [Op.in]: dealIds } };
-
-    // Apply role-based filtering
-    if (req.role !== "admin") {
-      whereClause[Op.or] = [
-        { masterUserID: req.adminId },
-        { ownerId: req.adminId },
-      ];
-    }
-
-    const dealsToUpdate = await Deal.findAll({
-      where: whereClause,
+    // Fetch the created note with creator details
+    const noteWithCreator = await PersonNote.findByPk(note.noteId, {
       include: [
         {
-          model: DealDetails,
-          as: "details",
-          required: false,
-        },
-        {
-          model: Person,
-          as: "Person",
-          required: false,
-        },
-        {
-          model: Organization,
-          as: "Organization",
-          required: false,
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
         },
       ],
     });
 
-    if (dealsToUpdate.length === 0) {
-      return res.status(404).json({
-        message:
-          "No deals found to update or you don't have permission to edit them",
-      });
+    res.status(201).json({
+      message: "Note added to person successfully",
+      note: noteWithCreator,
+    });
+  } catch (error) {
+    console.error("Error adding person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.addOrganizationNote = async (req, res) => {
+  const { leadOrganizationId } = req.params; // Get leadOrganizationId from params
+  if (!leadOrganizationId) {
+    return res.status(400).json({ message: "Organization ID is required." });
+  }
+  const { content } = req.body;
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+  try {
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
     }
 
-    console.log(`Found ${dealsToUpdate.length} deals to update`);
-
-    const updateResults = {
-      successful: [],
-      failed: [],
-      skipped: [],
-    };
-
-    // Process each deal
-    for (const deal of dealsToUpdate) {
-      try {
-        console.log(`Processing deal ${deal.dealId}`);
-
-        // Track if owner is being changed
-        let ownerChanged = false;
-        let newOwner = null;
-        if (updateData.ownerId && updateData.ownerId !== deal.ownerId) {
-          ownerChanged = true;
-          newOwner = await MasterUser.findByPk(updateData.ownerId);
-        }
-
-        // Check if pipelineStage is changing and create stage history
-        if (
-          dealData.pipelineStage &&
-          dealData.pipelineStage !== deal.pipelineStage
-        ) {
-          await DealStageHistory.create({
-            dealId: deal.dealId,
-            stageName: dealData.pipelineStage,
-            enteredAt: new Date(),
-          });
-        }
-
-        // Update Deal table
-        if (Object.keys(dealData).length > 0) {
-          try {
-            await deal.update(dealData);
-            console.log(`Updated deal ${deal.dealId} with:`, dealData);
-          } catch (updateError) {
-            // Handle specific database constraint errors
-            if (
-              updateError.name === "SequelizeUniqueConstraintError" ||
-              updateError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              // Extract field name and value from error message
-              if (updateError.original?.sqlMessage) {
-                const match = updateError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField}: '${duplicateValue}' already exists. Please use a unique value.`
-              );
-            }
-
-            // Handle other constraint violations
-            if (updateError.name === "SequelizeValidationError") {
-              const validationErrors = updateError.errors
-                .map((err) => err.message)
-                .join(", ");
-              throw new Error(`Validation error: ${validationErrors}`);
-            }
-
-            if (updateError.name === "SequelizeForeignKeyConstraintError") {
-              throw new Error(
-                `Foreign key constraint error: Invalid reference to related data.`
-              );
-            }
-
-            // Re-throw original error if not a known constraint error
-            throw updateError;
-          }
-        }
-
-        // Update DealDetails table
-        if (Object.keys(dealDetailsData).length > 0) {
-          try {
-            let dealDetails = await DealDetails.findOne({
-              where: { dealId: deal.dealId },
-            });
-
-            if (dealDetails) {
-              await dealDetails.update(dealDetailsData);
-            } else {
-              await DealDetails.create({
-                dealId: deal.dealId,
-                ...dealDetailsData,
-              });
-            }
-            console.log(
-              `Updated deal details for ${deal.dealId}:`,
-              dealDetailsData
-            );
-          } catch (detailsError) {
-            // Handle specific database constraint errors for DealDetails
-            if (
-              detailsError.name === "SequelizeUniqueConstraintError" ||
-              detailsError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (detailsError.original?.sqlMessage) {
-                const match = detailsError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in deal details: '${duplicateValue}' already exists.`
-              );
-            }
-
-            if (detailsError.name === "SequelizeValidationError") {
-              const validationErrors = detailsError.errors
-                .map((err) => err.message)
-                .join(", ");
-              throw new Error(
-                `Deal details validation error: ${validationErrors}`
-              );
-            }
-
-            throw detailsError;
-          }
-        }
-
-        // Update Person table
-        if (Object.keys(personData).length > 0 && deal.personId) {
-          try {
-            const person = await Person.findByPk(deal.personId);
-            if (person) {
-              await person.update(personData);
-              console.log(`Updated person ${deal.personId}:`, personData);
-            }
-          } catch (personError) {
-            if (
-              personError.name === "SequelizeUniqueConstraintError" ||
-              personError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (personError.original?.sqlMessage) {
-                const match = personError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in person data: '${duplicateValue}' already exists.`
-              );
-            }
-
-            throw personError;
-          }
-        }
-
-        // Update Organization table
-        if (
-          Object.keys(organizationData).length > 0 &&
-          deal.leadOrganizationId
-        ) {
-          try {
-            const organization = await Organization.findByPk(
-              deal.leadOrganizationId
-            );
-            if (organization) {
-              await organization.update(organizationData);
-              console.log(
-                `Updated organization ${deal.leadOrganizationId}:`,
-                organizationData
-              );
-            }
-          } catch (orgError) {
-            if (
-              orgError.name === "SequelizeUniqueConstraintError" ||
-              orgError.original?.code === "ER_DUP_ENTRY"
-            ) {
-              let constraintField = "unknown";
-              let duplicateValue = "unknown";
-
-              if (orgError.original?.sqlMessage) {
-                const match = orgError.original.sqlMessage.match(
-                  /Duplicate entry '(.+?)' for key '(.+?)'/
-                );
-                if (match) {
-                  duplicateValue = match[1];
-                  constraintField = match[2];
-                }
-              }
-
-              throw new Error(
-                `Duplicate ${constraintField} in organization data: '${duplicateValue}' already exists.`
-              );
-            }
-
-            throw orgError;
-          }
-        }
-
-        // Handle custom fields
-        const savedCustomFields = {};
-        if (customFields && Object.keys(customFields).length > 0) {
-          for (const [fieldKey, value] of Object.entries(customFields)) {
-            try {
-              // Find custom field by fieldId first, then by fieldName
-              let customField = await CustomField.findOne({
-                where: {
-                  fieldId: fieldKey,
-                  entityType: { [Op.in]: ["deal", "both", "lead"] },
-                  isActive: true,
-                  [Op.or]: [
-                    { masterUserID: req.adminId },
-                    { fieldSource: "default" },
-                    { fieldSource: "system" },
-                  ],
-                },
-              });
-
-              if (!customField) {
-                customField = await CustomField.findOne({
-                  where: {
-                    fieldName: fieldKey,
-                    entityType: { [Op.in]: ["deal", "both", "lead"] },
-                    isActive: true,
-                    [Op.or]: [
-                      { masterUserID: req.adminId },
-                      { fieldSource: "default" },
-                      { fieldSource: "system" },
-                    ],
-                  },
-                });
-              }
-
-              if (
-                customField &&
-                value !== null &&
-                value !== undefined &&
-                value !== ""
-              ) {
-                // Check if custom field value already exists
-                const existingValue = await CustomFieldValue.findOne({
-                  where: {
-                    fieldId: customField.fieldId,
-                    entityId: deal.dealId,
-                    entityType: "deal",
-                  },
-                });
-
-                if (existingValue) {
-                  await existingValue.update({ value: value });
-                } else {
-                  await CustomFieldValue.create({
-                    fieldId: customField.fieldId,
-                    entityId: deal.dealId,
-                    entityType: "deal",
-                    value: value,
-                    masterUserID: req.adminId,
-                  });
-                }
-
-                savedCustomFields[customField.fieldName] = {
-                  fieldName: customField.fieldName,
-                  fieldType: customField.fieldType,
-                  value: value,
-                };
-              }
-            } catch (customFieldError) {
-              console.error(
-                `Error updating custom field ${fieldKey} for deal ${deal.dealId}:`,
-                customFieldError
-              );
-            }
-          }
-        }
-
-        // Send email notification if owner changed
-        if (ownerChanged && newOwner && newOwner.email) {
-          try {
-            const assigner = await MasterUser.findByPk(req.adminId);
-            if (assigner && assigner.email) {
-              await sendEmail(assigner.email, {
-                from: assigner.email,
-                to: newOwner.email,
-                subject: "You have been assigned a new deal",
-                text: `Hello ${newOwner.name},\n\nYou have been assigned a new deal: "${deal.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
-              });
-            }
-          } catch (emailError) {
-            console.error(
-              `Error sending email notification for deal ${deal.dealId}:`,
-              emailError
-            );
-          }
-        }
-
-        // Log audit trail for successful update
-        await historyLogger(
-          getProgramId("DEALS"),
-          "BULK_DEAL_UPDATE",
-          req.adminId,
-          deal.dealId,
-          null,
-          `Deal bulk updated by ${req.role}`,
-          { updateData }
-        );
-
-        updateResults.successful.push({
-          dealId: deal.dealId,
-          title: deal.title,
-          value: deal.value,
-          pipelineStage: deal.pipelineStage,
-          customFields: savedCustomFields,
-        });
-      } catch (dealError) {
-        console.error(`Error updating deal ${deal.dealId}:`, dealError);
-
-        // Create more detailed error message
-        let errorMessage = dealError.message;
-        let errorType = "general";
-
-        if (
-          dealError.name === "SequelizeUniqueConstraintError" ||
-          dealError.original?.code === "ER_DUP_ENTRY"
-        ) {
-          errorType = "duplicate";
-        } else if (dealError.name === "SequelizeValidationError") {
-          errorType = "validation";
-        } else if (dealError.name === "SequelizeForeignKeyConstraintError") {
-          errorType = "foreign_key";
-        }
-
-        await logAuditTrail(
-          getProgramId("DEALS"),
-          "BULK_DEAL_UPDATE",
-          req.adminId,
-          `Error updating deal ${deal.dealId}: ${errorMessage}`,
-          req.adminId
-        );
-
-        updateResults.failed.push({
-          dealId: deal.dealId,
-          title: deal.title || `Deal ${deal.dealId}`,
-          error: errorMessage,
-          errorType: errorType,
-          errorCode: dealError.original?.code || dealError.name,
-        });
-      }
-    }
-
-    // Check for deals that were requested but not found
-    const foundDealIds = dealsToUpdate.map((deal) => deal.dealId);
-    const notFoundDealIds = dealIds.filter((id) => !foundDealIds.includes(id));
-
-    notFoundDealIds.forEach((dealId) => {
-      updateResults.skipped.push({
-        dealId: dealId,
-        reason: "Deal not found or no permission to edit",
-      });
+    const note = await OrganizationNote.create({
+      leadOrganizationId,
+      masterUserID: req.adminId,
+      content: content.trim(),
+      createdBy: req.adminId,
     });
 
-    console.log("Bulk update results:", updateResults);
+    // Fetch the created note with creator details
+    const noteWithCreator = await OrganizationNote.findByPk(note.noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      message: "Note added to organization successfully",
+      note: noteWithCreator,
+    });
+  } catch (error) {
+    console.error("Error adding organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Get all notes for a person
+exports.getPersonNotes = async (req, res) => {
+  const { personId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  try {
+    // Verify person exists
+    const person = await Person.findByPk(personId);
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    const { count, rows: notes } = await PersonNote.findAndCountAll({
+      where: { personId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
+    });
 
     res.status(200).json({
-      message: "Bulk edit operation completed",
-      results: updateResults,
-      summary: {
-        total: dealIds.length,
-        successful: updateResults.successful.length,
-        failed: updateResults.failed.length,
-        skipped: updateResults.skipped.length,
-        hasErrors: updateResults.failed.length > 0,
-        errorBreakdown: {
-          duplicateErrors: updateResults.failed.filter(
-            (f) => f.errorType === "duplicate"
-          ).length,
-          validationErrors: updateResults.failed.filter(
-            (f) => f.errorType === "validation"
-          ).length,
-          foreignKeyErrors: updateResults.failed.filter(
-            (f) => f.errorType === "foreign_key"
-          ).length,
-          generalErrors: updateResults.failed.filter(
-            (f) => f.errorType === "general"
-          ).length,
-        },
+      message: "Person notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
       },
-      recommendations:
-        updateResults.failed.length > 0
-          ? [
-              "Check for duplicate values in fields that require uniqueness",
-              "Ensure all required fields are provided",
-              "Verify that referenced IDs exist in the system",
-              "Consider updating deals individually if bulk update continues to fail",
-            ]
-          : null,
+      notes,
     });
   } catch (error) {
-    console.error("Error in bulk edit deals:", error);
-
-    await logAuditTrail(
-      getProgramId("DEALS"),
-      "BULK_DEAL_UPDATE",
-      null,
-      "Error in bulk edit deals: " + error.message,
-      req.adminId
-    );
-
-    res.status(500).json({
-      message: "Internal server error during bulk edit",
-      error: error.message,
-    });
+    console.error("Error fetching person notes:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// ================ DUPLICATE DEAL FUNCTIONALITY ================
-
-/**
- * Duplicate an existing deal with all its custom field values
- * POST /api/deals/duplicate/:dealId
- */
-exports.duplicateDeal = async (req, res) => {
-  const { dealId } = req.params;
-  const masterUserID = req.adminId;
-  const entityType = "deal";
-
-  if (!dealId) {
-    return res.status(400).json({
-      message: "Deal ID is required.",
-    });
-  }
+// Get all notes for an organization
+exports.getOrganizationNotes = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  const { page = 1, limit = 20 } = req.query;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    console.log(`[DUPLICATE] Starting duplication of deal ${dealId} for user ${masterUserID} with role ${req.role}`);
-    
-    // Debug: Check if deal exists at all
-    const dealExists = await Deal.findOne({
-      where: { dealId: dealId },
-      attributes: ['dealId', 'title', 'masterUserID']
+    // Verify organization exists
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
+    }
+
+    const { count, rows: notes } = await OrganizationNote.findAndCountAll({
+      where: { leadOrganizationId },
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: parseInt(limit),
+      offset,
     });
-    
-    if (!dealExists) {
-      console.log(`[DUPLICATE] ❌ Deal ${dealId} does not exist in database`);
-      return res.status(404).json({
-        message: `Deal with ID ${dealId} not found.`,
-      });
-    }
-    
-    console.log(`[DUPLICATE] 🔍 Deal ${dealId} exists: "${dealExists.title}" (Owner: ${dealExists.masterUserID})`);
 
-    // Start a transaction
-    const transaction = await sequelize.transaction();
-
-    try {
-      // 1. Get the original deal with admin permission check
-      let whereCondition = { dealId: dealId };
-      
-      // If user is not admin, restrict to their own deals only
-      if (req.role !== 'admin') {
-        whereCondition.masterUserID = masterUserID;
-      }
-      
-      const originalDeal = await Deal.findOne({
-        where: whereCondition,
-        transaction
-      });
-
-      if (!originalDeal) {
-        await transaction.rollback();
-        return res.status(404).json({
-          message: "Deal not found or you don't have permission to access it.",
-        });
-      }
-
-      console.log(`[DUPLICATE] Original deal found: ${originalDeal.title} (Owner: ${originalDeal.masterUserID}, Requester: ${masterUserID}, Role: ${req.role})`);
-      
-      // Log admin access if applicable
-      if (req.role === 'admin' && originalDeal.masterUserID !== masterUserID) {
-        console.log(`[DUPLICATE] Admin ${masterUserID} duplicating deal owned by user ${originalDeal.masterUserID}`);
-      }
-
-      console.log(`[DUPLICATE] Original deal found: ${originalDeal.title}`);
-
-      // 2. Prepare data for the new deal (exclude unique fields)
-      const originalData = originalDeal.toJSON();
-      const {
-        dealId: _dealId,
-        createdAt: _createdAt,
-        updatedAt: _updatedAt,
-        ...duplicateData
-      } = originalData;
-
-      // 3. Generate unique title with "Copy of" prefix
-      let newTitle = `Copy of ${originalDeal.title}`;
-      
-      // Check if a deal with this title already exists and add counter if needed
-      let counter = 1;
-      let titleExists = await Deal.findOne({
-        where: { title: newTitle, masterUserID },
-        transaction
-      });
-
-      while (titleExists) {
-        counter++;
-        newTitle = `Copy of ${originalDeal.title} (${counter})`;
-        titleExists = await Deal.findOne({
-          where: { title: newTitle, masterUserID },
-          transaction
-        });
-      }
-
-      duplicateData.title = newTitle;
-      duplicateData.masterUserID = masterUserID;
-
-      console.log(`[DUPLICATE] New deal title: ${newTitle}`);
-
-      // 4. Create the duplicate deal
-      const newDeal = await Deal.create(duplicateData, { transaction });
-      console.log(`[DUPLICATE] New deal created with ID: ${newDeal.dealId}`);
-
-      // 5. Get all custom field values from the original deal
-      const originalCustomFieldValues = await CustomFieldValue.findAll({
-        where: {
-          entityId: dealId.toString(),
-          entityType: entityType,
-          masterUserID: masterUserID,
-        },
-        include: [
-          {
-            model: CustomField,
-            as: "CustomField",
-            attributes: ["fieldName", "fieldLabel", "fieldType"],
-          },
-        ],
-        transaction
-      });
-
-      console.log(`[DUPLICATE] Found ${originalCustomFieldValues.length} custom field values to copy`);
-
-      // 6. Duplicate all custom field values
-      const duplicatedCustomFieldValues = [];
-      
-      for (const originalValue of originalCustomFieldValues) {
-        const duplicatedValue = await CustomFieldValue.create({
-          fieldId: originalValue.fieldId,
-          entityId: newDeal.dealId.toString(),
-          entityType: entityType,
-          value: originalValue.value,
-          masterUserID: masterUserID,
-        }, { transaction });
-
-        duplicatedCustomFieldValues.push({
-          fieldId: duplicatedValue.fieldId,
-          fieldName: originalValue.CustomField?.fieldName || 'unknown',
-          fieldLabel: originalValue.CustomField?.fieldLabel || 'Unknown Field',
-          fieldType: originalValue.CustomField?.fieldType || 'text',
-          value: duplicatedValue.value,
-        });
-      }
-
-      console.log(`[DUPLICATE] Successfully duplicated ${duplicatedCustomFieldValues.length} custom field values`);
-
-      // 7. Log audit trail (if available)
-      try {
-        const { logAuditTrail } = require("../../utils/auditTrailLogger");
-        const PROGRAMS = require("../../utils/programConstants");
-        
-        await logAuditTrail(
-          masterUserID,
-          PROGRAMS.DEAL_MANAGEMENT || "DEAL_MANAGEMENT",
-          `Duplicated deal: "${originalDeal.title}" → "${newTitle}"`,
-          "create",
-          "Deal",
-          newDeal.dealId.toString(),
-          null,
-          transaction
-        );
-      } catch (auditError) {
-        console.log(`[DUPLICATE] Audit logging not available: ${auditError.message}`);
-      }
-
-      // 8. Log history (if available)
-      try {
-        const historyLogger = require("../../utils/historyLogger").logHistory;
-        
-        await historyLogger(
-          "Deal",
-          "create",
-          newDeal.dealId,
-          masterUserID,
-          `Deal duplicated from "${originalDeal.title}"`,
-          null,
-          duplicateData,
-          transaction
-        );
-      } catch (historyError) {
-        console.log(`[DUPLICATE] History logging not available: ${historyError.message}`);
-      }
-
-      // Commit the transaction
-      await transaction.commit();
-
-      console.log(`[DUPLICATE] ✅ Successfully duplicated deal ${dealId} → ${newDeal.dealId}`);
-
-      // 9. Return the new deal with its custom field values
-      res.status(201).json({
-        message: `Deal "${originalDeal.title}" duplicated successfully as "${newTitle}"`,
-        originalDeal: {
-          dealId: originalDeal.dealId,
-          title: originalDeal.title,
-        },
-        newDeal: {
-          dealId: newDeal.dealId,
-          title: newDeal.title,
-          value: newDeal.value,
-          currency: newDeal.currency,
-          pipeline: newDeal.pipeline,
-          pipelineStage: newDeal.pipelineStage,
-          expectedCloseDate: newDeal.expectedCloseDate,
-          status: newDeal.status,
-          createdAt: newDeal.createdAt,
-        },
-        duplicatedFields: duplicatedCustomFieldValues,
-        summary: {
-          totalCustomFields: duplicatedCustomFieldValues.length,
-          duplicationTime: new Date().toISOString(),
-        },
-      });
-
-    } catch (error) {
-      await transaction.rollback();
-      throw error;
-    }
-
+    res.status(200).json({
+      message: "Organization notes fetched successfully",
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+      notes,
+    });
   } catch (error) {
-    console.error(`[DUPLICATE] ❌ Error duplicating deal ${dealId}:`, error);
-    res.status(500).json({
-      message: "Failed to duplicate deal.",
-      error: error.message,
-      dealId: dealId,
-    });
+    console.error("Error fetching organization notes:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
-/**
- * Batch duplicate multiple deals
- * POST /api/deals/duplicate-batch
- */
-exports.duplicateDealsInBatch = async (req, res) => {
-  const { dealIds } = req.body;
-  const masterUserID = req.adminId;
+// Update a person note
+exports.updatePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+  const { content } = req.body;
 
-  if (!dealIds || !Array.isArray(dealIds) || dealIds.length === 0) {
-    return res.status(400).json({
-      message: "Array of deal IDs is required.",
-      example: { dealIds: [1, 2, 3] }
-    });
-  }
-
-  if (dealIds.length > 10) {
-    return res.status(400).json({
-      message: "Maximum 10 deals can be duplicated at once.",
-    });
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
   }
 
   try {
-    console.log(`[BATCH-DUPLICATE] Starting batch duplication of ${dealIds.length} deals for user ${masterUserID}`);
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
 
-    const results = {
-      successful: [],
-      failed: [],
-      summary: {
-        total: dealIds.length,
-        successCount: 0,
-        failCount: 0,
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
+    }
+
+    // Update the note
+    await note.update({ content: content.trim() });
+
+    // Fetch updated note with creator details
+    const updatedNote = await PersonNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(200).json({
+      message: "Person note updated successfully",
+      note: updatedNote,
+    });
+  } catch (error) {
+    console.error("Error updating person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Update an organization note
+exports.updateOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+  const { content } = req.body;
+
+  if (!content || content.trim() === "") {
+    return res.status(400).json({ message: "Note content is required." });
+  }
+
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to update (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to update this note." });
+    }
+
+    // Update the note
+    await note.update({ content: content.trim() });
+
+    // Fetch updated note with creator details
+    const updatedNote = await OrganizationNote.findByPk(noteId, {
+      include: [
+        {
+          model: MasterUser,
+          as: "creator",
+          attributes: ["masterUserID", "name"],
+        },
+      ],
+    });
+
+    res.status(200).json({
+      message: "Organization note updated successfully",
+      note: updatedNote,
+    });
+  } catch (error) {
+    console.error("Error updating organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete a person note
+exports.deletePersonNote = async (req, res) => {
+  const { personId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await PersonNote.findOne({
+      where: { noteId, personId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Person note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting person note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Delete an organization note
+exports.deleteOrganizationNote = async (req, res) => {
+  const { leadOrganizationId, noteId } = req.params;
+
+  try {
+    // Find the note
+    const note = await OrganizationNote.findOne({
+      where: { noteId, leadOrganizationId },
+    });
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found." });
+    }
+
+    // Check if user has permission to delete (only creator or admin)
+    if (note.createdBy !== req.adminId && req.role !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "You don't have permission to delete this note." });
+    }
+
+    // Delete the note
+    await note.destroy();
+
+    res.status(200).json({
+      message: "Organization note deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting organization note:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// exports.getAllContactPersons = async (req, res) => {
+//   try {
+//     const { search = "" } = req.query;
+
+//     const where = search
+//       ? { contactPerson: { [Op.like]: `%${search}%` } }
+//       : {};
+
+//     const persons = await Person.findAll({
+//       where,
+//       attributes: ["personId", "contactPerson", "email"],
+//       order: [["contactPerson", "ASC"]],
+//       raw: true
+//     });
+
+//     res.status(200).json({
+//       contactPersons: persons // Array of { personId, contactPerson }
+//     });
+//   } catch (error) {
+//     console.error("Error fetching contact persons:", error);
+//     res.status(500).json({ message: "Internal server error" });
+//   }
+// };
+
+exports.getAllContactPersons = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const where = search ? { contactPerson: { [Op.like]: `%${search}%` } } : {};
+
+    // Include organization using association
+    const { count, rows: persons } = await Person.findAndCountAll({
+      where,
+      attributes: ["personId", "contactPerson", "email", "leadOrganizationId"],
+      include: [
+        {
+          model: Organization,
+          as: "LeadOrganization", // Make sure this matches your association
+          attributes: ["leadOrganizationId", "organization"],
+        },
+      ],
+      order: [["contactPerson", "ASC"]],
+      limit: parseInt(limit),
+      offset,
+    });
+
+    // Format response to include organization info at top level
+    const contactPersons = persons.map((person) => ({
+      personId: person.personId,
+      contactPerson: person.contactPerson,
+      email: person.email,
+      organization: person.LeadOrganization
+        ? {
+            leadOrganizationId: person.LeadOrganization.leadOrganizationId,
+            organization: person.LeadOrganization.organization,
+          }
+        : null,
+    }));
+
+    res.status(200).json({
+      contactPersons,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPersonsByOrganization = async (req, res) => {
+  const { leadOrganizationId } = req.params;
+  try {
+    // Find the organization
+    const organization = await Organization.findByPk(leadOrganizationId);
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    // Find all persons linked to this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId },
+      attributes: [
+        "personId",
+        "contactPerson",
+        "email",
+        "phone",
+        "jobTitle",
+        "personLabels",
+        "organization",
+      ],
+      order: [["contactPerson", "ASC"]],
+    });
+
+    // Fetch ownerName from MasterUser using organization.ownerId
+    let ownerName = null;
+    if (organization.ownerId) {
+      const owner = await MasterUser.findByPk(organization.ownerId);
+      if (owner) {
+        ownerName = owner.name;
       }
+    }
+
+    // Add ownerName to each person object
+    const personsWithOwner = persons.map((person) => ({
+      ...person.toJSON(),
+      ownerName,
+    }));
+
+    res.status(200).json({
+      organization: organization.organization,
+      persons: personsWithOwner,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getPersonsAndOrganizations = async (req, res) => {
+  try {
+    // Import required models at the beginning of the function
+    const { Lead, LeadDetails, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    // const CustomField = require("../../models/customFieldModel");
+    // const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Pagination and search for persons
+    const personPage = parseInt(req.query.personPage) || 1;
+    const personLimit = parseInt(req.query.personLimit) || 20;
+    const personOffset = (personPage - 1) * personLimit;
+    const personSearch = req.query.personSearch || "";
+
+     // Get sort parameters
+    const sortBy = req.query.sortBy || 'createdAt';
+    const sortOrder = req.query.sortOrder || 'DESC';
+
+    // Pagination and search for organizations
+    const orgPage = parseInt(req.query.orgPage) || 1;
+    const orgLimit = parseInt(req.query.orgLimit) || 20;
+    const orgOffset = (orgPage - 1) * orgLimit;
+    const orgSearch = req.query.orgSearch || "";
+
+    // Dynamic filter config (from body or query) -- now supports filterId as number or object
+    const LeadFilter = require("../../models/leads/leadFiltersModel");
+    let filterConfig = null;
+    let filterIdRaw = null;
+    if (req.body && req.body.filterId !== undefined) {
+      filterIdRaw = req.body.filterId;
+    } else if (req.query && req.query.filterId !== undefined) {
+      filterIdRaw = req.query.filterId;
+    }
+
+    // If filterIdRaw is a number, fetch filterConfig from DB
+    if (filterIdRaw !== null && filterIdRaw !== undefined) {
+      if (typeof filterIdRaw === "string" && /^\d+$/.test(filterIdRaw)) {
+        // filterIdRaw is a string number
+        const filterRow = await LeadFilter.findByPk(parseInt(filterIdRaw));
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else if (typeof filterIdRaw === "number") {
+        const filterRow = await LeadFilter.findByPk(filterIdRaw);
+        if (filterRow && filterRow.filterConfig) {
+          // Parse the filterConfig if it's a JSON string from database
+          if (typeof filterRow.filterConfig === "string") {
+            try {
+              filterConfig = JSON.parse(filterRow.filterConfig);
+              console.log(
+                "[DEBUG] Parsed filterConfig from DB string:",
+                JSON.stringify(filterConfig, null, 2)
+              );
+            } catch (e) {
+              console.log(
+                "[DEBUG] Error parsing filterConfig string from DB:",
+                e.message
+              );
+              filterConfig = null;
+            }
+          } else {
+            filterConfig = filterRow.filterConfig;
+          }
+        }
+      } else {
+        // Try to parse as JSON object
+        try {
+          filterConfig =
+            typeof filterIdRaw === "string"
+              ? JSON.parse(filterIdRaw)
+              : filterIdRaw;
+        } catch (e) {
+          filterConfig = null;
+        }
+      }
+    }
+
+    let personWhere = {};
+    let leadWhere = {};
+    let dealWhere = {};
+    let organizationWhere = {};
+    let activityWhere = {};
+    // Debug: print filterConfig
+    console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
+    const ops = {
+      eq: Op.eq,
+      ne: Op.ne,
+      like: Op.like,
+      notLike: Op.notLike,
+      gt: Op.gt,
+      gte: Op.gte,
+      lt: Op.lt,
+      lte: Op.lte,
+      in: Op.in,
+      notIn: Op.notIn,
+      is: Op.eq,
+      isNot: Op.ne,
+      isEmpty: Op.is,
+      isNotEmpty: Op.not,
+      between: Op.between,
+      notBetween: Op.notBetween,
+    };
+    const operatorMap = {
+      is: "eq",
+      "is not": "ne",
+      "is empty": "isEmpty",
+      "is not empty": "isNotEmpty",
+      contains: "like",
+      "does not contain": "notLike",
+      "is exactly or earlier than": "lte",
+      "is earlier than": "lt",
+      "is exactly or later than": "gte",
+      "not equals": "ne",
+      "greater than": "gt",
+      "greater than or equal": "gte",
+      "less than": "lt",
+      "less than or equal": "lte",
     };
 
-    // Process each deal individually to avoid transaction conflicts
-    for (const dealId of dealIds) {
-      try {
-        // Create a mock request/response for the single duplicate function
-        const mockReq = { params: { dealId }, adminId: masterUserID, role: req.role };
-        let duplicateResult = null;
-        
-        const mockRes = {
-          status: (code) => ({
-            json: (data) => {
-              duplicateResult = { statusCode: code, data };
-              return mockRes;
-            }
-          })
+    // Helper function to build a single condition - following the pattern from other APIs
+    function buildCondition(cond) {
+      console.log(
+        "[DEBUG] buildCondition called with:",
+        JSON.stringify(cond, null, 2)
+      );
+
+      const ops = {
+        eq: Op.eq,
+        ne: Op.ne,
+        like: Op.like,
+        notLike: Op.notLike,
+        gt: Op.gt,
+        gte: Op.gte,
+        lt: Op.lt,
+        lte: Op.lte,
+        in: Op.in,
+        notIn: Op.notIn,
+        is: Op.eq,
+        isNot: Op.ne,
+        isEmpty: Op.is,
+        isNotEmpty: Op.not,
+        between: Op.between,
+        notBetween: Op.notBetween,
+      };
+
+      let operator = cond.operator;
+      console.log("[DEBUG] Original operator:", operator);
+
+      if (operatorMap[operator]) {
+        operator = operatorMap[operator];
+        console.log("[DEBUG] Mapped operator:", operator);
+      }
+
+      // Handle "is empty" and "is not empty"
+      if (operator === "isEmpty" || operator === "is empty") {
+        const result = { [cond.field]: { [Op.is]: null } };
+        console.log(
+          "[DEBUG] isEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "isNotEmpty" || operator === "is not empty") {
+        const result = {
+          [Op.and]: [
+            { [cond.field]: { [Op.not]: null } },
+            { [cond.field]: { [Op.ne]: "" } },
+          ],
         };
+        console.log(
+          "[DEBUG] isNotEmpty condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
 
-        // Call the single duplicate function
-        await exports.duplicateDeal(mockReq, mockRes);
+      // Handle "contains" and "does not contain" for text fields
+      if (operator === "like" || operator === "contains") {
+        const result = { [cond.field]: { [Op.like]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] like condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
+      if (operator === "notLike" || operator === "does not contain") {
+        const result = { [cond.field]: { [Op.notLike]: `%${cond.value}%` } };
+        console.log(
+          "[DEBUG] notLike condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
 
-        if (duplicateResult && duplicateResult.statusCode === 201) {
-          results.successful.push({
-            originalDealId: dealId,
-            newDeal: duplicateResult.data.newDeal,
-            customFieldsCount: duplicateResult.data.duplicatedFields.length,
-          });
-          results.summary.successCount++;
-        } else {
-          results.failed.push({
-            dealId: dealId,
-            error: duplicateResult?.data?.message || "Unknown error",
-          });
-          results.summary.failCount++;
-        }
+      // Handle "is" operator for exact match
+      if (operator === "is" || operator === "eq") {
+        const result = { [cond.field]: cond.value };
+        console.log(
+          "[DEBUG] is/eq condition result:",
+          JSON.stringify(result, null, 2)
+        );
+        return result;
+      }
 
-      } catch (dealError) {
-        console.error(`[BATCH-DUPLICATE] Error duplicating deal ${dealId}:`, dealError.message);
-        results.failed.push({
-          dealId: dealId,
-          error: dealError.message,
+      // Default condition
+      const finalOperator = ops[operator] || Op.eq;
+      console.log("[DEBUG] Final operator symbol:", finalOperator);
+      console.log("[DEBUG] Condition value:", cond.value);
+      console.log("[DEBUG] Condition field:", cond.field);
+
+      const result = {
+        [cond.field]: {
+          [finalOperator]: cond.value,
+        },
+      };
+      console.log(
+        "[DEBUG] Default condition result:",
+        JSON.stringify(result, null, 2)
+      );
+
+      // Additional validation
+      if (cond.value === undefined || cond.value === null) {
+        console.log("[DEBUG] WARNING: cond.value is undefined or null!");
+        console.log(
+          "[DEBUG] Full condition object:",
+          JSON.stringify(cond, null, 2)
+        );
+      }
+
+      return result;
+    }
+
+    // Get model field names for validation
+    const personFields = Object.keys(Person.rawAttributes);
+    const leadFields = Object.keys(Lead.rawAttributes);
+    const dealFields = Object.keys(Deal.rawAttributes);
+    const organizationFields = Object.keys(Organization.rawAttributes);
+
+    let activityFields = [];
+    try {
+      const Activity = require("../../models/activity/activityModel");
+      activityFields = Object.keys(Activity.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Activity model not available:", e.message);
+    }
+
+    console.log("[DEBUG] Available fields:");
+    console.log("- Person fields:", personFields.slice(0, 5), "...");
+    console.log("- Lead fields:", leadFields.slice(0, 5), "...");
+    console.log("- Deal fields:", dealFields.slice(0, 5), "...");
+    console.log(
+      "- Organization fields:",
+      organizationFields.slice(0, 5),
+      "..."
+    );
+    console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+
+    // If filterConfig is provided, build AND/OR logic for all entities
+    if (filterConfig && typeof filterConfig === "object") {
+      // AND conditions
+      if (Array.isArray(filterConfig.all) && filterConfig.all.length > 0) {
+        console.log("[DEBUG] Processing 'all' conditions:", filterConfig.all);
+
+        filterConfig.all.forEach(function (cond) {
+          console.log(`[DEBUG] Processing AND condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.and]) personWhere[Op.and] = [];
+                  personWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+                  leadWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+                  dealWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.and])
+                    organizationWhere[Op.and] = [];
+                  organizationWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                console.log(`[DEBUG] Processing activity condition:`, cond);
+                console.log(
+                  `[DEBUG] Available activity fields:`,
+                  activityFields
+                );
+                console.log(
+                  `[DEBUG] Checking if field '${cond.field}' is in activity fields`
+                );
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+                  const condition = buildCondition(cond);
+                  console.log(
+                    `[DEBUG] Built activity condition:`,
+                    JSON.stringify(condition, null, 2)
+                  );
+                  activityWhere[Op.and].push(condition);
+                  console.log(
+                    `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                  console.log(
+                    `[DEBUG] Current activityWhere[Op.and]:`,
+                    JSON.stringify(activityWhere[Op.and], null, 2)
+                  );
+                  console.log(
+                    `[DEBUG] Current activityWhere:`,
+                    JSON.stringify(activityWhere, null, 2)
+                  );
+                } else {
+                  console.log(
+                    `[DEBUG] Field '${cond.field}' NOT found in activity fields:`,
+                    activityFields
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.and]) personWhere[Op.and] = [];
+              personWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person AND condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.and]) leadWhere[Op.and] = [];
+              leadWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead AND condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.and]) dealWhere[Op.and] = [];
+              dealWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal AND condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.and]) organizationWhere[Op.and] = [];
+              organizationWhere[Op.and].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization AND condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              console.log(
+                `[DEBUG] Auto-detecting activity condition for field: ${cond.field}`
+              );
+              if (!activityWhere[Op.and]) activityWhere[Op.and] = [];
+              const condition = buildCondition(cond);
+              console.log(
+                `[DEBUG] Built auto-detected activity condition:`,
+                JSON.stringify(condition, null, 2)
+              );
+              activityWhere[Op.and].push(condition);
+              console.log(
+                `[DEBUG] Auto-detected Activity AND condition for field: ${cond.field}`
+              );
+              console.log(
+                `[DEBUG] Current activityWhere after auto-detection:`,
+                JSON.stringify(activityWhere, null, 2)
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+              console.log(`[DEBUG] Available fields summary:`);
+              console.log(`  - Person: ${personFields.length} fields`);
+              console.log(`  - Lead: ${leadFields.length} fields`);
+              console.log(`  - Deal: ${dealFields.length} fields`);
+              console.log(
+                `  - Organization: ${organizationFields.length} fields`
+              );
+              console.log(`  - Activity: ${activityFields.length} fields`);
+            }
+          }
         });
-        results.summary.failCount++;
+      }
+
+      // OR conditions
+      if (Array.isArray(filterConfig.any) && filterConfig.any.length > 0) {
+        console.log("[DEBUG] Processing 'any' conditions:", filterConfig.any);
+
+        filterConfig.any.forEach(function (cond) {
+          console.log(`[DEBUG] Processing OR condition:`, cond);
+
+          if (cond.entity) {
+            // Entity is explicitly specified
+            switch (cond.entity.toLowerCase()) {
+              case "person":
+                if (personFields.includes(cond.field)) {
+                  if (!personWhere[Op.or]) personWhere[Op.or] = [];
+                  personWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Person OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "lead":
+                if (leadFields.includes(cond.field)) {
+                  if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+                  leadWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Lead OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "deal":
+                if (dealFields.includes(cond.field)) {
+                  if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+                  dealWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Deal OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "organization":
+                if (organizationFields.includes(cond.field)) {
+                  if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+                  organizationWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Organization OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "activity":
+                if (activityFields.includes(cond.field)) {
+                  if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+                  activityWhere[Op.or].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Activity OR condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              default:
+                console.log(`[DEBUG] Unknown entity: ${cond.entity}`);
+            }
+          } else {
+            // Auto-detect entity based on field name
+            if (personFields.includes(cond.field)) {
+              if (!personWhere[Op.or]) personWhere[Op.or] = [];
+              personWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Person OR condition for field: ${cond.field}`
+              );
+            } else if (leadFields.includes(cond.field)) {
+              if (!leadWhere[Op.or]) leadWhere[Op.or] = [];
+              leadWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Lead OR condition for field: ${cond.field}`
+              );
+            } else if (dealFields.includes(cond.field)) {
+              if (!dealWhere[Op.or]) dealWhere[Op.or] = [];
+              dealWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Deal OR condition for field: ${cond.field}`
+              );
+            } else if (organizationFields.includes(cond.field)) {
+              if (!organizationWhere[Op.or]) organizationWhere[Op.or] = [];
+              organizationWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Organization OR condition for field: ${cond.field}`
+              );
+            } else if (activityFields.includes(cond.field)) {
+              if (!activityWhere[Op.or]) activityWhere[Op.or] = [];
+              activityWhere[Op.or].push(buildCondition(cond));
+              console.log(
+                `[DEBUG] Auto-detected Activity OR condition for field: ${cond.field}`
+              );
+            } else {
+              console.log(
+                `[DEBUG] Field '${cond.field}' not found in any entity`
+              );
+            }
+          }
+        });
+      }
+    } else if (personSearch) {
+      // Fallback to search logic if no filterConfig
+      if (personSearch.length === 1) {
+        // If personSearch is a single character, filter contactPerson by first letter only
+        personWhere.contactPerson = { [Op.like]: `${personSearch}%` };
+      } else {
+        personWhere[Op.or] = [
+          { contactPerson: { [Op.like]: `%${personSearch}%` } },
+          { email: { [Op.like]: `%${personSearch}%` } },
+          { phone: { [Op.like]: `%${personSearch}%` } },
+          { jobTitle: { [Op.like]: `%${personSearch}%` } },
+          { personLabels: { [Op.like]: `%${personSearch}%` } },
+          { organization: { [Op.like]: `%${personSearch}%` } },
+        ];
       }
     }
 
-    console.log(`[BATCH-DUPLICATE] ✅ Batch duplication completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed`);
+    // Debug: log all where clauses
+    console.log("[DEBUG] Final where clauses:");
+    console.log("- personWhere:", JSON.stringify(personWhere, null, 2));
+    console.log("- leadWhere:", JSON.stringify(leadWhere, null, 2));
+    console.log("- dealWhere:", JSON.stringify(dealWhere, null, 2));
+    console.log(
+      "- organizationWhere:",
+      JSON.stringify(organizationWhere, null, 2)
+    );
+    console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
 
-    const statusCode = results.summary.successCount > 0 ? 200 : 400;
+    // Additional debug for contactPerson filtering
+    if (filterConfig && filterConfig.all && filterConfig.all.length > 0) {
+      const contactPersonFilter = filterConfig.all.find(
+        (cond) => cond.field === "contactPerson" && cond.entity === "Person"
+      );
+      if (contactPersonFilter) {
+        console.log("[DEBUG] Found contactPerson filter:", contactPersonFilter);
+        console.log(
+          "[DEBUG] Checking if personWhere contains contactPerson condition..."
+        );
+
+        // Test the exact query that will be run
+        const testQuery = await Person.findAll({
+          where: { contactPerson: contactPersonFilter.value },
+          attributes: ["personId", "contactPerson"],
+          limit: 5,
+          raw: true,
+        });
+        console.log(
+          "[DEBUG] Test query for exact contactPerson match:",
+          testQuery
+        );
+      }
+    }
+
+    // Check if any conditions exist (including Op.and arrays)
+    const hasActivityFilters =
+      Object.keys(activityWhere).length > 0 ||
+      (activityWhere[Op.and] && activityWhere[Op.and].length > 0);
+    const hasLeadFilters =
+      Object.keys(leadWhere).length > 0 ||
+      (leadWhere[Op.and] && leadWhere[Op.and].length > 0);
+    const hasDealFilters =
+      Object.keys(dealWhere).length > 0 ||
+      (dealWhere[Op.and] && dealWhere[Op.and].length > 0);
+    const hasOrgFilters =
+      Object.keys(organizationWhere).length > 0 ||
+      (organizationWhere[Op.and] && organizationWhere[Op.and].length > 0);
+
+    console.log("[DEBUG] Filter detection:");
+    console.log("- hasActivityFilters:", hasActivityFilters);
+    console.log("- hasLeadFilters:", hasLeadFilters);
+    console.log("- hasDealFilters:", hasDealFilters);
+    console.log("- hasOrgFilters:", hasOrgFilters);
+
+    if (hasActivityFilters) {
+      console.log(
+        "[DEBUG] Activity filter conditions:",
+        activityWhere[Op.and] || activityWhere
+      );
+    }
+
+    // Apply Lead filters to get relevant person IDs
+    let leadFilteredPersonIds = [];
+    const hasLeadFiltersSymbol =
+      leadWhere[Op.and]?.length > 0 ||
+      leadWhere[Op.or]?.length > 0 ||
+      Object.keys(leadWhere).some((key) => typeof key === "string");
+
+    if (hasLeadFiltersSymbol) {
+      console.log("[DEBUG] Applying Lead filters to find persons");
+      console.log("[DEBUG] leadWhere has filters:", {
+        andConditions: leadWhere[Op.and]?.length || 0,
+        orConditions: leadWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(leadWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let leadFilterResults = [];
+      if (req.role === "admin") {
+        leadFilterResults = await Lead.findAll({
+          where: leadWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        leadFilterResults = await Lead.findAll({
+          where: {
+            ...leadWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Lead filter results:",
+        leadFilterResults.length,
+        "leads found"
+      );
+
+      // Get person IDs directly from leads
+      const directPersonIds = leadFilterResults
+        .map((lead) => lead.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from leads, then find persons in those organizations
+      const leadOrgIds = leadFilterResults
+        .map((lead) => lead.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (leadOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: leadOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      leadFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Lead-filtered person IDs:",
+        leadFilteredPersonIds.length
+      );
+    }
+
+    // Apply Activity filters to get relevant person IDs
+    let activityFilteredPersonIds = [];
+    const hasActivityFiltersSymbol =
+      activityWhere[Op.and]?.length > 0 ||
+      activityWhere[Op.or]?.length > 0 ||
+      Object.keys(activityWhere).some((key) => typeof key === "string");
+
+    if (hasActivityFiltersSymbol) {
+      console.log("[DEBUG] Applying Activity filters to find persons");
+      console.log("[DEBUG] activityWhere has filters:", {
+        andConditions: activityWhere[Op.and]?.length || 0,
+        orConditions: activityWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(activityWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      try {
+        const Activity = require("../../models/activity/activityModel");
+        let activityFilterResults = [];
+
+        if (req.role === "admin") {
+          activityFilterResults = await Activity.findAll({
+            where: activityWhere,
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        } else {
+          activityFilterResults = await Activity.findAll({
+            where: {
+              ...activityWhere,
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { assignedTo: req.adminId },
+              ],
+            },
+            attributes: ["personId", "leadOrganizationId"],
+            raw: true,
+          });
+        }
+
+        console.log(
+          "[DEBUG] Activity filter results:",
+          activityFilterResults.length,
+          "activities found"
+        );
+
+        // Get person IDs directly from activities
+        const directPersonIds = activityFilterResults
+          .map((activity) => activity.personId)
+          .filter(Boolean);
+
+        // Get organization IDs from activities, then find persons in those organizations
+        const activityOrgIds = activityFilterResults
+          .map((activity) => activity.leadOrganizationId)
+          .filter(Boolean);
+
+        let orgPersonIds = [];
+        if (activityOrgIds.length > 0) {
+          const personsInOrgs = await Person.findAll({
+            where: { leadOrganizationId: { [Op.in]: activityOrgIds } },
+            attributes: ["personId"],
+            raw: true,
+          });
+          orgPersonIds = personsInOrgs.map((p) => p.personId);
+        }
+
+        activityFilteredPersonIds = [
+          ...new Set([...directPersonIds, ...orgPersonIds]),
+        ];
+
+        console.log(
+          "[DEBUG] Activity-filtered person IDs:",
+          activityFilteredPersonIds.length
+        );
+      } catch (e) {
+        console.log("[DEBUG] Error applying Activity filters:", e.message);
+      }
+    }
+
+    // Apply Deal filters to get relevant person IDs
+    let dealFilteredPersonIds = [];
+    const hasDealFiltersSymbol =
+      dealWhere[Op.and]?.length > 0 ||
+      dealWhere[Op.or]?.length > 0 ||
+      Object.keys(dealWhere).some((key) => typeof key === "string");
+
+    if (hasDealFiltersSymbol) {
+      console.log("[DEBUG] Applying Deal filters to find persons");
+      console.log("[DEBUG] dealWhere has filters:", {
+        andConditions: dealWhere[Op.and]?.length || 0,
+        orConditions: dealWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(dealWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let dealFilterResults = [];
+      if (req.role === "admin") {
+        dealFilterResults = await Deal.findAll({
+          where: dealWhere,
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        dealFilterResults = await Deal.findAll({
+          where: {
+            ...dealWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["personId", "leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Deal filter results:",
+        dealFilterResults.length,
+        "deals found"
+      );
+
+      // Get person IDs directly from deals
+      const directPersonIds = dealFilterResults
+        .map((deal) => deal.personId)
+        .filter(Boolean);
+
+      // Get organization IDs from deals, then find persons in those organizations
+      const dealOrgIds = dealFilterResults
+        .map((deal) => deal.leadOrganizationId)
+        .filter(Boolean);
+
+      let orgPersonIds = [];
+      if (dealOrgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: dealOrgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      dealFilteredPersonIds = [
+        ...new Set([...directPersonIds, ...orgPersonIds]),
+      ];
+
+      console.log(
+        "[DEBUG] Deal-filtered person IDs:",
+        dealFilteredPersonIds.length
+      );
+    }
+
+    // Apply Organization filters to get relevant person IDs
+    let orgFilteredPersonIds = [];
+    const hasOrgFiltersSymbol =
+      organizationWhere[Op.and]?.length > 0 ||
+      organizationWhere[Op.or]?.length > 0 ||
+      Object.keys(organizationWhere).some((key) => typeof key === "string");
+
+    if (hasOrgFiltersSymbol) {
+      console.log("[DEBUG] Applying Organization filters to find persons");
+      console.log("[DEBUG] organizationWhere has filters:", {
+        andConditions: organizationWhere[Op.and]?.length || 0,
+        orConditions: organizationWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(organizationWhere).filter(
+          (key) => typeof key === "string"
+        ),
+      });
+
+      let orgFilterResults = [];
+      if (req.role === "admin") {
+        orgFilterResults = await Organization.findAll({
+          where: organizationWhere,
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      } else {
+        orgFilterResults = await Organization.findAll({
+          where: {
+            ...organizationWhere,
+            [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+          },
+          attributes: ["leadOrganizationId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Organization filter results:",
+        orgFilterResults.length,
+        "organizations found"
+      );
+
+      // Get organization IDs, then find persons in those organizations
+      const orgIds = orgFilterResults.map((org) => org.leadOrganizationId);
+
+      if (orgIds.length > 0) {
+        const personsInOrgs = await Person.findAll({
+          where: { leadOrganizationId: { [Op.in]: orgIds } },
+          attributes: ["personId"],
+          raw: true,
+        });
+        orgFilteredPersonIds = personsInOrgs.map((p) => p.personId);
+      }
+
+      console.log(
+        "[DEBUG] Organization-filtered person IDs:",
+        orgFilteredPersonIds.length
+      );
+    }
+
+    // Apply Person filters directly
+    let personFilteredPersonIds = [];
+    const hasPersonFiltersSymbol =
+      personWhere[Op.and]?.length > 0 ||
+      personWhere[Op.or]?.length > 0 ||
+      Object.keys(personWhere).some((key) => typeof key === "string");
+
+    if (hasPersonFiltersSymbol) {
+      console.log("[DEBUG] Applying Person filters to find persons");
+      console.log("[DEBUG] personWhere has filters:", {
+        andConditions: personWhere[Op.and]?.length || 0,
+        orConditions: personWhere[Op.or]?.length || 0,
+        stringKeys: Object.keys(personWhere).filter(
+          (key) => typeof key === "string"
+        ),
+        fullPersonWhere: JSON.stringify(personWhere, null, 2),
+      });
+
+      let personFilterResults = [];
+      if (req.role === "admin") {
+        personFilterResults = await Person.findAll({
+          where: personWhere,
+          attributes: ["personId"],
+          raw: true,
+        });
+      } else {
+        // For non-admin users, we need to be careful about combining filters
+        const userAccessWhere = {
+          [Op.or]: [{ masterUserID: req.adminId }],
+        };
+
+        const combinedWhere = {
+          [Op.and]: [personWhere, userAccessWhere],
+        };
+
+        console.log(
+          "[DEBUG] Combined where for non-admin:",
+          JSON.stringify(combinedWhere, null, 2)
+        );
+
+        personFilterResults = await Person.findAll({
+          where: combinedWhere,
+          attributes: ["personId"],
+          raw: true,
+        });
+      }
+
+      console.log(
+        "[DEBUG] Person filter results:",
+        personFilterResults.length,
+        "persons found"
+      );
+
+      // Get person IDs directly from person filters
+      personFilteredPersonIds = personFilterResults.map(
+        (person) => person.personId
+      );
+
+      console.log(
+        "[DEBUG] Person-filtered person IDs:",
+        personFilteredPersonIds.length
+      );
+    }
+
+    // Role-based filtering logic for organizations
+    let orgWhere = orgSearch
+      ? {
+          [Op.or]: [
+            { organization: { [Op.like]: `%${orgSearch}%` } },
+            { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+            { address: { [Op.like]: `%${orgSearch}%` } },
+          ],
+        }
+      : {};
+
+    // Fetch organizations first - same logic as getLeads API
+    let organizations = [];
+    if (req.role === "admin") {
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        raw: true,
+      });
+    } else {
+      organizations = await Organization.findAll({
+        where: {
+          ...orgWhere,
+          [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
+        },
+        raw: true,
+      });
+    }
+
+    const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    // Apply Lead, Activity, Deal, Organization, and Person filters by restricting to persons found in those entities
+    const allFilteredPersonIds = [
+      ...new Set([
+        ...leadFilteredPersonIds,
+        ...activityFilteredPersonIds,
+        ...dealFilteredPersonIds,
+        ...orgFilteredPersonIds,
+        ...personFilteredPersonIds,
+      ]),
+    ];
+
+    // Merge personWhere from filters with filtered person IDs
+    let finalPersonWhere = { ...personWhere };
+
+    if (allFilteredPersonIds.length > 0) {
+      console.log(
+        "[DEBUG] Applying combined filters: restricting to person IDs:",
+        allFilteredPersonIds.length
+      );
+      console.log(
+        "[DEBUG] - From leads:",
+        leadFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From activities:",
+        activityFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From deals:",
+        dealFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From organizations:",
+        orgFilteredPersonIds.length,
+        "person IDs"
+      );
+      console.log(
+        "[DEBUG] - From persons:",
+        personFilteredPersonIds.length,
+        "person IDs"
+      );
+
+      if (Object.keys(finalPersonWhere).length > 0) {
+        // Combine with existing filters using AND
+        finalPersonWhere = {
+          [Op.and]: [
+            finalPersonWhere,
+            { personId: { [Op.in]: allFilteredPersonIds } },
+          ],
+        };
+      } else {
+        // Only entity filters apply
+        finalPersonWhere = { personId: { [Op.in]: allFilteredPersonIds } };
+      }
+    } else if (
+      hasLeadFiltersSymbol ||
+      hasActivityFiltersSymbol ||
+      hasDealFiltersSymbol ||
+      hasOrgFiltersSymbol ||
+      hasPersonFiltersSymbol
+    ) {
+      // If entity filters were applied but no matching persons found, return empty results
+      console.log(
+        "[DEBUG] Entity filters applied but no matching persons found - returning empty results"
+      );
+      return res.status(200).json({
+        totalRecords: 0,
+        totalPages: 0,
+        currentPage: personPage,
+        persons: [],
+      });
+    }
+
+    console.log(
+      "[DEBUG] Final finalPersonWhere:",
+      JSON.stringify(finalPersonWhere, null, 2)
+    );
+
+    // Fetch persons using updated filtering logic
+    let persons = [];
+    if (req.role === "admin" && !req.query.masterUserID) {
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    } else if (req.query.masterUserID) {
+      // If masterUserID is provided, filter by that as well
+      finalPersonWhere.masterUserID = req.query.masterUserID;
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    } else {
+      const roleBasedPersonFilter = {
+        [Op.or]: [
+          { masterUserID: req.adminId },
+          { leadOrganizationId: orgIds },
+        ],
+      };
+
+      // Merge filter conditions with role-based access control
+      if (Object.keys(finalPersonWhere).length > 0) {
+        finalPersonWhere = {
+          [Op.and]: [finalPersonWhere, roleBasedPersonFilter],
+        };
+      } else {
+        finalPersonWhere = roleBasedPersonFilter;
+      }
+
+      persons = await Person.findAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        raw: true,
+      });
+    }
+
+    console.log("[DEBUG] persons count:", persons.length);
+    console.log(
+      "[DEBUG] persons sample:",
+      persons && persons.length > 0 ? persons[0] : null
+    );
+
+    // Build org map for quick lookup
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+
+    // Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Add ownerName to persons - same logic as getLeads API
+    persons = persons.map((p) => ({
+      ...p,
+      ownerName: ownerMap[p.ownerId] || null,
+    }));
+
+    // Count leads for each person using the same approach as getLeads API
+    const personIds = persons.map((p) => p.personId);
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [{ personId: personIds }, { leadOrganizationId: orgIds }],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Add leadCount to persons - same logic as getLeads API
+    persons = persons.map((p) => {
+      let ownerName = null;
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+        }
+      }
+      return {
+        ...p,
+        ownerName,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all persons - same as getLeads API
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const personIdsForCustomFields = persons.map((p) => p.personId);
+    let customFieldValues = [];
+    if (personIdsForCustomFields.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: personIdsForCustomFields,
+          entityType: "person",
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for person entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map personId to their custom field values as { fieldName: value }
+    const personCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!personCustomFieldsMap[cfv.entityId])
+        personCustomFieldsMap[cfv.entityId] = {};
+      personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each person - same as getLeads API
+    persons = persons.map((p) => {
+      const customFields = personCustomFieldsMap[p.personId] || {};
+      return { ...p, ...customFields };
+    });
+
+    // Fetch custom field values for organizations
+    const orgIdsForCustomFields = organizations.map((org) => org.leadOrganizationId);
+    let orgCustomFieldValues = [];
+    if (orgIdsForCustomFields.length > 0) {
+      orgCustomFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: orgIdsForCustomFields,
+          entityType: "organization",
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for organization entity
+    const allOrgCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Sequelize.Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const orgCustomFieldIdToName = {};
+    allOrgCustomFields.forEach((cf) => {
+      orgCustomFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map organizationId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    orgCustomFieldValues.forEach((cfv) => {
+      const fieldName = orgCustomFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization
+    organizations = organizations.map((org) => {
+      const customFields = orgCustomFieldsMap[org.leadOrganizationId] || {};
+      return { ...org, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const personColumnPref = await PersonColumnPreference.findOne({ where: {} });
+    const orgColumnPref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = entityType === 'person' 
+        ? ['personId', 'leadOrganizationId', 'organization', 'ownerName', 'leadCount']
+        : ['leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter persons based on person column preferences
+    const filteredPersons = filterDataByColumnPreference(persons, personColumnPref, 'person');
+
+    // Similarly filter organizations and add organization data
+    let filteredOrganizations = [];
+    if (organizations && organizations.length > 0) {
+      // Add leadCount and other computed fields to organizations
+      organizations = organizations.map((org) => {
+        return {
+          ...org,
+          ownerName: ownerMap[org.ownerId] || null,
+          leadCount: orgLeadCountMap[org.leadOrganizationId] || 0,
+        };
+      });
+
+      // Filter organizations based on organization column preferences
+      filteredOrganizations = filterDataByColumnPreference(organizations, orgColumnPref, 'organization');
+    }
+
+    // Return both filtered datasets in separate arrays
+    res.status(200).json({
+      totalRecords: filteredPersons.length + filteredOrganizations.length,
+      totalPages: Math.ceil((filteredPersons.length + filteredOrganizations.length) / personLimit),
+      currentPage: personPage,
+      persons: filteredPersons, // Filtered person data with entity: 'person'
+      organizations: filteredOrganizations, // Filtered organization data with entity: 'organization'
+      summary: {
+        personCount: filteredPersons.length,
+        organizationCount: filteredOrganizations.length,
+        totalCount: filteredPersons.length + filteredOrganizations.length
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching persons and organizations:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// Alternative: Soft delete (if you have deletedAt column)
+// exports.softDeleteOrganization = async (req, res) => {
+//   try {
+//     const { leadOrganizationId } = req.params;
+//     const { adminId, role } = req; // Assuming these are set by your authentication middleware
+
+//     const organization = await Organization.findByPk(leadOrganizationId);
     
-    res.status(statusCode).json({
-      message: `Batch duplication completed. ${results.summary.successCount} deals duplicated successfully, ${results.summary.failCount} failed.`,
-      results: results,
-      timestamp: new Date().toISOString(),
+//     if (!organization) {
+//       return res.status(404).json({
+//         success: false,
+//         error: "Organization not found"
+//       });
+//     }
+
+//     // Check permissions
+//     if (role !== "admin" && organization.ownerId !== adminId) {
+//       return res.status(403).json({
+//         success: false,
+//         error: "Permission denied",
+//         message: "You don't have permission to delete this organization"
+//       });
+//     }
+
+//     // Check if already soft deleted
+//     if (organization.active === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         error: "Organization already deleted",
+//         message: "This organization has already been deleted"
+//       });
+//     }
+
+//     // Soft delete by updating isActive to false
+//     await organization.update({ 
+//       active: 0,
+//       // deletedAt: new Date() 
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Organization soft deleted successfully",
+//       data: {
+//         leadOrganizationId: organization.leadOrganizationId,
+//         organization: organization.organization,
+//         isActive: organization.isActive,
+//         // deletedAt: organization.deletedAt
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Error soft deleting Organization:", error);
+//     return res.status(500).json({
+//       success: false,
+//       error: "Internal server error",
+//       message: error.message
+//     });
+//   }
+// };
+
+
+exports.deleteOrganization = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
+
+  try {
+    const { leadOrganizationId } = req.params;
+    const { adminId, role } = req; 
+
+    const organization = await Organization.findByPk(leadOrganizationId);
+    
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: "Organization not found"
+      });
+    }
+
+    // Check permissions
+    if (role !== "admin" && organization.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this organization"
+      });
+    }
+
+    // 1. Remove leadOrganizationId from LeadPerson records
+    await Person.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 2. Remove leadOrganizationId from Lead records
+    await Lead.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 3. Remove leadOrganizationId from Deal records
+    await Deal.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove leadOrganizationId from Activity records
+    await Activities.update(
+      { leadOrganizationId: null, organization: null },
+      {
+        where: { leadOrganizationId: leadOrganizationId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the organization
+    await organization.destroy({ transaction: transaction });
+
+    // Commit the transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization deleted successfully and all references removed",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        organization: organization.organization,
+      }
     });
 
   } catch (error) {
-    console.error(`[BATCH-DUPLICATE] ❌ Batch duplication error:`, error);
-    res.status(500).json({
-      message: "Failed to duplicate deals in batch.",
-      error: error.message,
+    // Rollback the transaction in case of error
+    await transaction.rollback();
+    
+    console.error("Error deleting Organization:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+exports.deletePerson = async (req, res) => {
+  const transaction = await sequelize.transaction(); // Start a transaction
+
+  try {
+    const { personId } = req.params;
+    const { adminId, role } = req; 
+
+    const person = await Person.findByPk(personId);
+    
+    if (!person) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: "Person not found"
+      });
+    }
+
+    // Check permissions
+    if (role !== "admin" && person.ownerId !== adminId) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        error: "Permission denied",
+        message: "You don't have permission to delete this Person"
+      });
+    }
+
+    // 2. Remove personId from Lead records
+    await Lead.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 3. Remove personId from Deal records
+    await Deal.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 4. Remove personId from Activity records
+    await Activities.update(
+      { personId: null, contactPerson: null },
+      {
+        where: { personId: personId },
+        transaction: transaction
+      }
+    );
+
+    // 5. Now delete the person
+    await person.destroy({ transaction: transaction });
+
+    // Commit the transaction
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "person deleted successfully and all references removed",
+      data: {
+        personId: person.personId,
+        contactPerson: person.contactPerson,
+      }
+    });
+
+  } catch (error) {
+    // Rollback the transaction in case of error
+    await transaction.rollback();
+    
+    console.error("Error deleting person:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Person Owner API
+exports.updatePersonOwner = async (req, res) => {
+  const { personId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!personId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the person
+    let person;
+    if (req.role === "admin") {
+      person = await Person.findByPk(personId, { transaction });
+    } else {
+      // Non-admin users can only update persons they own or created
+      person = await Person.findOne({
+        where: {
+          personId: personId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!person) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Person not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await person.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Person owner updated successfully.",
+      data: {
+        personId: person.personId,
+        name: person.name,
+        email: person.email,
+        ownerId: person.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating person owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Update Organization Owner API
+exports.updateOrganizationOwner = async (req, res) => {
+  const { leadOrganizationId, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!leadOrganizationId || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "leadOrganizationId and ownerId are required."
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId, { transaction });
+    if (!newOwner) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    // Find the organization
+    let organization;
+    if (req.role === "admin") {
+      organization = await Organization.findByPk(leadOrganizationId, { transaction });
+    } else {
+      // Non-admin users can only update organizations they own or created
+      organization = await Organization.findOne({
+        where: {
+          leadOrganizationId: leadOrganizationId,
+          [Op.or]: [
+            { ownerId: adminId },
+            { masterUserID: adminId }
+          ]
+        },
+        transaction
+      });
+    }
+
+    if (!organization) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Organization not found or you don't have permission to update it."
+      });
+    }
+
+    // Update the ownerId
+    await organization.update({ ownerId: ownerId }, { transaction });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization owner updated successfully.",
+      data: {
+        leadOrganizationId: organization.leadOrganizationId,
+        name: organization.name,
+        email: organization.email,
+        ownerId: organization.ownerId,
+        ownerName: newOwner.name
+      }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating organization owner:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Bulk Update Person Owners API
+exports.bulkUpdatePersonOwners = async (req, res) => {
+  const { personIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Person = require("../../models/leads/personModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!Array.isArray(personIds) || personIds.length === 0 || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "personIds array and ownerId are required."
+    });
+  }
+
+  const results = [];
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    for (const personId of personIds) {
+      const transaction = await sequelize.transaction();
+
+      try {
+        // Find the person
+        let person;
+        if (req.role === "admin") {
+          person = await Person.findByPk(personId, { transaction });
+        } else {
+          // Non-admin users can only update persons they own or created
+          person = await Person.findOne({
+            where: {
+              personId: personId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
+
+        if (!person) {
+          await transaction.rollback();
+          results.push({
+            personId: personId,
+            success: false,
+            error: "Person not found or you don't have permission to update it."
+          });
+          continue;
+        }
+
+        // Update the ownerId
+        await person.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          personId: person.personId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: person.name,
+            email: person.email,
+            ownerId: person.ownerId,
+            ownerName: newOwner.name
+          }
+        });
+
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating person ${personId} owner:`, error);
+        results.push({
+          personId: personId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
+      summary: {
+        total: personIds.length,
+        successful: successCount,
+        failed: failureCount
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in bulk update person owners:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// Bulk Update Organization Owners API
+exports.bulkUpdateOrganizationOwners = async (req, res) => {
+  const { leadOrganizationIds, ownerId } = req.body;
+  const adminId = req.adminId;
+  const { Op } = require("sequelize");
+  const Organization = require("../../models/leads/leadOrganizationModel");
+  const MasterUser = require("../../models/masterUserModel");
+  const sequelize = require("../../config/db");
+
+  // Validate required fields
+  if (!Array.isArray(leadOrganizationIds) || leadOrganizationIds.length === 0 || !ownerId) {
+    return res.status(400).json({
+      success: false,
+      message: "leadOrganizationIds array and ownerId are required."
+    });
+  }
+
+  const results = [];
+
+  try {
+    // Check if the new owner exists
+    const newOwner = await MasterUser.findByPk(ownerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: "New owner not found."
+      });
+    }
+
+    for (const orgId of leadOrganizationIds) {
+      const transaction = await sequelize.transaction();
+
+      try {
+        // Find the organization
+        let organization;
+        if (req.role === "admin") {
+          organization = await Organization.findByPk(orgId, { transaction });
+        } else {
+          // Non-admin users can only update organizations they own or created
+          organization = await Organization.findOne({
+            where: {
+              leadOrganizationId: orgId,
+              [Op.or]: [
+                { ownerId: adminId },
+                { masterUserID: adminId }
+              ]
+            },
+            transaction
+          });
+        }
+
+        if (!organization) {
+          await transaction.rollback();
+          results.push({
+            leadOrganizationId: orgId,
+            success: false,
+            error: "Organization not found or you don't have permission to update it."
+          });
+          continue;
+        }
+
+        // Update the ownerId
+        await organization.update({ ownerId: ownerId }, { transaction });
+
+        await transaction.commit();
+
+        results.push({
+          leadOrganizationId: organization.leadOrganizationId,
+          success: true,
+          message: "Owner updated successfully",
+          data: {
+            name: organization.name,
+            email: organization.email,
+            ownerId: organization.ownerId,
+            ownerName: newOwner.name
+          }
+        });
+
+      } catch (error) {
+        await transaction.rollback();
+        console.error(`Error updating organization ${orgId} owner:`, error);
+        results.push({
+          leadOrganizationId: orgId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk update completed. ${successCount} successful, ${failureCount} failed.`,
+      results: results,
+      summary: {
+        total: leadOrganizationIds.length,
+        successful: successCount,
+        failed: failureCount
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in bulk update organization owners:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
     });
   }
 };
