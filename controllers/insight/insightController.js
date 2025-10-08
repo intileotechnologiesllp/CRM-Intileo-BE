@@ -1512,7 +1512,7 @@ exports.createGoal = async (req, res) => {
           const isFutureMonth = monthStart > currentDate;
 
           // Calculate actual results for this month period
-          const { result, recordCount } = await calculatePeriodResults(
+          const { result, recordCount, records } = await calculatePeriodResults(
             actualMonthStart, 
             actualMonthEnd, 
             entity, 
@@ -1538,6 +1538,7 @@ exports.createGoal = async (req, res) => {
             monthStart: actualMonthStart.toISOString(),
             monthEnd: actualMonthEnd.toISOString(),
             recordCount: recordCount,
+            records: records,
             isCurrentMonth: isCurrentMonth,
             isFutureMonth: isFutureMonth
           });
@@ -1807,6 +1808,7 @@ exports.createGoal = async (req, res) => {
             } else {
               result = recordCount;
             }
+            records = addedDeals;
           } else if (goalType === "Won") {
             const wonWhereClause = {
               ...whereClause,
@@ -1821,6 +1823,7 @@ exports.createGoal = async (req, res) => {
             } else {
               result = recordCount;
             }
+            records = wonDeals;
           } else if (goalType === "Progressed") {
             // Use DealStageHistory for progressed goals
             const stageWhere = {
@@ -1857,6 +1860,7 @@ exports.createGoal = async (req, res) => {
               } else {
                 result = recordCount;
               }
+              records = progressedDeals;
             }
           }
         } else if (entity === "Activity") {
@@ -1880,13 +1884,14 @@ exports.createGoal = async (req, res) => {
           const activities = await Activity.findAll({ where: activityWhereClause });
           recordCount = activities.length;
           result = recordCount;
+          records = activities;
         }
       } catch (error) {
         console.error(`Error calculating results for period ${periodStart} to ${periodEnd}:`, error);
         // Continue with default values if there's an error
       }
 
-      return { result, recordCount };
+      return { result, recordCount, records };
     };
 
     // Generate config with breakdown and filters
@@ -3826,16 +3831,19 @@ async function processGoalData(goal, ownerId, periodFilter) {
       activityWhereClause.isDone = true;
     }
 
+    const tableName = Activity
+    const columnNames = Object.keys(tableName.rawAttributes);
     const activities = await Activity.findAll({
       where: activityWhereClause,
       attributes: [
-        "activityId",
-        "type",
-        "subject",
-        "isDone",
-        "createdAt",
-        "assignedTo",
-        "markedAsDoneTime",
+        ...columnNames
+        // "activityId",
+        // "type",
+        // "subject",
+        // "isDone",
+        // "createdAt",
+        // "assignedTo",
+        // "markedAsDoneTime",
       ],
       order: [["createdAt", "DESC"]],
       include: [
@@ -6145,18 +6153,21 @@ async function generateGoalBreakdownData(
       }
 
       if (goalType === "Added") {
+        const tableName = Activity
+        const columnNames = Object.keys(tableName.rawAttributes);
         const addedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "createdAt",
-            "assignedTo",
-            "markedAsDoneTime",
+            ...columnNames
+            // "activityId",
+            // "type",
+            // "isDone",
+            // "masterUserID",
+            // "dealId",
+            // "createdAt",
+            // "assignedTo",
+            // "markedAsDoneTime",
           ],
           include: [
             {
@@ -6205,19 +6216,21 @@ async function generateGoalBreakdownData(
               );
       } else if (goalType === "Completed") {
         activityWhereClause.isDone = true;
-
+        const tableName = Activity
+        const columnNames = Object.keys(tableName.rawAttributes);
         const completedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "updatedAt",
-            "assignedTo",
-            "markedAsDoneTime",
+            ...columnNames
+            // "activityId",
+            // "type",
+            // "isDone",
+            // "masterUserID",
+            // "dealId",
+            // "updatedAt",
+            // "assignedTo",
+            // "markedAsDoneTime",
           ],
           include: [
             {
@@ -6547,6 +6560,7 @@ function generateMonthlyBreakdown(
       return recordDate >= monthStart && recordDate <= monthEnd;
     });
 
+    console.log(monthRecords, "This is the Records");
     // Calculate result based on tracking metric and entity type
     let monthResult = 0;
     if (entityType === "Deal" && trackingMetric === "Value") {
@@ -6591,6 +6605,8 @@ function generateMonthlyBreakdown(
       monthStart: monthStart.toISOString(),
       monthEnd: monthEnd.toISOString(),
       recordCount: monthRecords.length,
+      records: monthRecords,
+      monthRecords: monthRecords,
       isCurrentMonth:
         currentMonth.getMonth() === currentDate.getMonth() &&
         currentMonth.getFullYear() === currentDate.getFullYear(),
@@ -6884,6 +6900,7 @@ function generateQuarterlyBreakdown(
       quarterStart: quarterStart.toISOString(),
       quarterEnd: quarterEndAdjusted.toISOString(),
       recordCount: quarterRecords.length,
+      records: quarterRecords,
       isCurrentQuarter: isCurrentQuarter,
       isFutureQuarter: currentQuarterStart > now,
       quarterNumber: quarterNumber,
@@ -7035,6 +7052,7 @@ function generateWeeklyBreakdown(
       weekStart: weekStart.toISOString(),
       weekEnd: weekEnd.toISOString(),
       recordCount: weekRecords.length,
+      records: weekRecords,
       isCurrentWeek: isCurrentWeek,
       isFutureWeek: currentWeekStart > currentDate,
       weekNumber: weekNumber,
