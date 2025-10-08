@@ -124,6 +124,8 @@ router.post("/update-organization-columns", verifyToken, validatePrivilege(5, "e
 router.post("/save-person-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllPersonFieldsWithCheck);
 router.get("/person-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getBothColumnPreferences);
 router.post("/update-person-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonColumnChecks);
+router.post("/update-person-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonOwner);
+router.post("/update-organization-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationOwner);
 
 
 
