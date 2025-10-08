@@ -21,6 +21,8 @@ const {
   getPersonConditionObject,
 } = require("../../../utils/conditionObject/createPerson");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
+const { Goal, Dashboard } = require("../../../models");
+
 
 exports.createActivityReport = async (req, res) => {
   try {
@@ -2218,7 +2220,8 @@ async function generateActivityPerformanceDataForDrillDown(
     4: Organization,
     5: Deal,
     6: Lead,
-  };
+    7: Goal
+  }
 
   const tableName = entityData[entity];
   const columnNames = Object.keys(tableName.rawAttributes);
@@ -2227,28 +2230,32 @@ async function generateActivityPerformanceDataForDrillDown(
   let results;
 
   let addIncludeModel = includeModels;
-  if (entity != 4 && entity != 3) {
-    if (entity == 1 || entity == 6) {
-      addIncludeModel = [
-        ...includeModels,
+  if(entity != 4 && entity != 3){
+    if(entity == 1 || entity == 6){
+      addIncludeModel = [...includeModels,
+       {
+        model: MasterUser,
+        as: 'Owner', // For masterUserID
+        attributes: ['masterUserID', 'name'],
+      }]
+    }else if(entity == 2 || entity == 5){
+      addIncludeModel = [...includeModels,
+       {
+        model: MasterUser,
+        as: 'Owner', // For masterUserID
+        attributes: ['masterUserID', 'name'],
+      }]
+    }else if(entity == 7){
+      addIncludeModel = [...includeModels,
         {
-          model: MasterUser,
-          as: "Owner", // For masterUserID
-          attributes: ["masterUserID", "name"],
+          model: Dashboard,
+          as: 'Dashboard', // For masterUserID
+          attributes: ['dashboard', 'name','folder', 'type',],
         },
-      ];
-    } else if (entity == 2 || entity == 5) {
-      addIncludeModel = [
-        ...includeModels,
-        {
-          model: MasterUser,
-          as: "Owner", // For masterUserID
-          attributes: ["masterUserID", "name"],
-        },
-      ];
-    } else {
-      addIncludeModel = [
-        ...includeModels,
+      ]
+    }
+    else{
+      addIncludeModel = [...includeModels,
         {
           model: MasterUser,
           as: "assignedUser", // For masterUserID
