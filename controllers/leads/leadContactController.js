@@ -6124,7 +6124,7 @@ exports.deleteOrganization = async (req, res) => {
     const { adminId, role } = req; 
 
     const organization = await Organization.findByPk(leadOrganizationId);
-    
+    console.log(adminId, role)
     if (!organization) {
       await transaction.rollback();
       return res.status(404).json({
@@ -6134,7 +6134,7 @@ exports.deleteOrganization = async (req, res) => {
     }
 
     // Check permissions
-    if (role !== "admin" && organization.ownerId !== adminId) {
+    if (role !== "admin" && organization.masterUserID !== adminId ) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
@@ -6225,7 +6225,7 @@ exports.deletePerson = async (req, res) => {
     }
 
     // Check permissions
-    if (role !== "admin" && person.ownerId !== adminId) {
+    if (role !== "admin" && person.masterUserID !== adminId) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
