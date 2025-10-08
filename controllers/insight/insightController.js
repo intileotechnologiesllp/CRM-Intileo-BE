@@ -1529,6 +1529,26 @@ exports.createGoal = async (req, res) => {
           const difference = result - periodTarget;
           const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
+           function flattenObject(obj, parentKey = "", res = {}) {
+            for (let key in obj) {
+              const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+              if (
+                typeof obj[key] === "object" &&
+                obj[key] !== null &&
+                !Array.isArray(obj[key])
+              ) {
+                flattenObject(obj[key], newKey, res);
+              } else {
+                res[newKey] = obj[key];
+              }
+            }
+            return res;
+          }
+
+          const flattened = JSON.parse(JSON.stringify(records, null, 2)).map((item) =>
+            flattenObject(item)
+          );
           breakdown.push({
             period: monthName,
             goal: periodTarget,
@@ -1538,7 +1558,7 @@ exports.createGoal = async (req, res) => {
             monthStart: actualMonthStart.toISOString(),
             monthEnd: actualMonthEnd.toISOString(),
             recordCount: recordCount,
-            records: records,
+            records: flattened,
             isCurrentMonth: isCurrentMonth,
             isFutureMonth: isFutureMonth
           });
@@ -4009,9 +4029,30 @@ async function processGoalData(goal, ownerId, periodFilter) {
       : "expired",
   };
 
+   function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey =  key; 
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(data, null, 2)).map((item) =>
+    flattenObject(item)
+  );
+  console.log(flattened.length, data.length)
   return {
     goal: goal.toJSON(),
-    records: data,
+    records: flattened,
     summary: summary,
     monthlyBreakdown: breakdown,
     period: { startDate: start, endDate: end },
@@ -6596,6 +6637,26 @@ function generateMonthlyBreakdown(
       monthNames[currentMonth.getMonth()]
     } ${currentMonth.getFullYear()}`;
 
+     function flattenObject(obj, parentKey = "", res = {}) {
+      for (let key in obj) {
+        const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+        if (
+          typeof obj[key] === "object" &&
+          obj[key] !== null &&
+          !Array.isArray(obj[key])
+        ) {
+          flattenObject(obj[key], newKey, res);
+        } else {
+          res[newKey] = obj[key];
+        }
+      }
+      return res;
+    }
+
+    const flattened = JSON.parse(JSON.stringify(monthRecords, null, 2)).map((item) =>
+      flattenObject(item)
+    );
     monthlyBreakdown.push({
       period: periodDisplay,
       goal: monthlyTarget,
@@ -6605,7 +6666,7 @@ function generateMonthlyBreakdown(
       monthStart: monthStart.toISOString(),
       monthEnd: monthEnd.toISOString(),
       recordCount: monthRecords.length,
-      records: monthRecords,
+      records: flattened,
       monthRecords: monthRecords,
       isCurrentMonth:
         currentMonth.getMonth() === currentDate.getMonth() &&
@@ -6891,6 +6952,26 @@ function generateQuarterlyBreakdown(
     const isCurrentQuarter =
       currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
 
+       function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(quarterRecords, null, 2)).map((item) =>
+    flattenObject(item)
+  );
     quarterlyBreakdown.push({
       period: periodDisplay,
       goal: quarterlyTarget, // Keep the actual quarterly target
@@ -6900,7 +6981,7 @@ function generateQuarterlyBreakdown(
       quarterStart: quarterStart.toISOString(),
       quarterEnd: quarterEndAdjusted.toISOString(),
       recordCount: quarterRecords.length,
-      records: quarterRecords,
+      records: flattened,
       isCurrentQuarter: isCurrentQuarter,
       isFutureQuarter: currentQuarterStart > now,
       quarterNumber: quarterNumber,
@@ -7043,6 +7124,26 @@ function generateWeeklyBreakdown(
     const isCurrentWeek =
       currentWeekStart.getTime() === currentWeekStart_check.getTime();
 
+       function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(weekRecords, null, 2)).map((item) =>
+    flattenObject(item)
+  );
     weeklyBreakdown.push({
       period: periodDisplay,
       goal: weeklyTarget, // Keep the actual weekly target (with decimals)
@@ -7052,7 +7153,7 @@ function generateWeeklyBreakdown(
       weekStart: weekStart.toISOString(),
       weekEnd: weekEnd.toISOString(),
       recordCount: weekRecords.length,
-      records: weekRecords,
+      records: flattened,
       isCurrentWeek: isCurrentWeek,
       isFutureWeek: currentWeekStart > currentDate,
       weekNumber: weekNumber,
