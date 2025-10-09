@@ -696,6 +696,14 @@ exports.getDeals = async (req, res) => {
     // Build the base where clause
     let where = {};
 
+    // Exclude deals that have been converted to leads
+    where.isConvertedToLead = {
+      [Op.or]: [
+        { [Op.is]: null },
+        { [Op.eq]: false }
+      ]
+    };
+
     // --- Handle column preferences ---
     const pref = await DealColumnPreference.findOne();
     let attributes = [];
@@ -1274,6 +1282,21 @@ exports.getDeals = async (req, res) => {
       // Ensure status is present (from deal or details)
       if (!("status" in dealObj)) {
         dealObj.status = deal.status || null;
+      }
+
+      // Add conversion flag information for UI display
+      dealObj.isConvertedToLead = dealObj.isConvertedToLead || false;
+      dealObj.convertedToLeadAt = dealObj.convertedToLeadAt || null;
+      dealObj.convertedToLeadBy = dealObj.convertedToLeadBy || null;
+      
+      // Add display flag for UI
+      if (dealObj.isConvertedToLead) {
+        dealObj.conversionFlag = {
+          badge: 'CONVERTED TO LEAD',
+          icon: '🔄',
+          color: '#ff9800',
+          tooltip: `Converted to lead on ${dealObj.convertedToLeadAt ? new Date(dealObj.convertedToLeadAt).toLocaleDateString() : 'Unknown date'}`
+        };
       }
 
       return dealObj;
@@ -3806,9 +3829,18 @@ exports.updateDeal = async (req, res) => {
 // };
 exports.getDealSummary = async (req, res) => {
   try {
-    // Fetch all deals with value, currency, and pipelineStage
+    // Fetch all deals with value, currency, and pipelineStage, excluding converted deals
     const deals = await Deal.findAll({
       attributes: ["value", "currency", "pipelineStage"],
+      where: {
+        // Exclude deals that have been converted to leads
+        isConvertedToLead: {
+          [Op.or]: [
+            { [Op.is]: null },
+            { [Op.eq]: false }
+          ]
+        }
+      },
       raw: true,
     });
 
@@ -3919,7 +3951,16 @@ exports.getDealsByStage = async (req, res) => {
 
     for (const stage of allStages) {
       const deals = await Deal.findAll({
-        where: { pipelineStage: stage },
+        where: { 
+          pipelineStage: stage,
+          // Exclude deals that have been converted to leads
+          isConvertedToLead: {
+            [Op.or]: [
+              { [Op.is]: null },
+              { [Op.eq]: false }
+            ]
+          }
+        },
         order: [["createdAt", "DESC"]],
       });
 
@@ -4569,25 +4610,75 @@ exports.getDealDetail = async (req, res) => {
       })
     );
 
-    // Optimized email fetching with pagination
-    // Get total email count first
+    // Optimized email fetching with pagination and visibility filtering
+    console.log(`📧 [getDealDetail] Fetching emails for deal ${dealId} with visibility filtering`);
+    
+    // Get current user's email for visibility filtering
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { userId: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+      console.log(`👤 [getDealDetail] Current user email: ${currentUserEmail}`);
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    // Build email visibility where clause
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } } // Include emails without visibility set (legacy)
+        ]
+      };
+    } else {
+      // If no user email found, only show shared emails and emails without visibility set
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    // Get total email count first with visibility filtering
     const totalEmailsCount = await Email.count({
       where: {
-        [Op.or]: [
-          { dealId },
-          ...(deal.email
-            ? [
-                { sender: deal.email },
-                { recipient: { [Op.like]: `%${deal.email}%` } },
-              ]
-            : []),
-        ],
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { dealId },
+              ...(deal.email
+                ? [
+                    { sender: deal.email },
+                    { recipient: { [Op.like]: `%${deal.email}%` } },
+                  ]
+                : []),
+            ],
+          },
+          emailVisibilityWhere
+        ]
       },
     });
 
-    // Fetch emails linked to this deal with pagination and essential fields only
+    // Fetch emails linked to this deal with pagination, essential fields, and visibility filtering
     const emailsByDeal = await Email.findAll({
-      where: { dealId },
+      where: {
+        [Op.and]: [
+          { dealId },
+          emailVisibilityWhere
+        ]
+      },
       attributes: [
         "emailID",
         "messageId",
@@ -4602,21 +4693,28 @@ exports.getDealDetail = async (req, res) => {
         "isRead",
         "leadId",
         "dealId",
+        "visibility",
+        "userEmail"
       ],
       order: [["createdAt", "DESC"]],
       limit: Math.ceil(safeEmailLimit / 2),
       offset: Math.floor(emailOffset / 2),
     });
 
-    // Fetch emails by address with pagination and essential fields only
+    // Fetch emails by address with pagination, essential fields, and visibility filtering
     let emailsByAddress = [];
     if (deal.email) {
       emailsByAddress = await Email.findAll({
         where: {
-          [Op.or]: [
-            { sender: deal.email },
-            { recipient: { [Op.like]: `%${deal.email}%` } },
-          ],
+          [Op.and]: [
+            {
+              [Op.or]: [
+                { sender: deal.email },
+                { recipient: { [Op.like]: `%${deal.email}%` } },
+              ],
+            },
+            emailVisibilityWhere
+          ]
         },
         attributes: [
           "emailID",
@@ -4632,6 +4730,8 @@ exports.getDealDetail = async (req, res) => {
           "isRead",
           "leadId",
           "dealId",
+          "visibility",
+          "userEmail"
         ],
         order: [["createdAt", "DESC"]],
         limit: Math.ceil(safeEmailLimit / 2),
@@ -4644,6 +4744,14 @@ exports.getDealDetail = async (req, res) => {
     emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
+
+    // Log visibility statistics
+    const visibilityStats = allEmails.reduce((stats, email) => {
+      const visibility = email.visibility || 'legacy';
+      stats[visibility] = (stats[visibility] || 0) + 1;
+      return stats;
+    }, {});
+    console.log(`📊 [getDealDetail] Email visibility stats:`, visibilityStats);
 
     // Limit final email results and add optimization metadata
     const limitedEmails = allEmails.slice(0, safeEmailLimit);
@@ -4909,6 +5017,15 @@ exports.getDealDetail = async (req, res) => {
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
+        // Email visibility information
+        visibilityFiltering: {
+          currentUserEmail: currentUserEmail,
+          visibilityStats: visibilityStats,
+          filterApplied: !!currentUserEmail,
+          description: currentUserEmail 
+            ? "Emails filtered by visibility - showing shared emails and private emails owned by current user"
+            : "User email not found - showing only shared emails and legacy emails"
+        }
       },
       // Enhanced pipeline data (optional for frontend to use)
       _pipelineMetadata: {
@@ -4919,6 +5036,20 @@ exports.getDealDetail = async (req, res) => {
       owner : {
         ownerName : owner.name,
         ownerId : owner.masterUserID
+      },
+      // Deal conversion information for modal display
+      conversionInfo: {
+        isConvertedToLead: deal.isConvertedToLead || false,
+        convertedToLeadAt: deal.convertedToLeadAt || null,
+        convertedToLeadBy: deal.convertedToLeadBy || null,
+        conversionStatus: deal.isConvertedToLead ? 'converted' : 'original',
+        displayFlag: deal.isConvertedToLead ? {
+          status: 'This deal was converted back to a lead',
+          icon: '🔄',
+          color: '#ff9800',
+          badge: 'CONVERTED TO LEAD',
+          timestamp: deal.convertedToLeadAt
+        } : null
       }
     });
   } catch (error) {
@@ -7018,12 +7149,15 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
           // Store the original leadId for response
           const originalLeadId = deal.leadId;
           
-          // Remove leadId from the deal record
+          // Remove leadId from the deal record and set conversion flags
           await deal.update({
-            leadId: null
+            leadId: null,
+            isConvertedToLead: true,
+            convertedToLeadAt: new Date(),
+            convertedToLeadBy: userId
           }, { transaction });
           
-          console.log(`[BULK-DISCONNECT] ✅ Successfully disconnected deal ${dealId} from lead ${originalLeadId}`);
+          console.log(`[BULK-DISCONNECT] ✅ Successfully disconnected deal ${dealId} from lead ${originalLeadId} and marked as converted to lead`);
 
           // Log audit trail
           try {
@@ -7033,7 +7167,9 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
               entityId: dealId,
               changes: {
                 previousLeadId: originalLeadId,
-                disconnectedBy: userId
+                disconnectedBy: userId,
+                isConvertedToLead: true,
+                convertedToLeadAt: new Date()
               },
               userId: userId,
               ipAddress: req.ip,
@@ -7045,9 +7181,11 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
 
           // Log history
           try {
-            await historyLogger("Deal", dealId, "disconnected from lead", {
+            await historyLogger("Deal", dealId, "disconnected from lead and converted to lead", {
               previousLeadId: originalLeadId,
-              disconnectedBy: userId
+              disconnectedBy: userId,
+              isConvertedToLead: true,
+              convertedToLeadAt: new Date()
             }, userId);
           } catch (historyError) {
             console.log(`[BULK-DISCONNECT] History logging failed: ${historyError.message}`);
@@ -7056,7 +7194,10 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
           results.success.push({
             dealId,
             previousLeadId: originalLeadId,
-            action: 'disconnected'
+            action: 'disconnected',
+            isConvertedToLead: true,
+            convertedToLeadAt: new Date(),
+            convertedToLeadBy: userId
           });
           results.summary.successCount++;
 
@@ -7082,12 +7223,12 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
     // Commit transaction
     await transaction.commit();
 
-    console.log(`[BULK-DISCONNECT] ✅ Bulk disconnection completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
+    console.log(`[BULK-DISCONNECT] ✅ Bulk conversion completed: ${results.summary.successCount} successful, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped`);
 
     const statusCode = results.summary.successCount > 0 ? 200 : 400;
     
     res.status(statusCode).json({
-      message: `Bulk disconnection completed. ${results.summary.successCount} deals disconnected successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
+      message: `Bulk conversion completed. ${results.summary.successCount} deals converted to leads successfully, ${results.summary.failCount} failed, ${results.summary.skippedCount} skipped.`,
       success: true,
       results: results,
       timestamp: new Date().toISOString(),
@@ -7099,11 +7240,69 @@ exports.bulkConvertDealsToLeads = async (req, res) => {
       await transaction.rollback();
     }
     
-    console.error(`[BULK-DISCONNECT] ❌ Bulk disconnection error:`, error);
+    console.error(`[BULK-DISCONNECT] ❌ Bulk conversion error:`, error);
     res.status(500).json({
-      message: "Failed to disconnect deals from leads in bulk.",
+      message: "Failed to convert deals to leads in bulk.",
       success: false,
       error: error.message,
+    });
+  }
+};
+
+// Reset conversion flag for a deal (for testing/admin purposes)
+exports.resetDealConversionFlag = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const userId = req.adminId;
+
+    // Validate dealId
+    if (!dealId) {
+      return res.status(400).json({
+        message: "Deal ID is required",
+        success: false
+      });
+    }
+
+    // Find the deal
+    const deal = await Deal.findByPk(dealId);
+    
+    if (!deal) {
+      return res.status(404).json({
+        message: "Deal not found",
+        success: false
+      });
+    }
+
+    // Reset conversion flags
+    await deal.update({
+      isConvertedToLead: false,
+      convertedToLeadAt: null,
+      convertedToLeadBy: null
+    });
+
+    // Log the action
+    try {
+      await historyLogger("Deal", dealId, "conversion flag reset", {
+        resetBy: userId,
+        resetAt: new Date()
+      }, userId);
+    } catch (historyError) {
+      console.log(`History logging failed: ${historyError.message}`);
+    }
+
+    res.status(200).json({
+      message: "Deal conversion flag reset successfully",
+      success: true,
+      dealId: dealId,
+      resetAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error("Error resetting deal conversion flag:", error);
+    res.status(500).json({
+      message: "Failed to reset deal conversion flag",
+      success: false,
+      error: error.message
     });
   }
 };

@@ -3898,6 +3898,16 @@ exports.getAllLeadDetails = async (req, res) => {
 
     const clientEmail = lead.email;
 
+    // Get user credentials for email visibility filtering
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+
+    let userEmail = null;
+    if (userCredential) {
+      userEmail = userCredential.email;
+    }
+
     // Fetch person and leadOrganization data for the lead
     let person = null;
     let leadOrganization = null;
@@ -3918,13 +3928,44 @@ exports.getAllLeadDetails = async (req, res) => {
     const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
     const maxBodyLength = 1000;
 
+    // Build email where clause with visibility filtering
+    let emailWhereClause = {
+      [Op.or]: [
+        { sender: clientEmail },
+        { recipient: { [Op.like]: `%${clientEmail}%` } },
+      ],
+    };
+
+    // Add visibility filtering
+    if (userEmail) {
+      emailWhereClause[Op.and] = [
+        emailWhereClause[Op.or], // Keep the original sender/recipient conditions
+        {
+          [Op.or]: [
+            { visibility: 'shared' }, // Show all shared emails
+            { 
+              visibility: 'private',
+              userEmail: userEmail // Show only private emails from current user
+            },
+            { visibility: { [Op.is]: null } } // Show legacy emails without visibility set (backward compatibility)
+          ]
+        }
+      ];
+    } else {
+      // If no user credentials found, only show shared emails and legacy emails
+      emailWhereClause[Op.and] = [
+        emailWhereClause[Op.or],
+        {
+          [Op.or]: [
+            { visibility: 'shared' },
+            { visibility: { [Op.is]: null } } // Legacy emails without visibility
+          ]
+        }
+      ];
+    }
+
     let emails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          { sender: clientEmail },
-          { recipient: { [Op.like]: `%${clientEmail}%` } },
-        ],
-      },
+      where: emailWhereClause,
       attributes: [
         "emailID",
         "messageId",
@@ -3935,6 +3976,8 @@ exports.getAllLeadDetails = async (req, res) => {
         "subject",
         "createdAt",
         "folder",
+        "visibility", // Include visibility field for debugging
+        "userEmail", // Include userEmail field for debugging
         [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
       ],
       include: [
@@ -3972,16 +4015,47 @@ exports.getAllLeadDetails = async (req, res) => {
     });
     const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
 
-    // Fetch related emails with stricter limits
+    // Fetch related emails with stricter limits and visibility filtering
     let relatedEmails = [];
     if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
+      // Build related emails where clause with visibility filtering
+      let relatedEmailsWhereClause = {
+        [Op.or]: [
+          { messageId: { [Op.in]: uniqueThreadIds } },
+          { inReplyTo: { [Op.in]: uniqueThreadIds } },
+        ],
+      };
+
+      // Apply same visibility filtering to related emails
+      if (userEmail) {
+        relatedEmailsWhereClause[Op.and] = [
+          relatedEmailsWhereClause[Op.or], // Keep the original thread conditions
+          {
+            [Op.or]: [
+              { visibility: 'shared' }, // Show all shared emails
+              { 
+                visibility: 'private',
+                userEmail: userEmail // Show only private emails from current user
+              },
+              { visibility: { [Op.is]: null } } // Show legacy emails without visibility set
+            ]
+          }
+        ];
+      } else {
+        // If no user credentials found, only show shared emails and legacy emails
+        relatedEmailsWhereClause[Op.and] = [
+          relatedEmailsWhereClause[Op.or],
+          {
+            [Op.or]: [
+              { visibility: 'shared' },
+              { visibility: { [Op.is]: null } } // Legacy emails without visibility
+            ]
+          }
+        ];
+      }
+
       relatedEmails = await Email.findAll({
-        where: {
-          [Op.or]: [
-            { messageId: { [Op.in]: uniqueThreadIds } },
-            { inReplyTo: { [Op.in]: uniqueThreadIds } },
-          ],
-        },
+        where: relatedEmailsWhereClause,
         attributes: [
           "emailID",
           "messageId",
@@ -3991,6 +4065,8 @@ exports.getAllLeadDetails = async (req, res) => {
           "subject",
           "createdAt",
           "folder",
+          "visibility", // Include visibility field for debugging
+          "userEmail", // Include userEmail field for debugging
           [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
         ],
         include: [
@@ -4178,6 +4254,19 @@ exports.getAllLeadDetails = async (req, res) => {
       });
     }
 
+    // Add some logging for debugging email visibility
+    console.log(`[getAllLeadDetails] User ${masterUserID} fetching emails for lead ${leadId}`);
+    console.log(`[getAllLeadDetails] User email: ${userEmail || 'No credentials found'}`);
+    console.log(`[getAllLeadDetails] Total emails found (after visibility filtering): ${relatedEmails.length}`);
+    
+    // Count emails by visibility for debugging
+    const emailVisibilityStats = {
+      shared: relatedEmails.filter(email => email.visibility === 'shared').length,
+      private: relatedEmails.filter(email => email.visibility === 'private').length,
+      legacy: relatedEmails.filter(email => !email.visibility).length
+    };
+    console.log(`[getAllLeadDetails] Email visibility breakdown:`, emailVisibilityStats);
+
     res.status(200).json({
       message: "Lead details fetched successfully.",
       lead: filteredLead,
@@ -4210,6 +4299,12 @@ exports.getAllLeadDetails = async (req, res) => {
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+        visibilityFiltering: {
+          enabled: true,
+          userEmail: userEmail || null,
+          hasCredentials: !!userCredential,
+          visibilityStats: emailVisibilityStats
+        }
       },
       _pagination: {
         emailPage: parseInt(emailPage),
