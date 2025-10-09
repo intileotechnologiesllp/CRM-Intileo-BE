@@ -25,6 +25,7 @@
     "googleapis": "^148.0.0",
     "html-to-text": "^9.0.5",
     "imap-simple": "^5.1.0",
+    "imapflow": "^1.0.198",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "mailparser": "^3.7.2",

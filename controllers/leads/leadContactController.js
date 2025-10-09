@@ -2770,6 +2770,7 @@ const Lead = require("../../models/leads/leadsModel")
 const Activities = require("../../models/activity/activityModel")
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
+const UserCredential = require("../../models/email/userCredentialModel"); // Add UserCredential model
 const sequelize = require("../../config/db");
 
 /**
@@ -3247,7 +3248,7 @@ exports.getPersonTimeline = async (req, res) => {
   const { personId } = req.params;
 
   // Email optimization parameters
-  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const { emailPage = 1, emailLimit = 30 } = req.query;
   const emailOffset = (parseInt(emailPage) - 1) * parseInt(emailLimit);
   const MAX_EMAIL_LIMIT = 50;
   const safeEmailLimit = Math.min(parseInt(emailLimit), MAX_EMAIL_LIMIT);
@@ -3270,25 +3271,75 @@ exports.getPersonTimeline = async (req, res) => {
     const leads = await Lead.findAll({ where: { personId } });
     const deals = await Deal.findAll({ where: { personId } });
 
-    // Optimized email fetching with pagination and essential fields only
+    // Optimized email fetching with pagination, essential fields, and visibility filtering
     const leadIds = leads.map((l) => l.leadId);
+    
+    console.log(`📧 [getPersonTimeline] Fetching emails for person ${personId} with visibility filtering`);
+    
+    // Get current user's email for visibility filtering
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { userId: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+      console.log(`👤 [getPersonTimeline] Current user email: ${currentUserEmail}`);
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
 
-    // Get total email count first
+    // Build email visibility where clause
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } } // Include emails without visibility set (legacy)
+        ]
+      };
+    } else {
+      // If no user email found, only show shared emails and emails without visibility set
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    // Get total email count first with visibility filtering
     const totalEmailsCount = await Email.count({
       where: {
-        [Op.or]: [
-          ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
-          { sender: person.email },
-          { recipient: { [Op.like]: `%${person.email}%` } },
-        ],
+        [Op.and]: [
+          {
+            [Op.or]: [
+              ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
+              { sender: person.email },
+              { recipient: { [Op.like]: `%${person.email}%` } },
+            ],
+          },
+          emailVisibilityWhere
+        ]
       },
     });
 
-    // Fetch emails with pagination and essential fields only
+    // Fetch emails with pagination, essential fields, and visibility filtering
     const emailsByLead =
       leadIds.length > 0
         ? await Email.findAll({
-            where: { leadId: leadIds },
+            where: {
+              [Op.and]: [
+                { leadId: leadIds },
+                emailVisibilityWhere
+              ]
+            },
             attributes: [
               "emailID",
               "messageId",
@@ -3303,6 +3354,8 @@ exports.getPersonTimeline = async (req, res) => {
               "isRead",
               "leadId",
               "dealId",
+              "visibility",
+              "userEmail"
             ],
             order: [["createdAt", "DESC"]],
             limit: Math.ceil(safeEmailLimit / 2),
@@ -3310,13 +3363,18 @@ exports.getPersonTimeline = async (req, res) => {
           })
         : [];
 
-    // Fetch emails where person's email is sender or recipient
+    // Fetch emails where person's email is sender or recipient with visibility filtering
     const emailsByAddress = await Email.findAll({
       where: {
-        [Op.or]: [
-          { sender: person.email },
-          { recipient: { [Op.like]: `%${person.email}%` } },
-        ],
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { sender: person.email },
+              { recipient: { [Op.like]: `%${person.email}%` } },
+            ],
+          },
+          emailVisibilityWhere
+        ]
       },
       attributes: [
         "emailID",
@@ -3332,6 +3390,8 @@ exports.getPersonTimeline = async (req, res) => {
         "isRead",
         "leadId",
         "dealId",
+        "visibility",
+        "userEmail"
       ],
       order: [["createdAt", "DESC"]],
       limit: Math.ceil(safeEmailLimit / 2),
@@ -3343,6 +3403,14 @@ exports.getPersonTimeline = async (req, res) => {
     emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
+
+    // Log visibility statistics
+    const visibilityStats = allEmails.reduce((stats, email) => {
+      const visibility = email.visibility || 'legacy';
+      stats[visibility] = (stats[visibility] || 0) + 1;
+      return stats;
+    }, {});
+    console.log(`📊 [getPersonTimeline] Email visibility stats:`, visibilityStats);
 
     // Limit final email results and add optimization metadata
     const limitedEmails = allEmails.slice(0, safeEmailLimit);
@@ -3531,6 +3599,15 @@ exports.getPersonTimeline = async (req, res) => {
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
+        // Email visibility information
+        visibilityFiltering: {
+          currentUserEmail: currentUserEmail,
+          visibilityStats: visibilityStats,
+          filterApplied: !!currentUserEmail,
+          description: currentUserEmail 
+            ? "Emails filtered by visibility - showing shared emails and private emails owned by current user"
+            : "User email not found - showing only shared emails and legacy emails"
+        }
       },
     });
   } catch (error) {
@@ -3581,11 +3658,51 @@ exports.getOrganizationTimeline = async (req, res) => {
       where: { leadOrganizationId: organizationId },
     });
 
-    // Optimized email fetching with pagination
+    // Optimized email fetching with pagination and visibility filtering
     const leadIds = leads.map((l) => l.leadId);
     const personEmails = persons.map((p) => p.email).filter(Boolean);
 
-    // Get total email count first
+    console.log(`📧 [getOrganizationTimeline] Fetching emails for organization ${organizationId} with visibility filtering`);
+    
+    // Get current user's email for visibility filtering
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { userId: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+      console.log(`👤 [getOrganizationTimeline] Current user email: ${currentUserEmail}`);
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    // Build email visibility where clause
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } } // Include emails without visibility set (legacy)
+        ]
+      };
+    } else {
+      // If no user email found, only show shared emails and emails without visibility set
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    // Get total email count first with visibility filtering
     const emailWhereConditions = [
       ...(leadIds.length > 0 ? [{ leadId: leadIds }] : []),
       ...(personEmails.length > 0
@@ -3605,15 +3722,25 @@ exports.getOrganizationTimeline = async (req, res) => {
     const totalEmailsCount =
       emailWhereConditions.length > 0
         ? await Email.count({
-            where: { [Op.or]: emailWhereConditions },
+            where: {
+              [Op.and]: [
+                { [Op.or]: emailWhereConditions },
+                emailVisibilityWhere
+              ]
+            },
           })
         : 0;
 
-    // Fetch emails with pagination and essential fields only
+    // Fetch emails with pagination, essential fields, and visibility filtering
     const emailsByLead =
       leadIds.length > 0
         ? await Email.findAll({
-            where: { leadId: leadIds },
+            where: {
+              [Op.and]: [
+                { leadId: leadIds },
+                emailVisibilityWhere
+              ]
+            },
             attributes: [
               "emailID",
               "messageId",
@@ -3628,6 +3755,8 @@ exports.getOrganizationTimeline = async (req, res) => {
               "isRead",
               "leadId",
               "dealId",
+              "visibility",
+              "userEmail"
             ],
             order: [["createdAt", "DESC"]],
             limit: Math.ceil(safeEmailLimit / 2),
@@ -3635,21 +3764,26 @@ exports.getOrganizationTimeline = async (req, res) => {
           })
         : [];
 
-    // Fetch emails where any person's email is sender or recipient
+    // Fetch emails where any person's email is sender or recipient with visibility filtering
     let emailsByAddress = [];
     if (personEmails.length > 0) {
       emailsByAddress = await Email.findAll({
         where: {
-          [Op.or]: [
-            { sender: { [Op.in]: personEmails } },
+          [Op.and]: [
             {
-              recipient: {
-                [Op.or]: personEmails.map((email) => ({
-                  [Op.like]: `%${email}%`,
-                })),
-              },
+              [Op.or]: [
+                { sender: { [Op.in]: personEmails } },
+                {
+                  recipient: {
+                    [Op.or]: personEmails.map((email) => ({
+                      [Op.like]: `%${email}%`,
+                    })),
+                  },
+                },
+              ],
             },
-          ],
+            emailVisibilityWhere
+          ]
         },
         attributes: [
           "emailID",
@@ -3665,6 +3799,8 @@ exports.getOrganizationTimeline = async (req, res) => {
           "isRead",
           "leadId",
           "dealId",
+          "visibility",
+          "userEmail"
         ],
         order: [["createdAt", "DESC"]],
         limit: Math.ceil(safeEmailLimit / 2),
@@ -3677,6 +3813,14 @@ exports.getOrganizationTimeline = async (req, res) => {
     emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
     emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
     const allEmails = Array.from(allEmailsMap.values());
+
+    // Log visibility statistics
+    const visibilityStats = allEmails.reduce((stats, email) => {
+      const visibility = email.visibility || 'legacy';
+      stats[visibility] = (stats[visibility] || 0) + 1;
+      return stats;
+    }, {});
+    console.log(`📊 [getOrganizationTimeline] Email visibility stats:`, visibilityStats);
 
     // Limit final email results and add optimization metadata
     const limitedEmails = allEmails.slice(0, safeEmailLimit);
@@ -3882,6 +4026,15 @@ exports.getOrganizationTimeline = async (req, res) => {
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
+        // Email visibility information
+        visibilityFiltering: {
+          currentUserEmail: currentUserEmail,
+          visibilityStats: visibilityStats,
+          filterApplied: !!currentUserEmail,
+          description: currentUserEmail 
+            ? "Emails filtered by visibility - showing shared emails and private emails owned by current user"
+            : "User email not found - showing only shared emails and legacy emails"
+        }
       },
     });
   } catch (error) {

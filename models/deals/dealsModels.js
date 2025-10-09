@@ -308,15 +308,33 @@ const Deal = sequelize.define(
       comment: "Current stage in the sales pipeline (replaces pipelineStage)",
     },
     proposalValueCurrency: {
-    type: DataTypes.STRING,
-    allowNull: true, // Currency for the proposal value
-    defaultValue: "INR", // Default to INR
-  },
-  valueCurrency: {
-    type: DataTypes.STRING,
-    allowNull: true, // Currency for the lead value
-    defaultValue: "INR", // Default to INR
-  },
+      type: DataTypes.STRING,
+      allowNull: true, // Currency for the proposal value
+      defaultValue: "INR", // Default to INR
+    },
+    valueCurrency: {
+      type: DataTypes.STRING,
+      allowNull: true, // Currency for the lead value
+      defaultValue: "INR", // Default to INR
+    },
+
+    // Deal conversion tracking
+    isConvertedToLead: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      defaultValue: false,
+      comment: "Flag to indicate if this deal was converted back to a lead",
+    },
+    convertedToLeadAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Date when the deal was converted back to a lead",
+    },
+    convertedToLeadBy: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "User ID who converted the deal back to a lead",
+    },
 
     // Timestamps
     createdAt: {

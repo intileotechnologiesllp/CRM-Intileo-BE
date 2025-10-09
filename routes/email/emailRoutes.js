@@ -58,6 +58,9 @@ router.post("/bulk-delete", verifyToken, validatePrivilege(4, "delete"), emailCo
 router.post("/bulk-mark", verifyToken, validatePrivilege(4, "edit"), emailController.bulkMarkEmails);
 router.post("/bulk-move", verifyToken, validatePrivilege(4, "edit"), emailController.bulkMoveEmails);
 
+// Email visibility (shared/private)
+router.post("/visibility/:emailId", verifyToken, validatePrivilege(4, "edit"), emailController.updateEmailVisibility);
+
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 
 // Gmail IMAP test routes (no auth for testing)

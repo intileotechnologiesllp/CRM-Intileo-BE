@@ -3435,6 +3435,7 @@ exports.getEmails = async (req, res) => {
     dealLinkFilter, // New filter: "linked_with_deal", "linked_with_open_deal", "not_linked_with_deal"
     contactFilter, // New filter: "from_existing_contact", "not_from_existing_contact"
     includeFullBody = "false", // New parameter to control body inclusion
+    visibility = "all", // New parameter: "all", "shared", "private"
   } = req.query;
   const masterUserID = req.adminId; // Assuming adminId is set in middleware
 
@@ -3462,9 +3463,28 @@ exports.getEmails = async (req, res) => {
       });
     }
 
+    const userEmail = userCredential.email; // Get user's email for visibility filtering
+
     let filters = {
       masterUserID,
     };
+
+    // Apply visibility filtering
+    if (visibility === "shared") {
+      filters.visibility = "shared";
+    } else if (visibility === "private") {
+      filters.visibility = "private";
+      filters.userEmail = userEmail; // Only show private emails from this user
+    } else if (visibility === "all") {
+      // Show both shared emails and private emails from this user
+      filters[Sequelize.Op.or] = [
+        { visibility: "shared" },
+        { 
+          visibility: "private",
+          userEmail: userEmail
+        }
+      ];
+    }
     // if (isShared === "true") {
     //   filters.isShared = true;
     //   if (folder) filters.folder = folder;
@@ -7252,4 +7272,68 @@ exports.checkGmailInboxCount = async (req, res) => {
     });
   }
 };
+
+// Update email visibility (shared/private)
+exports.updateEmailVisibility = async (req, res) => {
+  const { emailId } = req.params;
+  const { visibility } = req.body; // "shared" or "private"
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate visibility value
+    if (!visibility || !['shared', 'private'].includes(visibility)) {
+      return res.status(400).json({
+        message: 'Invalid visibility value. Must be "shared" or "private".'
+      });
+    }
+
+    // Get user credentials for userEmail
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+
+    if (!userCredential) {
+      return res.status(404).json({
+        message: 'User credentials not found.'
+      });
+    }
+
+    // Find the email
+    const email = await Email.findOne({
+      where: { 
+        emailID: emailId,
+        masterUserID: masterUserID 
+      }
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or you do not have permission to modify it.'
+      });
+    }
+
+    // Update visibility
+    const updateData = { 
+      visibility: visibility,
+      userEmail: userCredential.email // Always set userEmail when updating visibility
+    };
+
+    await email.update(updateData);
+
+    res.status(200).json({
+      message: `Email visibility updated to ${visibility}.`,
+      emailID: email.emailID,
+      visibility: visibility,
+      userEmail: userCredential.email
+    });
+
+  } catch (error) {
+    console.error('Error updating email visibility:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
 //hello
