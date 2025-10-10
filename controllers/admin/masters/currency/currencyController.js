@@ -484,7 +484,7 @@ exports.getcurrencys = async (req, res) => {
         total: activeCurrencies + deactivatedCurrencies
       },
       // Paginated results (filtered based on query parameters)
-      currencies: currencies.rows.map(formatCurrency),
+      currencys: currencies.rows.map(formatCurrency),
       // Separate arrays for all active and deactivated currencies
       activeCurrencies: allActiveCurrencies.map(formatCurrency),
       deactivatedCurrencies: allDeactivatedCurrencies.map(formatCurrency)
