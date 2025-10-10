@@ -222,18 +222,25 @@ exports.updateLostReason = async (req, res) => {
 /**
  * Delete lost reason
  * @route DELETE /api/lost-reasons/:id
- * @desc Delete a lost reason (soft delete by setting isActive to false)
+ * @desc Permanently delete a lost reason
  * @access Private
  */
 exports.deleteLostReason = async (req, res) => {
   try {
     const { id } = req.params;
     const masterUserID = req.adminId || req.user?.id;
-    const { hardDelete = false } = req.query;
+
+    // Validate ID
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ 
+        message: "Invalid lost reason ID provided.",
+        errors: { id: "Lost reason ID must be a valid number" }
+      });
+    }
 
     const lostReason = await LostReason.findOne({
       where: {
-        lostReasonId: id,
+        lostReasonId: parseInt(id),
         masterUserID: masterUserID // Users can only delete their own reasons
       }
     });
@@ -246,19 +253,25 @@ exports.deleteLostReason = async (req, res) => {
 
     if (lostReason.isSystemDefault) {
       return res.status(403).json({ 
-        message: "Cannot delete system default lost reasons." 
+        message: "Cannot delete system default lost reasons.",
+        errors: { systemDefault: "System default reasons are protected from deletion" }
       });
     }
 
-    if (hardDelete === 'true') {
-      await lostReason.destroy();
-      res.status(200).json({ message: "Lost reason permanently deleted." });
-    } else {
-      // Soft delete
-      lostReason.isActive = false;
-      await lostReason.save();
-      res.status(200).json({ message: "Lost reason deactivated." });
-    }
+    // Store reason details for response
+    const deletedReason = {
+      lostReasonId: lostReason.lostReasonId,
+      reason: lostReason.reason,
+      description: lostReason.description
+    };
+
+    // Permanently delete the lost reason
+    await lostReason.destroy();
+    
+    res.status(200).json({ 
+      message: "Lost reason permanently deleted.",
+      deletedReason
+    });
   } catch (error) {
     console.error("Error deleting lost reason:", error);
     res.status(500).json({ 
