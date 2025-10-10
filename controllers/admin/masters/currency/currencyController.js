@@ -447,6 +447,33 @@ exports.getcurrencys = async (req, res) => {
     const activeCurrencies = await Currency.count({ where: { isActive: true } });
     const deactivatedCurrencies = await Currency.count({ where: { isActive: false } });
 
+    // Get all active and deactivated currencies separately (without pagination for separate arrays)
+    const allActiveCurrencies = await Currency.findAll({
+      where: { isActive: true },
+      order: [['currency_desc', 'ASC']]
+    });
+
+    const allDeactivatedCurrencies = await Currency.findAll({
+      where: { isActive: false },
+      order: [['currency_desc', 'ASC']]
+    });
+
+    const formatCurrency = (currency) => ({
+      currencyId: currency.currencyId,
+      currency_desc: currency.currency_desc,
+      symbol: currency.symbol,
+      decimalPoints: currency.decimalPoints,
+      code: currency.code,
+      isActive: currency.isActive,
+      isCustom: currency.isCustom,
+      mode: currency.mode,
+      createdBy: currency.createdBy,
+      createdAt: currency.createdAt,
+      updatedAt: currency.updatedAt,
+      // For frontend compatibility (if needed)
+      fullName: currency.currency_desc
+    });
+
     res.status(200).json({
       total: currencies.count,
       pages: Math.ceil(currencies.count / limit),
@@ -456,21 +483,11 @@ exports.getcurrencys = async (req, res) => {
         deactivated: deactivatedCurrencies,
         total: activeCurrencies + deactivatedCurrencies
       },
-      currencies: currencies.rows.map((currency) => ({
-        currencyId: currency.currencyId,
-        currency_desc: currency.currency_desc,
-        symbol: currency.symbol,
-        decimalPoints: currency.decimalPoints,
-        code: currency.code,
-        isActive: currency.isActive,
-        isCustom: currency.isCustom,
-        mode: currency.mode,
-        createdBy: currency.createdBy,
-        createdAt: currency.createdAt,
-        updatedAt: currency.updatedAt,
-        // For frontend compatibility (if needed)
-        fullName: currency.currency_desc
-      })),
+      // Paginated results (filtered based on query parameters)
+      currencies: currencies.rows.map(formatCurrency),
+      // Separate arrays for all active and deactivated currencies
+      activeCurrencies: allActiveCurrencies.map(formatCurrency),
+      deactivatedCurrencies: allDeactivatedCurrencies.map(formatCurrency)
     });
   } catch (error) {
     console.error("Error fetching currencies:", error);
