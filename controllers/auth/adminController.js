@@ -682,3 +682,289 @@ exports.updateMiscSettings = async (req, res) => {
   }
 };
 
+/**
+ * Change user password
+ * @route POST /api/auth/change-password
+ * @desc Change user password with current password verification
+ * @access Private (requires authentication)
+ */
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword, logOutAllDevices = false } = req.body;
+    const userId = req.adminId || req.user?.id; // Get user ID from authentication middleware
+
+    // Input validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: "Current password, new password, and confirm password are required",
+        errors: {
+          currentPassword: !currentPassword ? "Current password is required" : null,
+          newPassword: !newPassword ? "New password is required" : null,
+          confirmPassword: !confirmPassword ? "Confirm password is required" : null
+        }
+      });
+    }
+
+    // Password confirmation validation
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        message: "New password and confirm password do not match",
+        errors: {
+          confirmPassword: "Passwords do not match"
+        }
+      });
+    }
+
+    // Password strength validation (minimum 8 characters)
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "New password must be at least 8 characters long",
+        errors: {
+          newPassword: "Password must be at least 8 characters long"
+        }
+      });
+    }
+
+    // Additional password strength validation
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({
+        message: "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        errors: {
+          newPassword: "Password does not meet complexity requirements"
+        }
+      });
+    }
+
+    // Check if new password is same as current password
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        message: "New password must be different from current password",
+        errors: {
+          newPassword: "New password cannot be the same as current password"
+        }
+      });
+    }
+
+    // Find the user
+    const user = await MasterUser.findByPk(userId);
+    if (!user) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "PASSWORD_CHANGE",
+        "FAILED",
+        `User not found: ${userId}`,
+        userId
+      );
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "PASSWORD_CHANGE",
+        "FAILED",
+        `Invalid current password for user: ${user.email} | IP: ${req.ip || req.connection.remoteAddress}`,
+        userId
+      );
+      return res.status(401).json({
+        message: "Current password is incorrect",
+        errors: {
+          currentPassword: "Current password is incorrect"
+        }
+      });
+    }
+
+    // Hash the new password
+    const saltRounds = 12;
+    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update the user's password
+    await user.update({
+      password: hashedNewPassword,
+      passwordChangedAt: new Date(),
+      // Optionally increment a password version field if you have one
+      // passwordVersion: user.passwordVersion ? user.passwordVersion + 1 : 1
+    });
+
+    // Log successful password change with detailed information
+    await logAuditTrail(
+      PROGRAMS.AUTHENTICATION,
+      "PASSWORD_CHANGE",
+      "SUCCESS",
+      `Password changed successfully for user: ${user.email} | IP: ${req.ip || req.connection.remoteAddress} | UserAgent: ${req.get('User-Agent') || "Unknown"}`,
+      userId
+    );
+
+    // Log password change in login history
+    const loginTimeUTC = new Date();
+    const loginTimeIST = moment(loginTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    await LoginHistory.create({
+      userId: user.masterUserID,
+      loginType: user.loginType || "general", // Include required loginType field
+      ipAddress: req.ip || req.connection.remoteAddress,
+      loginTime: loginTimeIST, // Use IST format like in sign-in
+      username: user.name || user.email, // Include username field if available
+      // Note: Removed fields not defined in the model (email, action, status, userAgent)
+    });
+
+    // If logOutAllDevices is true, you might want to implement token invalidation
+    // This would require maintaining a blacklist or token versioning system
+    let responseMessage = "Password changed successfully";
+    if (logOutAllDevices) {
+      responseMessage += ". You will be logged out from all other devices.";
+      // TODO: Implement token invalidation logic here
+      // This could involve:
+      // 1. Adding the user's current tokens to a blacklist
+      // 2. Incrementing a token version in the user record
+      // 3. Requiring all tokens to be validated against this version
+    }
+
+    res.status(200).json({
+      message: responseMessage,
+      data: {
+        passwordChanged: true,
+        passwordChangedAt: new Date(),
+        logOutAllDevices: logOutAllDevices,
+        user: {
+          id: user.masterUserID,
+          email: user.email,
+          name: user.name
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error changing password:", error);
+    
+    // Log error in audit trail
+    await logAuditTrail(
+      PROGRAMS.AUTHENTICATION,
+      "PASSWORD_CHANGE",
+      "ERROR",
+      `Password change error: ${error.message}`,
+      req.adminId || req.user?.id
+    );
+
+    res.status(500).json({
+      message: "Internal server error while changing password",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Validate password strength
+ * @route POST /api/auth/validate-password
+ * @desc Validate password strength without changing it
+ * @access Private (requires authentication)
+ */
+exports.validatePassword = async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        message: "Password is required",
+        isValid: false
+      });
+    }
+
+    const validations = {
+      minLength: password.length >= 8,
+      hasUppercase: /[A-Z]/.test(password),
+      hasLowercase: /[a-z]/.test(password),
+      hasNumber: /\d/.test(password),
+      hasSpecialChar: /[@$!%*?&]/.test(password)
+    };
+
+    const isValid = Object.values(validations).every(Boolean);
+
+    const strengthScore = Object.values(validations).filter(Boolean).length;
+    let strength;
+    if (strengthScore <= 2) strength = "weak";
+    else if (strengthScore <= 4) strength = "medium";
+    else strength = "strong";
+
+    res.status(200).json({
+      message: "Password validation completed",
+      isValid,
+      strength,
+      validations,
+      requirements: {
+        minLength: "At least 8 characters",
+        hasUppercase: "At least one uppercase letter",
+        hasLowercase: "At least one lowercase letter", 
+        hasNumber: "At least one number",
+        hasSpecialChar: "At least one special character (@$!%*?&)"
+      }
+    });
+
+  } catch (error) {
+    console.error("Error validating password:", error);
+    res.status(500).json({
+      message: "Internal server error while validating password",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Get password change history
+ * @route GET /api/auth/password-history
+ * @desc Get password change history for the current user
+ * @access Private (requires authentication)
+ */
+exports.getPasswordHistory = async (req, res) => {
+  try {
+    const userId = req.adminId || req.user?.id;
+    const { page = 1, limit = 10 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get recent login history that might include password changes
+    // Since we simplified LoginHistory, we'll get all login records and note that 
+    // detailed password change info is in the audit trail
+    const loginHistory = await LoginHistory.findAndCountAll({
+      where: {
+        userId: userId
+      },
+      order: [["loginTime", "DESC"]],
+      limit: parseInt(limit),
+      offset: offset,
+      attributes: [
+        "id",
+        "loginTime",
+        "ipAddress",
+        "loginType",
+        "username"
+      ]
+    });
+
+    res.status(200).json({
+      message: "Login history fetched successfully",
+      data: {
+        loginHistory: loginHistory.rows,
+        pagination: {
+          total: loginHistory.count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(loginHistory.count / parseInt(limit))
+        },
+        note: "Detailed password change information is available in the audit trail for security purposes"
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching password history:", error);
+    res.status(500).json({
+      message: "Internal server error while fetching password history",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+

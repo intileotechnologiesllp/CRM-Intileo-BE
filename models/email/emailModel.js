@@ -129,11 +129,17 @@ const Email = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true, // Allow NULL values for emails not linked to a deal
     },
-    // isShared: {
-    //   type: DataTypes.BOOLEAN,
-    //   allowNull: false,
-    //   defaultValue: false, // false = private, true = shared
-    // },
+    visibility: {
+      type: DataTypes.ENUM('shared', 'private'),
+      allowNull: false,
+      defaultValue: 'shared', // Default to shared visibility
+      comment: 'Email visibility: shared (visible to all users) or private (visible only to owner)'
+    },
+    userEmail: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'Email address of the user who owns this email (for privacy filtering)'
+    },
   },
   {
     indexes: [
