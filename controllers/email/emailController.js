@@ -3772,7 +3772,9 @@ exports.getEmails = async (req, res) => {
       "leadId",
       "dealId",
       "draftId",
-      "recipientName"
+      "recipientName",
+      "visibility",
+      "userEmail",
     ];
 
     // Fetch emails from the database
