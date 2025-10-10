@@ -76,9 +76,9 @@ exports.getLostReasons = async (req, res) => {
       ]
     };
 
-    if (!includeInactive) {
-      whereClause.isActive = true;
-    }
+    // if (!includeInactive) {
+    //   whereClause.isActive = true;
+    // }
 
     if (!includeSystem) {
       whereClause.isSystemDefault = false;
