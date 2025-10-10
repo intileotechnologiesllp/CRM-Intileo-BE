@@ -8,16 +8,84 @@ const Currency = sequelize.define("Currency", {
     autoIncrement: true, // Auto-increment the ID
   },
   currency_desc: {
-    type: DataTypes.STRING,
-    allowNull: false, // Ensure this field cannot be null
+    type: DataTypes.STRING(150),
+    allowNull: false,
     validate: {
       notNull: {
-        msg: "currency description is required", // Custom error message
+        msg: "Currency description is required",
       },
       notEmpty: {
-        msg: "currency description cannot be empty", // Custom error message
+        msg: "Currency description cannot be empty",
       },
+      len: {
+        args: [1, 150],
+        msg: "Currency description must be between 1 and 150 characters"
+      }
     },
+  },
+  symbol: {
+    type: DataTypes.STRING(15),
+    allowNull: false,
+    validate: {
+      notNull: {
+        msg: "Symbol is required",
+      },
+      notEmpty: {
+        msg: "Symbol cannot be empty",
+      },
+      len: {
+        args: [1, 15],
+        msg: "Symbol must be between 1 and 15 characters"
+      }
+    },
+  },
+  decimalPoints: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 2,
+    validate: {
+      min: {
+        args: [0],
+        msg: "Decimal points cannot be negative"
+      },
+      max: {
+        args: [10],
+        msg: "Decimal points cannot exceed 10"
+      }
+    },
+  },
+  code: {
+    type: DataTypes.STRING(10),
+    allowNull: false,
+    unique: true,
+    validate: {
+      notNull: {
+        msg: "Currency code is required",
+      },
+      notEmpty: {
+        msg: "Currency code cannot be empty",
+      }
+    },
+  },
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  isCustom: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false, // false for standard currencies, true for custom
+  },
+  // Virtual field for API consistency (alias for currency_desc)
+  fullName: {
+    type: DataTypes.VIRTUAL,
+    get() {
+      return this.currency_desc;
+    },
+    set(value) {
+      this.currency_desc = value;
+    }
   },
   createdBy: {
     type: DataTypes.STRING,
@@ -36,6 +104,24 @@ const Currency = sequelize.define("Currency", {
     allowNull: false,
     defaultValue: DataTypes.NOW, // Set default value to the current timestamp
   },
+}, {
+  tableName: 'currencies',
+  timestamps: true,
+  indexes: [
+    {
+      unique: true,
+      fields: ['code'],
+      name: 'unique_currency_code'
+    },
+    {
+      fields: ['isActive'],
+      name: 'idx_currency_active'
+    },
+    {
+      fields: ['isCustom'],
+      name: 'idx_currency_custom'
+    }
+  ]
 });
 
 module.exports = Currency;
