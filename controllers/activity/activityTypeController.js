@@ -24,7 +24,7 @@ exports.createActivityType = async (req, res) => {
 // Optionally: get all activity types (for listing)
 exports.getActivityTypes = async (req, res) => {
   try {
-    const activityTypes = await ActivityType.findAll({ where: { isActive: true } });
+    const activityTypes = await ActivityType.findAll();
     res.status(200).json({ activityTypes });
   } catch (error) {
     res.status(500).json({ message: "Internal server error" });

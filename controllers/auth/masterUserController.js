@@ -273,6 +273,9 @@ exports.getMasterUsers = async (req, res) => {
   } = req.query;
 
   try {
+    // Import LoginHistory model
+    const LoginHistory = require("../../models/reports/loginHistoryModel");
+
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
@@ -307,31 +310,119 @@ exports.getMasterUsers = async (req, res) => {
       ],
     });
 
-    // Parse the permissions field if it is a JSON string
-    const mappedUsers = rows.map((user) => {
+    // Get all active and deactive users separately (without pagination)
+    const allActiveUsers = await MasterUser.findAll({
+      where: { 
+        ...whereClause,
+        status: "active" // Assuming status field indicates active/inactive
+      },
+      include: [
+        {
+          model: MasterUserPrivileges,
+          as: "privileges",
+          required: false,
+        },
+      ],
+      order: [['name', 'ASC']]
+    });
+
+    const allDeactiveUsers = await MasterUser.findAll({
+      where: { 
+        ...whereClause,
+        status: "inactive" // Assuming status field indicates active/inactive
+      },
+      include: [
+        {
+          model: MasterUserPrivileges,
+          as: "privileges",
+          required: false,
+        },
+      ],
+      order: [['name', 'ASC']]
+    });
+
+    // Function to get last login data for a user
+    const getLastLoginData = async (userId) => {
+      try {
+        const lastLogin = await LoginHistory.findOne({
+          where: { userId: userId },
+          order: [['loginTime', 'DESC']],
+          limit: 1
+        });
+        return lastLogin ? {
+          lastLoginTime: lastLogin.loginTime,
+          lastLoginIpAddress: lastLogin.ipAddress,
+          lastLoginDuration: lastLogin.duration,
+          lastLogoutTime: lastLogin.logoutTime,
+          lastLoginLocation: {
+            latitude: lastLogin.latitude,
+            longitude: lastLogin.longitude
+          }
+        } : {
+          lastLoginTime: null,
+          lastLoginIpAddress: null,
+          lastLoginDuration: null,
+          lastLogoutTime: null,
+          lastLoginLocation: null
+        };
+      } catch (error) {
+        console.error(`Error fetching last login for user ${userId}:`, error);
+        return {
+          lastLoginTime: null,
+          lastLoginIpAddress: null,
+          lastLoginDuration: null,
+          lastLogoutTime: null,
+          lastLoginLocation: null
+        };
+      }
+    };
+
+    // Function to format user data with privileges and last login
+    const formatUserData = async (user) => {
       const privileges = user.privileges
         ? {
             ...user.privileges.toJSON(),
             permissions:
               typeof user.privileges.permissions === "string"
-                ? JSON.parse(user.privileges.permissions) // Parse JSON string
-                : user.privileges.permissions, // Use as-is if already an object
+                ? JSON.parse(user.privileges.permissions)
+                : user.privileges.permissions,
           }
-        : null; // If privileges is null, return null
+        : null;
+
+      const lastLoginData = await getLastLoginData(user.masterUserID);
 
       return {
         ...user.toJSON(),
         privileges,
+        ...lastLoginData
       };
-    });
+    };
 
-    // Return paginated response
+    // Parse the permissions field if it is a JSON string for paginated results
+    const mappedUsers = await Promise.all(rows.map(formatUserData));
+
+    // Format active users with last login data
+    const formattedActiveUsers = await Promise.all(allActiveUsers.map(formatUserData));
+
+    // Format deactive users with last login data
+    const formattedDeactiveUsers = await Promise.all(allDeactiveUsers.map(formatUserData));
+
+    // Return paginated response with separate arrays
     res.status(200).json({
       message: "Master users fetched successfully",
       totalRecords: count,
       totalPages: Math.ceil(count / limit),
       currentPage: parseInt(page),
+      counts: {
+        active: allActiveUsers.length,
+        deactive: allDeactiveUsers.length,
+        total: allActiveUsers.length + allDeactiveUsers.length
+      },
+      // Original paginated response (unchanged)
       masterUsers: mappedUsers,
+      // Separate arrays for active and deactive users
+      activeUsers: formattedActiveUsers,
+      deactiveUsers: formattedDeactiveUsers
     });
   } catch (error) {
     console.error("Error fetching master users:", error);
