@@ -442,6 +442,122 @@ exports.getActivities = async (req, res) => {
       ],
     });
 
+    // Fetch available custom fields to ensure we show columns even if no values exist
+    let availableCustomFields = {
+      activity: [],
+      lead: [],
+      deal: [],
+      person: [],
+      organization: []
+    };
+
+    // Get checked custom field names from ActivityColumnPreference
+    const checkedCustomFields = {
+      activity: [],
+      lead: [],
+      deal: [],
+      person: [],
+      organization: []
+    };
+
+    if (pref && pref.columns) {
+      const columns = typeof pref.columns === "string" ? JSON.parse(pref.columns) : pref.columns;
+      
+      // Filter custom field columns that are checked
+      columns.forEach(column => {
+        // Check if this is a custom field column (has isCustomField property)
+        if (column.check && column.isCustomField && column.key) {
+          const entityType = column.entityType ? column.entityType.toLowerCase() : null;
+          const fieldName = column.key;
+          
+          if (checkedCustomFields[entityType]) {
+            checkedCustomFields[entityType].push(fieldName);
+          }
+        }
+      });
+    }
+
+    console.log("Checked custom fields from ActivityColumnPreference:", checkedCustomFields);
+
+    // Get all available custom fields for each entity type, but filter by checked status from ActivityColumnPreference
+    const customFieldPromises = [
+      // Skip activity custom fields - we don't show them even if check=true
+      
+      CustomField.findAll({
+        where: { 
+          entityType: { [Op.in]: ['lead', 'both'] }, 
+          isActive: true
+        },
+        attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+      }).then(fields => ({ 
+        type: 'lead', 
+        fields: fields.filter(field => checkedCustomFields.lead.includes(field.fieldName))
+      })),
+      
+      // For deal custom fields, we need to check both 'deal' and 'lead' entityTypes
+      // because some fields might be stored as 'lead' but used for deals
+      CustomField.findAll({
+        where: { 
+          entityType: { [Op.in]: ['deal', 'both', 'lead'] }, 
+          isActive: true
+        },
+        attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+      }).then(fields => ({ 
+        type: 'deal', 
+        fields: fields.filter(field => checkedCustomFields.deal.includes(field.fieldName))
+      })),
+      
+      CustomField.findAll({
+        where: { 
+          entityType: { [Op.in]: ['person', 'both'] }, 
+          isActive: true
+        },
+        attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+      }).then(fields => ({ 
+        type: 'person', 
+        fields: fields.filter(field => checkedCustomFields.person.includes(field.fieldName))
+      })),
+      
+      CustomField.findAll({
+        where: { 
+          entityType: { [Op.in]: ['organization', 'both'] }, 
+          isActive: true
+        },
+        attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+      }).then(fields => ({ 
+        type: 'organization', 
+        fields: fields.filter(field => checkedCustomFields.organization.includes(field.fieldName))
+      }))
+    ];
+
+    const customFieldResults = await Promise.all(customFieldPromises);
+    
+    // Store available custom fields
+    customFieldResults.forEach(result => {
+      availableCustomFields[result.type] = result.fields;
+    });
+
+    console.log("Available checked custom fields from ActivityColumnPreference:", {
+      activity: availableCustomFields.activity.map(f => f.fieldName),
+      lead: availableCustomFields.lead.map(f => f.fieldName),
+      deal: availableCustomFields.deal.map(f => f.fieldName),
+      person: availableCustomFields.person.map(f => f.fieldName),
+      organization: availableCustomFields.organization.map(f => f.fieldName)
+    });
+
+    // Debug: Check if espl_proposal_no is in the deal custom fields
+    console.log("DEBUG: Deal custom fields details:", availableCustomFields.deal.map(f => ({
+      fieldName: f.fieldName,
+      fieldId: f.fieldId,
+      fieldLabel: f.fieldLabel
+    })));
+    
+    const esplField = availableCustomFields.deal.find(f => f.fieldName === 'espl_proposal_no');
+    console.log("DEBUG: espl_proposal_no field found in deal custom fields:", esplField ? 'YES' : 'NO');
+    if (esplField) {
+      console.log("DEBUG: espl_proposal_no field details:", esplField);
+    }
+
     // After getting activities, fetch custom field values for related entities
     let customFieldsByEntity = {};
     
@@ -456,30 +572,31 @@ exports.getActivities = async (req, res) => {
       console.log("Fetching custom fields for:", { leadIds: leadIds.length, dealIds: dealIds.length, personIds: personIds.length, organizationIds: organizationIds.length, activityIds: activityIds.length });
 
       // Fetch custom field values for all related entities in parallel
-      const customFieldPromises = [];
+      const customFieldValuePromises = [];
 
+      // Skip activity custom fields - we don't fetch them anymore
       // Activity custom fields
-      if (activityIds.length > 0) {
-        customFieldPromises.push(
-          CustomFieldValue.findAll({
-            where: {
-              entityId: { [Op.in]: activityIds.map(id => id.toString()) },
-              entityType: 'activity',
-              masterUserID: req.adminId
-            },
-            include: [{
-              model: CustomField,
-              as: 'CustomField',
-              where: { isActive: true },
-              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
-            }]
-          }).then(values => ({ type: 'activity', values }))
-        );
-      }
+      // if (activityIds.length > 0) {
+      //   customFieldValuePromises.push(
+      //     CustomFieldValue.findAll({
+      //       where: {
+      //         entityId: { [Op.in]: activityIds.map(id => id.toString()) },
+      //         entityType: 'activity',
+      //         masterUserID: req.adminId
+      //       },
+      //       include: [{
+      //         model: CustomField,
+      //         as: 'CustomField',
+      //         where: { isActive: true },
+      //         attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+      //       }]
+      //     }).then(values => ({ type: 'activity', values }))
+      //   );
+      // }
 
       // Lead custom fields
       if (leadIds.length > 0) {
-        customFieldPromises.push(
+        customFieldValuePromises.push(
           CustomFieldValue.findAll({
             where: {
               entityId: { [Op.in]: leadIds.map(id => id.toString()) },
@@ -498,7 +615,7 @@ exports.getActivities = async (req, res) => {
 
       // Deal custom fields
       if (dealIds.length > 0) {
-        customFieldPromises.push(
+        customFieldValuePromises.push(
           CustomFieldValue.findAll({
             where: {
               entityId: { [Op.in]: dealIds.map(id => id.toString()) },
@@ -517,7 +634,7 @@ exports.getActivities = async (req, res) => {
 
       // Person custom fields
       if (personIds.length > 0) {
-        customFieldPromises.push(
+        customFieldValuePromises.push(
           CustomFieldValue.findAll({
             where: {
               entityId: { [Op.in]: personIds.map(id => id.toString()) },
@@ -536,7 +653,7 @@ exports.getActivities = async (req, res) => {
 
       // Organization custom fields
       if (organizationIds.length > 0) {
-        customFieldPromises.push(
+        customFieldValuePromises.push(
           CustomFieldValue.findAll({
             where: {
               entityId: { [Op.in]: organizationIds.map(id => id.toString()) },
@@ -554,10 +671,10 @@ exports.getActivities = async (req, res) => {
       }
 
       // Wait for all custom field queries to complete
-      const customFieldResults = await Promise.all(customFieldPromises);
+      const customFieldValueResults = await Promise.all(customFieldValuePromises);
       
       // Organize custom fields by entity type and entity ID
-      customFieldResults.forEach(result => {
+      customFieldValueResults.forEach(result => {
         if (!customFieldsByEntity[result.type]) {
           customFieldsByEntity[result.type] = {};
         }
@@ -587,6 +704,20 @@ exports.getActivities = async (req, res) => {
         person: Object.keys(customFieldsByEntity.person || {}).length,
         organization: Object.keys(customFieldsByEntity.organization || {}).length
       });
+
+      // Debug: Check custom field values for deals
+      console.log("DEBUG: Deal custom field values by entity ID:", customFieldsByEntity.deal || {});
+      
+      // Check if we have any deal custom field values at all
+      const dealCustomFieldEntities = Object.keys(customFieldsByEntity.deal || {});
+      console.log("DEBUG: Deal IDs with custom field values:", dealCustomFieldEntities);
+      
+      // Check specifically for deal ID 248 if it exists
+      if (customFieldsByEntity.deal && customFieldsByEntity.deal['248']) {
+        console.log("DEBUG: Custom fields for deal 248:", customFieldsByEntity.deal['248']);
+      } else {
+        console.log("DEBUG: No custom fields found for deal 248");
+      }
     }
 
     const activitiesWithTitle = activities.map((activity) => {
@@ -636,47 +767,59 @@ exports.getActivities = async (req, res) => {
         result.email = ActivityPerson ? ActivityPerson.email : null;
       }
       
-      // Add custom fields for the activity itself
-      const activityCustomFields = customFieldsByEntity.activity?.[rest.activityId.toString()] || {};
-      Object.keys(activityCustomFields).forEach(fieldName => {
-        result[`activity_${fieldName}`] = activityCustomFields[fieldName].value;
+      // Add custom fields for the activity itself (SKIP - we don't show activity custom fields)
+      // availableCustomFields.activity.forEach(field => {
+      //   const activityCustomFields = customFieldsByEntity.activity?.[rest.activityId.toString()] || {};
+      //   result[`activity_${field.fieldName}`] = activityCustomFields[field.fieldName]?.value || null;
+      // });
+      
+      // Add custom fields from related Lead (only if activity is linked to a lead)
+      if (rest.leadId) {
+        availableCustomFields.lead.forEach(field => {
+          const leadCustomFields = customFieldsByEntity.lead?.[rest.leadId.toString()] || {};
+          result[`lead_${field.fieldName}`] = leadCustomFields[field.fieldName]?.value || null;
+        });
+      }
+      
+      // Add custom fields from related Deal (CRITICAL: Check if dealId exists first)
+      availableCustomFields.deal.forEach(field => {
+        console.log(`DEBUG: Processing deal custom field ${field.fieldName} for activity ${rest.activityId}`);
+        
+        if (rest.dealId) {
+          // Activity is linked to a deal - get actual custom field value
+          const dealCustomFields = customFieldsByEntity.deal?.[rest.dealId.toString()] || {};
+          result[`deal_cf_${field.fieldName}`] = dealCustomFields[field.fieldName]?.value || null;
+          console.log(`Activity ${rest.activityId} has dealId ${rest.dealId} - deal_cf_${field.fieldName}: ${result[`deal_cf_${field.fieldName}`]}`);
+          
+          // Special debug for espl_proposal_no
+          if (field.fieldName === 'espl_proposal_no') {
+            console.log(`DEBUG ESPL: Activity ${rest.activityId}, Deal ${rest.dealId}`);
+            console.log(`DEBUG ESPL: dealCustomFields for this deal:`, dealCustomFields);
+            console.log(`DEBUG ESPL: espl_proposal_no field exists in dealCustomFields:`, !!dealCustomFields[field.fieldName]);
+            if (dealCustomFields[field.fieldName]) {
+              console.log(`DEBUG ESPL: espl_proposal_no value:`, dealCustomFields[field.fieldName].value);
+            }
+          }
+        } else {
+          // Activity is NOT linked to a deal - show null but keep the column
+          result[`deal_cf_${field.fieldName}`] = null;
+          console.log(`Activity ${rest.activityId} has no dealId - deal_cf_${field.fieldName}: null`);
+        }
       });
       
-      // Add custom fields from related Lead
-      if (rest.leadId) {
-        const leadCustomFields = customFieldsByEntity.lead?.[rest.leadId.toString()] || {};
-        Object.keys(leadCustomFields).forEach(fieldName => {
-          result[`lead_${fieldName}`] = leadCustomFields[fieldName].value;
-        });
-        
-        // Specifically add espl_proposal_no if it exists in lead custom fields
-        if (leadCustomFields.espl_proposal_no) {
-          result.espl_proposal_no = leadCustomFields.espl_proposal_no.value;
-          console.log(`Found espl_proposal_no for activity ${rest.activityId}: ${leadCustomFields.espl_proposal_no.value}`);
-        }
-      }
-      
-      // Add custom fields from related Deal
-      if (rest.dealId) {
-        const dealCustomFields = customFieldsByEntity.deal?.[rest.dealId.toString()] || {};
-        Object.keys(dealCustomFields).forEach(fieldName => {
-          result[`deal_cf_${fieldName}`] = dealCustomFields[fieldName].value;
-        });
-      }
-      
-      // Add custom fields from related Person
+      // Add custom fields from related Person (only if activity is linked to a person)
       if (rest.personId) {
-        const personCustomFields = customFieldsByEntity.person?.[rest.personId.toString()] || {};
-        Object.keys(personCustomFields).forEach(fieldName => {
-          result[`person_${fieldName}`] = personCustomFields[fieldName].value;
+        availableCustomFields.person.forEach(field => {
+          const personCustomFields = customFieldsByEntity.person?.[rest.personId.toString()] || {};
+          result[`person_${field.fieldName}`] = personCustomFields[field.fieldName]?.value || null;
         });
       }
       
-      // Add custom fields from related Organization
+      // Add custom fields from related Organization (only if activity is linked to an organization)
       if (rest.leadOrganizationId) {
-        const orgCustomFields = customFieldsByEntity.organization?.[rest.leadOrganizationId.toString()] || {};
-        Object.keys(orgCustomFields).forEach(fieldName => {
-          result[`org_${fieldName}`] = orgCustomFields[fieldName].value;
+        availableCustomFields.organization.forEach(field => {
+          const orgCustomFields = customFieldsByEntity.organization?.[rest.leadOrganizationId.toString()] || {};
+          result[`org_${field.fieldName}`] = orgCustomFields[field.fieldName]?.value || null;
         });
       }
       
