@@ -314,7 +314,7 @@ exports.getMasterUsers = async (req, res) => {
     const allActiveUsers = await MasterUser.findAll({
       where: { 
         ...whereClause,
-        status: "active" // Assuming status field indicates active/inactive
+        isActive: true // Use isActive column instead of status
       },
       include: [
         {
@@ -326,10 +326,10 @@ exports.getMasterUsers = async (req, res) => {
       order: [['name', 'ASC']]
     });
 
-    const allDeactiveUsers = await MasterUser.findAll({
+    const allInactiveUsers = await MasterUser.findAll({
       where: { 
         ...whereClause,
-        status: "inactive" // Assuming status field indicates active/inactive
+        isActive: false // Use isActive column instead of status
       },
       include: [
         {
@@ -404,8 +404,8 @@ exports.getMasterUsers = async (req, res) => {
     // Format active users with last login data
     const formattedActiveUsers = await Promise.all(allActiveUsers.map(formatUserData));
 
-    // Format deactive users with last login data
-    const formattedDeactiveUsers = await Promise.all(allDeactiveUsers.map(formatUserData));
+    // Format inactive users with last login data
+    const formattedInactiveUsers = await Promise.all(allInactiveUsers.map(formatUserData));
 
     // Return paginated response with separate arrays
     res.status(200).json({
@@ -415,14 +415,14 @@ exports.getMasterUsers = async (req, res) => {
       currentPage: parseInt(page),
       counts: {
         active: allActiveUsers.length,
-        deactive: allDeactiveUsers.length,
-        total: allActiveUsers.length + allDeactiveUsers.length
+        inactive: allInactiveUsers.length,
+        total: allActiveUsers.length + allInactiveUsers.length
       },
       // Original paginated response (unchanged)
       masterUsers: mappedUsers,
-      // Separate arrays for active and deactive users
+      // Separate arrays for active and inactive users based on isActive column
       activeUsers: formattedActiveUsers,
-      deactiveUsers: formattedDeactiveUsers
+      inactiveUsers: formattedInactiveUsers
     });
   } catch (error) {
     console.error("Error fetching master users:", error);
