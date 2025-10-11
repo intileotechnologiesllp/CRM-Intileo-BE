@@ -27,6 +27,12 @@ const LeadFilter = sequelize.define("LeadFilter", {
     type: DataTypes.JSON, // Optional: store selected columns
     allowNull: true,
   },
+  filterEntityType: {
+    type: DataTypes.ENUM('lead', 'deal', 'person', 'organization', 'activity'),
+    allowNull: false,
+    defaultValue: 'lead',
+    comment: 'Indicates which entity type this filter is designed for'
+  },
 });
 
 module.exports = LeadFilter;

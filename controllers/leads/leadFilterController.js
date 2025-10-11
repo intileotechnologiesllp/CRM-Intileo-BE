@@ -14,6 +14,7 @@ exports.saveLeadFilter = async (req, res) => {
     filterConfig,
     visibility = "Private",
     columns,
+    filterEntityType = "lead", // New parameter with default value
   } = req.body;
   const masterUserID = req.adminId; // or req.user.id
 
@@ -22,6 +23,17 @@ exports.saveLeadFilter = async (req, res) => {
       .status(400)
       .json({ message: "filterName and filterConfig are required." });
   }
+
+  // Validate filterEntityType
+  const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+  if (!validEntityTypes.includes(filterEntityType)) {
+    return res
+      .status(400)
+      .json({ 
+        message: `Invalid filterEntityType. Must be one of: ${validEntityTypes.join(', ')}` 
+      });
+  }
+
   try {
     const filter = await LeadFilter.create({
       filterName,
@@ -29,8 +41,23 @@ exports.saveLeadFilter = async (req, res) => {
       visibility,
       masterUserID,
       columns,
+      filterEntityType, // Add the new field
     });
-    res.status(201).json({ message: "Filter saved successfully", filter });
+    
+    res.status(201).json({ 
+      message: "Filter saved successfully", 
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        visibility: filter.visibility,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        filterEntityType: filter.filterEntityType,
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      }
+    });
   } catch (error) {
     console.error("Error saving filter:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -38,7 +65,7 @@ exports.saveLeadFilter = async (req, res) => {
 };
 exports.getLeadFilters = async (req, res) => {
   const masterUserID = req.adminId; // or req.user.id
-  const { entityType } = req.query; // 'Lead' or 'Deal'
+  const { entityType, filterEntityType } = req.query; // Added filterEntityType parameter
   try {
     let filters;
 
@@ -57,7 +84,12 @@ exports.getLeadFilters = async (req, res) => {
       });
     }
 
-    // Filter by entityType if provided
+    // Filter by filterEntityType if provided (new filtering option)
+    if (filterEntityType) {
+      filters = filters.filter(f => f.filterEntityType === filterEntityType);
+    }
+
+    // Filter by entityType if provided (legacy filtering based on filterConfig)
     let filtered = filters;
     if (entityType) {
       filtered = filters.filter((f) => {
@@ -72,7 +104,11 @@ exports.getLeadFilters = async (req, res) => {
       });
     }
 
-    res.status(200).json({ filters: filtered });
+    res.status(200).json({ 
+      filters: filtered,
+      totalFilters: filtered.length,
+      availableEntityTypes: ['lead', 'deal', 'person', 'organization', 'activity']
+    });
   } catch (error) {
     console.error("Error fetching filters:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -266,7 +302,7 @@ function buildCondition(cond) {
 }
 exports.updateLeadFilter = async (req, res) => {
   const { filterId } = req.params;
-  const { filterName, filterConfig, visibility, columns } = req.body;
+  const { filterName, filterConfig, visibility, columns, filterEntityType } = req.body;
   const masterUserID = req.adminId; // or req.user.id
 
   try {
@@ -283,15 +319,41 @@ exports.updateLeadFilter = async (req, res) => {
         .json({ message: "You are not allowed to edit this filter." });
     }
 
+    // Validate filterEntityType if provided
+    if (filterEntityType) {
+      const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+      if (!validEntityTypes.includes(filterEntityType)) {
+        return res
+          .status(400)
+          .json({ 
+            message: `Invalid filterEntityType. Must be one of: ${validEntityTypes.join(', ')}` 
+          });
+      }
+    }
+
     // Update fields if provided
     if (filterName !== undefined) filter.filterName = filterName;
     if (filterConfig !== undefined) filter.filterConfig = filterConfig;
     if (visibility !== undefined) filter.visibility = visibility;
     if (columns !== undefined) filter.columns = columns;
+    if (filterEntityType !== undefined) filter.filterEntityType = filterEntityType; // Add the new field
 
     await filter.save();
 
-    res.status(200).json({ message: "Filter updated successfully", filter });
+    res.status(200).json({ 
+      message: "Filter updated successfully", 
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        visibility: filter.visibility,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        filterEntityType: filter.filterEntityType,
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      }
+    });
   } catch (error) {
     console.error("Error updating filter:", error);
     res.status(500).json({ message: "Internal server error" });
