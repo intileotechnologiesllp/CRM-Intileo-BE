@@ -1512,7 +1512,7 @@ exports.createGoal = async (req, res) => {
           const isFutureMonth = monthStart > currentDate;
 
           // Calculate actual results for this month period
-          const { result, recordCount } = await calculatePeriodResults(
+          const { result, recordCount, records } = await calculatePeriodResults(
             actualMonthStart, 
             actualMonthEnd, 
             entity, 
@@ -1529,6 +1529,26 @@ exports.createGoal = async (req, res) => {
           const difference = result - periodTarget;
           const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
+           function flattenObject(obj, parentKey = "", res = {}) {
+            for (let key in obj) {
+              const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+              if (
+                typeof obj[key] === "object" &&
+                obj[key] !== null &&
+                !Array.isArray(obj[key])
+              ) {
+                flattenObject(obj[key], newKey, res);
+              } else {
+                res[newKey] = obj[key];
+              }
+            }
+            return res;
+          }
+
+          const flattened = JSON.parse(JSON.stringify(records, null, 2)).map((item) =>
+            flattenObject(item)
+          );
           breakdown.push({
             period: monthName,
             goal: periodTarget,
@@ -1538,6 +1558,7 @@ exports.createGoal = async (req, res) => {
             monthStart: actualMonthStart.toISOString(),
             monthEnd: actualMonthEnd.toISOString(),
             recordCount: recordCount,
+            records: flattened,
             isCurrentMonth: isCurrentMonth,
             isFutureMonth: isFutureMonth
           });
@@ -1807,6 +1828,7 @@ exports.createGoal = async (req, res) => {
             } else {
               result = recordCount;
             }
+            records = addedDeals;
           } else if (goalType === "Won") {
             const wonWhereClause = {
               ...whereClause,
@@ -1821,6 +1843,7 @@ exports.createGoal = async (req, res) => {
             } else {
               result = recordCount;
             }
+            records = wonDeals;
           } else if (goalType === "Progressed") {
             // Use DealStageHistory for progressed goals
             const stageWhere = {
@@ -1857,6 +1880,7 @@ exports.createGoal = async (req, res) => {
               } else {
                 result = recordCount;
               }
+              records = progressedDeals;
             }
           }
         } else if (entity === "Activity") {
@@ -1880,13 +1904,14 @@ exports.createGoal = async (req, res) => {
           const activities = await Activity.findAll({ where: activityWhereClause });
           recordCount = activities.length;
           result = recordCount;
+          records = activities;
         }
       } catch (error) {
         console.error(`Error calculating results for period ${periodStart} to ${periodEnd}:`, error);
         // Continue with default values if there's an error
       }
 
-      return { result, recordCount };
+      return { result, recordCount, records };
     };
 
     // Generate config with breakdown and filters
@@ -3826,16 +3851,19 @@ async function processGoalData(goal, ownerId, periodFilter) {
       activityWhereClause.isDone = true;
     }
 
+    const tableName = Activity
+    const columnNames = Object.keys(tableName.rawAttributes);
     const activities = await Activity.findAll({
       where: activityWhereClause,
       attributes: [
-        "activityId",
-        "type",
-        "subject",
-        "isDone",
-        "createdAt",
-        "assignedTo",
-        "markedAsDoneTime",
+        ...columnNames
+        // "activityId",
+        // "type",
+        // "subject",
+        // "isDone",
+        // "createdAt",
+        // "assignedTo",
+        // "markedAsDoneTime",
       ],
       order: [["createdAt", "DESC"]],
       include: [
@@ -4001,9 +4029,30 @@ async function processGoalData(goal, ownerId, periodFilter) {
       : "expired",
   };
 
+   function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey =  key; 
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(data, null, 2)).map((item) =>
+    flattenObject(item)
+  );
+  console.log(flattened.length, data.length)
   return {
     goal: goal.toJSON(),
-    records: data,
+    records: flattened,
     summary: summary,
     monthlyBreakdown: breakdown,
     period: { startDate: start, endDate: end },
@@ -6145,18 +6194,21 @@ async function generateGoalBreakdownData(
       }
 
       if (goalType === "Added") {
+        const tableName = Activity
+        const columnNames = Object.keys(tableName.rawAttributes);
         const addedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "createdAt",
-            "assignedTo",
-            "markedAsDoneTime",
+            ...columnNames
+            // "activityId",
+            // "type",
+            // "isDone",
+            // "masterUserID",
+            // "dealId",
+            // "createdAt",
+            // "assignedTo",
+            // "markedAsDoneTime",
           ],
           include: [
             {
@@ -6205,19 +6257,21 @@ async function generateGoalBreakdownData(
               );
       } else if (goalType === "Completed") {
         activityWhereClause.isDone = true;
-
+        const tableName = Activity
+        const columnNames = Object.keys(tableName.rawAttributes);
         const completedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            "activityId",
-            "type",
-            "isDone",
-            "masterUserID",
-            "dealId",
-            "updatedAt",
-            "assignedTo",
-            "markedAsDoneTime",
+            ...columnNames
+            // "activityId",
+            // "type",
+            // "isDone",
+            // "masterUserID",
+            // "dealId",
+            // "updatedAt",
+            // "assignedTo",
+            // "markedAsDoneTime",
           ],
           include: [
             {
@@ -6547,6 +6601,7 @@ function generateMonthlyBreakdown(
       return recordDate >= monthStart && recordDate <= monthEnd;
     });
 
+    console.log(monthRecords, "This is the Records");
     // Calculate result based on tracking metric and entity type
     let monthResult = 0;
     if (entityType === "Deal" && trackingMetric === "Value") {
@@ -6582,6 +6637,26 @@ function generateMonthlyBreakdown(
       monthNames[currentMonth.getMonth()]
     } ${currentMonth.getFullYear()}`;
 
+     function flattenObject(obj, parentKey = "", res = {}) {
+      for (let key in obj) {
+        const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+        if (
+          typeof obj[key] === "object" &&
+          obj[key] !== null &&
+          !Array.isArray(obj[key])
+        ) {
+          flattenObject(obj[key], newKey, res);
+        } else {
+          res[newKey] = obj[key];
+        }
+      }
+      return res;
+    }
+
+    const flattened = JSON.parse(JSON.stringify(monthRecords, null, 2)).map((item) =>
+      flattenObject(item)
+    );
     monthlyBreakdown.push({
       period: periodDisplay,
       goal: monthlyTarget,
@@ -6591,6 +6666,8 @@ function generateMonthlyBreakdown(
       monthStart: monthStart.toISOString(),
       monthEnd: monthEnd.toISOString(),
       recordCount: monthRecords.length,
+      records: flattened,
+      monthRecords: monthRecords,
       isCurrentMonth:
         currentMonth.getMonth() === currentDate.getMonth() &&
         currentMonth.getFullYear() === currentDate.getFullYear(),
@@ -6875,6 +6952,26 @@ function generateQuarterlyBreakdown(
     const isCurrentQuarter =
       currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
 
+       function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(quarterRecords, null, 2)).map((item) =>
+    flattenObject(item)
+  );
     quarterlyBreakdown.push({
       period: periodDisplay,
       goal: quarterlyTarget, // Keep the actual quarterly target
@@ -6884,6 +6981,7 @@ function generateQuarterlyBreakdown(
       quarterStart: quarterStart.toISOString(),
       quarterEnd: quarterEndAdjusted.toISOString(),
       recordCount: quarterRecords.length,
+      records: flattened,
       isCurrentQuarter: isCurrentQuarter,
       isFutureQuarter: currentQuarterStart > now,
       quarterNumber: quarterNumber,
@@ -7026,6 +7124,26 @@ function generateWeeklyBreakdown(
     const isCurrentWeek =
       currentWeekStart.getTime() === currentWeekStart_check.getTime();
 
+       function flattenObject(obj, parentKey = "", res = {}) {
+    for (let key in obj) {
+      const newKey = parentKey ? `${parentKey}_${key}` : key;
+
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        flattenObject(obj[key], newKey, res);
+      } else {
+        res[newKey] = obj[key];
+      }
+    }
+    return res;
+  }
+
+  const flattened = JSON.parse(JSON.stringify(weekRecords, null, 2)).map((item) =>
+    flattenObject(item)
+  );
     weeklyBreakdown.push({
       period: periodDisplay,
       goal: weeklyTarget, // Keep the actual weekly target (with decimals)
@@ -7035,6 +7153,7 @@ function generateWeeklyBreakdown(
       weekStart: weekStart.toISOString(),
       weekEnd: weekEnd.toISOString(),
       recordCount: weekRecords.length,
+      records: flattened,
       isCurrentWeek: isCurrentWeek,
       isFutureWeek: currentWeekStart > currentDate,
       weekNumber: weekNumber,

@@ -18,6 +18,7 @@ const Report = require("./insight/reportModel");
 const Goal = require("./insight/goalModel");
 const GroupVisibility = require("../models/admin/groupVisibilityModel");
 const LeadOrganization = require("./leads/leadOrganizationModel");
+const DeviceActivity = require("./deviceActivity/deviceActivity");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -205,4 +206,5 @@ module.exports = {
   Dashboard,
   Report,
   Goal,
+  DeviceActivity
 };
