@@ -1593,10 +1593,11 @@ exports.getLeads = async (req, res) => {
         // Debug: Show all custom fields in the database
         const allCustomFields = await CustomField.findAll({
           where: {
+            // Removed masterUserID restriction - show all custom fields
             [Op.or]: [
-              { masterUserID: req.adminId },
               { fieldSource: "default" },
               { fieldSource: "system" },
+              { fieldSource: "custom" },
             ],
           },
           attributes: [
@@ -2592,10 +2593,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
         where: {
           fieldName: cond.field,
           isActive: true,
+          // Removed masterUserID restriction - allow access to all custom fields
           [Op.or]: [
-            { masterUserID: masterUserID },
             { fieldSource: "default" },
             { fieldSource: "system" },
+            { fieldSource: "custom" },
           ],
         },
       });
@@ -2606,10 +2608,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
           where: {
             fieldId: cond.field,
             isActive: true,
+            // Removed masterUserID restriction - allow access to all custom fields
             [Op.or]: [
-              { masterUserID: masterUserID },
               { fieldSource: "default" },
               { fieldSource: "system" },
+              { fieldSource: "custom" },
             ],
           },
         });
@@ -2659,10 +2662,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
         where: {
           fieldName: cond.field,
           isActive: true,
+          // Removed masterUserID restriction - allow access to all custom fields
           [Op.or]: [
-            { masterUserID: masterUserID },
             { fieldSource: "default" },
             { fieldSource: "system" },
+            { fieldSource: "custom" },
           ],
         },
       });
@@ -2673,10 +2677,11 @@ async function buildCustomFieldFilters(customFieldsConditions, masterUserID) {
           where: {
             fieldId: cond.field,
             isActive: true,
+            // Removed masterUserID restriction - allow access to all custom fields
             [Op.or]: [
-              { masterUserID: masterUserID },
               { fieldSource: "default" },
               { fieldSource: "system" },
+              { fieldSource: "custom" },
             ],
           },
         });
