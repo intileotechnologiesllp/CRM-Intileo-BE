@@ -145,8 +145,9 @@ const GroupVisibility = require("../../models/admin/groupVisibilityModel.js")
 // };
 
 exports.signIn = async (req, res) => {
-  const { email, password, longitude, latitude, ipAddress } = req.body;
+  const { email, password,systemInfo,device ,longitude, latitude, ipAddress } = req.body;
 
+  const locationInfo = systemInfo?.approximateLocation
   try {
     // Check if the user exists
     const user = await MasterUser.findOne({ where: { email } });
@@ -229,11 +230,14 @@ exports.signIn = async (req, res) => {
       userId: user.masterUserID,
       loginType: user.loginType,
       ipAddress: ipAddress || null,
-      longitude: longitude || null,
-      latitude: latitude || null,
+      longitude: locationInfo?.longitude || null,
+      latitude: locationInfo?.latitude || null,
       loginTime: loginTimeIST,
       username: user.name,
       totalSessionDuration, // Save updated totalSessionDuration
+      isActive: true,
+      device: device,
+      location: `${locationInfo?.city}, ${locationInfo?.country}` || null
     });
 
     // Delete any existing records for the user in RecentLoginHistory
@@ -250,7 +254,8 @@ exports.signIn = async (req, res) => {
       latitude: latitude || null,
       loginTime: loginTimeIST,
       username: user.name,
-      totalSessionDuration, // Save updated totalSessionDuration
+      totalSessionDuration,
+       // Save updated totalSessionDuration
     });
 
     // Fetch user's groups
@@ -557,6 +562,7 @@ exports.logout = async (req, res) => {
       logoutTime: logoutTimeIST, // Store logout time in IST
       duration: currentSessionDuration, // Save current session duration
       totalSessionDuration, // Save updated total session duration
+      isActive: false
     });
 
     // Update the RecentLoginHistory record
@@ -597,6 +603,24 @@ exports.getLoginHistory = async (req, res) => {
     if (!loginHistory || loginHistory.length === 0) {
       return res.status(404).json({ message: "No login history found" });
     }
+
+    res.status(200).json({
+      message: "Login history fetched successfully",
+      loginHistory,
+    });
+  } catch (error) {
+    console.error("Error fetching login history:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getAllLoginHistory = async (req, res) => {
+  const { userId } = req.params; // Get userId from query parameters
+
+  try {
+    // Fetch login history for the specified user or all users
+    const loginHistory = await LoginHistory.findAll({
+      order: [["loginTime", "DESC"]], // Sort by login time in descending order
+    });
 
     res.status(200).json({
       message: "Login history fetched successfully",
