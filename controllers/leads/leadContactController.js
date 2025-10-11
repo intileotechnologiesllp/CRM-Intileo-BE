@@ -4044,39 +4044,109 @@ exports.getOrganizationTimeline = async (req, res) => {
 };
 exports.getPersonFields = async (req, res) => {
   try {
-    // You can customize or fetch this list from your model or config if needed
-    const fields = [
-      { value: "contactPerson", label: "Name" },
-      // { key: "firstName", label: "First name" },
-      // { key: "lastName", label: "Last name" },
-      { value: "email", label: "Email" },
-      { value: "phone", label: "Phone" },
-      { value: "jobTitle", label: "Job title" },
-      { value: "birthday", label: "Birthday" },
-      { value: "personLabels", label: "Labels" },
-      { value: "organization", label: "Organization" },
-      // { value: "owner", label: "Owner" },
-      // { value: "notes", label: "Notes" },
-      { value: "postalAddress", label: "Postal address" },
-      // { value: "postalAddressDetails", label: "Postal address (details)" },
-      // { value: "visibleTo", label: "Visible to" },
-      { value: "createdAt", label: "Person created" },
-      { value: "updatedAt", label: "Update time" },
-      // { key: "activitiesToDo", label: "Activities to do" },
-      // { key: "doneActivities", label: "Done activities" },
-      // { key: "closedDeals", label: "Closed deals" },
-      // { key: "openDeals", label: "Open deals" },
-      // { key: "wonDeals", label: "Won deals" },
-      // { key: "lostDeals", label: "Lost deals" },
-      // { key: "totalActivities", label: "Total activities" },
-      // { key: "lastActivityDate", label: "Last activity date" },
-      // { key: "nextActivityDate", label: "Next activity date" },
-      // { key: "lastEmailReceived", label: "Last email received" },
-      // { key: "lastEmailSent", label: "Last email sent" },
-      // { key: "emailMessagesCount", label: "Email messages count" },
-      // { key: "instantMessenger", label: "Instant messenger" },
-    ];
-    res.status(200).json({ fields });
+    const Person = require("../../models/leads/leadPersonModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Helper function to convert field type to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType) return 'text';
+      
+      const typeString = sequelizeType.toString().toLowerCase();
+      
+      if (typeString.includes('integer') || typeString.includes('bigint') || typeString.includes('decimal') || typeString.includes('float') || typeString.includes('double')) {
+        return 'number';
+      } else if (typeString.includes('boolean')) {
+        return 'boolean';
+      } else if (typeString.includes('date') || typeString.includes('time')) {
+        return 'date';
+      } else if (typeString.includes('json')) {
+        return 'json';
+      } else if (typeString.includes('enum')) {
+        return 'select';
+      } else {
+        return 'text';
+      }
+    };
+
+    // Helper function to generate label from field name
+    const generateLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/\s+/g, ' ') // Clean up multiple spaces
+        .trim();
+    };
+
+    // Get all Person model fields
+    const personFields = Object.keys(Person.rawAttributes);
+    
+    // Convert Person model fields to the required format
+    const fields = personFields.map(fieldName => {
+      const fieldInfo = Person.rawAttributes[fieldName];
+      return {
+        value: fieldName,
+        label: generateLabel(fieldName),
+        type: getFieldType(fieldInfo.type),
+        isStandard: true
+      };
+    });
+
+    // Fetch custom fields for Person entity
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["person", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName", 
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    }
+
+    // Add custom fields to the fields array
+    const customFieldsFormatted = customFields.map(field => ({
+      value: field.fieldName,
+      label: field.fieldLabel || generateLabel(field.fieldName),
+      type: field.fieldType || 'text',
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType
+    }));
+
+    // Combine standard and custom fields
+    const allFields = [...fields, ...customFieldsFormatted];
+
+    res.status(200).json({ 
+      fields: allFields,
+      standardFieldsCount: fields.length,
+      customFieldsCount: customFields.length,
+      totalFieldsCount: allFields.length,
+      message: "Person fields fetched successfully"
+    });
   } catch (error) {
     console.error("Error fetching person fields:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -4085,31 +4155,109 @@ exports.getPersonFields = async (req, res) => {
 
 exports.getOrganizationFields = async (req, res) => {
   try {
-    const fields = [
-      { value: "organization", label: "Organization name" },
-      { value: "organizationLabels", label: "Labels" },
-      { value: "address", label: "Address" },
-      // { value: "addressDetails", label: "Address (details)" },
-      // { value: "visibleTo", label: "Visible to" },
-      { value: "createdAt", label: "Organization created" },
-      { value: "updatedAt", label: "Update time" },
-      { value: "ownerId", label: "Owner" },
-      // { key: "people", label: "People" },
-      // { key: "notes", label: "Notes" },
-      // { key: "activitiesToDo", label: "Activities to do" },
-      // { key: "doneActivities", label: "Done activities" },
-      // { key: "closedDeals", label: "Closed deals" },
-      // { key: "openDeals", label: "Open deals" },
-      // { key: "wonDeals", label: "Won deals" },
-      // { key: "lostDeals", label: "Lost deals" },
-      // { key: "totalActivities", label: "Total activities" },
-      // { key: "lastActivityDate", label: "Last activity date" },
-      // { key: "nextActivityDate", label: "Next activity date" },
-      // { key: "lastEmailReceived", label: "Last email received" },
-      // { key: "lastEmailSent", label: "Last email sent" },
-      // { key: "emailMessagesCount", label: "Email messages count" },
-    ];
-    res.status(200).json({ fields });
+    const Organization = require("../../models/leads/leadOrganizationModel");
+    const CustomField = require("../../models/customFieldModel");
+    const { Op } = require("sequelize");
+
+    // Helper function to convert field type to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType) return 'text';
+      
+      const typeString = sequelizeType.toString().toLowerCase();
+      
+      if (typeString.includes('integer') || typeString.includes('bigint') || typeString.includes('decimal') || typeString.includes('float') || typeString.includes('double')) {
+        return 'number';
+      } else if (typeString.includes('boolean')) {
+        return 'boolean';
+      } else if (typeString.includes('date') || typeString.includes('time')) {
+        return 'date';
+      } else if (typeString.includes('json')) {
+        return 'json';
+      } else if (typeString.includes('enum')) {
+        return 'select';
+      } else {
+        return 'text';
+      }
+    };
+
+    // Helper function to generate label from field name
+    const generateLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/\s+/g, ' ') // Clean up multiple spaces
+        .trim();
+    };
+
+    // Get all Organization model fields
+    const organizationFields = Object.keys(Organization.rawAttributes);
+    
+    // Convert Organization model fields to the required format
+    const fields = organizationFields.map(fieldName => {
+      const fieldInfo = Organization.rawAttributes[fieldName];
+      return {
+        value: fieldName,
+        label: generateLabel(fieldName),
+        type: getFieldType(fieldInfo.type),
+        isStandard: true
+      };
+    });
+
+    // Fetch custom fields for Organization entity
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["organization", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName", 
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    }
+
+    // Add custom fields to the fields array
+    const customFieldsFormatted = customFields.map(field => ({
+      value: field.fieldName,
+      label: field.fieldLabel || generateLabel(field.fieldName),
+      type: field.fieldType || 'text',
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType
+    }));
+
+    // Combine standard and custom fields
+    const allFields = [...fields, ...customFieldsFormatted];
+
+    res.status(200).json({ 
+      fields: allFields,
+      standardFieldsCount: fields.length,
+      customFieldsCount: customFields.length,
+      totalFieldsCount: allFields.length,
+      message: "Organization fields fetched successfully"
+    });
   } catch (error) {
     console.error("Error fetching organization fields:", error);
     res.status(500).json({ message: "Internal server error" });

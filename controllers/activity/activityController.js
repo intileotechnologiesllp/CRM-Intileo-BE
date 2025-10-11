@@ -2738,51 +2738,113 @@ exports.bulkReassignActivities = async (req, res) => {
 
 exports.getActivityFilterFields = async (req, res) => {
   try {
+    // Helper function to convert field type to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType) return 'text';
+      
+      const typeString = sequelizeType.toString().toLowerCase();
+      
+      if (typeString.includes('integer') || typeString.includes('bigint') || typeString.includes('decimal') || typeString.includes('float') || typeString.includes('double')) {
+        return 'number';
+      } else if (typeString.includes('boolean')) {
+        return 'boolean';
+      } else if (typeString.includes('date') || typeString.includes('time')) {
+        return 'date';
+      } else if (typeString.includes('json')) {
+        return 'json';
+      } else if (typeString.includes('enum')) {
+        return 'select';
+      } else {
+        return 'text';
+      }
+    };
+
+    // Helper function to generate label from field name
+    const generateLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/\s+/g, ' ') // Clean up multiple spaces
+        .trim();
+    };
+
+    // Get all Activity model fields
     const activityFields = Object.keys(Activity.rawAttributes);
+    
+    // Convert Activity model fields to the required format
+    const fields = activityFields.map(fieldName => {
+      const fieldInfo = Activity.rawAttributes[fieldName];
+      return {
+        value: fieldName,
+        label: generateLabel(fieldName),
+        type: getFieldType(fieldInfo.type),
+        isStandard: true,
+        entity: 'activity'
+      };
+    });
 
-    // Exclude ID fields
-    const filteredFields = activityFields.filter(
-      (field) => !field.toLowerCase().endsWith("id")
-    );
+    // Fetch custom fields for Activity entity
+    let customFields = [];
+    if (req.adminId) {
+      try {
+        customFields = await CustomField.findAll({
+          where: {
+            entityType: { [Op.in]: ["activity", "both"] },
+            isActive: true,
+            [Op.or]: [
+              { masterUserID: req.adminId },
+              { fieldSource: "default" },
+              { fieldSource: "system" },
+              { fieldSource: "custom" },
+            ],
+          },
+          attributes: [
+            "fieldId",
+            "fieldName", 
+            "fieldLabel",
+            "fieldType",
+            "isRequired",
+            "isImportant",
+            "fieldSource",
+            "entityType",
+          ],
+          order: [["fieldName", "ASC"]],
+        });
+      } catch (customFieldError) {
+        console.error("Error fetching custom fields:", customFieldError);
+      }
+    }
 
-    // Predefined fields with labels
-    const predefinedFields = [
-      { value: "dueDate", label: "Due Date" },
-      { value: "priority", label: "Priority" },
-      { value: "subject", label: "Subject" },
-      { value: "type", label: "Type" },
-      { value: "organization", label: "Organization" },
-      { value: "contactPerson", label: "Contact Person" },
-      { value: "email", label: "Email" },
-      { value: "description", label: "Description" },
-      { value: "status", label: "Status" },
-      { value: "notes", label: "Notes" },
-      { value: "isDone", label: "Is Done" },
-    ];
+    // Add custom fields to the fields array
+    const customFieldsFormatted = customFields.map(field => ({
+      value: field.fieldName,
+      label: field.fieldLabel || generateLabel(field.fieldName),
+      type: field.fieldType || 'text',
+      isCustomField: true,
+      fieldId: field.fieldId,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      fieldSource: field.fieldSource,
+      entityType: field.entityType,
+      entity: 'activity'
+    }));
 
-    // Combine predefined fields with dynamically fetched fields
-    const combinedFields = [
-      ...predefinedFields,
-      ...filteredFields.map((field) => ({
-        value: field,
-        label: field
-          .replace(/([A-Z])/g, " $1")
-          .replace(/^./, (str) => str.toUpperCase()),
-      })),
-    ];
+    // Combine standard and custom fields
+    const allFields = [...fields, ...customFieldsFormatted];
 
-    // Remove duplicate fields
-    const uniqueFields = combinedFields.filter(
-      (field, index, self) =>
-        index === self.findIndex((f) => f.value === field.value)
-    );
-
-    res.status(200).json({ fields: uniqueFields });
+    res.status(200).json({ 
+      fields: allFields,
+      standardFieldsCount: fields.length,
+      customFieldsCount: customFields.length,
+      totalFieldsCount: allFields.length,
+      message: "Activity filter fields fetched successfully"
+    });
   } catch (error) {
-    console.error("Error fetching activity fields:", error);
-    res
-      .status(500)
-      .json({ message: "Internal server error", error: error.message });
+    console.error("Error fetching activity filter fields:", error);
+    res.status(500).json({ 
+      message: "Internal server error", 
+      error: error.message 
+    });
   }
 };
 

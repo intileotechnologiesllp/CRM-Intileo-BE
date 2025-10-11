@@ -1,5 +1,6 @@
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const Lead = require("../../models/leads/leadsModel");
+const CustomField = require("../../models/customFieldModel");
 const { Op } = require("sequelize"); // Import Sequelize operators
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
@@ -296,57 +297,138 @@ exports.updateLeadFilter = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-exports.getLeadFields = (req, res) => {
-  const fields = [
-    { value: "contactPerson", label: "Contact person" },
-    { value: "organization", label: "Organization" },
-    { value: "title", label: "Title" },
-    { value: "valueLabels", label: "Value Labels" },
-    { value: "expectedCloseDate", label: "Expected Close Date" },
-    { value: "sourceChannel", label: "Source channel" },
-    { value: "sourceChannelID", label: "Source channel ID" },
-    { value: "serviceType", label: "Service Type" },
-    { value: "scopeOfServiceType", label: "Scope of Service Type" },
-    { value: "phone", label: "Person phone" },
-    { value: "email", label: "Email" },
-    { value: "company", label: "Company" },
-    { value: "proposalValue", label: "Proposal Value" },
-    { value: "esplProposalNo", label: "ESPL Proposal No." },
-    { value: "projectLocation", label: "Project Location" },
-    { value: "organizationCountry", label: "Organization Country" },
-    { value: "proposalSentDate", label: "Proposal Sent Date" },
-    { value: "status", label: "Status" },
-    { value: "ownerId", label: "Owner" },
-    { value: "createdAt", label: "Lead created" },
-    { value: "updatedAt", label: "Last updated" },
-    // Add any custom/virtual fields below
-    { value: "masterUserID", label: "Creator" },
-    { value: "currency", label: "Currency" },
-    { value: "nextActivityDate", label: "Next activity date" },
-    { value: "nextActivityStatus", label: "Next activity status" },
-    {
-      value: "reportsPrepared",
-      label: "No. of reports prepared for the project",
-    },
-    { value: "organizationName", label: "Organization name" },
-    { value: "seen", label: "Seen" },
-    { value: "questionerShared", label: "Questioner Shared?" },
-    { value: "responsiblePerson", label: "Responsible Person" },
-    { value: "rfpReceivedDate", label: "RFP received Date" },
-    { value: "sbuClass", label: "SBU Class" },
-    { value: "sectoralSector", label: "Sectoral Sector" },
-    { value: "source", label: "Source" },
-    { value: "sourceOrigin", label: "Source origin" },
-    { value: "sourceOriginID", label: "Source origin ID" },
-    { value: "statusSummery", label: "Status Summery" },
-    { value: "title", label: "Title" },
-    { value: "updatedAt", label: "Update time" },
-    { value: "value", label: "Value" },
-    { value: "visibleTo", label: "Visible to" },
-    { value: "archiveTime", label: "Archive time" },
-    // ...add more as needed
-  ];
-  res.status(200).json({ fields });
+exports.getLeadFields = async (req, res) => {
+  try {
+    const fields = [];
+    
+    // Helper function to convert Sequelize data types to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType || !sequelizeType.key) return 'text';
+      
+      switch (sequelizeType.key) {
+        case 'STRING':
+        case 'TEXT':
+          return 'text';
+        case 'INTEGER':
+        case 'BIGINT':
+        case 'FLOAT':
+        case 'DECIMAL':
+        case 'DOUBLE':
+          return 'number';
+        case 'DATE':
+        case 'DATEONLY':
+          return 'date';
+        case 'BOOLEAN':
+          return 'boolean';
+        case 'JSON':
+        case 'JSONB':
+          return 'json';
+        case 'ENUM':
+          return 'select';
+        default:
+          return 'text';
+      }
+    };
+
+    // Helper function to format field labels
+    const formatLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/_/g, ' ') // Replace underscores with spaces
+        .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize each word
+    };
+
+    // Get all Lead model fields
+    const leadAttributes = Lead.rawAttributes;
+    
+    // Process Lead model fields
+    Object.entries(leadAttributes).forEach(([fieldName, fieldConfig]) => {
+      const fieldType = getFieldType(fieldConfig.type);
+      const label = formatLabel(fieldName);
+      
+      fields.push({
+        value: fieldName,
+        label: label,
+        type: fieldType,
+        entity: 'Lead',
+        isCustomField: false
+      });
+    });
+
+    // Get all Lead custom fields
+    const leadCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ['lead', 'both'] }, // Include both lead-specific and universal custom fields
+        isActive: true
+      },
+      attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+    });
+
+    // Process custom fields
+    leadCustomFields.forEach(customField => {
+      // Convert custom field type to standard type
+      let fieldType = 'text'; // default
+      switch (customField.fieldType) {
+        case 'text':
+        case 'textarea':
+          fieldType = 'text';
+          break;
+        case 'number':
+        case 'monetary':
+          fieldType = 'number';
+          break;
+        case 'date':
+        case 'datetime':
+          fieldType = 'date';
+          break;
+        case 'singleselect':
+        case 'multiselect':
+          fieldType = 'select';
+          break;
+        case 'boolean':
+        case 'checkbox':
+          fieldType = 'boolean';
+          break;
+        default:
+          fieldType = 'text';
+      }
+
+      fields.push({
+        value: customField.fieldName,
+        label: customField.fieldLabel || formatLabel(customField.fieldName),
+        type: fieldType,
+        entity: 'Lead',
+        isCustomField: true,
+        fieldId: customField.fieldId
+      });
+    });
+
+    // Sort fields by entity type and then by label
+    fields.sort((a, b) => {
+      // First sort by entity (Lead fields first, then custom fields)
+      if (a.isCustomField !== b.isCustomField) {
+        return a.isCustomField ? 1 : -1;
+      }
+      // Then sort by label
+      return a.label.localeCompare(b.label);
+    });
+
+    res.status(200).json({ 
+      success: true,
+      fields,
+      totalFields: fields.length,
+      standardFields: fields.filter(f => !f.isCustomField).length,
+      customFields: fields.filter(f => f.isCustomField).length
+    });
+  } catch (error) {
+    console.error("Error fetching lead fields:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching lead fields",
+      error: error.message 
+    });
+  }
 };
 
 exports.getAllLeadContactPersons = async (req, res) => {

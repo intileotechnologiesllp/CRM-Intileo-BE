@@ -6113,44 +6113,201 @@ exports.markDealAsOpen = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-exports.getDealFieldsForFilter = (req, res) => {
-  const fields = [
-    { value: "dealId", label: "Deal ID" },
-    { value: "title", label: "Title" },
-    { value: "value", label: "Value" },
-    { value: "pipeline", label: "Pipeline" },
-    { value: "pipelineStage", label: "Pipeline Stage" },
-    { value: "status", label: "Status" },
-    { value: "expectedCloseDate", label: "Expected Close Date" },
-    { value: "serviceType", label: "Service Type" },
-    { value: "scopeOfServiceType", label: "Scope of Service Type" },
-    { value: "proposalValue", label: "Proposal Value" },
-    { value: "esplProposalNo", label: "ESPL Proposal No." },
-    { value: "projectLocation", label: "Project Location" },
-    { value: "organizationCountry", label: "Organization Country" },
-    { value: "proposalSentDate", label: "Proposal Sent Date" },
-    { value: "ownerId", label: "Owner" },
-    { value: "createdAt", label: "Deal Created" },
-    { value: "updatedAt", label: "Last Updated" },
-    { value: "masterUserID", label: "Creator" },
-    { value: "currency", label: "Currency" },
-    { value: "nextActivityDate", label: "Next Activity Date" },
-    { value: "responsiblePerson", label: "Responsible Person" },
-    { value: "rfpReceivedDate", label: "RFP Received Date" },
-    { value: "statusSummary", label: "Status Summary" },
-    { value: "wonTime", label: "Won Time" },
-    { value: "lostTime", label: "Lost Time" },
-    { value: "dealClosedOn", label: "Deal Closed On" },
-    { value: "lostReason", label: "Lost Reason" },
-    {
-      value: "stateAndCountryProjectLocation",
-      label: "State and Country Project Location",
-    },
-    { value: "visibleTo", label: "Visible To" },
-    { value: "archiveTime", label: "Archive Time" },
-    // ...add more as needed
-  ];
-  res.status(200).json({ fields });
+exports.getDealFieldsForFilter = async (req, res) => {
+  try {
+    console.log('🔍 [getDealFieldsForFilter] ===== API CALL START =====');
+    console.log('🔍 [getDealFieldsForFilter] Request headers:', {
+      'x-admin-id': req.headers['x-admin-id'],
+      'authorization': req.headers['authorization'] ? 'Present' : 'Missing'
+    });
+    console.log('🔍 [getDealFieldsForFilter] req.adminId:', req.adminId);
+    console.log('🔍 [getDealFieldsForFilter] req.role:', req.role);
+    console.log('🔍 [getDealFieldsForFilter] req.user:', req.user ? 'Present' : 'Missing');
+    
+    // Get all field names from Deal model dynamically
+    const dealFields = Object.keys(Deal.rawAttributes);
+    console.log('🔍 [getDealFieldsForFilter] Deal model fields count:', dealFields.length);
+    console.log('🔍 [getDealFieldsForFilter] First 5 deal fields:', dealFields.slice(0, 5));
+    
+    // Define field type mapping for Deal model fields
+    const fieldTypeMapping = {
+      INTEGER: 'number',
+      BIGINT: 'number',
+      DECIMAL: 'number',
+      FLOAT: 'number',
+      DOUBLE: 'number',
+      STRING: 'text',
+      TEXT: 'text',
+      DATE: 'date',
+      DATEONLY: 'date',
+      BOOLEAN: 'boolean',
+      JSON: 'json',
+      JSONB: 'json',
+      ENUM: 'select'
+    };
+
+    // Generate fields from Deal model
+    const modelFields = dealFields.map(fieldName => {
+      const attribute = Deal.rawAttributes[fieldName];
+      const dataType = attribute?.type?.constructor?.name || 'STRING';
+      const mappedType = fieldTypeMapping[dataType] || 'text';
+      
+      // Generate label from field name
+      const label = fieldName
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/^./, str => str.toUpperCase())
+        .trim();
+
+      return {
+        value: fieldName,
+        label: label,
+        type: mappedType,
+        entity: 'deal',
+        isCustomField: false
+      };
+    });
+
+    console.log('🔍 [getDealFieldsForFilter] Model fields generated:', modelFields.length);
+
+    // Fetch ALL custom fields for deals (no user restriction)
+    let customFields = [];
+    
+    console.log('🔍 [getDealFieldsForFilter] ===== CUSTOM FIELDS SECTION =====');
+    console.log('🔍 [getDealFieldsForFilter] Fetching ALL custom fields for deal entity (no user filter)');
+    console.log('🔍 [getDealFieldsForFilter] CustomField model:', typeof CustomField);
+    console.log('🔍 [getDealFieldsForFilter] Op object:', typeof Op);
+    
+    try {
+      // Fetch ALL custom fields for deal and both entity types (no masterUserID filter)
+      console.log('🔍 [getDealFieldsForFilter] Fetching deal-specific custom fields...');
+      
+      customFields = await CustomField.findAll({
+        where: {
+          [Op.and]: [
+            { isActive: true },
+            {
+              [Op.or]: [
+                { entityType: 'deal' },
+                { entityType: 'both' }
+              ]
+            }
+          ]
+        },
+        order: [
+          ['category', 'ASC'],
+          ['fieldGroup', 'ASC'],
+          ['displayOrder', 'ASC'],
+          ['fieldLabel', 'ASC']
+        ]
+      });
+      
+      console.log('🔍 [getDealFieldsForFilter] Deal-specific query executed successfully');
+      console.log('🔍 [getDealFieldsForFilter] Custom fields found (deal/both):', customFields.length);
+      
+      if (customFields.length > 0) {
+        customFields.forEach((field, index) => {
+          console.log(`🔍 [getDealFieldsForFilter]   ${index + 1}. ${field.fieldName} (${field.entityType}, UserID: ${field.masterUserID}) - ${field.fieldLabel}`);
+        });
+      } else {
+        console.log('🔍 [getDealFieldsForFilter] No deal-specific custom fields found');
+        
+        // Debug: Check all entity types in the system
+        const allFields = await CustomField.findAll({
+          where: { isActive: true },
+          attributes: ['entityType'],
+          group: ['entityType']
+        });
+        console.log('🔍 [getDealFieldsForFilter] Available entity types in system:', allFields.map(f => f.entityType));
+      }
+      
+    } catch (customFieldError) {
+      console.error("🔍 [getDealFieldsForFilter] Error fetching custom fields:", customFieldError);
+      console.error("🔍 [getDealFieldsForFilter] Error stack:", customFieldError.stack);
+      customFields = [];
+    }
+
+    console.log('🔍 [getDealFieldsForFilter] ===== FORMATTING SECTION =====');
+
+    // Format custom fields
+    const customFieldsFormatted = customFields.map(field => ({
+      value: field.fieldName,
+      label: field.fieldLabel,
+      type: field.fieldType,
+      entity: 'deal',
+      isCustomField: true,
+      fieldId: field.fieldId,
+      category: field.category,
+      fieldGroup: field.fieldGroup,
+      isRequired: field.isRequired,
+      isImportant: field.isImportant,
+      options: field.options
+    }));
+
+    console.log('🔍 [getDealFieldsForFilter] Custom fields formatted:', customFieldsFormatted.length);
+
+    // Combine model fields and custom fields
+    const allFields = [...modelFields, ...customFieldsFormatted];
+    console.log('🔍 [getDealFieldsForFilter] All fields combined:', allFields.length);
+
+    // Remove duplicates and sort
+    const uniqueFields = [];
+    const seenValues = new Set();
+
+    allFields.forEach(field => {
+      if (!seenValues.has(field.value)) {
+        seenValues.add(field.value);
+        uniqueFields.push(field);
+      }
+    });
+
+    // Sort fields: basic fields first, then custom fields
+    const sortedFields = uniqueFields.sort((a, b) => {
+      if (a.isCustomField !== b.isCustomField) {
+        return a.isCustomField ? 1 : -1;
+      }
+      return a.label.localeCompare(b.label);
+    });
+
+    console.log('🔍 [getDealFieldsForFilter] ===== FINAL RESULTS =====');
+    console.log('🔍 [getDealFieldsForFilter] Final sorted fields:', sortedFields.length);
+    console.log('🔍 [getDealFieldsForFilter] Standard fields:', sortedFields.filter(f => !f.isCustomField).length);
+    console.log('🔍 [getDealFieldsForFilter] Custom fields in response:', sortedFields.filter(f => f.isCustomField).length);
+
+    const response = {
+      fields: sortedFields,
+      totalFields: sortedFields.length,
+      standardFields: modelFields.length,
+      customFields: customFields.length,
+      metadata: {
+        entityType: 'deal',
+        dynamicallyGenerated: true,
+        includesCustomFields: customFields.length > 0,
+        debugInfo: {
+          adminId: 'Not required - fetching all custom fields',
+          originalCustomFieldsCount: customFields.length,
+          formattedCustomFieldsCount: customFieldsFormatted.length,
+          finalCustomFieldsInResponse: sortedFields.filter(f => f.isCustomField).length
+        }
+      }
+    };
+    
+    console.log('🔍 [getDealFieldsForFilter] Response summary:', {
+      totalFields: response.totalFields,
+      standardFields: response.standardFields,
+      customFields: response.customFields,
+      metadata: response.metadata
+    });
+
+    console.log('🔍 [getDealFieldsForFilter] ===== API CALL END =====');
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("🔍 [getDealFieldsForFilter] FATAL ERROR:", error);
+    console.error("🔍 [getDealFieldsForFilter] Error stack:", error.stack);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
 };
 
 // Bulk edit deals functionality
