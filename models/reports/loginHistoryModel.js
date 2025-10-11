@@ -6,6 +6,12 @@ const LoginHistory = sequelize.define("LoginHistory", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
+  device: {
+    type: DataTypes.STRING(100)
+  },
+  location: {
+    type: DataTypes.STRING(100)
+  },
   loginTime: {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
@@ -48,7 +54,13 @@ const LoginHistory = sequelize.define("LoginHistory", {
   totalSessionDuration:{
     type: DataTypes.STRING, // New column for total session duration (e.g., "2 hours 15 minutes")
     allowNull: true,
+  },
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   }
 });
+
+LoginHistory.sync({ alter: true });
 
 module.exports = LoginHistory;
