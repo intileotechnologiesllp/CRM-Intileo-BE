@@ -51,7 +51,6 @@ router.get(
 );
 router.get(
   "/get-filter-fields",
-  verifyToken,
   activityController.getActivityFilterFields
 );
 

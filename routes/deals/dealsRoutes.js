@@ -59,8 +59,6 @@ router.post(
 );
 router.get(
   "/get-deal-for-filter",
-  verifyToken,
-  validatePrivilege(3, "view"),
   dealsController.getDealFieldsForFilter
 );
 router.get(

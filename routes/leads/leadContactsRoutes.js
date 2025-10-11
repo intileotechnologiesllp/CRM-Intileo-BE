@@ -23,10 +23,9 @@ router.get(
   validatePrivilege(5, "view"),
   leadContactsController.getOrganizationTimeline
 );
-router.get("/get-person-fields", validatePrivilege(5, "view"), leadContactsController.getPersonFields);
+router.get("/get-person-fields", leadContactsController.getPersonFields);
 router.get(
-  "/get-organization-fields", verifyToken,
-  validatePrivilege(5, "view"),
+  "/get-organization-fields",
   leadContactsController.getOrganizationFields
 );
 router.post(
