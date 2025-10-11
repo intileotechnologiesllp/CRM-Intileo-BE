@@ -13,6 +13,7 @@ const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
+const CustomField = require("../../models/customFieldModel");
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
@@ -441,6 +442,153 @@ exports.getActivities = async (req, res) => {
       ],
     });
 
+    // After getting activities, fetch custom field values for related entities
+    let customFieldsByEntity = {};
+    
+    if (activities.length > 0) {
+      // Get all related entity IDs from activities
+      const leadIds = [...new Set(activities.map(a => a.leadId).filter(id => id))];
+      const dealIds = [...new Set(activities.map(a => a.dealId).filter(id => id))];
+      const personIds = [...new Set(activities.map(a => a.personId).filter(id => id))];
+      const organizationIds = [...new Set(activities.map(a => a.leadOrganizationId).filter(id => id))];
+      const activityIds = activities.map(a => a.activityId);
+
+      console.log("Fetching custom fields for:", { leadIds: leadIds.length, dealIds: dealIds.length, personIds: personIds.length, organizationIds: organizationIds.length, activityIds: activityIds.length });
+
+      // Fetch custom field values for all related entities in parallel
+      const customFieldPromises = [];
+
+      // Activity custom fields
+      if (activityIds.length > 0) {
+        customFieldPromises.push(
+          CustomFieldValue.findAll({
+            where: {
+              entityId: { [Op.in]: activityIds.map(id => id.toString()) },
+              entityType: 'activity',
+              masterUserID: req.adminId
+            },
+            include: [{
+              model: CustomField,
+              as: 'CustomField',
+              where: { isActive: true },
+              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+            }]
+          }).then(values => ({ type: 'activity', values }))
+        );
+      }
+
+      // Lead custom fields
+      if (leadIds.length > 0) {
+        customFieldPromises.push(
+          CustomFieldValue.findAll({
+            where: {
+              entityId: { [Op.in]: leadIds.map(id => id.toString()) },
+              entityType: 'lead',
+              masterUserID: req.adminId
+            },
+            include: [{
+              model: CustomField,
+              as: 'CustomField',
+              where: { isActive: true },
+              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+            }]
+          }).then(values => ({ type: 'lead', values }))
+        );
+      }
+
+      // Deal custom fields
+      if (dealIds.length > 0) {
+        customFieldPromises.push(
+          CustomFieldValue.findAll({
+            where: {
+              entityId: { [Op.in]: dealIds.map(id => id.toString()) },
+              entityType: 'deal',
+              masterUserID: req.adminId
+            },
+            include: [{
+              model: CustomField,
+              as: 'CustomField',
+              where: { isActive: true },
+              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+            }]
+          }).then(values => ({ type: 'deal', values }))
+        );
+      }
+
+      // Person custom fields
+      if (personIds.length > 0) {
+        customFieldPromises.push(
+          CustomFieldValue.findAll({
+            where: {
+              entityId: { [Op.in]: personIds.map(id => id.toString()) },
+              entityType: 'person',
+              masterUserID: req.adminId
+            },
+            include: [{
+              model: CustomField,
+              as: 'CustomField',
+              where: { isActive: true },
+              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+            }]
+          }).then(values => ({ type: 'person', values }))
+        );
+      }
+
+      // Organization custom fields
+      if (organizationIds.length > 0) {
+        customFieldPromises.push(
+          CustomFieldValue.findAll({
+            where: {
+              entityId: { [Op.in]: organizationIds.map(id => id.toString()) },
+              entityType: 'organization',
+              masterUserID: req.adminId
+            },
+            include: [{
+              model: CustomField,
+              as: 'CustomField',
+              where: { isActive: true },
+              attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+            }]
+          }).then(values => ({ type: 'organization', values }))
+        );
+      }
+
+      // Wait for all custom field queries to complete
+      const customFieldResults = await Promise.all(customFieldPromises);
+      
+      // Organize custom fields by entity type and entity ID
+      customFieldResults.forEach(result => {
+        if (!customFieldsByEntity[result.type]) {
+          customFieldsByEntity[result.type] = {};
+        }
+        
+        result.values.forEach(value => {
+          const entityId = value.entityId;
+          if (!customFieldsByEntity[result.type][entityId]) {
+            customFieldsByEntity[result.type][entityId] = {};
+          }
+          
+          if (value.CustomField) {
+            customFieldsByEntity[result.type][entityId][value.CustomField.fieldName] = {
+              fieldId: value.CustomField.fieldId,
+              fieldName: value.CustomField.fieldName,
+              fieldLabel: value.CustomField.fieldLabel,
+              fieldType: value.CustomField.fieldType,
+              value: value.value
+            };
+          }
+        });
+      });
+
+      console.log("Custom fields fetched:", {
+        activity: Object.keys(customFieldsByEntity.activity || {}).length,
+        lead: Object.keys(customFieldsByEntity.lead || {}).length,
+        deal: Object.keys(customFieldsByEntity.deal || {}).length,
+        person: Object.keys(customFieldsByEntity.person || {}).length,
+        organization: Object.keys(customFieldsByEntity.organization || {}).length
+      });
+    }
+
     const activitiesWithTitle = activities.map((activity) => {
       const data = activity.get ? activity.get({ plain: true }) : activity;
       const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
@@ -486,6 +634,50 @@ exports.getActivities = async (req, res) => {
       // Only add email if it's in the selected attributes or no preferences are set
       if (!attributes || attributes.includes('email')) {
         result.email = ActivityPerson ? ActivityPerson.email : null;
+      }
+      
+      // Add custom fields for the activity itself
+      const activityCustomFields = customFieldsByEntity.activity?.[rest.activityId.toString()] || {};
+      Object.keys(activityCustomFields).forEach(fieldName => {
+        result[`activity_${fieldName}`] = activityCustomFields[fieldName].value;
+      });
+      
+      // Add custom fields from related Lead
+      if (rest.leadId) {
+        const leadCustomFields = customFieldsByEntity.lead?.[rest.leadId.toString()] || {};
+        Object.keys(leadCustomFields).forEach(fieldName => {
+          result[`lead_${fieldName}`] = leadCustomFields[fieldName].value;
+        });
+        
+        // Specifically add espl_proposal_no if it exists in lead custom fields
+        if (leadCustomFields.espl_proposal_no) {
+          result.espl_proposal_no = leadCustomFields.espl_proposal_no.value;
+          console.log(`Found espl_proposal_no for activity ${rest.activityId}: ${leadCustomFields.espl_proposal_no.value}`);
+        }
+      }
+      
+      // Add custom fields from related Deal
+      if (rest.dealId) {
+        const dealCustomFields = customFieldsByEntity.deal?.[rest.dealId.toString()] || {};
+        Object.keys(dealCustomFields).forEach(fieldName => {
+          result[`deal_cf_${fieldName}`] = dealCustomFields[fieldName].value;
+        });
+      }
+      
+      // Add custom fields from related Person
+      if (rest.personId) {
+        const personCustomFields = customFieldsByEntity.person?.[rest.personId.toString()] || {};
+        Object.keys(personCustomFields).forEach(fieldName => {
+          result[`person_${fieldName}`] = personCustomFields[fieldName].value;
+        });
+      }
+      
+      // Add custom fields from related Organization
+      if (rest.leadOrganizationId) {
+        const orgCustomFields = customFieldsByEntity.organization?.[rest.leadOrganizationId.toString()] || {};
+        Object.keys(orgCustomFields).forEach(fieldName => {
+          result[`org_${fieldName}`] = orgCustomFields[fieldName].value;
+        });
       }
       
       return result;
@@ -604,6 +796,154 @@ exports.getActivityById = async (req, res) => {
         jobTitle: ActivityPerson.jobTitle
       } : null
     };
+
+    // Fetch custom field values for this activity and related entities
+    const customFieldPromises = [];
+
+    // Activity custom fields
+    customFieldPromises.push(
+      CustomFieldValue.findAll({
+        where: {
+          entityId: activityId.toString(),
+          entityType: 'activity',
+          masterUserID: masterUserID
+        },
+        include: [{
+          model: CustomField,
+          as: 'CustomField',
+          where: { isActive: true },
+          attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+        }]
+      }).then(values => ({ type: 'activity', values }))
+    );
+
+    // Lead custom fields (if activity is linked to a lead)
+    if (ActivityLead) {
+      customFieldPromises.push(
+        CustomFieldValue.findAll({
+          where: {
+            entityId: ActivityLead.leadId.toString(),
+            entityType: 'lead',
+            masterUserID: masterUserID
+          },
+          include: [{
+            model: CustomField,
+            as: 'CustomField',
+            where: { isActive: true },
+            attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+          }]
+        }).then(values => ({ type: 'lead', values }))
+      );
+    }
+
+    // Deal custom fields (if activity is linked to a deal)
+    if (ActivityDeal) {
+      customFieldPromises.push(
+        CustomFieldValue.findAll({
+          where: {
+            entityId: ActivityDeal.dealId.toString(),
+            entityType: 'deal',
+            masterUserID: masterUserID
+          },
+          include: [{
+            model: CustomField,
+            as: 'CustomField',
+            where: { isActive: true },
+            attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+          }]
+        }).then(values => ({ type: 'deal', values }))
+      );
+    }
+
+    // Person custom fields (if activity is linked to a person)
+    if (ActivityPerson) {
+      customFieldPromises.push(
+        CustomFieldValue.findAll({
+          where: {
+            entityId: ActivityPerson.personId.toString(),
+            entityType: 'person',
+            masterUserID: masterUserID
+          },
+          include: [{
+            model: CustomField,
+            as: 'CustomField',
+            where: { isActive: true },
+            attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+          }]
+        }).then(values => ({ type: 'person', values }))
+      );
+    }
+
+    // Organization custom fields (if activity is linked to an organization)
+    if (ActivityOrganization) {
+      customFieldPromises.push(
+        CustomFieldValue.findAll({
+          where: {
+            entityId: ActivityOrganization.leadOrganizationId.toString(),
+            entityType: 'organization',
+            masterUserID: masterUserID
+          },
+          include: [{
+            model: CustomField,
+            as: 'CustomField',
+            where: { isActive: true },
+            attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+          }]
+        }).then(values => ({ type: 'organization', values }))
+      );
+    }
+
+    // Wait for all custom field queries to complete
+    const customFieldResults = await Promise.all(customFieldPromises);
+    
+    // Add custom fields to the response
+    const customFields = {
+      activity: {},
+      lead: {},
+      deal: {},
+      person: {},
+      organization: {}
+    };
+
+    customFieldResults.forEach(result => {
+      result.values.forEach(value => {
+        if (value.CustomField) {
+          customFields[result.type][value.CustomField.fieldName] = {
+            fieldId: value.CustomField.fieldId,
+            fieldName: value.CustomField.fieldName,
+            fieldLabel: value.CustomField.fieldLabel,
+            fieldType: value.CustomField.fieldType,
+            value: value.value
+          };
+        }
+      });
+    });
+
+    // Add custom fields to the main response object
+    if (Object.keys(customFields.activity).length > 0) {
+      formattedActivity.activityCustomFields = customFields.activity;
+    }
+
+    if (ActivityLead && Object.keys(customFields.lead).length > 0) {
+      formattedActivity.lead.customFields = customFields.lead;
+      
+      // Specifically add espl_proposal_no to main level if it exists
+      if (customFields.lead.espl_proposal_no) {
+        formattedActivity.espl_proposal_no = customFields.lead.espl_proposal_no.value;
+      }
+    }
+
+    if (ActivityDeal && Object.keys(customFields.deal).length > 0) {
+      formattedActivity.deal.customFields = customFields.deal;
+    }
+
+    if (ActivityPerson && Object.keys(customFields.person).length > 0) {
+      formattedActivity.person.customFields = customFields.person;
+    }
+
+    if (ActivityOrganization && Object.keys(customFields.organization).length > 0) {
+      formattedActivity.organization.customFields = customFields.organization;
+    }
 
     res.status(200).json({
       message: "Activity retrieved successfully",
