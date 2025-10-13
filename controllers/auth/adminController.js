@@ -270,7 +270,7 @@ exports.signIn = async (req, res) => {
 
     // Filter groups where the user exists in the group's user list
     const userGroups = allGroups.filter(group => {
-      const groupUserIds = group.group; // This uses the getter which returns an array
+      const groupUserIds = group.memberIds; // This uses the getter which returns an array
       return groupUserIds.includes(parseInt(user.masterUserID));
     });
 
