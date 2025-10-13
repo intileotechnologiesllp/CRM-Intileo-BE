@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
-const MasterUser = require("../../models/master/masterUserModel")
+const MasterUser = require("../../models/master/masterUserModel");
+const Pipeline = require("../deals/pipelineModel");
 
 const GroupVisibility = sequelize.define(
   "GroupVisibility",
@@ -26,42 +27,29 @@ const GroupVisibility = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
     },
-    pipeline: {
-      type: DataTypes.BOOLEAN,
+    pipelineIds: {
+      type: DataTypes.STRING,
       allowNull: true,
     },
     lead: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.ENUM('owner', 'visibilitygroup', 'everyone'),
       allowNull: true,
     },
     deal: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.ENUM('owner', 'visibilitygroup', 'everyone'),
       allowNull: true,
     },
     person: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.ENUM('owner', 'visibilitygroup', 'everyone'),
       allowNull: true,
     },
     Organization: {
-      type: DataTypes.BOOLEAN,
+      type: DataTypes.ENUM('owner', 'visibilitygroup', 'everyone'),
       allowNull: true,
     },
-    group: {
-      type: DataTypes.STRING, // Changed to STRING to store multiple group IDs like "2,4,5"
+    memberIds: {
+      type: DataTypes.STRING,
       allowNull: true,
-      get() {
-        const rawValue = this.getDataValue('group');
-        return rawValue ? rawValue.split(',').map(id => parseInt(id.trim())) : [];
-      },
-      set(value) {
-        if (Array.isArray(value)) {
-          this.setDataValue('group', value.join(','));
-        } else if (typeof value === 'string') {
-          this.setDataValue('group', value);
-        } else {
-          this.setDataValue('group', null);
-        }
-      }
     },
     createdBy: {
       type: DataTypes.INTEGER,

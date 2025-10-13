@@ -27,17 +27,34 @@ exports.getVisibilityGroups = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
-    // Extract all unique user IDs from all groups
+    // Extract all unique user IDs from all groups' memberIds
     const allUserIds = [];
+    // Extract all unique pipeline IDs from all groups' pipelineIds
+    const allPipelineIds = [];
+    
     groups.forEach(group => {
-      const userIds = group.group; // This uses the getter to return array
-      if (userIds && userIds.length > 0) {
-        allUserIds.push(...userIds);
+      // Process memberIds for users
+      const memberIds = group.memberIds;
+      if (memberIds) {
+        const userIdsArray = memberIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        if (userIdsArray.length > 0) {
+          allUserIds.push(...userIdsArray);
+        }
+      }
+
+      // Process pipelineIds for pipelines
+      const pipelineIds = group.pipelineIds;
+      if (pipelineIds) {
+        const pipelineIdsArray = pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        if (pipelineIdsArray.length > 0) {
+          allPipelineIds.push(...pipelineIdsArray);
+        }
       }
     });
 
     // Remove duplicates
     const uniqueUserIds = [...new Set(allUserIds)];
+    const uniquePipelineIds = [...new Set(allPipelineIds)];
 
     // Fetch all users in one query
     let usersMap = {};
@@ -51,27 +68,62 @@ exports.getVisibilityGroups = async (req, res) => {
         attributes: ['masterUserID', 'name', 'email']
       });
 
-      // Create a map for quick lookup
       usersMap = users.reduce((map, user) => {
         map[user.masterUserID] = user.toJSON();
         return map;
       }, {});
     }
 
-    // Format the response with users data
+    // Fetch all pipelines in one query
+    let pipelinesMap = {};
+    if (uniquePipelineIds.length > 0) {
+      const pipelines = await Pipeline.findAll({
+        where: {
+          pipelineId: {
+            [Op.in]: uniquePipelineIds
+          }
+        },
+        attributes: ['pipelineId', 'pipelineName', 'color', 'isActive']
+      });
+
+      pipelinesMap = pipelines.reduce((map, pipeline) => {
+        map[pipeline.pipelineId] = pipeline.toJSON();
+        return map;
+      }, {});
+    }
+
+    // Format the response with users and pipelines data
     const formattedGroups = groups.map(group => {
       const groupData = group.toJSON();
       
-      // Get user IDs from the group field
-      const userIds = groupData.group;
+      // Convert memberIds to array and get user details
+      const memberIds = groupData.memberIds;
+      let userIds = [];
+      let users = [];
       
-      // Get user details from the map
-      const users = userIds.map(userId => usersMap[userId]).filter(user => user !== undefined);
+      if (memberIds) {
+        userIds = memberIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        users = userIds.map(userId => usersMap[userId]).filter(user => user !== undefined);
+      }
+
+      // Convert pipelineIds to array and get pipeline details
+      const pipelineIds = groupData.pipelineIds;
+      let pipelineIdArray = [];
+      let pipelines = [];
+      
+      if (pipelineIds) {
+        pipelineIdArray = pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        pipelines = pipelineIdArray.map(pipelineId => pipelinesMap[pipelineId]).filter(pipeline => pipeline !== undefined);
+      }
       
       return {
         ...groupData,
         users: users, // Array of user objects
         userCount: users.length,
+        memberIds: userIds, // Return as array instead of string
+        pipelineIds: pipelineIdArray, // Return as array instead of string
+        pipelines: pipelines, // Array of pipeline objects with details
+        pipelineCount: pipelines.length,
         creator: groupData.creator // Include creator info
       };
     });
@@ -83,7 +135,7 @@ exports.getVisibilityGroups = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching groups with users:", error);
+    console.error("Error fetching groups with users and pipelines:", error);
     return res.status(500).json({
       success: false,
       error: "Internal server error",
@@ -116,22 +168,43 @@ exports.getVisibilityGroupsWithId = async (req, res) => {
     }
 
     const groupData = group.toJSON();
-    const userIds = groupData.group;
+    
+    // Convert comma-separated strings to arrays
+    const userIds = groupData.memberIds ? 
+      groupData.memberIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) : [];
+    
+    const pipelineIds = groupData.pipelineIds ? 
+      groupData.pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id)) : [];
 
-    let users = [];
-    if (userIds && userIds.length > 0) {
-      users = await MasterUser.findAll({
+    // Fetch users and pipelines in parallel
+    const [users, pipelines] = await Promise.all([
+      // Fetch users
+      userIds.length > 0 ? MasterUser.findAll({
         where: {
           masterUserID: {
             [Op.in]: userIds
           }
         },
         attributes: ['masterUserID', 'name', 'email']
-      });
-    }
+      }) : Promise.resolve([]),
+      
+      // Fetch pipelines
+      pipelineIds.length > 0 ? Pipeline.findAll({
+        where: {
+          pipelineId: {
+            [Op.in]: pipelineIds
+          }
+        },
+        attributes: ['pipelineId', 'pipelineName', 'color', 'isActive']
+      }) : Promise.resolve([])
+    ]);
 
     const response = {
       ...groupData,
+      memberIds: userIds,
+      pipelineIds: pipelineIds,
+      pipelines: pipelines.map(pipeline => pipeline.toJSON()),
+      pipelineCount: pipelines.length,
       users: users.map(user => user.toJSON()),
       userCount: users.length
     };
@@ -157,10 +230,10 @@ exports.createVisibilityGroup = async (req, res) => {
     const {
       groupName,
       description,
-      parentGroupIds, // Changed to accept array of group IDs like [2,4,5] or "2,4,5"
+      memberIds,
       isDefault = false,
       isActive = true,
-      pipeline,
+      pipelineIds,
       lead,
       deal,
       person,
@@ -169,31 +242,36 @@ exports.createVisibilityGroup = async (req, res) => {
 
     const createdBy = req.adminId;
 
-    // Convert parentGroupIds to array if it's a string
-    let groupIdsArray = [];
-    if (parentGroupIds) {
-      if (Array.isArray(parentGroupIds)) {
-        groupIdsArray = parentGroupIds;
-      } else if (typeof parentGroupIds === 'string') {
-        groupIdsArray = parentGroupIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    const memberIdsArray = Array.isArray(memberIds)
+      ? memberIds
+      : [memberIds];
+
+    // Validate that all memberIds belong to the owner
+    for (const masterUserID of memberIdsArray) {
+      const member = await MasterUser.findOne({
+        where: { masterUserID },
+      });
+      if (!member) {
+        return res.status(404).json({
+          success: false,
+          message: `member ${masterUserID} not found or access denied`,
+        });
       }
     }
+    
+    const pipelineIdsArray = Array.isArray(pipelineIds)
+      ? pipelineIds
+      : [pipelineIds];
 
-    // Validate group IDs exist if provided
-    if (groupIdsArray.length > 0) {
-      const existingGroups = await MasterUser.findAll({
-        where: {
-          masterUserID: {
-            [Op.in]: groupIdsArray,
-          },
-        },
+    // Validate that all pipelineIds belong to the owner
+    for (const pipelineId of pipelineIdsArray) {
+      const pipeline = await Pipeline.findOne({
+        where: { pipelineId },
       });
-
-      if (existingGroups.length !== groupIdsArray.length) {
-        const existingGroupIds = existingGroups.map(group => group.groupId);
-        const missingGroupIds = groupIdsArray.filter(id => !existingGroupIds.includes(id));
-        return res.status(400).json({
-          error: `Some group Types do not exist! Missing group IDs: ${missingGroupIds.join(', ')}`
+      if (!pipeline) {
+        return res.status(404).json({
+          success: false,
+          message: `pipeline ${pipelineId} not found or access denied`,
         });
       }
     }
@@ -215,12 +293,12 @@ exports.createVisibilityGroup = async (req, res) => {
       description,
       isDefault,
       isActive,
-      pipeline,
+      pipelineIds: pipelineIdsArray.join(","),
       lead,
       deal,
       person,
       Organization: organization,
-      group: groupIdsArray, // This will be stored as comma-separated string
+      memberIds: memberIdsArray.join(","),
       createdBy
     });
 
@@ -246,12 +324,10 @@ exports.updateVisibilityGroup = async (req, res) => {
     const {
       groupName,
       description,
-      userIds, // Can be array [1,2,3] or string "1,2,3" to replace existing users
-      addUserIds, // Array or string of user IDs to add
-      removeUserIds, // Array or string of user IDs to remove
+      memberIds, // Can be array [1,2,3] or string "1,2,3"
+      pipelineIds, // Can be array [1,2,3] or string "1,2,3"
       isDefault,
       isActive,
-      pipeline,
       lead,
       deal,
       person,
@@ -289,92 +365,78 @@ exports.updateVisibilityGroup = async (req, res) => {
     if (description !== undefined) updateData.description = description;
     if (isDefault !== undefined) updateData.isDefault = isDefault;
     if (isActive !== undefined) updateData.isActive = isActive;
-    if (pipeline !== undefined) updateData.pipeline = pipeline;
     if (lead !== undefined) updateData.lead = lead;
     if (deal !== undefined) updateData.deal = deal;
     if (person !== undefined) updateData.person = person;
     if (organization !== undefined) updateData.Organization = organization;
 
-    // Handle user IDs management
-    let finalUserIds = group.group; // Get current user IDs array
-
-    // Option 1: Replace all user IDs
-    if (userIds !== undefined) {
-      let newUserIds = [];
-      if (Array.isArray(userIds)) {
-        newUserIds = userIds;
-      } else if (typeof userIds === 'string') {
-        newUserIds = userIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    // Handle memberIds - convert to comma-separated string
+    if (memberIds !== undefined) {
+      let finalMemberIds = [];
+      
+      if (Array.isArray(memberIds)) {
+        finalMemberIds = memberIds;
+      } else if (typeof memberIds === 'string') {
+        finalMemberIds = memberIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
       }
       
-      // Validate new user IDs exist
-      if (newUserIds.length > 0) {
-        const existingUsers = await MasterUser.findAll({
-          where: { masterUserID: { [Op.in]: newUserIds } }
+      // Validate member IDs exist
+      if (finalMemberIds.length > 0) {
+        const existingMembers = await MasterUser.findAll({
+          where: { masterUserID: { [Op.in]: finalMemberIds } }
         });
         
-        if (existingUsers.length !== newUserIds.length) {
-          const existingUserIds = existingUsers.map(user => user.masterUserID);
-          const missingUserIds = newUserIds.filter(id => !existingUserIds.includes(id));
+        if (existingMembers.length !== finalMemberIds.length) {
+          const existingMemberIds = existingMembers.map(user => user.masterUserID);
+          const missingMemberIds = finalMemberIds.filter(id => !existingMemberIds.includes(id));
           return res.status(400).json({
             success: false,
-            error: `Some users do not exist! Missing user IDs: ${missingUserIds.join(', ')}`
+            error: `Some members do not exist! Missing member IDs: ${missingMemberIds.join(', ')}`
           });
         }
       }
       
-      finalUserIds = newUserIds;
+      // Convert array to comma-separated string for database storage
+      updateData.memberIds = finalMemberIds.join(',');
     }
 
-    // Option 2: Add specific user IDs
-    if (addUserIds !== undefined) {
-      let usersToAdd = [];
-      if (Array.isArray(addUserIds)) {
-        usersToAdd = addUserIds;
-      } else if (typeof addUserIds === 'string') {
-        usersToAdd = addUserIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    // Handle pipelineIds - convert to comma-separated string
+    if (pipelineIds !== undefined) {
+      let finalPipelineIds = [];
+      
+      if (Array.isArray(pipelineIds)) {
+        finalPipelineIds = pipelineIds;
+      } else if (typeof pipelineIds === 'string') {
+        finalPipelineIds = pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
       }
-
-      // Validate users to add exist
-      if (usersToAdd.length > 0) {
-        const existingUsers = await MasterUser.findAll({
-          where: { masterUserID: { [Op.in]: usersToAdd } }
+      
+      // Validate pipeline IDs exist (if you have a Pipeline model)
+      // If you have a Pipeline model, you can add validation here:
+      
+      if (finalPipelineIds.length > 0) {
+        const existingPipelines = await Pipeline.findAll({
+          where: { pipelineId: { [Op.in]: finalPipelineIds } }
         });
         
-        if (existingUsers.length !== usersToAdd.length) {
-          const existingUserIds = existingUsers.map(user => user.masterUserID);
-          const missingUserIds = usersToAdd.filter(id => !existingUserIds.includes(id));
+        if (existingPipelines.length !== finalPipelineIds.length) {
+          const existingPipelineIds = existingPipelines.map(pipe => pipe.pipelineId);
+          const missingPipelineIds = finalPipelineIds.filter(id => !existingPipelineIds.includes(id));
           return res.status(400).json({
             success: false,
-            error: `Some users to add do not exist! Missing user IDs: ${missingUserIds.join(', ')}`
+            error: `Some pipelines do not exist! Missing pipeline IDs: ${missingPipelineIds.join(', ')}`
           });
         }
       }
-
-      // Add users (avoid duplicates)
-      finalUserIds = [...new Set([...finalUserIds, ...usersToAdd])];
+      
+      
+      // Convert array to comma-separated string for database storage
+      updateData.pipelineIds = finalPipelineIds.join(',');
     }
-
-    // Option 3: Remove specific user IDs
-    if (removeUserIds !== undefined) {
-      let usersToRemove = [];
-      if (Array.isArray(removeUserIds)) {
-        usersToRemove = removeUserIds;
-      } else if (typeof removeUserIds === 'string') {
-        usersToRemove = removeUserIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-      }
-
-      // Remove users
-      finalUserIds = finalUserIds.filter(id => !usersToRemove.includes(id));
-    }
-
-    // Update the group field with final user IDs
-    updateData.group = finalUserIds;
 
     // Update the group
     await group.update(updateData);
 
-    // Fetch the updated group with user details
+    // Fetch the updated group with creator details
     const updatedGroup = await GroupVisibility.findByPk(groupId, {
       include: [
         {
@@ -385,18 +447,34 @@ exports.updateVisibilityGroup = async (req, res) => {
       ]
     });
 
-    // Get user details for the response
-    let users = [];
-    if (finalUserIds.length > 0) {
-      users = await MasterUser.findAll({
-        where: { masterUserID: { [Op.in]: finalUserIds } },
-        attributes: ['masterUserID', 'name', 'email']
-      });
+    // Get member details for the response
+    const groupData = updatedGroup.toJSON();
+    
+    let members = [];
+    let memberIdArray = [];
+    if (groupData.memberIds) {
+      memberIdArray = groupData.memberIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      if (memberIdArray.length > 0) {
+        members = await MasterUser.findAll({
+          where: { masterUserID: { [Op.in]: memberIdArray } },
+          attributes: ['masterUserID', 'name', 'email']
+        });
+      }
     }
 
-    const response = updatedGroup.toJSON();
-    response.users = users.map(user => user.toJSON());
-    response.userCount = users.length;
+    // Convert pipelineIds to array for response
+    let pipelineIdArray = [];
+    if (groupData.pipelineIds) {
+      pipelineIdArray = groupData.pipelineIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    }
+
+    const response = {
+      ...groupData,
+      memberIds: memberIdArray, // Return as array
+      pipelineIds: pipelineIdArray, // Return as array
+      users: members.map(user => user.toJSON()),
+      userCount: members.length
+    };
 
     return res.status(200).json({
       success: true,
@@ -513,7 +591,7 @@ exports.softDeleteGroup = async (req, res) => {
 exports.getMyGroups = async (req, res) => {
   try {
     const masterUserId = req.adminId; // Assuming this is set from authentication middleware
-    
+    console.log(masterUserId)
     if (!masterUserId) {
       return res.status(400).json({ message: "User ID is required" });
     }
@@ -530,7 +608,7 @@ exports.getMyGroups = async (req, res) => {
 
     // Filter groups where the user exists in the group's user list
     const userGroups = allGroups.filter(group => {
-      const groupUserIds = group.group; // This uses the getter which returns an array
+      const groupUserIds = group.memberIds; // This uses the getter which returns an array
       return groupUserIds.includes(parseInt(masterUserId));
     });
 
