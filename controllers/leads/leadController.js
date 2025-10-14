@@ -3872,7 +3872,7 @@ exports.getAllLeadDetails = async (req, res) => {
   const { leadId } = req.params;
 
   // Add pagination parameters for emails
-  const { emailPage = 1, emailLimit = 50 } = req.query;
+  const { emailPage = 1, emailLimit = 20 } = req.query;
   const emailOffset = (emailPage - 1) * emailLimit;
 
   if (!leadId) {

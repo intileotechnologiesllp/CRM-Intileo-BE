@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
+const imapTestController = require("../../controllers/email/imapTestController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 
@@ -65,5 +66,10 @@ router.post("/visibility/:emailId", verifyToken, validatePrivilege(4, "edit"), e
 
 // Gmail IMAP test routes (no auth for testing)
 router.get("/inbox-count", emailController.checkGmailInboxCount);
+
+// IMAP sync test endpoints
+router.get("/imap/health", verifyToken, validatePrivilege(4, "view"), imapTestController.testImapHealth);
+router.post("/imap/test-sync", verifyToken, validatePrivilege(4, "view"), imapTestController.testImapSync);
+router.get("/imap/stats", verifyToken, validatePrivilege(4, "view"), imapTestController.getImapStats);
 
 module.exports = router;
