@@ -929,7 +929,7 @@ exports.getDeals = async (req, res) => {
 
         const customFieldFilters = await buildCustomFieldFilters(
           customFieldsConditions,
-          null // Remove user restriction for custom fields
+          req.adminId
         );
         console.log("Built custom field filters:", customFieldFilters);
 
@@ -937,7 +937,7 @@ exports.getDeals = async (req, res) => {
           // Apply custom field filtering by finding deals that match the custom field conditions
           const matchingDealIds = await getDealIdsByCustomFieldFilters(
             customFieldFilters,
-            null // Remove user restriction for custom fields
+            req.adminId
           );
 
           console.log(

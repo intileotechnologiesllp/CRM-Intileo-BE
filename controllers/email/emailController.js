@@ -21,12 +21,47 @@ const MasterUser = require("../../models/master/masterUserModel");
 const { Lead, Deal, Person, Organization } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
+const { syncImapFlags } = require("../../services/imapSyncService");
+const flagSyncQueue = require("../../services/flagSyncQueueService");
 const { log } = require("console");
 
 // Configuration constants
 const ICON_ATTACHMENT_SIZE_THRESHOLD = 100; // bytes - attachments smaller than this are considered icons/tracking pixels
 const MAX_BATCH_SIZE = 100; // Maximum number of emails to process in one batch
 const DEFAULT_BATCH_SIZE = 50; // Default batch size for email fetching
+
+// 🚀 PERFORMANCE: Add concurrency control for multiple users
+const pLimit = require('p-limit');
+const activeUsers = new Map(); // Track active user sessions
+const MAX_CONCURRENT_USERS = 3; // Maximum users that can fetch emails simultaneously
+const concurrencyLimit = pLimit(MAX_CONCURRENT_USERS);
+
+// 🚀 PERFORMANCE: User session tracking
+const trackUserSession = (userID, operation) => {
+  const sessionKey = `${userID}_${operation}`;
+  const now = Date.now();
+  
+  if (activeUsers.has(sessionKey)) {
+    const existingSession = activeUsers.get(sessionKey);
+    console.log(`⚠️ [CONCURRENCY] User ${userID} already has active ${operation} session (started ${Math.round((now - existingSession.startTime) / 1000)}s ago)`);
+    return false; // Session already active
+  }
+  
+  activeUsers.set(sessionKey, { startTime: now, userID, operation });
+  console.log(`🚀 [CONCURRENCY] Started ${operation} session for user ${userID} (Active users: ${activeUsers.size})`);
+  return true;
+};
+
+const releaseUserSession = (userID, operation) => {
+  const sessionKey = `${userID}_${operation}`;
+  if (activeUsers.has(sessionKey)) {
+    const session = activeUsers.get(sessionKey);
+    const duration = Math.round((Date.now() - session.startTime) / 1000);
+    activeUsers.delete(sessionKey);
+    console.log(`✅ [CONCURRENCY] Completed ${operation} session for user ${userID} in ${duration}s (Active users: ${activeUsers.size})`);
+  }
+};
+
 // Helper function to identify icon/image attachments and body content that shouldn't be saved as attachments
 const isIconAttachment = (attachment) => {
   const filename = attachment.filename || attachment.generatedFileName || "";
@@ -3418,6 +3453,29 @@ exports.fetchArchiveEmails = async (req, res) => {
 };
 // Get emails with pagination, filtering, and searching
 exports.getEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  
+  // 🚀 PERFORMANCE: Check if user already has an active session
+  if (!trackUserSession(masterUserID, 'getEmails')) {
+    return res.status(429).json({
+      message: "You already have an active email fetch session. Please wait for it to complete.",
+      error: "CONCURRENT_SESSION_ACTIVE",
+      activeSession: true
+    });
+  }
+
+  // 🚀 PERFORMANCE: Use concurrency limiting
+  return concurrencyLimit(async () => {
+    try {
+      return await getEmailsInternal(req, res, masterUserID);
+    } finally {
+      releaseUserSession(masterUserID, 'getEmails');
+    }
+  });
+};
+
+// Internal function to handle the actual email fetching logic
+async function getEmailsInternal(req, res, masterUserID) {
   let {
     page = 1,
     pageSize = 20,
@@ -3437,7 +3495,8 @@ exports.getEmails = async (req, res) => {
     includeFullBody = "false", // New parameter to control body inclusion
     visibility = "all", // New parameter: "all", "shared", "private"
   } = req.query;
-  const masterUserID = req.adminId; // Assuming adminId is set in middleware
+
+  console.log(`🔄 [PERFORMANCE] Processing getEmails for user ${masterUserID} with concurrency control`);
 
   // Enforce strict maximum page size
   const MAX_SAFE_PAGE_SIZE = 50;
@@ -3485,6 +3544,8 @@ exports.getEmails = async (req, res) => {
         }
       ];
     }
+    // For default case (no visibility specified), don't add visibility filtering
+    // This will show all emails for the user regardless of visibility
     // if (isShared === "true") {
     //   filters.isShared = true;
     //   if (folder) filters.folder = folder;
@@ -3753,6 +3814,7 @@ exports.getEmails = async (req, res) => {
     const essentialFields = [
       "emailID",
       "messageId",
+      "uid", // 🔄 IMAP SYNC: Required for Gmail flag synchronization
       "inReplyTo",
       "references",
       "sender",
@@ -3867,6 +3929,9 @@ exports.getEmails = async (req, res) => {
       ...includeLeadDeal,
     ];
 
+    // Declare totalCount variable
+    let totalCount;
+
     if (cursor) {
       // Buffer pagination - use findAll with limit and order
       emails = await Email.findAll({
@@ -3875,7 +3940,7 @@ exports.getEmails = async (req, res) => {
         limit,
         order,
         attributes: essentialFields,
-        distinct: true,
+        // distinct: true, // Removed - causes issues with complex joins
       });
       if (direction === "prev") emails = emails.reverse();
     } else {
@@ -3887,9 +3952,10 @@ exports.getEmails = async (req, res) => {
         limit,
         order,
         attributes: essentialFields,
-        distinct: true,
+        // distinct: true, // Removed - causes issues with complex joins
       });
       emails = rows;
+      totalCount = count;
     }
 
     // Handle attachment metadata and file paths appropriately
@@ -3928,9 +3994,35 @@ exports.getEmails = async (req, res) => {
       return emailObj;
     });
 
+    // � PRODUCTION ARCHITECTURE: Queue flag sync instead of direct IMAP sync
+    try {
+      console.log(`🔄 [FLAG SYNC QUEUE] Queuing flag sync for ${emailsWithAttachments.length} emails`);
+      
+      // 🔧 FIX: Count ALL emails with UIDs in database, not just paginated results
+      const totalEmailsWithUIDs = await Email.count({
+        where: {
+          masterUserID,
+          uid: { [require('sequelize').Op.not]: null }
+        }
+      });
+      
+      console.log(`📧 [FLAG SYNC QUEUE] Emails with UIDs: ${totalEmailsWithUIDs}/${totalCount} (${emailsWithAttachments.length} in current page)`);
+      
+      if (totalEmailsWithUIDs === 0) {
+        console.log(`ℹ️ [FLAG SYNC QUEUE] No emails with UIDs found - skipping queue for user ${masterUserID}`);
+      } else {
+        // Queue flag sync job for ALL emails with UIDs (not just paginated ones)
+        // The worker will query the database independently for all emails with UIDs
+        const jobId = await flagSyncQueue.queueFlagSync(masterUserID, [], 8); // High priority, empty UIDs array = process all
+        console.log(`✅ [FLAG SYNC QUEUE] Queued flag sync job ${jobId} for user ${masterUserID} (${totalEmailsWithUIDs} emails)`);
+      }
+    } catch (queueError) {
+      console.error(`❌ [FLAG SYNC QUEUE] Failed to queue flag sync for user ${masterUserID}:`, queueError.message);
+      // Continue without flag sync - API remains fast
+    }
+
     // Calculate unviewCount using base filters (without cursor date filtering)
     let unviewCount;
-    let totalCount;
 
     // Handle count queries with deal linkage filter
     if (dealLinkFilter === "linked_with_open_deal") {
@@ -3993,16 +4085,9 @@ exports.getEmails = async (req, res) => {
       });
       responseThreads = Object.values(threads);
     } else {
-      // For other folders, group by inReplyTo or messageId
-      const threads = {};
-      emailsWithAttachments.forEach((email) => {
-        const threadId = email.inReplyTo || email.messageId || email.emailID;
-        if (!threads[threadId]) {
-          threads[threadId] = [];
-        }
-        threads[threadId].push(email);
-      });
-      responseThreads = Object.values(threads);
+      // For inbox and other folders, show individual emails (no threading)
+      // Each email becomes its own thread for better visibility
+      responseThreads = emailsWithAttachments.map(email => [email]);
     }
 
     // Buffer pagination cursors
@@ -4030,7 +4115,7 @@ exports.getEmails = async (req, res) => {
     console.error("Error fetching emails:", error);
     res.status(500).json({ message: "Internal server error." });
   }
-};
+} // End of getEmailsInternal function
 // // Get emails with pagination, filtering, and searching
 // exports.getEmails = async (req, res) => {
 //   let {
@@ -7333,6 +7418,101 @@ exports.updateEmailVisibility = async (req, res) => {
     console.error('Error updating email visibility:', error);
     res.status(500).json({
       message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// 🚀 PRODUCTION ARCHITECTURE: Flag Sync Queue Management API
+exports.getFlagSyncStats = async (req, res) => {
+  try {
+    console.log(`📊 [FLAG SYNC API] Getting queue statistics for admin ${req.adminId}`);
+    
+    // Get queue statistics
+    const queueStats = await flagSyncQueue.getQueueStats();
+    
+    // Get basic system info
+    const systemInfo = {
+      nodeVersion: process.version,
+      platform: process.platform,
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log(`✅ [FLAG SYNC API] Queue stats retrieved: ${queueStats.messageCount} pending jobs`);
+    
+    res.status(200).json({
+      message: "Flag sync queue statistics retrieved successfully",
+      queueStats,
+      systemInfo,
+      recommendations: {
+        status: queueStats.messageCount > 100 ? 'HIGH_LOAD' : 'NORMAL',
+        suggestion: queueStats.messageCount > 100 
+          ? 'Consider scaling up workers or increasing concurrency'
+          : 'System operating normally'
+      }
+    });
+    
+  } catch (error) {
+    console.error(`❌ [FLAG SYNC API] Failed to get queue stats:`, error.message);
+    res.status(500).json({
+      message: "Failed to retrieve flag sync statistics",
+      error: error.message
+    });
+  }
+};
+
+// 🚀 PRODUCTION ARCHITECTURE: Manual flag sync trigger for specific user
+exports.triggerFlagSync = async (req, res) => {
+  try {
+    const { userID, priority = 9 } = req.body; // High priority for manual triggers
+    const requestingAdminId = req.adminId;
+    
+    console.log(`🔄 [FLAG SYNC API] Manual flag sync triggered by admin ${requestingAdminId} for user ${userID}`);
+    
+    if (!userID) {
+      return res.status(400).json({
+        message: "User ID is required for manual flag sync"
+      });
+    }
+    
+    // Get emails with UIDs for this user
+    const emailsWithUIDs = await Email.findAll({
+      where: {
+        masterUserID: userID,
+        uid: { [require('sequelize').Op.not]: null }
+      },
+      attributes: ['uid'],
+      limit: 1000
+    });
+    
+    const uids = emailsWithUIDs.map(email => email.uid).filter(uid => uid);
+    
+    if (uids.length === 0) {
+      return res.status(404).json({
+        message: `No emails with UIDs found for user ${userID}`
+      });
+    }
+    
+    // Queue flag sync job with very high priority
+    const jobId = await flagSyncQueue.queueFlagSync(userID, uids, priority);
+    
+    console.log(`✅ [FLAG SYNC API] Queued manual flag sync job ${jobId} for user ${userID} (${uids.length} emails)`);
+    
+    res.status(200).json({
+      message: "Manual flag sync queued successfully",
+      jobId,
+      userID,
+      emailCount: uids.length,
+      priority,
+      estimatedProcessingTime: `${Math.ceil(uids.length / 100)} minutes`
+    });
+    
+  } catch (error) {
+    console.error(`❌ [FLAG SYNC API] Failed to trigger manual flag sync:`, error.message);
+    res.status(500).json({
+      message: "Failed to trigger manual flag sync",
       error: error.message
     });
   }
