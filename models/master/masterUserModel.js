@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/db");
+const permissionSet = require("../permissionsetModel");
 
 const MasterUser = sequelize.define("MasterUser", {
   masterUserID: {
@@ -110,6 +111,22 @@ const MasterUser = sequelize.define("MasterUser", {
     type: DataTypes.TEXT,
     allowNull: true, // Store Google OAuth token for calendar sync
   },
+  permissionSetId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: permissionSet, // table name (auto-pluralized)
+      key: "permissionSetId",
+    },
+  },
+  globalPermissionSetId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: permissionSet, // table name (auto-pluralized)
+      key: "permissionSetId",
+    },
+  },
 });
 
 const MasterUserPrivileges = require("../privileges/masterUserPrivilegesModel");
@@ -123,5 +140,7 @@ MasterUserPrivileges.belongsTo(MasterUser, {
   foreignKey: "masterUserID",
   as: "user", // Alias for the reverse association
 });
+
+MasterUser.sync({});
 
 module.exports = MasterUser;

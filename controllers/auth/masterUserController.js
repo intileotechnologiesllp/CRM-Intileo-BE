@@ -72,6 +72,7 @@ const { Op } = require("sequelize");
 const { log } = require("console");
 const Program = require("../../models/admin/masters/programModel");
 const MasterUserPrivileges = require("../../models/privileges/masterUserPrivilegesModel"); // Import the MasterUserPrivileges model
+const { permissionSet } = require('../../models');
 // const path = require("path");
 
 // Create a Master User
@@ -742,6 +743,7 @@ exports.getProfile = async (req, res) => {
     const masterUser = await MasterUser.findOne({
       where: { masterUserID },
       attributes: [
+        "masterUserID",
         "name",
         "lastName",
         "bio",
@@ -755,14 +757,37 @@ exports.getProfile = async (req, res) => {
         "userType", // Include userType in the response
         "createdAt",   // Add this line
         "updatedAt",
+        "permissionSetId",
+        "globalPermissionSetId"
       ],
     });
+
     if (!masterUser) {
       return res.status(404).json({ message: "Profile not found." });
+    }
+
+    let permission = []
+    let globalPermission = []
+    if(masterUser?.permissionSetId){
+      permission = await permissionSet.findOne({
+        where: {
+          permissionSetId: masterUser?.permissionSetId
+        }
+      })
+    }
+    if(masterUser?.globalPermissionSetId){
+      console.log(masterUser?.globalPermissionSetId, "masterUser?.globalPermissionSetId")
+      globalPermission = await permissionSet.findOne({
+        where: {
+          permissionSetId: masterUser?.globalPermissionSetId
+        }
+      })
     }
     res.status(200).json({
       message: "Profile fetched successfully.",
       profile: masterUser,
+      permission: permission,
+      globalPermission: globalPermission
     });
   } catch (error) {
     console.error("Error fetching profile:", error);
