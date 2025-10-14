@@ -19,6 +19,7 @@ const Goal = require("./insight/goalModel");
 const GroupVisibility = require("../models/admin/groupVisibilityModel");
 const LeadOrganization = require("./leads/leadOrganizationModel");
 const DeviceActivity = require("./deviceActivity/deviceActivity");
+const permissionSet = require("./permissionsetModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -78,13 +79,13 @@ Activity.belongsTo(Organization, {
   foreignKey: "leadOrganizationId",
   as: "ActivityOrganization",
 });
-Activity.belongsTo(Lead, { 
-  foreignKey: 'leadId', 
-  as: 'ActivityLead' 
+Activity.belongsTo(Lead, {
+  foreignKey: "leadId",
+  as: "ActivityLead",
 });
-Activity.belongsTo(Deal, { 
-  foreignKey: 'dealId', 
-  as: 'ActivityDeal' 
+Activity.belongsTo(Deal, {
+  foreignKey: "dealId",
+  as: "ActivityDeal",
 });
 // PersonNote associations
 Person.hasMany(PersonNote, { foreignKey: "personId", as: "personNotes" });
@@ -142,7 +143,10 @@ Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
 // (some associations were defined only on the hasMany side previously)
 Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
 Deal.belongsTo(Person, { foreignKey: "personId", as: "Person" });
-Deal.belongsTo(Organization, { foreignKey: "leadOrganizationId", as: "Organization" });
+Deal.belongsTo(Organization, {
+  foreignKey: "leadOrganizationId",
+  as: "Organization",
+});
 Deal.belongsTo(MasterUser, { foreignKey: "ownerId", as: "Owner" });
 
 // Pipeline associations
@@ -182,11 +186,25 @@ Dashboard.hasMany(Goal, { foreignKey: "dashboardId", as: "Goals" });
 Goal.belongsTo(Dashboard, { foreignKey: "dashboardId", as: "Dashboard" });
 
 LeadOrganization.belongsTo(MasterUser, {
-  foreignKey: 'masterUserID',
-  targetKey: 'masterUserID',
-  as: 'MasterUser'
+  foreignKey: "masterUserID",
+  targetKey: "masterUserID",
+  as: "MasterUser",
 });
 
+permissionSet.hasMany(MasterUser, {
+  foreignKey: "permissionSetId",
+  as: "pusers",
+});
+
+// Each user → belongs to one permission set
+MasterUser.belongsTo(permissionSet, {
+  foreignKey: "permissionSetId",
+  as: "permissionSet",
+});
+MasterUser.belongsTo(permissionSet, {
+  foreignKey: "permissionSetId",
+  as: "globalPermissionSet",
+});
 
 module.exports = {
   Lead,
@@ -206,5 +224,6 @@ module.exports = {
   Dashboard,
   Report,
   Goal,
-  DeviceActivity
+  DeviceActivity,
+  permissionSet,
 };
