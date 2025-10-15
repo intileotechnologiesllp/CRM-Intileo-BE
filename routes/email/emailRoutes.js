@@ -71,5 +71,6 @@ router.get("/inbox-count", emailController.checkGmailInboxCount);
 router.get("/imap/health", verifyToken, validatePrivilege(4, "view"), imapTestController.testImapHealth);
 router.post("/imap/test-sync", verifyToken, validatePrivilege(4, "view"), imapTestController.testImapSync);
 router.get("/imap/stats", verifyToken, validatePrivilege(4, "view"), imapTestController.getImapStats);
+router.post("/update-default-email-visibility",verifyToken,emailController.updateDefaultEmailVisibility); // Endpoint to trigger the update script
 
 module.exports = router;
