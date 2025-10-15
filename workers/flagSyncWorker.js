@@ -35,7 +35,7 @@ class FlagSyncWorker {
       console.log(`🚀 [${this.workerName}] Starting flag sync worker...`);
       
       // Connect to RabbitMQ
-      this.connection = await amqp.connect('amqp://localhost');
+      this.connection = await amqp.connect(process.env.RABBITMQ_URL || 'amqp://localhost');
       this.channel = await this.connection.createChannel();
       
       // Set prefetch count for this worker
