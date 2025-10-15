@@ -20,7 +20,7 @@ class FlagSyncQueueService {
       if (this.isInitialized) return;
       
       console.log('🔌 [FLAG SYNC QUEUE] Initializing RabbitMQ connection...');
-      this.connection = await amqp.connect('amqp://localhost');
+      this.connection = await amqp.connect(process.env.RABBITMQ_URL ||'amqp://localhost');
       this.channel = await this.connection.createChannel();
       
       // Declare the main flag sync queue with durability

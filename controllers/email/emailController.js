@@ -2220,7 +2220,7 @@ exports.fetchInboxEmails = async (req, res) => {
 
       try {
         // Queue the next batch for this user
-        const queueConnection = await amqp.connect('amqp://localhost');
+        const queueConnection = await amqp.connect(process.env.RABBITMQ_URL ||'amqp://localhost');
         const queueChannel = await queueConnection.createChannel();
         const queueName = `FETCH_INBOX_QUEUE_${masterUserID}`;
         
