@@ -2847,6 +2847,32 @@ exports.createPerson = async (req, res) => {
     const primaryEmail = emailList[0].email;
     const primaryPhone = phoneList.length > 0 ? phoneList[0].phone : null;
 
+    // Enhanced email validation for all emails
+    for (const emailObj of emailList) {
+      const emailToValidate = emailObj.email;
+      // Check for basic format and length limit (254 characters)
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      
+      if (!emailRegex.test(emailToValidate) || emailToValidate.length > 254) {
+        return res.status(400).json({
+          message: `Invalid email format: ${emailToValidate}. Please provide a valid email address.`,
+        });
+      }
+    }
+
+    // Phone number validation for all phones (only numerical values allowed)
+    for (const phoneObj of phoneList) {
+      const phoneToValidate = phoneObj.phone;
+      // Strict validation: only digits and optional plus sign at the beginning
+      const phoneRegex = /^\+?\d{7,15}$/;
+      
+      if (!phoneRegex.test(phoneToValidate.trim())) {
+        return res.status(400).json({
+          message: `Invalid phone number format: ${phoneToValidate}. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
+        });
+      }
+    }
+
     // Check for duplicate primary email (primary email must be unique across all persons)
     const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
     if (existingEmailPerson) {
@@ -4319,6 +4345,36 @@ exports.updatePerson = async (req, res) => {
       phoneList = phones.filter(phoneObj => phoneObj.phone && phoneObj.phone.trim());
     } else if (phone && phone.trim()) {
       phoneList = [{ phone: phone.trim(), type: 'Work' }]; // Default type
+    }
+
+    // Enhanced email validation for all emails (if emails are being updated)
+    if (emailList.length > 0) {
+      for (const emailObj of emailList) {
+        const emailToValidate = emailObj.email;
+        // Check for basic format and length limit (254 characters)
+        const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+        
+        if (!emailRegex.test(emailToValidate) || emailToValidate.length > 254) {
+          return res.status(400).json({
+            message: `Invalid email format: ${emailToValidate}. Please provide a valid email address.`,
+          });
+        }
+      }
+    }
+
+    // Phone number validation for all phones (only numerical values allowed) - if phones are being updated
+    if (phoneList.length > 0) {
+      for (const phoneObj of phoneList) {
+        const phoneToValidate = phoneObj.phone;
+        // Strict validation: only digits and optional plus sign at the beginning
+        const phoneRegex = /^\+?\d{7,15}$/;
+        
+        if (!phoneRegex.test(phoneToValidate.trim())) {
+          return res.status(400).json({
+            message: `Invalid phone number format: ${phoneToValidate}. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
+          });
+        }
+      }
     }
 
     // If emails are being updated, validate primary email uniqueness
