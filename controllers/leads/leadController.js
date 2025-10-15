@@ -177,12 +177,6 @@ exports.createLead = async (req, res) => {
   }
 
   // --- Add validation here ---
-  if (!contactPerson || !organization || !title || !email) {
-    return res.status(400).json({
-      message: "contactPerson, organization, title, and email are required.",
-    });
-  }
-
   // Validate emailID is required when sourceOrgin is 0 (email-created lead)
   if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
     return res.status(400).json({
@@ -190,9 +184,34 @@ exports.createLead = async (req, res) => {
         "emailID is required when sourceOrgin is 0 (email-created lead).",
     });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ message: "Invalid email format." });
+
+  // Enhanced email format validation
+  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ 
+      message: "Invalid email format. Please provide a valid email address." 
+    });
   }
+
+  // Validate email length
+  if (email.length > 254) {
+    return res.status(400).json({ 
+      message: "Email address is too long. Maximum length is 254 characters." 
+    });
+  }
+
+  // Phone number validation (if phone is provided) - Only numerical values allowed
+  if (phone && phone.trim() !== "") {
+    // Strict validation: only digits and optional plus sign at the beginning
+    const phoneRegex = /^\+?\d{7,15}$/;
+    
+    if (!phoneRegex.test(phone.trim())) {
+      return res.status(400).json({ 
+        message: "Invalid phone number format. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed." 
+      });
+    }
+  }
+
   if (proposalValue && proposalValue < 0) {
     return res
       .status(400)
@@ -3016,6 +3035,40 @@ exports.updateLead = async (req, res) => {
     console.log("personData:", personData);
     console.log("organizationData:", organizationData);
     console.log("customFields:", customFields);
+
+    // --- Add validation for email and phone ---
+    const emailToValidate = leadData.email || personData.email;
+    const phoneToValidate = leadData.phone || personData.phone || organizationData.phone;
+
+    // Enhanced email format validation (if email is being updated)
+    if (emailToValidate) {
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      if (!emailRegex.test(emailToValidate)) {
+        return res.status(400).json({ 
+          message: "Invalid email format. Please provide a valid email address." 
+        });
+      }
+
+      // Validate email length
+      if (emailToValidate.length > 254) {
+        return res.status(400).json({ 
+          message: "Email address is too long. Maximum length is 254 characters." 
+        });
+      }
+    }
+
+    // Phone number validation (if phone is being updated) - Only numerical values allowed
+    if (phoneToValidate && phoneToValidate.trim() !== "") {
+      // Strict validation: only digits and optional plus sign at the beginning
+      const phoneRegex = /^\+?\d{7,15}$/;
+      
+      if (!phoneRegex.test(phoneToValidate.trim())) {
+        return res.status(400).json({ 
+          message: "Invalid phone number format. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed." 
+        });
+      }
+    }
+    // --- End validation ---
 
     // Update Lead
     const lead = await Lead.findByPk(leadId);

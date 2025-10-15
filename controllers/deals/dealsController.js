@@ -123,32 +123,42 @@ exports.createDeal = async (req, res) => {
       });
     }
 
-    // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid email format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid email format.",
-      });
+    // Enhanced email validation (RFC 5322 compliant)
+    if (email) {
+      // Check for basic format and length limit (254 characters)
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      
+      if (!emailRegex.test(email) || email.length > 254) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Invalid email format.`,
+          req.adminId
+        );
+        return res.status(400).json({
+          message: "Invalid email format.",
+        });
+      }
     }
 
-    // Validate phone if provided
-    if (phone && !/^\+?\d{7,15}$/.test(phone)) {
-      await logAuditTrail(
-        dealProgramId,
-        "DEAL_CREATION",
-        req.role,
-        `Deal creation failed: Invalid phone number format.`,
-        req.adminId
-      );
-      return res.status(400).json({
-        message: "Invalid phone number format.",
-      });
+    // Phone number validation (only numerical values allowed)
+    if (phone && phone.trim() !== "") {
+      // Strict validation: only digits and optional plus sign at the beginning
+      const phoneRegex = /^\+?\d{7,15}$/;
+      
+      if (!phoneRegex.test(phone.trim())) {
+        await logAuditTrail(
+          dealProgramId,
+          "DEAL_CREATION",
+          req.role,
+          `Deal creation failed: Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
+          req.adminId
+        );
+        return res.status(400).json({
+          message: "Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.",
+        });
+      }
     }
 
     // Validate and sanitize proposalValue
@@ -3267,6 +3277,44 @@ exports.updateDeal = async (req, res) => {
         req.adminId
       );
       return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Phone number validation (only numerical values allowed) - if phone is being updated
+    if (updateFields.phone && updateFields.phone.trim() !== "") {
+      // Strict validation: only digits and optional plus sign at the beginning
+      const phoneRegex = /^\+?\d{7,15}$/;
+      
+      if (!phoneRegex.test(updateFields.phone.trim())) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.`,
+          req.adminId
+        );
+        return res.status(400).json({
+          message: "Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed.",
+        });
+      }
+    }
+
+    // Enhanced email validation (if email is being updated)
+    if (updateFields.email && updateFields.email.trim() !== "") {
+      // Check for basic format and length limit (254 characters)
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      
+      if (!emailRegex.test(updateFields.email) || updateFields.email.length > 254) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: Invalid email format.`,
+          req.adminId
+        );
+        return res.status(400).json({
+          message: "Invalid email format.",
+        });
+      }
     }
     // Check if pipelineStage is changing
     // Only check for pipelineStage if it's in the request body
