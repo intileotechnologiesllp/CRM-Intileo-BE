@@ -24,6 +24,7 @@ const DealDetails = require("../../models/deals/dealsDetailModel"); // Import De
 const DealNote = require("../../models/deals/delasNoteModel"); // Import DealNote model
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
+const Label = require("../../models/admin/masters/labelModel"); // Import Label model
 const {
   VisibilityGroup,
   GroupMembership,
@@ -693,6 +694,7 @@ exports.getLeads = async (req, res) => {
     order = "DESC",
     masterUserID: queryMasterUserID,
     filterId,
+    labels, // Add labels parameter for filtering by labels
   } = req.query;
   console.log(req.role, "role of the user............");
 
@@ -776,6 +778,10 @@ exports.getLeads = async (req, res) => {
       }
       if (!leadAttributes.includes('masterUserID')) {
         leadAttributes.push('masterUserID');
+      }
+      // Always include valueLabels for label functionality
+      if (!leadAttributes.includes('valueLabels')) {
+        leadAttributes.push('valueLabels');
       }
 
       leadDetailsAttributes = columns
@@ -1249,6 +1255,85 @@ exports.getLeads = async (req, res) => {
       }
       whereClause = filterWhere;
 
+      // Handle label filtering in filtered queries too
+      if (labels) {
+        console.log("→ Labels parameter received in filtered query:", labels);
+        
+        // Parse labels - could be comma-separated string or array
+        let labelArray;
+        if (typeof labels === 'string') {
+          labelArray = labels.split(',').map(label => label.trim()).filter(label => label);
+        } else if (Array.isArray(labels)) {
+          labelArray = labels.filter(label => label && label.trim());
+        } else {
+          labelArray = [];
+        }
+        
+        console.log("→ Parsed label array in filtered query:", labelArray);
+        
+        if (labelArray.length > 0) {
+          console.log("→ Searching for labels in filtered query:", labelArray);
+          
+          // Since valueLabels contains label names directly, we can filter by names
+          // But let's also check if labels exist in the Label table for validation
+          const validLabels = await Label.findAll({
+            where: {
+              labelName: { [Op.in]: labelArray },
+              isActive: true
+            },
+            attributes: ['labelId', 'labelName'],
+            raw: true
+          });
+          
+          console.log("→ Found labels in database for filtered query:", validLabels);
+          
+          // Use the provided label names for filtering (regardless of Label table)
+          // since the valueLabels column stores names directly
+          console.log("→ Filtering by label names directly from valueLabels column in filtered query");
+          
+          // Create OR conditions for each label name with proper LIKE patterns
+          const labelOrConditions = [];
+          labelArray.forEach(labelName => {
+            // Handle different formats: "Hot", "Hot,Warm", "Warm,Hot,Cold", etc.
+            labelOrConditions.push(
+              { valueLabels: { [Op.like]: `%,${labelName},%` } }, // Label in middle with commas
+              { valueLabels: { [Op.like]: `${labelName},%` } },   // Label at start with comma
+              { valueLabels: { [Op.like]: `%,${labelName}` } },   // Label at end with comma
+              { valueLabels: { [Op.eq]: `${labelName}` } },       // Only this label (exact match)
+              // Additional patterns for potential spacing issues
+              { valueLabels: { [Op.like]: `%, ${labelName},%` } }, // Space after comma
+              { valueLabels: { [Op.like]: `%,${labelName} ,%` } }, // Space before comma
+              { valueLabels: { [Op.like]: `${labelName} ,%` } },   // Space at start before comma
+              { valueLabels: { [Op.like]: `%, ${labelName}` } }    // Space at end after comma
+            );
+          });
+          
+          console.log("→ Label OR conditions for filtered query:", labelOrConditions);
+          
+          // Combine with existing where conditions more carefully
+          if (whereClause[Op.and]) {
+            // If we already have AND conditions, add label filter as another AND condition
+            whereClause[Op.and].push({
+              [Op.or]: labelOrConditions
+            });
+          } else if (whereClause[Op.or]) {
+            // If we have existing OR conditions, combine them properly
+            whereClause[Op.and] = [
+              { [Op.or]: whereClause[Op.or] },
+              { [Op.or]: labelOrConditions }
+            ];
+            delete whereClause[Op.or];
+          } else {
+            // No existing conditions, just add the label filter
+            whereClause[Op.or] = labelOrConditions;
+          }
+          
+          console.log("→ Label filtering applied successfully using label names in filtered query");
+        } else {
+          console.log("→ No valid label names provided in filtered query, no filtering applied");
+        }
+      }
+
       console.log("→ Built filterWhere:", JSON.stringify(filterWhere));
       console.log(
         "→ Built leadDetailsWhere:",
@@ -1703,6 +1788,85 @@ exports.getLeads = async (req, res) => {
           "→ Search applied, whereClause[Op.or]:",
           whereClause[Op.or]
         );
+      }
+
+      // Handle label filtering
+      if (labels) {
+        console.log("→ Labels parameter received:", labels);
+        
+        // Parse labels - could be comma-separated string or array
+        let labelArray;
+        if (typeof labels === 'string') {
+          labelArray = labels.split(',').map(label => label.trim()).filter(label => label);
+        } else if (Array.isArray(labels)) {
+          labelArray = labels.filter(label => label && label.trim());
+        } else {
+          labelArray = [];
+        }
+        
+        console.log("→ Parsed label array:", labelArray);
+        
+        if (labelArray.length > 0) {
+          console.log("→ Searching for labels:", labelArray);
+          
+          // Since valueLabels contains label names directly, we can filter by names
+          // But let's also check if labels exist in the Label table for validation
+          const validLabels = await Label.findAll({
+            where: {
+              labelName: { [Op.in]: labelArray },
+              isActive: true
+            },
+            attributes: ['labelId', 'labelName'],
+            raw: true
+          });
+          
+          console.log("→ Found labels in database:", validLabels);
+          
+          // Use the provided label names for filtering (regardless of Label table)
+          // since the valueLabels column stores names directly
+          console.log("→ Filtering by label names directly from valueLabels column");
+          
+          // Create OR conditions for each label name with proper LIKE patterns
+          const labelOrConditions = [];
+          labelArray.forEach(labelName => {
+            // Handle different formats: "Hot", "Hot,Warm", "Warm,Hot,Cold", etc.
+            labelOrConditions.push(
+              { valueLabels: { [Op.like]: `%,${labelName},%` } }, // Label in middle with commas
+              { valueLabels: { [Op.like]: `${labelName},%` } },   // Label at start with comma
+              { valueLabels: { [Op.like]: `%,${labelName}` } },   // Label at end with comma
+              { valueLabels: { [Op.eq]: `${labelName}` } },       // Only this label (exact match)
+              // Additional patterns for potential spacing issues
+              { valueLabels: { [Op.like]: `%, ${labelName},%` } }, // Space after comma
+              { valueLabels: { [Op.like]: `%,${labelName} ,%` } }, // Space before comma
+              { valueLabels: { [Op.like]: `${labelName} ,%` } },   // Space at start before comma
+              { valueLabels: { [Op.like]: `%, ${labelName}` } }    // Space at end after comma
+            );
+          });
+          
+          console.log("→ Label OR conditions:", labelOrConditions);
+          
+          // Combine with existing where conditions more carefully
+          if (whereClause[Op.and]) {
+            // If we already have AND conditions, add label filter as another AND condition
+            whereClause[Op.and].push({
+              [Op.or]: labelOrConditions
+            });
+          } else if (whereClause[Op.or]) {
+            // If we have existing OR conditions (like search), combine them properly
+            whereClause[Op.and] = [
+              { [Op.or]: whereClause[Op.or] },
+              { [Op.or]: labelOrConditions }
+            ];
+            delete whereClause[Op.or];
+          } else {
+            // No existing conditions, just add the label filter
+            whereClause[Op.or] = labelOrConditions;
+          }
+          
+          console.log("→ Label filtering applied successfully using label names");
+        } else {
+          console.log("→ No valid label names provided, no filtering applied");
+        }
       }
 
       // Add default Activity include for non-filtered queries
@@ -2181,6 +2345,16 @@ exports.getLeads = async (req, res) => {
       // Keep the customFields property for backward compatibility (optional)
       leadObj.customFields = customFields;
 
+      // Process and enrich label information
+      if (leadObj.valueLabels) {
+        // Parse the comma-separated label names
+        const labelNames = leadObj.valueLabels.split(',').map(name => name.trim()).filter(name => name);
+        leadObj.labelNames = labelNames; // Store raw label names for reference
+        
+        // Note: Label details will be fetched separately for all leads to avoid N+1 queries
+        // This will be done after the flatLeads processing
+      }
+
       // Add person and organization data back to the lead object
       if (person) {
         leadObj.person = person;
@@ -2191,6 +2365,69 @@ exports.getLeads = async (req, res) => {
 
       return leadObj;
     });
+    
+    // Fetch and enrich label details for all leads
+    console.log("🔍 === ENRICHING LABEL DETAILS ===");
+    
+    // Collect all unique label names from all leads
+    const allLabelNames = new Set();
+    flatLeads.forEach(lead => {
+      if (lead.labelNames && lead.labelNames.length > 0) {
+        lead.labelNames.forEach(labelName => {
+          if (labelName) allLabelNames.add(labelName);
+        });
+      }
+    });
+    
+    console.log("🔍 All unique label names found:", Array.from(allLabelNames));
+    
+    // Fetch label details for all unique label names
+    let labelDetailsMap = {};
+    if (allLabelNames.size > 0) {
+      const labelDetails = await Label.findAll({
+        where: {
+          labelName: { [Op.in]: Array.from(allLabelNames) },
+          isActive: true
+        },
+        attributes: ['labelId', 'labelName', 'labelColor', 'description'],
+        raw: true
+      });
+      
+      // Create a map for quick lookup using label names as keys
+      labelDetails.forEach(label => {
+        labelDetailsMap[label.labelName] = {
+          labelId: label.labelId,
+          labelName: label.labelName,
+          labelColor: label.labelColor,
+          description: label.description
+        };
+      });
+      
+      console.log("🔍 Label details map created:", labelDetailsMap);
+    }
+    
+    // Enrich each lead with full label details
+    flatLeads.forEach(lead => {
+      if (lead.labelNames && lead.labelNames.length > 0) {
+        lead.labels = lead.labelNames.map(labelName => {
+          return labelDetailsMap[labelName] || {
+            labelId: null,
+            labelName: labelName,
+            labelColor: '#gray',
+            description: 'Label not found in database'
+          };
+        }).filter(label => label); // Remove null/undefined labels
+        
+        console.log(`🔍 Lead ${lead.leadId} enriched with ${lead.labels.length} labels`);
+      } else {
+        lead.labels = []; // No labels for this lead
+      }
+      
+      // Clean up temporary labelNames property
+      delete lead.labelNames;
+    });
+    
+    console.log("🔍 === LABEL ENRICHMENT COMPLETE ===");
     
     // DEBUG: Final verification of 'source' field
     console.log("🔍 === FINAL 'source' FIELD VERIFICATION ===");
@@ -6387,6 +6624,491 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
     res.status(500).json({
       message: "Internal server error during bulk lead to deal conversion",
       error: error.message,
+    });
+  }
+};
+
+// ===========================================
+// LABEL MANAGEMENT FUNCTIONS FOR LEADS
+// ===========================================
+
+/**
+ * Get all available labels for leads
+ */
+exports.getLeadLabels = async (req, res) => {
+  try {
+    const labels = await Label.findAll({
+      where: {
+        entityType: { [Op.in]: ['lead', 'all'] },
+        isActive: true
+      },
+      attributes: [
+        'labelId',
+        'labelName', 
+        'labelColor',
+        'entityType',
+        'description',
+        'createdBy',
+        'creationDate'
+      ],
+      order: [['labelName', 'ASC']]
+    });
+
+    res.status(200).json({
+      message: "Lead labels fetched successfully",
+      labels: labels,
+      count: labels.length
+    });
+
+  } catch (error) {
+    console.error("Error fetching lead labels:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Create a new label for leads
+ */
+exports.createLeadLabel = async (req, res) => {
+  try {
+    const { labelName, labelColor, description } = req.body;
+
+    // Validation
+    if (!labelName || !labelName.trim()) {
+      return res.status(400).json({ 
+        message: "Label name is required." 
+      });
+    }
+
+    // Check if label already exists
+    const existingLabel = await Label.findOne({
+      where: {
+        labelName: labelName.trim(),
+        entityType: { [Op.in]: ['lead', 'all'] },
+        isActive: true
+      }
+    });
+
+    if (existingLabel) {
+      return res.status(409).json({
+        message: "A label with this name already exists.",
+        existingLabel: {
+          labelId: existingLabel.labelId,
+          labelName: existingLabel.labelName,
+          labelColor: existingLabel.labelColor
+        }
+      });
+    }
+
+    // Get user info for audit
+    const user = await MasterUser.findByPk(req.adminId);
+    const userName = user ? user.name : 'Unknown User';
+
+    // Create the label
+    const newLabel = await Label.create({
+      labelName: labelName.trim(),
+      labelColor: labelColor || '#007bff', // Default blue color
+      entityType: 'lead',
+      description: description || null,
+      isActive: true,
+      createdBy: userName,
+      createdById: req.adminId,
+      mode: 'CREATE_LABEL'
+    });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "CREATE_LEAD_LABEL",
+      req.adminId,
+      `Created new lead label: ${labelName}`,
+      newLabel.labelId
+    );
+
+    res.status(201).json({
+      message: "Lead label created successfully",
+      label: {
+        labelId: newLabel.labelId,
+        labelName: newLabel.labelName,
+        labelColor: newLabel.labelColor,
+        entityType: newLabel.entityType,
+        description: newLabel.description,
+        createdBy: newLabel.createdBy,
+        creationDate: newLabel.creationDate
+      }
+    });
+
+  } catch (error) {
+    console.error("Error creating lead label:", error);
+    
+    // Handle validation errors
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        message: "Validation error",
+        errors: error.errors.map(err => ({
+          field: err.path,
+          message: err.message
+        }))
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Update labels for a specific lead
+ */
+exports.updateLeadLabels = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { valueLabels } = req.body;
+
+    // Find the lead
+    const lead = await Lead.findByPk(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found." });
+    }
+
+    // Role-based access control
+    if (req.role !== "admin") {
+      if (lead.masterUserID !== req.adminId && lead.ownerId !== req.adminId) {
+        return res.status(403).json({
+          message: "Access denied. You can only update your own leads."
+        });
+      }
+    }
+
+    // Validate labels if provided
+    if (valueLabels) {
+      // If valueLabels is a string (comma-separated), convert to array
+      let labelsArray = [];
+      if (typeof valueLabels === 'string') {
+        labelsArray = valueLabels.split(',').map(label => label.trim()).filter(label => label);
+      } else if (Array.isArray(valueLabels)) {
+        labelsArray = valueLabels;
+      }
+
+      // Validate that all labels exist
+      if (labelsArray.length > 0) {
+        const existingLabels = await Label.findAll({
+          where: {
+            labelName: { [Op.in]: labelsArray },
+            entityType: { [Op.in]: ['lead', 'all'] },
+            isActive: true
+          }
+        });
+
+        const existingLabelNames = existingLabels.map(label => label.labelName);
+        const invalidLabels = labelsArray.filter(label => !existingLabelNames.includes(label));
+
+        if (invalidLabels.length > 0) {
+          return res.status(400).json({
+            message: "Some labels do not exist or are not active.",
+            invalidLabels: invalidLabels,
+            availableLabels: existingLabelNames
+          });
+        }
+
+        // Convert back to comma-separated string for storage
+        const finalValueLabels = labelsArray.join(', ');
+        
+        // Update the lead
+        await lead.update({ valueLabels: finalValueLabels });
+      } else {
+        // Clear labels if empty array provided
+        await lead.update({ valueLabels: null });
+      }
+    } else {
+      // Clear labels if null/undefined provided
+      await lead.update({ valueLabels: null });
+    }
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "UPDATE_LEAD_LABELS",
+      req.adminId,
+      `Updated labels for lead ${leadId}: ${valueLabels || 'cleared'}`,
+      leadId
+    );
+
+    // Get updated lead with labels
+    const updatedLead = await Lead.findByPk(leadId, {
+      attributes: ['leadId', 'title', 'valueLabels', 'contactPerson', 'organization']
+    });
+
+    res.status(200).json({
+      message: "Lead labels updated successfully",
+      lead: updatedLead
+    });
+
+  } catch (error) {
+    console.error("Error updating lead labels:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Get leads filtered by specific labels
+ */
+exports.getLeadsByLabels = async (req, res) => {
+  try {
+    const { 
+      labels, // Comma-separated string or array
+      page = 1, 
+      limit = 20,
+      sortBy = "createdAt",
+      order = "DESC"
+    } = req.query;
+
+    if (!labels) {
+      return res.status(400).json({
+        message: "Labels parameter is required. Provide comma-separated label names."
+      });
+    }
+
+    // Parse labels
+    let labelsArray = [];
+    if (typeof labels === 'string') {
+      labelsArray = labels.split(',').map(label => label.trim()).filter(label => label);
+    } else if (Array.isArray(labels)) {
+      labelsArray = labels;
+    }
+
+    if (labelsArray.length === 0) {
+      return res.status(400).json({
+        message: "At least one label must be specified."
+      });
+    }
+
+    const offset = (page - 1) * limit;
+
+    // Build where clause for labels (OR condition - lead has any of the specified labels)
+    const labelConditions = labelsArray.map(label => ({
+      valueLabels: { [Op.like]: `%${label}%` }
+    }));
+
+    let where = {
+      [Op.or]: labelConditions
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      where[Op.and] = [
+        { [Op.or]: labelConditions },
+        { 
+          [Op.or]: [
+            { masterUserID: req.adminId },
+            { ownerId: req.adminId }
+          ]
+        }
+      ];
+      delete where[Op.or]; // Remove the outer OR since we're using AND now
+    }
+
+    // Get leads with pagination
+    const { rows: leads, count: total } = await Lead.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset,
+      order: [[sortBy, order.toUpperCase()]],
+      attributes: [
+        'leadId',
+        'title', 
+        'contactPerson',
+        'organization',
+        'email',
+        'phone',
+        'valueLabels',
+        'status',
+        'pipeline',
+        'stage',
+        'value',
+        'expectedCloseDate',
+        'createdAt',
+        'updatedAt'
+      ]
+    });
+
+    // Process leads to include label details
+    const processedLeads = await Promise.all(leads.map(async (lead) => {
+      const leadObj = lead.toJSON();
+      
+      if (leadObj.valueLabels) {
+        const leadLabels = leadObj.valueLabels.split(',').map(label => label.trim());
+        
+        // Get label details
+        const labelDetails = await Label.findAll({
+          where: {
+            labelName: { [Op.in]: leadLabels },
+            entityType: { [Op.in]: ['lead', 'all'] },
+            isActive: true
+          },
+          attributes: ['labelId', 'labelName', 'labelColor']
+        });
+
+        leadObj.labels = labelDetails;
+      } else {
+        leadObj.labels = [];
+      }
+
+      return leadObj;
+    }));
+
+    res.status(200).json({
+      message: "Leads fetched successfully by labels",
+      searchedLabels: labelsArray,
+      totalLeads: total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: parseInt(page),
+      leads: processedLeads
+    });
+
+  } catch (error) {
+    console.error("Error fetching leads by labels:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Delete a label (soft delete - set isActive to false)
+ */
+exports.deleteLeadLabel = async (req, res) => {
+  try {
+    const { labelId } = req.params;
+
+    // Find the label
+    const label = await Label.findOne({
+      where: {
+        labelId,
+        entityType: { [Op.in]: ['lead', 'all'] },
+        isActive: true
+      }
+    });
+
+    if (!label) {
+      return res.status(404).json({ message: "Label not found or already deleted." });
+    }
+
+    // Check if label is being used by any leads
+    const leadsUsingLabel = await Lead.count({
+      where: {
+        valueLabels: { [Op.like]: `%${label.labelName}%` }
+      }
+    });
+
+    // Get user info for audit
+    const user = await MasterUser.findByPk(req.adminId);
+    const userName = user ? user.name : 'Unknown User';
+
+    // Soft delete the label
+    await label.update({
+      isActive: false,
+      updatedBy: userName,
+      updatedById: req.adminId,
+      updatedDate: new Date(),
+      mode: 'DELETE_LABEL'
+    });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "DELETE_LEAD_LABEL",
+      req.adminId,
+      `Deleted lead label: ${label.labelName} (was used by ${leadsUsingLabel} leads)`,
+      labelId
+    );
+
+    res.status(200).json({
+      message: "Lead label deleted successfully",
+      deletedLabel: {
+        labelId: label.labelId,
+        labelName: label.labelName,
+        leadsAffected: leadsUsingLabel
+      },
+      note: leadsUsingLabel > 0 ? `This label was being used by ${leadsUsingLabel} leads. You may want to update those leads.` : null
+    });
+
+  } catch (error) {
+    console.error("Error deleting lead label:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
+ * Get all available labels with usage statistics
+ */
+exports.getLeadLabelsWithStats = async (req, res) => {
+  try {
+    // Get all active labels for leads
+    const labels = await Label.findAll({
+      where: {
+        entityType: { [Op.in]: ['lead', 'all'] },
+        isActive: true
+      },
+      attributes: [
+        'labelId',
+        'labelName', 
+        'labelColor',
+        'entityType',
+        'description',
+        'createdBy',
+        'creationDate'
+      ],
+      order: [['labelName', 'ASC']]
+    });
+
+    // Get usage statistics for each label
+    const labelsWithStats = await Promise.all(labels.map(async (label) => {
+      const usageCount = await Lead.count({
+        where: {
+          valueLabels: { [Op.like]: `%${label.labelName}%` }
+        }
+      });
+
+      return {
+        ...label.toJSON(),
+        usageCount: usageCount
+      };
+    }));
+
+    // Get total leads count for percentage calculation
+    const totalLeads = await Lead.count();
+
+    // Add percentage to each label
+    const finalLabels = labelsWithStats.map(label => ({
+      ...label,
+      usagePercentage: totalLeads > 0 ? ((label.usageCount / totalLeads) * 100).toFixed(2) : 0
+    }));
+
+    res.status(200).json({
+      message: "Lead labels with statistics fetched successfully",
+      labels: finalLabels,
+      totalLabels: finalLabels.length,
+      totalLeads: totalLeads
+    });
+
+  } catch (error) {
+    console.error("Error fetching lead labels with stats:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
     });
   }
 };

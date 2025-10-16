@@ -36,6 +36,7 @@ exports.createActivity = async (req, res) => {
       personId,
       leadOrganizationId,
       isDone,
+      activityTypeFlag
     } = req.body;
     // Fetch contact person details
     let contactPerson = null;
@@ -93,6 +94,7 @@ exports.createActivity = async (req, res) => {
       email,
       organization,
       dueDate: endDateTime,
+      activityTypeFlag
     });
 
     // Update nextActivity in Lead if leadId is present
@@ -376,8 +378,8 @@ exports.getActivities = async (req, res) => {
       "personId",
       "activityId",
       // "type",
-      // "startDateTime",
-      // "endDateTime",
+      "startDateTime",
+      "endDateTime",
       // "priority",
       // "status"
     ];

@@ -124,6 +124,11 @@ const Activity = sequelize.define(
   type: DataTypes.STRING,
   allowNull: true,
 },
+activityTypeFlag:{
+  type: DataTypes.STRING,
+  allowNull: true,
+  defaultValue: 'time', // 👈 default value added here
+}
   },
   {
     tableName: "Activities",

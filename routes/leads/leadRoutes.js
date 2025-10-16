@@ -73,4 +73,26 @@ router.post("/bulk-unarchive", verifyToken,  validatePrivilege(2, "create"), lea
 router.post("/bulk-convert-to-deals", verifyToken, validatePrivilege(2, "create"), leadController.convertBulkLeadsToDeals);
 // router.post('/bulk-import', verifyToken,upload.single('file'), leadController.bulkImportLeads);
 
+// ===========================================
+// LABEL MANAGEMENT ROUTES
+// ===========================================
+
+// Get all available labels for leads
+router.get("/labels", verifyToken, validatePrivilege(2, "view"), leadController.getLeadLabels);
+
+// Get all labels with usage statistics
+router.get("/labels/stats", verifyToken, validatePrivilege(2, "view"), leadController.getLeadLabelsWithStats);
+
+// Create a new label for leads
+router.post("/labels/create", verifyToken, validatePrivilege(2, "create"), leadController.createLeadLabel);
+
+// Update labels for a specific lead
+router.put("/labels/:leadId", verifyToken, validatePrivilege(2, "edit"), leadController.updateLeadLabels);
+
+// Get leads filtered by specific labels
+router.get("/labels/filter", verifyToken, validatePrivilege(2, "view"), leadController.getLeadsByLabels);
+
+// Delete a label (soft delete)
+router.delete("/labels/:labelId", verifyToken, validatePrivilege(2, "delete"), leadController.deleteLeadLabel);
+
 module.exports = router;
