@@ -380,6 +380,7 @@ exports.getActivities = async (req, res) => {
       // "type",
       "startDateTime",
       "endDateTime",
+      "activityTypeFlag"
       // "priority",
       // "status"
     ];
