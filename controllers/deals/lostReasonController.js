@@ -52,6 +52,7 @@ exports.createLostReason = async (req, res) => {
   } catch (error) {
     console.error("Error creating lost reason:", error);
     res.status(500).json({ 
+      
       message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
