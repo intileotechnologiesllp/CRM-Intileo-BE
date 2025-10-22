@@ -86,6 +86,9 @@ router.get("/labels/stats", verifyToken, validatePrivilege(2, "view"), leadContr
 // Create a new label for leads
 router.post("/labels/create", verifyToken, validatePrivilege(2, "create"), leadController.createLeadLabel);
 
+// Edit/Update a particular label
+router.post("/labels/edit/:labelId", verifyToken, validatePrivilege(2, "edit"), leadController.updateLeadLabel);
+
 // Update labels for a specific lead
 router.put("/labels/:leadId", verifyToken, validatePrivilege(2, "edit"), leadController.updateLeadLabels);
 

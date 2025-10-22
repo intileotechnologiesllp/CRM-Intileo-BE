@@ -6763,6 +6763,191 @@ exports.createLeadLabel = async (req, res) => {
 };
 
 /**
+ * Update/Edit a particular label
+ */
+exports.updateLeadLabel = async (req, res) => {
+  try {
+    const { labelId } = req.params;
+    const { labelName, labelColor, description } = req.body;
+
+    // Validation
+    if (!labelId || !labelId.trim()) {
+      return res.status(400).json({ 
+        message: "Label ID is required." 
+      });
+    }
+
+    // Find the existing label
+    const existingLabel = await Label.findOne({
+      where: {
+        labelId: labelId.trim(),
+        entityType: { [Op.in]: ['lead', 'all'] },
+        isActive: true
+      }
+    });
+
+    if (!existingLabel) {
+      return res.status(404).json({
+        message: "Label not found or has been deactivated."
+      });
+    }
+
+    // Prepare update data
+    const updateData = {};
+    
+    // Only update provided fields
+    if (labelName && labelName.trim() && labelName.trim() !== existingLabel.labelName) {
+      // Check if new name already exists (excluding current label)
+      const duplicateLabel = await Label.findOne({
+        where: {
+          labelName: labelName.trim(),
+          entityType: { [Op.in]: ['lead', 'all'] },
+          isActive: true,
+          labelId: { [Op.ne]: labelId }
+        }
+      });
+
+      if (duplicateLabel) {
+        return res.status(409).json({
+          message: "A label with this name already exists.",
+          conflictingLabel: {
+            labelId: duplicateLabel.labelId,
+            labelName: duplicateLabel.labelName,
+            labelColor: duplicateLabel.labelColor
+          }
+        });
+      }
+
+      updateData.labelName = labelName.trim();
+    }
+
+    if (labelColor && labelColor.trim()) {
+      // Validate color format (hex color)
+      const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
+      if (!colorRegex.test(labelColor.trim())) {
+        return res.status(400).json({
+          message: "Invalid color format. Please provide a valid hex color code (e.g., #ff0000 or #f00)."
+        });
+      }
+      updateData.labelColor = labelColor.trim();
+    }
+
+    if (description !== undefined) {
+      updateData.description = description ? description.trim() : null;
+    }
+
+    // Check if there's anything to update
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        message: "No valid fields provided for update."
+      });
+    }
+
+    // Get user info for audit
+    const user = await MasterUser.findByPk(req.adminId);
+    const userName = user ? user.name : 'Unknown User';
+
+    // Add audit fields
+    updateData.updatedBy = userName;
+    updateData.updatedById = req.adminId;
+    updateData.lastUpdated = new Date();
+    updateData.mode = 'UPDATE_LABEL';
+
+    // Update the label
+    await Label.update(updateData, {
+      where: { 
+        labelId: labelId,
+        isActive: true 
+      }
+    });
+
+    // Fetch updated label
+    const updatedLabel = await Label.findByPk(labelId);
+
+    // If label name was changed, update all leads that have this label
+    if (updateData.labelName && updateData.labelName !== existingLabel.labelName) {
+      // Find all leads with the old label name
+      const leadsWithLabel = await Lead.findAll({
+        where: {
+          valueLabels: {
+            [Op.or]: [
+              { [Op.like]: `%,${existingLabel.labelName},%` },
+              { [Op.like]: `${existingLabel.labelName},%` },
+              { [Op.like]: `%,${existingLabel.labelName}` },
+              { [Op.like]: existingLabel.labelName }
+            ]
+          }
+        }
+      });
+
+      // Update each lead's valueLabels
+      for (const lead of leadsWithLabel) {
+        let labels = lead.valueLabels ? lead.valueLabels.split(',').map(l => l.trim()) : [];
+        
+        // Replace old label name with new label name
+        labels = labels.map(label => 
+          label === existingLabel.labelName ? updateData.labelName : label
+        );
+
+        await Lead.update(
+          { valueLabels: labels.join(',') },
+          { where: { leadId: lead.leadId } }
+        );
+      }
+
+      console.log(`Updated ${leadsWithLabel.length} leads with new label name: ${existingLabel.labelName} -> ${updateData.labelName}`);
+    }
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "UPDATE_LEAD_LABEL",
+      req.adminId,
+      `Updated lead label: ${existingLabel.labelName} ${updateData.labelName ? `-> ${updateData.labelName}` : ''}`,
+      labelId
+    );
+
+    res.status(200).json({
+      message: "Lead label updated successfully",
+      previousLabel: {
+        labelId: existingLabel.labelId,
+        labelName: existingLabel.labelName,
+        labelColor: existingLabel.labelColor,
+        description: existingLabel.description
+      },
+      updatedLabel: {
+        labelId: updatedLabel.labelId,
+        labelName: updatedLabel.labelName,
+        labelColor: updatedLabel.labelColor,
+        entityType: updatedLabel.entityType,
+        description: updatedLabel.description,
+        updatedBy: updatedLabel.updatedBy,
+        lastUpdated: updatedLabel.lastUpdated
+      }
+    });
+
+  } catch (error) {
+    console.error("Error updating lead label:", error);
+    
+    // Handle validation errors
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        message: "Validation error",
+        errors: error.errors.map(err => ({
+          field: err.path,
+          message: err.message
+        }))
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+/**
  * Update labels for a specific lead
  */
 exports.updateLeadLabels = async (req, res) => {
