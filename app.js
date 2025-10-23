@@ -48,7 +48,8 @@ const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Impo
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
 const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
 const activitySettingRoutes = require("./routes/activity/activitySettingRoutes.js"); // Import activity setting routes
-const activityTypeRoutes = require("./routes/activity/activityTypeRoutes.js"); // Import activity type routes
+const activityTypeRoutes = require('./routes/activity/activityTypeRoutes.js'); // Import activity type routes
+const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js"); // Import user favorites routes
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
 const { loadPrograms } = require("./utils/programCache");
@@ -122,6 +123,7 @@ app.use("/api/global-search", globalSearchRoutes); // Register global search rou
 app.use("/api/groupvisibility", groupVisibilityRoutes);
 app.use("/api/activity-settings", activitySettingRoutes); // Register activity setting routes
 app.use("/api/activity-types", activityTypeRoutes); // Register activity type routes
+app.use("/api/favorites", userFavoritesRoutes); // Register user favorites routes
 app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.get("/track/open/:tempMessageId", async (req, res) => {
