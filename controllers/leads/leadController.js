@@ -25,6 +25,7 @@ const DealNote = require("../../models/deals/delasNoteModel"); // Import DealNot
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const Label = require("../../models/admin/masters/labelModel"); // Import Label model
+const UserFavorites = require("../../models/favorites/userFavoritesModel"); // Import UserFavorites model
 const {
   VisibilityGroup,
   GroupMembership,
@@ -693,6 +694,7 @@ exports.getLeads = async (req, res) => {
     sortBy = "createdAt",
     order = "DESC",
     masterUserID: queryMasterUserID,
+    favoriteId, // Add favoriteId parameter for filtering by favorite user
     filterId,
     labels, // Add labels parameter for filtering by labels
   } = req.query;
@@ -726,6 +728,41 @@ exports.getLeads = async (req, res) => {
             entityType: "leads",
             isActive: true,
           },
+        });
+      }
+    }
+
+    // Handle favoriteId parameter - convert to masterUserID
+    let effectiveMasterUserID = queryMasterUserID;
+    
+    if (favoriteId) {
+      console.log("→ favoriteId parameter received:", favoriteId);
+      
+      // Look up the favorite record to get the favoriteUserId
+      const favoriteRecord = await UserFavorites.findOne({
+        where: {
+          favoriteId: favoriteId,
+          userId: req.adminId, // Only allow users to use their own favorites
+          isActive: true
+        }
+      });
+      
+      if (favoriteRecord) {
+        effectiveMasterUserID = favoriteRecord.favoriteUserId;
+        console.log("→ Found favorite record, using favoriteUserId as masterUserID:", effectiveMasterUserID);
+        
+        // Get favorite user details for logging
+        const favoriteUser = await MasterUser.findByPk(favoriteRecord.favoriteUserId, {
+          attributes: ['masterUserID', 'name']
+        });
+        
+        if (favoriteUser) {
+          console.log("→ Fetching leads for favorite user:", favoriteUser.name, "(ID:", favoriteUser.masterUserID, ")");
+        }
+      } else {
+        console.log("→ Favorite record not found or not accessible");
+        return res.status(404).json({
+          message: "Favorite not found or you don't have access to it."
         });
       }
     }
@@ -851,13 +888,13 @@ exports.getLeads = async (req, res) => {
     // Handle masterUserID filtering based on role and query parameters
     if (req.role === "admin") {
       // Admin can filter by specific masterUserID or see all leads
-      if (queryMasterUserID && queryMasterUserID !== "all") {
+      if (effectiveMasterUserID && effectiveMasterUserID !== "all") {
         whereClause[Op.or] = [
-          { masterUserID: queryMasterUserID },
-          { ownerId: queryMasterUserID },
+          { masterUserID: effectiveMasterUserID },
+          { ownerId: effectiveMasterUserID },
         ];
       }
-      // If queryMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
+      // If effectiveMasterUserID is "all" or not provided, admin sees all leads (no additional filter)
     } else {
       // Non-admin users: apply visibility filtering based on group rules
       let visibilityConditions = [];
@@ -948,9 +985,9 @@ exports.getLeads = async (req, res) => {
       }
 
       // Handle specific user filtering for non-admin users
-      if (queryMasterUserID && queryMasterUserID !== "all") {
+      if (effectiveMasterUserID && effectiveMasterUserID !== "all") {
         // Non-admin can only filter within their visible scope
-        const userId = queryMasterUserID;
+        const userId = effectiveMasterUserID;
         whereClause[Op.and] = whereClause[Op.and] || [];
         whereClause[Op.and].push({
           [Op.or]: [{ masterUserID: userId }, { ownerId: userId }],
@@ -960,6 +997,8 @@ exports.getLeads = async (req, res) => {
 
     console.log("→ Query params:", req.query);
     console.log("→ queryMasterUserID:", queryMasterUserID);
+    console.log("→ favoriteId:", favoriteId);
+    console.log("→ effectiveMasterUserID:", effectiveMasterUserID);
     console.log("→ req.adminId:", req.adminId);
     console.log("→ req.role:", req.role);
 
@@ -1216,31 +1255,31 @@ exports.getLeads = async (req, res) => {
       // Apply masterUserID filtering logic for filters
       if (req.role === "admin") {
         // Admin can filter by specific masterUserID or see all leads
-        if (queryMasterUserID && queryMasterUserID !== "all") {
+        if (effectiveMasterUserID && effectiveMasterUserID !== "all") {
           if (filterWhere[Op.or]) {
             // If there's already an Op.or condition from filters, we need to combine properly
             filterWhere[Op.and] = [
               { [Op.or]: filterWhere[Op.or] },
               {
                 [Op.or]: [
-                  { masterUserID: queryMasterUserID },
-                  { ownerId: queryMasterUserID },
+                  { masterUserID: effectiveMasterUserID },
+                  { ownerId: effectiveMasterUserID },
                 ],
               },
             ];
             delete filterWhere[Op.or];
           } else {
             filterWhere[Op.or] = [
-              { masterUserID: queryMasterUserID },
-              { ownerId: queryMasterUserID },
+              { masterUserID: effectiveMasterUserID },
+              { ownerId: effectiveMasterUserID },
             ];
           }
         }
       } else {
         // Non-admin users: filter by their own leads or specific user if provided
         const userId =
-          queryMasterUserID && queryMasterUserID !== "all"
-            ? queryMasterUserID
+          effectiveMasterUserID && effectiveMasterUserID !== "all"
+            ? effectiveMasterUserID
             : req.adminId;
         if (filterWhere[Op.or]) {
           // If there's already an Op.or condition from filters, we need to combine properly
