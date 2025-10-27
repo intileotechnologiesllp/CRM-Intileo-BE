@@ -11,8 +11,9 @@ router.post("/update-filters/:filterId",verifyToken, validatePrivilege(2, "edit"
 router.get("/get-lead-fields", verifyToken, validatePrivilege(2, "view"), leadFilterController.getLeadFields);
 router.get("/get-all-contacts-persons", verifyToken, validatePrivilege(2, "view"), leadFilterController.getAllLeadContactPersons);
 
-
-
-
+// Favorite filter routes
+router.post("/add-to-favorites/:filterId", verifyToken, validatePrivilege(2, "edit"), leadFilterController.addFilterToFavorites);
+router.delete("/remove-from-favorites/:filterId", verifyToken, validatePrivilege(2, "edit"), leadFilterController.removeFilterFromFavorites);
+router.get("/get-favorites", verifyToken, validatePrivilege(2, "view"), leadFilterController.getFavoriteFilters);
 
 module.exports = router;

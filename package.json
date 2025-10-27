@@ -17,6 +17,7 @@
     "bcrypt": "^5.1.1",
     "bull": "^4.16.5",
     "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
     "date-fns": "^4.1.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
@@ -42,6 +43,7 @@
     "sequelize": "^6.11.0",
     "uninstall": "^0.0.0",
     "utf8": "^3.0.0",
+    "uuid": "^13.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

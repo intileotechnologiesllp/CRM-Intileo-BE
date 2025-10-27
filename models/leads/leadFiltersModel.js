@@ -33,6 +33,12 @@ const LeadFilter = sequelize.define("LeadFilter", {
     defaultValue: 'lead',
     comment: 'Indicates which entity type this filter is designed for'
   },
+  isFavorite: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    comment: 'Indicates if this filter is marked as favorite by the user'
+  },
 });
 
 module.exports = LeadFilter;

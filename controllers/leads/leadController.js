@@ -695,6 +695,7 @@ exports.getLeads = async (req, res) => {
     order = "DESC",
     masterUserID: queryMasterUserID,
     favoriteId, // Add favoriteId parameter for filtering by favorite user
+    favoriteFilterId, // Add favoriteFilterId parameter for applying favorite filters
     filterId,
     labels, // Add labels parameter for filtering by labels
   } = req.query;
@@ -763,6 +764,36 @@ exports.getLeads = async (req, res) => {
         console.log("→ Favorite record not found or not accessible");
         return res.status(404).json({
           message: "Favorite not found or you don't have access to it."
+        });
+      }
+    }
+
+    // Handle favoriteFilterId parameter - convert to filterId
+    let effectiveFilterId = filterId;
+    
+    if (favoriteFilterId) {
+      console.log("→ favoriteFilterId parameter received:", favoriteFilterId);
+      
+      // Look up the favorite filter (filter with isFavorite = true and matching filterId)
+      const favoriteFilter = await LeadFilter.findOne({
+        where: {
+          filterId: favoriteFilterId,
+          isFavorite: true,
+          [Op.or]: [
+            { masterUserID: req.adminId }, // User's own filter
+            { visibility: 'Public' }       // Public filter
+          ]
+        }
+      });
+      
+      if (favoriteFilter) {
+        effectiveFilterId = favoriteFilter.filterId;
+        console.log("→ Found favorite filter, using filterId:", effectiveFilterId);
+        console.log("→ Applying favorite filter:", favoriteFilter.filterName, "(ID:", favoriteFilter.filterId, ")");
+      } else {
+        console.log("→ Favorite filter not found or not accessible");
+        return res.status(404).json({
+          message: "Favorite filter not found or you don't have access to it."
         });
       }
     }
@@ -998,16 +1029,18 @@ exports.getLeads = async (req, res) => {
     console.log("→ Query params:", req.query);
     console.log("→ queryMasterUserID:", queryMasterUserID);
     console.log("→ favoriteId:", favoriteId);
+    console.log("→ favoriteFilterId:", favoriteFilterId);
     console.log("→ effectiveMasterUserID:", effectiveMasterUserID);
+    console.log("→ effectiveFilterId:", effectiveFilterId);
     console.log("→ req.adminId:", req.adminId);
     console.log("→ req.role:", req.role);
 
     //................................................................//filter
-    if (filterId) {
-      console.log("Processing filter with filterId:", filterId);
+    if (effectiveFilterId) {
+      console.log("Processing filter with effectiveFilterId:", effectiveFilterId);
 
       // Fetch the saved filter
-      const filter = await LeadFilter.findByPk(filterId);
+      const filter = await LeadFilter.findByPk(effectiveFilterId);
       if (!filter) {
         return res.status(404).json({ message: "Filter not found." });
       }

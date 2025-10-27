@@ -87,6 +87,8 @@ Activity.belongsTo(Deal, {
   foreignKey: "dealId",
   as: "ActivityDeal",
 });
+Deal.hasMany(Activity, { foreignKey: "dealId", as: "Activities" });
+
 // PersonNote associations
 Person.hasMany(PersonNote, { foreignKey: "personId", as: "personNotes" });
 PersonNote.belongsTo(Person, { foreignKey: "personId", as: "person" });

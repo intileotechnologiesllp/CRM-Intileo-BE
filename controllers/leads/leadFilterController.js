@@ -54,6 +54,7 @@ exports.saveLeadFilter = async (req, res) => {
         masterUserID: filter.masterUserID,
         columns: filter.columns,
         filterEntityType: filter.filterEntityType,
+        isFavorite: filter.isFavorite || false, // Include favorite status
         createdAt: filter.createdAt,
         updatedAt: filter.updatedAt
       }
@@ -104,9 +105,23 @@ exports.getLeadFilters = async (req, res) => {
       });
     }
 
+    // Format the filtered results to include all necessary fields
+    const formattedFilters = filtered.map(filter => ({
+      filterId: filter.filterId,
+      filterName: filter.filterName,
+      filterConfig: filter.filterConfig,
+      filterEntityType: filter.filterEntityType,
+      visibility: filter.visibility,
+      masterUserID: filter.masterUserID,
+      isFavorite: filter.isFavorite || false, // Include favorite status
+      columns: filter.columns,
+      createdAt: filter.createdAt,
+      updatedAt: filter.updatedAt
+    }));
+
     res.status(200).json({ 
-      filters: filtered,
-      totalFilters: filtered.length,
+      filters: formattedFilters,
+      totalFilters: formattedFilters.length,
       availableEntityTypes: ['lead', 'deal', 'person', 'organization', 'activity']
     });
   } catch (error) {
@@ -523,5 +538,239 @@ exports.getAllLeadContactPersons = async (req, res) => {
   } catch (error) {
     console.error("Error fetching contact persons:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Add filter to favorites (mark as favorite)
+ */
+exports.addFilterToFavorites = async (req, res) => {
+  try {
+    const { filterId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Check if filter exists and user has access to it
+    const filter = await LeadFilter.findOne({
+      where: {
+        filterId: filterId,
+        [Op.or]: [
+          { masterUserID: masterUserID }, // User's own filter (private or public)
+          { visibility: 'Public' }        // Public filter from other users
+        ]
+      }
+    });
+
+    if (!filter) {
+      return res.status(404).json({
+        message: "Filter not found or you don't have access to it."
+      });
+    }
+
+    // Check if already favorite
+    if (filter.isFavorite) {
+      return res.status(409).json({
+        message: "Filter is already marked as favorite.",
+        filter: {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          isFavorite: filter.isFavorite
+        }
+      });
+    }
+
+    // Mark as favorite
+    await filter.update({ isFavorite: true });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "ADD_FILTER_TO_FAVORITES",
+      masterUserID,
+      `Marked filter "${filter.filterName}" as favorite`,
+      filter.filterId
+    );
+
+    res.status(200).json({
+      message: "Filter added to favorites successfully",
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        filterEntityType: filter.filterEntityType,
+        visibility: filter.visibility,
+        isFavorite: filter.isFavorite,
+        updatedAt: filter.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error("Error adding filter to favorites:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Remove filter from favorites (unmark as favorite)
+ */
+exports.removeFilterFromFavorites = async (req, res) => {
+  try {
+    const { filterId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Check if filter exists and user has access to it
+    const filter = await LeadFilter.findOne({
+      where: {
+        filterId: filterId,
+        [Op.or]: [
+          { masterUserID: masterUserID }, // User's own filter
+          { visibility: 'Public' }        // Public filter
+        ]
+      }
+    });
+
+    if (!filter) {
+      return res.status(404).json({
+        message: "Filter not found or you don't have access to it."
+      });
+    }
+
+    // Check if not favorite
+    if (!filter.isFavorite) {
+      return res.status(409).json({
+        message: "Filter is not marked as favorite.",
+        filter: {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          isFavorite: filter.isFavorite
+        }
+      });
+    }
+
+    // Remove from favorites
+    await filter.update({ isFavorite: false });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "REMOVE_FILTER_FROM_FAVORITES",
+      masterUserID,
+      `Removed filter "${filter.filterName}" from favorites`,
+      filter.filterId
+    );
+
+    res.status(200).json({
+      message: "Filter removed from favorites successfully",
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        filterEntityType: filter.filterEntityType,
+        visibility: filter.visibility,
+        isFavorite: filter.isFavorite,
+        updatedAt: filter.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error("Error removing filter from favorites:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all favorite filters
+ */
+exports.getFavoriteFilters = async (req, res) => {
+  try {
+    const masterUserID = req.adminId;
+    const { filterEntityType } = req.query;
+
+    // Build where clause
+    let whereClause = {
+      isFavorite: true,
+      [Op.or]: [
+        { masterUserID: masterUserID }, // User's own filters
+        { visibility: 'Public' }        // Public filters
+      ]
+    };
+
+    // Filter by entity type if specified
+    if (filterEntityType) {
+      whereClause.filterEntityType = filterEntityType;
+    }
+
+    // Get all favorite filters
+    const favoriteFilters = await LeadFilter.findAll({
+      where: whereClause,
+      order: [['updatedAt', 'DESC'], ['createdAt', 'DESC']]
+    });
+
+    // Get filter owner details for each filter
+    const filtersWithOwnerDetails = await Promise.all(
+      favoriteFilters.map(async (filter) => {
+        // Get owner information
+        const owner = await require('../../models/master/masterUserModel').findByPk(filter.masterUserID, {
+          attributes: ['masterUserID', 'name', 'email']
+        });
+
+        return {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          filterConfig: filter.filterConfig,
+          filterEntityType: filter.filterEntityType,
+          visibility: filter.visibility,
+          isFavorite: filter.isFavorite,
+          columns: filter.columns,
+          owner: owner ? {
+            masterUserID: owner.masterUserID,
+            name: owner.name,
+            email: owner.email
+          } : null,
+          isOwnFilter: filter.masterUserID === masterUserID,
+          createdAt: filter.createdAt,
+          updatedAt: filter.updatedAt
+        };
+      })
+    );
+
+    // Get summary information
+    const totalFavorites = filtersWithOwnerDetails.length;
+    const ownFavorites = filtersWithOwnerDetails.filter(f => f.isOwnFilter).length;
+    const publicFavorites = filtersWithOwnerDetails.filter(f => !f.isOwnFilter).length;
+
+    // Group by entity type
+    const byEntityType = filtersWithOwnerDetails.reduce((acc, filter) => {
+      const entityType = filter.filterEntityType;
+      if (!acc[entityType]) {
+        acc[entityType] = 0;
+      }
+      acc[entityType]++;
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      message: "Favorite filters retrieved successfully",
+      data: filtersWithOwnerDetails,
+      summary: {
+        totalFavorites,
+        ownFavorites,
+        publicFavorites,
+        byEntityType,
+        filterEntityType: filterEntityType || 'all'
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching favorite filters:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
   }
 };
