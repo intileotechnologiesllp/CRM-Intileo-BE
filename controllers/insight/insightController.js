@@ -2396,31 +2396,44 @@ exports.getAllGoals = async (req, res) => {
 
 exports.getAllGoalsDashboardWsie = async (req, res) => {
   try {
-    const ownerId = req.adminId;
     const { dashboardId } = req.params;
-    // const now = new Date(); // 'now' is not used, so it can be safely removed
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Validate dashboardId
+    if (!dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID is required",
+      });
+    }
+
+    // Build where condition
+    const whereCondition = {
+      isActive: true,
+      dashboardId: dashboardId
+    };
+
+    // Add owner filter for non-admin users
+    if (role !== "admin") {
+      whereCondition.ownerId = ownerId;
+    }
 
     const goals = await Goal.findAll({
-      where: {
-        ownerId,
-        isActive: true,
-        dashboardId
-      },
+      where: whereCondition,
       order: [["createdAt", "DESC"]],
     });
 
-    // --- Start of modification ---
+    // Parse JSON fields (config & colors)
     const parsedGoals = goals.map(goal => {
-      // Create a new object from the goal data
       const goalData = goal.get({ plain: true });
 
-      // Parse the JSON strings for 'config' and 'colors'
       if (goalData.config && typeof goalData.config === 'string') {
         try {
           goalData.config = JSON.parse(goalData.config);
         } catch (e) {
           console.error(`Error parsing config for goalId ${goalData.goalId}:`, e);
-          // Handle parsing error if necessary, e.g., set to null or keep as string
+          // Handle parsing error if necessary
         }
       }
 
@@ -2435,11 +2448,11 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
 
       return goalData;
     });
-    // --- End of modification ---
 
     res.status(200).json({
       success: true,
-      data: parsedGoals, // Send the parsed array
+      message: `Successfully fetched goals for dashboardId ${dashboardId}`,
+      data: parsedGoals,
     });
   } catch (error) {
     console.error("Error fetching goals:", error);
