@@ -2,6 +2,7 @@ const Deal = require("../../models/deals/dealsModels");
 const Lead = require("../../models/leads/leadsModel");
 const Person = require("../../models/leads/leadPersonModel");
 const Organization = require("../../models/leads/leadOrganizationModel");
+const Activity = require("../../models/activity/activityModel");
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const PROGRAMS = require("../../utils/programConstants");
@@ -18,7 +19,6 @@ const Email = require("../../models/email/emailModel");
 const Attachment = require("../../models/email/attachmentModel");
 const LeadFilter = require("../../models/leads/leadFiltersModel");
 const { convertRelativeDate } = require("../../utils/helper");
-const Activity = require("../../models/activity/activityModel");
 const DealColumnPreference = require("../../models/deals/dealColumnModel"); // Adjust path as needed
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Adjust path as needed
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
@@ -3986,6 +3986,8 @@ exports.unarchiveDeal = async (req, res) => {
 
 exports.getDealsByStage = async (req, res) => {
   try {
+    const { pipeline, pipelineId, includeActivities = false } = req.query;
+    
     const allStages = [
       "Qualified",
       "Contact Made",
@@ -3997,18 +3999,81 @@ exports.getDealsByStage = async (req, res) => {
     const result = [];
     let totalDeals = 0;
 
-    for (const stage of allStages) {
-      const deals = await Deal.findAll({
-        where: { 
-          pipelineStage: stage,
-          // Exclude deals that have been converted to leads
-          isConvertedToLead: {
-            [Op.or]: [
-              { [Op.is]: null },
-              { [Op.eq]: false }
-            ]
+    // Build pipeline filter conditions
+    const pipelineFilter = {};
+    if (pipeline) {
+      pipelineFilter.pipeline = pipeline;
+    }
+    if (pipelineId) {
+      pipelineFilter.pipelineId = parseInt(pipelineId);
+    }
+
+    // Build include array for associations
+    const includeArray = [
+      {
+        model: Person,
+        as: "Person",
+        attributes: ["personId","email", "phone"],
+        required: false,
+      },
+      {
+        model: Organization,
+        as: "Organization",
+        attributes: ["leadOrganizationId"],
+        required: false,
+      },
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+      {
+        model: Activity,
+        as: "Activities",
+        attributes: [
+          "activityId", 
+          "type", 
+          "subject", 
+          "startDateTime", 
+          "endDateTime", 
+          "priority", 
+          "status", 
+          "isDone", 
+          "dueDate",
+          "notes",
+          "contactPerson",
+          "email"
+        ],
+        include: [
+          {
+            model: MasterUser,
+            as: "assignedUser",
+            attributes: ["masterUserID", "name", "email"],
+            required: false,
           }
+        ],
+        required: false,
+        order: [["startDateTime", "DESC"]]
+      }
+    ];
+
+    for (const stage of allStages) {
+      const whereCondition = {
+        pipelineStage: stage,
+        // Exclude deals that have been converted to leads
+        isConvertedToLead: {
+          [Op.or]: [
+            { [Op.is]: null },
+            { [Op.eq]: false }
+          ]
         },
+        ...pipelineFilter
+      };
+
+      const deals = await Deal.findAll({
+        where: whereCondition,
+        include: includeArray,
         order: [["createdAt", "DESC"]],
       });
 
@@ -4019,20 +4084,59 @@ exports.getDealsByStage = async (req, res) => {
       const dealCount = deals.length;
       totalDeals += dealCount;
 
+      // Format deals with activity summary
+      const formattedDeals = deals.map(deal => {
+        const dealData = deal.toJSON();
+        
+        // Always add Activities array (empty if no activities)
+        const activities = dealData.Activities || [];
+        dealData.Activities = activities;
+        
+        // Add activity summary only if activities are requested
+        if (includeActivities === 'true' || includeActivities === true) {
+          dealData.activitySummary = {
+            totalActivities: activities.length,
+            completedActivities: activities.filter(a => a.isDone).length,
+            pendingActivities: activities.filter(a => !a.isDone).length,
+            nextActivity: activities.find(a => !a.isDone && new Date(a.startDateTime) > new Date()),
+            lastActivity: activities.find(a => a.isDone),
+            upcomingActivities: activities.filter(a => 
+              !a.isDone && 
+              new Date(a.startDateTime) > new Date() && 
+              new Date(a.startDateTime) <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // Next 7 days
+            ).length
+          };
+        }
+
+        return dealData;
+      });
+
       result.push({
         stage,
         totalValue,
         dealCount,
-        deals,
+        deals: formattedDeals,
       });
     }
 
-    res.status(200).json({
+    // Add filter information to response
+    const responseData = {
       totalDeals,
       stages: result,
-    });
+      filters: {
+        pipeline: pipeline || null,
+        pipelineId: pipelineId || null,
+        includeActivities: includeActivities === 'true' || includeActivities === true
+      }
+    };
+
+    res.status(200).json(responseData);
   } catch (error) {
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error in getDealsByStage:", error);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
