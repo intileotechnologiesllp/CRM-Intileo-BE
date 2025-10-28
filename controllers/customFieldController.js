@@ -4,6 +4,7 @@ const Deal = require("../models/deals/dealsModels");
 const Lead = require("../models/leads/leadsModel");
 const Pipeline = require("../models/deals/pipelineModel");
 const PipelineStage = require("../models/deals/pipelineStageModel");
+const Label = require("../models/admin/masters/labelModel");
 const { Op } = require("sequelize");
 const sequelize = require("../config/db");
 const { logAuditTrail } = require("../utils/auditTrailLogger");
@@ -58,6 +59,32 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
     }
   }
 
+  // Helper function to fetch labels dynamically from database
+  const fetchLabelsForEntity = async (targetEntityType) => {
+    try {
+      const labels = await Label.findAll({
+        where: {
+          isActive: true,
+          entityType: {
+            [Op.in]: [targetEntityType, 'all'] // Include specific entity type and 'all'
+          }
+        },
+        order: [['labelName', 'ASC']]
+      });
+      
+      return labels.map(label => label.labelName);
+    } catch (error) {
+      console.log(`Error fetching labels for ${targetEntityType}:`, error.message);
+      return ["Hot", "Dead", "Warm", "Cold"]; // Fallback to static options
+    }
+  };
+
+  // Fetch dynamic labels for each entity type
+  const leadsLabels = await fetchLabelsForEntity('lead');
+  const dealsLabels = await fetchLabelsForEntity('deal'); 
+  const personLabels = await fetchLabelsForEntity('person');
+  const organizationLabels = await fetchLabelsForEntity('organization');
+
   const specificFields = {
     // Fields from your screenshot that exist in database models
     leads: [
@@ -111,7 +138,6 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: true,
         dealView: true,
       },
-      
       {
         fieldName: "valueLabels",
         fieldLabel: "Label",
@@ -123,7 +149,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: true,
         dealView: false,
-        options:["Hot","Dead","Warm","Cold"]
+        options: leadsLabels
       },
             {
         fieldName: "sourceChannel",
@@ -235,6 +261,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: false,
         dealView: false,
       },
+
     ],
     deals: [
       // ...existing code for deals fields...
@@ -299,7 +326,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         isDefault: true,
         leadView: false,
         dealView: true,
-        options:["Hot","Dead","Warm","Cold"]
+        options: dealsLabels
       },
 
       {
@@ -409,7 +436,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: true,
         dealView: true,
         personView:true,
-        options:["Hot","Dead","Warm","Cold"]
+        options: personLabels
       },
 
       {
@@ -519,7 +546,7 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: false,
         dealView: false,
         organizationView:true,
-        options:["Hot","Dead","Warm","Cold"]
+        options: organizationLabels
       },
       {
         fieldName: "visibleTo",
