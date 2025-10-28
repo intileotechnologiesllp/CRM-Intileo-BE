@@ -13,7 +13,11 @@ const { Op } = require('sequelize');
 exports.getAvailableFields = async (req, res) => {
   try {
     const { entityType } = req.params;
+    const { search, fieldType, isRequired, isCustomField } = req.query;
     const masterUserID = req.adminId;
+
+    console.log('getAvailableFields called with entityType:', entityType);
+    console.log('Search params:', { search, fieldType, isRequired, isCustomField });
 
     // Validate entity type
     const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
@@ -24,7 +28,44 @@ exports.getAvailableFields = async (req, res) => {
       });
     }
 
-    const fields = await getEntityFields(entityType);
+    let fields = await getEntityFields(entityType);
+    
+    console.log('Fields before filtering:', fields.length);
+
+    // Apply search filter
+    if (search && search.trim()) {
+      const searchTerm = search.trim().toLowerCase();
+      fields = fields.filter(field => 
+        field.value.toLowerCase().includes(searchTerm) ||
+        field.label.toLowerCase().includes(searchTerm) ||
+        field.description?.toLowerCase().includes(searchTerm)
+      );
+      console.log('Fields after search filter:', fields.length);
+    }
+
+    // Apply field type filter
+    if (fieldType && fieldType.trim()) {
+      fields = fields.filter(field => field.type === fieldType.trim());
+      console.log('Fields after fieldType filter:', fields.length);
+    }
+
+    // Apply required filter
+    if (isRequired !== undefined) {
+      const requiredFilter = isRequired === 'true' || isRequired === true;
+      fields = fields.filter(field => field.isRequired === requiredFilter);
+      console.log('Fields after isRequired filter:', fields.length);
+    }
+
+    // Apply custom field filter
+    if (isCustomField !== undefined) {
+      const customFilter = isCustomField === 'true' || isCustomField === true;
+      fields = fields.filter(field => field.isCustomField === customFilter);
+      console.log('Fields after isCustomField filter:', fields.length);
+    }
+    
+    console.log('Fields returned from getEntityFields:', fields.length);
+    console.log('Standard fields:', fields.filter(f => !f.isCustomField).length);
+    console.log('Custom fields:', fields.filter(f => f.isCustomField).length);
 
     res.status(200).json({
       success: true,
@@ -33,7 +74,13 @@ exports.getAvailableFields = async (req, res) => {
         fields,
         totalFields: fields.length,
         standardFields: fields.filter(f => !f.isCustomField).length,
-        customFields: fields.filter(f => f.isCustomField).length
+        customFields: fields.filter(f => f.isCustomField).length,
+        filters: {
+          search: search || null,
+          fieldType: fieldType || null,
+          isRequired: isRequired || null,
+          isCustomField: isCustomField || null
+        }
       }
     });
 
@@ -49,6 +96,33 @@ exports.getAvailableFields = async (req, res) => {
 
 /**
  * Save column mapping configuration
+ * 
+ * Expected columnMapping format for manual mapping:
+ * {
+ *   "0": {
+ *     "field": "contactPerson",
+ *     "entityType": "lead", 
+ *     "fieldType": "text",
+ *     "isCustomField": false,
+ *     "isRequired": false,
+ *     "label": "Contact Person",
+ *     "transform": {
+ *       "type": "uppercase" // optional transform rules
+ *     }
+ *   },
+ *   "1": {
+ *     "field": "custom_industry",
+ *     "fieldId": "abc123", // Required for custom fields
+ *     "entityType": "lead",
+ *     "fieldType": "select", 
+ *     "isCustomField": true,
+ *     "isRequired": false,
+ *     "label": "Industry Type",
+ *     "options": ["Tech", "Finance", "Healthcare"],
+ *     "transform": null
+ *   },
+ *   "2": null // Unmapped column
+ * }
  */
 exports.saveColumnMapping = async (req, res) => {
   try {
@@ -76,8 +150,8 @@ exports.saveColumnMapping = async (req, res) => {
       });
     }
 
-    // Validate column mapping
-    const validationResult = await validateColumnMapping(columnMapping, importRecord.entityType);
+    // Enhanced validation for column mapping with fieldId and entityType support
+    const validationResult = await validateColumnMappingWithEntitySupport(columnMapping, importRecord.entityType);
     if (!validationResult.isValid) {
       return res.status(400).json({
         success: false,
@@ -86,9 +160,12 @@ exports.saveColumnMapping = async (req, res) => {
       });
     }
 
+    // Process and normalize column mapping to include entityType and fieldId
+    const normalizedColumnMapping = await normalizeColumnMapping(columnMapping, importRecord.entityType);
+
     // Update import record with mapping
     await importRecord.update({
-      columnMapping,
+      columnMapping: normalizedColumnMapping,
       importOptions,
       status: 'validating'
     });
@@ -107,7 +184,7 @@ exports.saveColumnMapping = async (req, res) => {
       message: 'Column mapping saved successfully',
       data: {
         sessionId,
-        columnMapping,
+        columnMapping: normalizedColumnMapping,
         importOptions,
         status: 'validating'
       }
@@ -260,9 +337,11 @@ async function getEntityFields(entityType) {
 
   // Helper function to convert Sequelize data types to readable format
   const getFieldType = (sequelizeType) => {
-    if (!sequelizeType || !sequelizeType.key) return 'text';
+    if (!sequelizeType) return 'text';
     
-    switch (sequelizeType.key) {
+    const typeKey = sequelizeType.key || sequelizeType.constructor?.name || sequelizeType.toString();
+    
+    switch (typeKey) {
       case 'STRING':
       case 'TEXT':
         return 'text';
@@ -297,43 +376,143 @@ async function getEntityFields(entityType) {
   };
 
   try {
-    // Get model based on entity type
-    let Model;
+    console.log('Getting entity fields for:', entityType);
+    
+    // Define standard fields based on entity type
+    let standardFields = [];
+    
     switch (entityType) {
       case 'lead':
-        Model = Lead;
+        standardFields = [
+          { name: 'contactPerson', type: 'text', required: false, label: 'Contact Person' },
+          { name: 'title', type: 'text', required: false, label: 'Title' },
+          { name: 'email', type: 'text', required: false, label: 'Email' },
+          { name: 'phone', type: 'text', required: false, label: 'Phone' },
+          { name: 'company', type: 'text', required: false, label: 'Company' },
+          { name: 'organization', type: 'text', required: false, label: 'Organization' },
+          { name: 'valueLabels', type: 'text', required: false, label: 'Value Labels' },
+          { name: 'status', type: 'select', required: false, label: 'Status' },
+          { name: 'proposalValue', type: 'number', required: false, label: 'Proposal Value' },
+          { name: 'expectedCloseDate', type: 'date', required: false, label: 'Expected Close Date' },
+          { name: 'sourceChannel', type: 'text', required: false, label: 'Source Channel' },
+          { name: 'serviceType', type: 'text', required: false, label: 'Service Type' },
+          { name: 'scopeOfServiceType', type: 'text', required: false, label: 'Scope Of Service Type' },
+          { name: 'projectLocation', type: 'text', required: false, label: 'Project Location' },
+          { name: 'organizationCountry', type: 'text', required: false, label: 'Organization Country' },
+          { name: 'proposalSentDate', type: 'date', required: false, label: 'Proposal Sent Date' },
+          { name: 'esplProposalNo', type: 'text', required: false, label: 'ESPL Proposal No' },
+          { name: 'ownerId', type: 'number', required: false, label: 'Owner ID' },
+          { name: 'ownerName', type: 'text', required: false, label: 'Owner Name' }
+        ];
         break;
       case 'person':
-        Model = Person;
+        standardFields = [
+          { name: 'contactPerson', type: 'text', required: false, label: 'Contact Person' },
+          { name: 'email', type: 'text', required: false, label: 'Email' },
+          { name: 'phone', type: 'text', required: false, label: 'Phone' },
+          { name: 'notes', type: 'text', required: false, label: 'Notes' },
+          { name: 'postalAddress', type: 'text', required: false, label: 'Postal Address' },
+          { name: 'birthday', type: 'date', required: false, label: 'Birthday' },
+          { name: 'jobTitle', type: 'text', required: false, label: 'Job Title' },
+          { name: 'personLabels', type: 'text', required: false, label: 'Person Labels' },
+          { name: 'organization', type: 'text', required: false, label: 'Organization' },
+          { name: 'ownerId', type: 'number', required: false, label: 'Owner ID' },
+          { name: 'ownerName', type: 'text', required: false, label: 'Owner Name' },
+          { name: 'emails', type: 'json', required: false, label: 'Emails (JSON)' },
+          { name: 'phones', type: 'json', required: false, label: 'Phones (JSON)' },
+          { name: 'wonDeals', type: 'number', required: false, label: 'Won Deals' },
+          { name: 'lostDeals', type: 'number', required: false, label: 'Lost Deals' },
+          { name: 'openDeals', type: 'number', required: false, label: 'Open Deals' },
+          { name: 'peopleCount', type: 'number', required: false, label: 'People Count' },
+          { name: 'lastActivityDate', type: 'date', required: false, label: 'Last Activity Date' },
+          { name: 'nextActivityDate', type: 'date', required: false, label: 'Next Activity Date' },
+          { name: 'doneActivitiesCount', type: 'number', required: false, label: 'Done Activities Count' },
+          { name: 'totalActivitiesCount', type: 'number', required: false, label: 'Total Activities Count' },
+          { name: 'activitiesTodoCount', type: 'number', required: false, label: 'Activities Todo Count' }
+        ];
         break;
       case 'deal':
-        Model = Deal;
+        standardFields = [
+          { name: 'title', type: 'text', required: true, label: 'Title' },
+          { name: 'value', type: 'number', required: false, label: 'Value' },
+          { name: 'currency', type: 'text', required: false, label: 'Currency' },
+          { name: 'contactPerson', type: 'text', required: false, label: 'Contact Person' },
+          { name: 'organization', type: 'text', required: false, label: 'Organization' },
+          { name: 'pipeline', type: 'text', required: false, label: 'Pipeline' },
+          { name: 'pipelineStage', type: 'text', required: false, label: 'Pipeline Stage' },
+          { name: 'pipelineId', type: 'number', required: false, label: 'Pipeline ID' },
+          { name: 'stageId', type: 'number', required: false, label: 'Stage ID' },
+          { name: 'label', type: 'text', required: false, label: 'Label' },
+          { name: 'expectedCloseDate', type: 'date', required: false, label: 'Expected Close Date' },
+          { name: 'sourceChannel', type: 'text', required: false, label: 'Source Channel' },
+          { name: 'sourceChannelId', type: 'text', required: false, label: 'Source Channel ID' },
+          { name: 'serviceType', type: 'text', required: false, label: 'Service Type' },
+          { name: 'proposalValue', type: 'number', required: false, label: 'Proposal Value' },
+          { name: 'proposalCurrency', type: 'text', required: false, label: 'Proposal Currency' },
+          { name: 'esplProposalNo', type: 'text', required: false, label: 'ESPL Proposal No' },
+          { name: 'projectLocation', type: 'text', required: false, label: 'Project Location' },
+          { name: 'organizationCountry', type: 'text', required: false, label: 'Organization Country' },
+          { name: 'proposalSentDate', type: 'date', required: false, label: 'Proposal Sent Date' },
+          { name: 'phone', type: 'text', required: false, label: 'Phone' },
+          { name: 'email', type: 'text', required: false, label: 'Email' },
+          { name: 'ownerId', type: 'number', required: false, label: 'Owner ID' },
+          { name: 'status', type: 'text', required: false, label: 'Status' },
+          { name: 'source', type: 'text', required: false, label: 'Source' },
+          { name: 'productName', type: 'text', required: false, label: 'Product Name' },
+          { name: 'probability', type: 'number', required: false, label: 'Probability' },
+          { name: 'weightedValue', type: 'number', required: false, label: 'Weighted Value' },
+          { name: 'productQuantity', type: 'number', required: false, label: 'Product Quantity' },
+          { name: 'productAmount', type: 'number', required: false, label: 'Product Amount' },
+          { name: 'MRR', type: 'number', required: false, label: 'Monthly Recurring Revenue' },
+          { name: 'ARR', type: 'number', required: false, label: 'Annual Recurring Revenue' },
+          { name: 'ACV', type: 'number', required: false, label: 'Annual Contract Value' },
+          { name: 'lostReason', type: 'text', required: false, label: 'Lost Reason' }
+        ];
         break;
-      // Add other entity types as needed
+      case 'organization':
+        standardFields = [
+          { name: 'organizationName', type: 'text', required: true, label: 'Organization Name' },
+          { name: 'website', type: 'text', required: false, label: 'Website' },
+          { name: 'industry', type: 'text', required: false, label: 'Industry' },
+          { name: 'address', type: 'text', required: false, label: 'Address' },
+          { name: 'city', type: 'text', required: false, label: 'City' },
+          { name: 'state', type: 'text', required: false, label: 'State' },
+          { name: 'country', type: 'text', required: false, label: 'Country' },
+          { name: 'postalCode', type: 'text', required: false, label: 'Postal Code' }
+        ];
+        break;
+      case 'activity':
+        standardFields = [
+          { name: 'activityType', type: 'select', required: true, label: 'Activity Type' },
+          { name: 'subject', type: 'text', required: true, label: 'Subject' },
+          { name: 'description', type: 'text', required: false, label: 'Description' },
+          { name: 'dueDate', type: 'date', required: false, label: 'Due Date' },
+          { name: 'duration', type: 'number', required: false, label: 'Duration' },
+          { name: 'ownerId', type: 'number', required: false, label: 'Owner ID' }
+        ];
+        break;
       default:
-        Model = Lead; // Default to Lead
+        standardFields = [];
     }
 
-    // Get standard fields from model
-    if (Model && Model.rawAttributes) {
-      Object.entries(Model.rawAttributes).forEach(([fieldName, fieldConfig]) => {
-        // Skip system fields
-        if (['createdAt', 'updatedAt', 'id'].includes(fieldName)) return;
-        
-        const fieldType = getFieldType(fieldConfig.type);
-        const label = formatLabel(fieldName);
-        
-        fields.push({
-          value: fieldName,
-          label: label,
-          type: fieldType,
-          entity: entityType,
-          isCustomField: false,
-          isRequired: fieldConfig.allowNull === false,
-          description: fieldConfig.comment || null
-        });
+    console.log('Standard fields defined:', standardFields.length);
+
+    // Add standard fields to the result
+    standardFields.forEach(fieldDef => {
+      fields.push({
+        value: fieldDef.name,
+        label: fieldDef.label,
+        type: fieldDef.type,
+        entity: entityType,
+        entityType: entityType, // Add for consistency
+        isCustomField: false,
+        isRequired: fieldDef.required,
+        description: null,
+        fieldId: null // Standard fields don't have fieldId
       });
-    }
+    });
+
+    console.log('Fields after adding standard fields:', fields.length);
 
     // Get custom fields
     const customFields = await CustomField.findAll({
@@ -341,8 +520,10 @@ async function getEntityFields(entityType) {
         entityType: { [Op.in]: [entityType, 'both'] },
         isActive: true
       },
-      attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType', 'isRequired', 'fieldOptions']
+      attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType', 'isRequired', 'options']
     });
+
+    console.log('Custom fields found:', customFields.length);
 
     // Process custom fields
     customFields.forEach(customField => {
@@ -377,12 +558,16 @@ async function getEntityFields(entityType) {
         label: customField.fieldLabel || formatLabel(customField.fieldName),
         type: fieldType,
         entity: entityType,
+        entityType: entityType, // Add for consistency
         isCustomField: true,
         isRequired: customField.isRequired || false,
-        fieldId: customField.fieldId,
-        options: customField.fieldOptions
+        fieldId: customField.fieldId, // Essential for custom fields
+        options: customField.options,
+        description: `Custom ${fieldType} field`
       });
     });
+
+    console.log('Total fields after adding custom fields:', fields.length);
 
     // Sort fields: required first, then by label
     fields.sort((a, b) => {
@@ -391,6 +576,10 @@ async function getEntityFields(entityType) {
       }
       return a.label.localeCompare(b.label);
     });
+
+    console.log('Final fields count:', fields.length);
+    console.log('Standard fields:', fields.filter(f => !f.isCustomField).length);
+    console.log('Custom fields:', fields.filter(f => f.isCustomField).length);
 
     return fields;
 
@@ -401,15 +590,23 @@ async function getEntityFields(entityType) {
 }
 
 /**
- * Validate column mapping configuration
+ * Enhanced validation for column mapping with entity type and field ID support
  */
-async function validateColumnMapping(columnMapping, entityType) {
+async function validateColumnMappingWithEntitySupport(columnMapping, entityType) {
   const errors = [];
   
   try {
     // Get available fields for validation
     const availableFields = await getEntityFields(entityType);
-    const availableFieldValues = availableFields.map(f => f.value);
+    const availableFieldsMap = new Map();
+    
+    // Create a map for quick lookup - handle both standard and custom fields
+    availableFields.forEach(field => {
+      const key = field.isCustomField ? `${field.value}_${field.fieldId}` : field.value;
+      availableFieldsMap.set(key, field);
+      // Also add by value only for backward compatibility
+      availableFieldsMap.set(field.value, field);
+    });
     
     // Check if columnMapping is an object
     if (typeof columnMapping !== 'object' || Array.isArray(columnMapping)) {
@@ -427,10 +624,44 @@ async function validateColumnMapping(columnMapping, entityType) {
         return;
       }
       
-      const { field, transform } = fieldMapping;
+      const { field, fieldId, entityType: mappedEntityType, transform } = fieldMapping;
+      
+      // Check if field is specified
+      if (!field) {
+        errors.push(`Field is required for column ${columnIndex}`);
+        return;
+      }
+      
+      // Validate entity type matches
+      if (mappedEntityType && mappedEntityType !== entityType) {
+        errors.push(`Entity type mismatch for column ${columnIndex}. Expected: ${entityType}, Got: ${mappedEntityType}`);
+      }
       
       // Check if mapped field exists
-      if (!availableFieldValues.includes(field)) {
+      let fieldExists = false;
+      let lookupKey = field;
+      
+      // For custom fields, use field + fieldId combination
+      if (fieldId) {
+        lookupKey = `${field}_${fieldId}`;
+        fieldExists = availableFieldsMap.has(lookupKey);
+        
+        if (!fieldExists) {
+          // Try just the field name for backward compatibility
+          fieldExists = availableFieldsMap.has(field);
+          if (fieldExists) {
+            const foundField = availableFieldsMap.get(field);
+            if (foundField.isCustomField && foundField.fieldId !== fieldId) {
+              errors.push(`Custom field "${field}" with fieldId "${fieldId}" does not exist for entity type "${entityType}"`);
+              fieldExists = false;
+            }
+          }
+        }
+      } else {
+        fieldExists = availableFieldsMap.has(field);
+      }
+      
+      if (!fieldExists) {
         errors.push(`Field "${field}" does not exist for entity type "${entityType}"`);
       }
       
@@ -456,40 +687,107 @@ async function validateColumnMapping(columnMapping, entityType) {
 }
 
 /**
- * Generate suggested mappings based on column names
+ * Normalize column mapping to include entityType and fieldId
+ */
+async function normalizeColumnMapping(columnMapping, entityType) {
+  try {
+    const availableFields = await getEntityFields(entityType);
+    const fieldsMap = new Map();
+    
+    // Create lookup map
+    availableFields.forEach(field => {
+      fieldsMap.set(field.value, field);
+    });
+    
+    const normalizedMapping = {};
+    
+    Object.entries(columnMapping).forEach(([columnIndex, fieldMapping]) => {
+      if (!fieldMapping) {
+        normalizedMapping[columnIndex] = null;
+        return;
+      }
+      
+      const { field, fieldId, transform, ...otherProps } = fieldMapping;
+      const fieldInfo = fieldsMap.get(field);
+      
+      if (fieldInfo) {
+        normalizedMapping[columnIndex] = {
+          field: field,
+          fieldId: fieldInfo.isCustomField ? (fieldId || fieldInfo.fieldId) : undefined,
+          entityType: entityType,
+          fieldType: fieldInfo.type,
+          isCustomField: fieldInfo.isCustomField,
+          isRequired: fieldInfo.isRequired,
+          label: fieldInfo.label,
+          transform: transform || null,
+          ...otherProps
+        };
+      } else {
+        // Keep original mapping if field not found (for validation to catch)
+        normalizedMapping[columnIndex] = {
+          ...fieldMapping,
+          entityType: entityType
+        };
+      }
+    });
+    
+    return normalizedMapping;
+    
+  } catch (error) {
+    console.error('Error normalizing column mapping:', error);
+    return columnMapping; // Return original on error
+  }
+}
+
+/**
+ * Validate column mapping configuration (legacy function - kept for backward compatibility)
+ */
+async function validateColumnMapping(columnMapping, entityType) {
+  return validateColumnMappingWithEntitySupport(columnMapping, entityType);
+}
+
+/**
+ * Generate suggested mappings based on column names with enhanced field information
  */
 function generateSuggestedMappings(columnHeaders, availableFields) {
   const suggestions = {};
+  
+  // Create field lookup map
+  const fieldsMap = new Map();
+  availableFields.forEach(field => {
+    fieldsMap.set(field.value.toLowerCase(), field);
+    fieldsMap.set(field.label.toLowerCase(), field);
+  });
   
   // Common field mappings
   const commonMappings = {
     // Lead fields
     'first name': 'firstName',
-    'firstname': 'firstName',
+    'firstname': 'firstName', 
     'last name': 'lastName',
     'lastname': 'lastName',
     'full name': 'contactPerson',
     'name': 'contactPerson',
-    'email': 'emailAddress',
-    'email address': 'emailAddress',
-    'phone': 'phoneNumber',
-    'phone number': 'phoneNumber',
-    'company': 'organizationName',
-    'organization': 'organizationName',
-    'title': 'jobTitle',
+    'email': 'email',
+    'email address': 'email',
+    'phone': 'phone',
+    'phone number': 'phone',
+    'company': 'company',
+    'organization': 'organization',
+    'title': 'title',
     'job title': 'jobTitle',
-    'lead source': 'leadSource',
-    'source': 'leadSource',
+    'lead source': 'sourceChannel',
+    'source': 'sourceChannel',
     'status': 'status',
-    'value': 'leadValue',
-    'lead value': 'leadValue',
+    'value': 'proposalValue',
+    'lead value': 'proposalValue',
     'notes': 'notes',
     'description': 'notes',
     'website': 'website',
-    'address': 'address',
+    'address': 'postalAddress',
     'city': 'city',
     'state': 'state',
-    'country': 'country',
+    'country': 'organizationCountry',
     'zip': 'postalCode',
     'postal code': 'postalCode',
     
@@ -498,10 +796,10 @@ function generateSuggestedMappings(columnHeaders, availableFields) {
     'contact person': 'contactPerson',
     
     // Deal fields
-    'deal title': 'dealTitle',
-    'deal name': 'dealTitle',
-    'deal value': 'dealValue',
-    'amount': 'dealValue',
+    'deal title': 'title',
+    'deal name': 'title',
+    'deal value': 'value',
+    'amount': 'value',
     'stage': 'stageId',
     'pipeline': 'pipelineId',
     'probability': 'probability',
@@ -521,20 +819,35 @@ function generateSuggestedMappings(columnHeaders, availableFields) {
     if (exactMatch) {
       suggestions[index] = {
         field: exactMatch.value,
+        fieldId: exactMatch.isCustomField ? exactMatch.fieldId : undefined,
+        entityType: exactMatch.entityType,
+        fieldType: exactMatch.type,
+        isCustomField: exactMatch.isCustomField,
+        isRequired: exactMatch.isRequired,
+        label: exactMatch.label,
         confidence: 1.0,
-        reason: 'Exact match'
+        reason: 'Exact match',
+        transform: null
       };
       return;
     }
     
     // Try common mappings
     if (commonMappings[columnName]) {
-      const mappedField = availableFields.find(field => field.value === commonMappings[columnName]);
+      const mappedFieldName = commonMappings[columnName];
+      const mappedField = fieldsMap.get(mappedFieldName.toLowerCase());
       if (mappedField) {
         suggestions[index] = {
           field: mappedField.value,
+          fieldId: mappedField.isCustomField ? mappedField.fieldId : undefined,
+          entityType: mappedField.entityType,
+          fieldType: mappedField.type,
+          isCustomField: mappedField.isCustomField,
+          isRequired: mappedField.isRequired,
+          label: mappedField.label,
           confidence: 0.9,
-          reason: 'Common mapping'
+          reason: 'Common mapping',
+          transform: null
         };
         return;
       }
@@ -551,8 +864,15 @@ function generateSuggestedMappings(columnHeaders, availableFields) {
     if (partialMatch) {
       suggestions[index] = {
         field: partialMatch.value,
+        fieldId: partialMatch.isCustomField ? partialMatch.fieldId : undefined,
+        entityType: partialMatch.entityType,
+        fieldType: partialMatch.type,
+        isCustomField: partialMatch.isCustomField,
+        isRequired: partialMatch.isRequired,
+        label: partialMatch.label,
         confidence: 0.7,
-        reason: 'Partial match'
+        reason: 'Partial match',
+        transform: null
       };
     }
   });
