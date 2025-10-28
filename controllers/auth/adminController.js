@@ -270,8 +270,17 @@ exports.signIn = async (req, res) => {
 
     // Filter groups where the user exists in the group's user list
     const userGroups = allGroups.filter(group => {
-      const groupUserIds = group.memberIds; // This uses the getter which returns an array
-      return groupUserIds.includes(parseInt(user.masterUserID));
+      const memberIdsRaw = group.memberIds;
+      let groupUserIds = [];
+
+      // memberIds may be stored as a comma-separated string or an array
+      if (Array.isArray(memberIdsRaw)) {
+        groupUserIds = memberIdsRaw.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+      } else if (typeof memberIdsRaw === 'string' && memberIdsRaw.trim() !== '') {
+        groupUserIds = memberIdsRaw.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+      }
+
+      return groupUserIds.includes(parseInt(user.masterUserID, 10));
     });
 
     // Format the groups
