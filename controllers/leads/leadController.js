@@ -4266,13 +4266,16 @@ exports.getAllLeadDetails = async (req, res) => {
     const clientEmail = lead.email;
 
     // Get user credentials for email visibility filtering
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID }
-    });
-
-    let userEmail = null;
-    if (userCredential) {
-      userEmail = userCredential.email;
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { userId: req.adminId },  // Changed from masterUserID to userId like deals API
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+      console.log(`👤 [getAllLeadDetails] Current user email: ${currentUserEmail}`);
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
     }
 
     // Fetch person and leadOrganization data for the lead
@@ -4295,44 +4298,59 @@ exports.getAllLeadDetails = async (req, res) => {
     const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
     const maxBodyLength = 1000;
 
-    // Build email where clause with visibility filtering
-    let emailWhereClause = {
-      [Op.or]: [
-        { sender: clientEmail },
-        { recipient: { [Op.like]: `%${clientEmail}%` } },
-      ],
-    };
-
-    // Add visibility filtering
-    if (userEmail) {
-      emailWhereClause[Op.and] = [
-        emailWhereClause[Op.or], // Keep the original sender/recipient conditions
-        {
-          [Op.or]: [
-            { visibility: 'shared' }, // Show all shared emails
-            { 
-              visibility: 'private',
-              userEmail: userEmail // Show only private emails from current user
-            },
-            { visibility: { [Op.is]: null } } // Show legacy emails without visibility set (backward compatibility)
-          ]
-        }
-      ];
+    // Build email visibility where clause
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } } // Include emails without visibility set (legacy)
+        ]
+      };
     } else {
-      // If no user credentials found, only show shared emails and legacy emails
-      emailWhereClause[Op.and] = [
-        emailWhereClause[Op.or],
-        {
-          [Op.or]: [
-            { visibility: 'shared' },
-            { visibility: { [Op.is]: null } } // Legacy emails without visibility
-          ]
-        }
-      ];
+      // If no user email found, only show shared emails and emails without visibility set
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
     }
 
-    let emails = await Email.findAll({
-      where: emailWhereClause,
+    // Get total email count first with visibility filtering
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { leadId },  // Direct lead association (like deals)
+              ...(lead.email
+                ? [
+                    { sender: lead.email },
+                    { recipient: { [Op.like]: `%${lead.email}%` } }
+                  ]
+                : [])
+            ]
+          },
+          emailVisibilityWhere
+        ]
+      }
+    });
+
+    // Fetch emails linked to this lead with pagination, essential fields, and visibility filtering
+    const emailsByLead = await Email.findAll({
+      where: {
+        [Op.and]: [
+          { leadId },
+          emailVisibilityWhere
+        ]
+      },
       attributes: [
         "emailID",
         "messageId",
@@ -4343,8 +4361,8 @@ exports.getAllLeadDetails = async (req, res) => {
         "subject",
         "createdAt",
         "folder",
-        "visibility", // Include visibility field for debugging
-        "userEmail", // Include userEmail field for debugging
+        "visibility",
+        "userEmail",
         [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
       ],
       include: [
@@ -4355,28 +4373,72 @@ exports.getAllLeadDetails = async (req, res) => {
         },
       ],
       order: [["createdAt", "DESC"]],
-      limit: maxEmailLimit,
-      offset: emailOffset,
+      limit: Math.ceil(maxEmailLimit / 2),
+      offset: Math.floor(emailOffset / 2),
     });
 
-    // Filter out emails with "RE:" in subject and no inReplyTo or references
-    emails = emails.filter((email) => {
-      const hasRE =
-        email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread =
-        (!email.inReplyTo || email.inReplyTo === "") &&
-        (!email.references || email.references === "");
-      return !(hasRE && noThread);
-    });
-
-    let emailsExist = emails.length > 0;
-    if (!emailsExist) {
-      emails = [];
+    // Fetch emails by address with pagination, essential fields, and visibility filtering
+    let emailsByAddress = [];
+    if (lead.email) {
+      emailsByAddress = await Email.findAll({
+        where: {
+          [Op.and]: [
+            {
+              [Op.or]: [
+                { sender: lead.email },
+                { recipient: { [Op.like]: `%${lead.email}%` } }
+              ]
+            },
+            emailVisibilityWhere
+          ]
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "inReplyTo",
+          "references",
+          "sender",
+          "recipient",
+          "subject",
+          "createdAt",
+          "folder",
+          "visibility",
+          "userEmail",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [
+          {
+            model: Attachment,
+            as: "attachments",
+            attributes: ["attachmentID", "filename", "size", "contentType"],
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: Math.ceil(maxEmailLimit / 2),
+        offset: Math.floor(emailOffset / 2),
+      });
     }
+
+    // Merge and deduplicate emails (like deals API)
+    const allEmailsMap = new Map();
+    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
+    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
+    let emails = Array.from(allEmailsMap.values());
+
+    // Log visibility statistics
+    const visibilityStats = emails.reduce((stats, email) => {
+      const visibility = email.visibility || 'legacy';
+      stats[visibility] = (stats[visibility] || 0) + 1;
+      return stats;
+    }, {});
+    console.log(`📊 [getAllLeadDetails] Email visibility stats:`, visibilityStats);
+
+    // Limit final email results and add optimization metadata
+    const limitedEmails = emails.slice(0, maxEmailLimit);
 
     // Simplified thread handling
     const threadIds = [];
-    emails.forEach((email) => {
+    limitedEmails.forEach((email) => {
       if (email.messageId) threadIds.push(email.messageId);
       if (email.inReplyTo) threadIds.push(email.inReplyTo);
     });
@@ -4394,7 +4456,7 @@ exports.getAllLeadDetails = async (req, res) => {
       };
 
       // Apply same visibility filtering to related emails
-      if (userEmail) {
+      if (currentUserEmail) {
         relatedEmailsWhereClause[Op.and] = [
           relatedEmailsWhereClause[Op.or], // Keep the original thread conditions
           {
@@ -4402,7 +4464,7 @@ exports.getAllLeadDetails = async (req, res) => {
               { visibility: 'shared' }, // Show all shared emails
               { 
                 visibility: 'private',
-                userEmail: userEmail // Show only private emails from current user
+                userEmail: currentUserEmail // Show only private emails from current user
               },
               { visibility: { [Op.is]: null } } // Show legacy emails without visibility set
             ]
@@ -4455,7 +4517,7 @@ exports.getAllLeadDetails = async (req, res) => {
         return true;
       });
     } else {
-      relatedEmails = emails;
+      relatedEmails = limitedEmails;
     }
 
     const notes = await LeadNote.findAll({
@@ -4622,8 +4684,9 @@ exports.getAllLeadDetails = async (req, res) => {
     }
 
     // Add some logging for debugging email visibility
+    console.log(`📧 [getAllLeadDetails] Fetching emails for lead ${leadId} with visibility filtering`);
     console.log(`[getAllLeadDetails] User ${masterUserID} fetching emails for lead ${leadId}`);
-    console.log(`[getAllLeadDetails] User email: ${userEmail || 'No credentials found'}`);
+    console.log(`[getAllLeadDetails] User email: ${currentUserEmail || 'No credentials found'}`);
     console.log(`[getAllLeadDetails] Total emails found (after visibility filtering): ${relatedEmails.length}`);
     
     // Count emails by visibility for debugging
@@ -4660,6 +4723,7 @@ exports.getAllLeadDetails = async (req, res) => {
       },
       _emailMetadata: {
         count: relatedEmails.length,
+        totalEmails: totalEmailsCount,
         page: parseInt(emailPage),
         limit: maxEmailLimit,
         hasMore: relatedEmails.length === maxEmailLimit,
@@ -4668,8 +4732,8 @@ exports.getAllLeadDetails = async (req, res) => {
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
         visibilityFiltering: {
           enabled: true,
-          userEmail: userEmail || null,
-          hasCredentials: !!userCredential,
+          userEmail: currentUserEmail || null,
+          hasCredentials: !!currentUserEmail,
           visibilityStats: emailVisibilityStats
         }
       },
