@@ -115,7 +115,7 @@ exports.createPipeline = async (req, res) => {
 // Get all pipelines with stages
 exports.getPipelines = async (req, res) => {
   const { includeInactive = "false" } = req.query;
-  const masterUserID = req.adminId;
+  // const masterUserID = req.adminId;
 
   try {
     // Organization-wide pipelines: Remove masterUserID filter to show all pipelines
@@ -212,7 +212,7 @@ exports.updatePipeline = async (req, res) => {
 
   try {
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId },
       include: [{ model: PipelineStage, as: "stages" }],
     });
 
@@ -227,7 +227,6 @@ exports.updatePipeline = async (req, res) => {
       const existingPipeline = await Pipeline.findOne({
         where: {
           pipelineName: pipelineName.trim(),
-          masterUserID,
           pipelineId: { [Op.ne]: pipelineId },
         },
       });
@@ -245,7 +244,6 @@ exports.updatePipeline = async (req, res) => {
         { isDefault: false },
         {
           where: {
-            masterUserID,
             isDefault: true,
             pipelineId: { [Op.ne]: pipelineId },
           },
@@ -299,7 +297,7 @@ exports.updatePipeline = async (req, res) => {
             updatedBy,
           },
           {
-            where: { stageId: s.stageId, pipelineId, masterUserID },
+            where: { stageId: s.stageId, pipelineId },
           }
         );
       } else {
@@ -330,7 +328,7 @@ exports.updatePipeline = async (req, res) => {
 
     // Return updated pipeline with stages
     const updatedPipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
       include: [
         { model: PipelineStage, as: "stages", order: [["stageOrder", "ASC"]] },
       ],
@@ -356,7 +354,7 @@ exports.deletePipeline = async (req, res) => {
 
   try {
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
     });
 
     if (!pipeline) {
@@ -369,7 +367,6 @@ exports.deletePipeline = async (req, res) => {
     const dealsCount = await Deal.count({
       where: {
         pipelineId: pipelineId,
-        masterUserID,
       },
     });
 
@@ -381,7 +378,7 @@ exports.deletePipeline = async (req, res) => {
 
     // Delete associated stages first
     await PipelineStage.destroy({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
     });
 
     // Delete the pipeline
@@ -433,7 +430,7 @@ exports.createStage = async (req, res) => {
 
     // Check if pipeline exists
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
     });
 
     if (!pipeline) {
@@ -447,7 +444,7 @@ exports.createStage = async (req, res) => {
       where: {
         pipelineId,
         stageName: stageName.trim(),
-        masterUserID,
+
       },
     });
 
@@ -461,7 +458,7 @@ exports.createStage = async (req, res) => {
     let finalStageOrder = stageOrder;
     if (!finalStageOrder) {
       const maxOrder = await PipelineStage.max("stageOrder", {
-        where: { pipelineId, masterUserID },
+        where: { pipelineId},
       });
       finalStageOrder = (maxOrder || 0) + 1;
     }
@@ -518,7 +515,7 @@ exports.updateStage = async (req, res) => {
 
   try {
     const stage = await PipelineStage.findOne({
-      where: { stageId, masterUserID },
+      where: { stageId},
       include: [
         {
           model: Pipeline,
@@ -540,7 +537,6 @@ exports.updateStage = async (req, res) => {
         where: {
           pipelineId: stage.pipelineId,
           stageName: stageName.trim(),
-          masterUserID,
           stageId: { [Op.ne]: stageId },
         },
       });
@@ -597,7 +593,7 @@ exports.deleteStage = async (req, res) => {
 
   try {
     const stage = await PipelineStage.findOne({
-      where: { stageId, masterUserID },
+      where: { stageId},
       include: [
         {
           model: Pipeline,
@@ -616,8 +612,7 @@ exports.deleteStage = async (req, res) => {
     // Check if there are deals in this stage
     const dealsCount = await Deal.count({
       where: {
-        stageId: stageId,
-        masterUserID,
+        stageId: stageId
       },
     });
 
@@ -660,7 +655,7 @@ exports.reorderStages = async (req, res) => {
   try {
     // Validate that the pipeline exists
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
     });
 
     if (!pipeline) {
@@ -673,7 +668,7 @@ exports.reorderStages = async (req, res) => {
     for (const { stageId, stageOrder } of stageOrders) {
       await PipelineStage.update(
         { stageOrder, updatedBy: req.adminId },
-        { where: { stageId, pipelineId, masterUserID } }
+        { where: { stageId, pipelineId} }
       );
     }
 
@@ -706,7 +701,7 @@ exports.getPipelineStats = async (req, res) => {
 
   try {
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
       include: [
         {
           model: PipelineStage,
@@ -729,16 +724,14 @@ exports.getPipelineStats = async (req, res) => {
       pipeline.stages.map(async (stage) => {
         const dealCount = await Deal.count({
           where: {
-            stageId: stage.stageId,
-            masterUserID,
+            stageId: stage.stageId
           },
         });
 
         const totalValue =
           (await Deal.sum("value", {
             where: {
-              stageId: stage.stageId,
-              masterUserID,
+              stageId: stage.stageId
             },
           })) || 0;
 
