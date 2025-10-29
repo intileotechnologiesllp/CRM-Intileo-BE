@@ -112,5 +112,41 @@ router.delete(
   dealsController.bulkDeleteDeals
 );
 
+// ================ FILE MANAGEMENT ROUTES ================
+router.post(
+  "/:dealId/files/upload",
+  verifyToken,
+  validatePrivilege(3, "create"),
+  dealsController.uploadDealFiles
+);
+
+router.get(
+  "/:dealId/files",
+  verifyToken,
+  validatePrivilege(3, "view"),
+  dealsController.getDealFiles
+);
+
+router.get(
+  "/:dealId/files/:fileId/download",
+  verifyToken,
+  validatePrivilege(3, "view"),
+  dealsController.downloadDealFile
+);
+
+router.put(
+  "/:dealId/files/:fileId",
+  verifyToken,
+  validatePrivilege(3, "edit"),
+  dealsController.updateDealFile
+);
+
+router.delete(
+  "/:dealId/files/:fileId",
+  verifyToken,
+  validatePrivilege(3, "delete"),
+  dealsController.deleteDealFile
+);
+
 module.exports = router;
 

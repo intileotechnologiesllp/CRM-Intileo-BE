@@ -159,11 +159,11 @@ exports.getPipelines = async (req, res) => {
 // Get a single pipeline with its stages
 exports.getPipelineById = async (req, res) => {
   const { pipelineId } = req.params;
-  const masterUserID = req.adminId;
+  // const masterUserID = req.adminId;
 
   try {
     const pipeline = await Pipeline.findOne({
-      where: { pipelineId, masterUserID },
+      where: { pipelineId},
       include: [
         {
           model: PipelineStage,
