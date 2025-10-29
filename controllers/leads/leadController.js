@@ -4269,7 +4269,7 @@ exports.getAllLeadDetails = async (req, res) => {
     let currentUserEmail = null;
     try {
       const userCredential = await UserCredential.findOne({
-        where: { userId: req.adminId },  // Changed from masterUserID to userId like deals API
+        where: { masterUserID: req.adminId },  // Using masterUserID as that's the correct column name
         attributes: ['email']
       });
       currentUserEmail = userCredential?.email;
