@@ -7,6 +7,7 @@ const Activity = require("./activity/activityModel");
 const Deal = require("./deals/dealsModels");
 const Pipeline = require("./deals/pipelineModel");
 const PipelineStage = require("./deals/pipelineStageModel");
+const DealFile = require("./deals/dealFileModel");
 const CustomField = require("./customFieldModel");
 const CustomFieldValue = require("./customFieldValueModel");
 const Email = require("./email/emailModel");
@@ -167,6 +168,12 @@ Pipeline.hasMany(Deal, { foreignKey: "pipelineId", as: "deals" });
 Deal.belongsTo(PipelineStage, { foreignKey: "stageId", as: "stageData" });
 PipelineStage.hasMany(Deal, { foreignKey: "stageId", as: "deals" });
 
+// Deal-File associations
+Deal.hasMany(DealFile, { foreignKey: "dealId", as: "files" });
+DealFile.belongsTo(Deal, { foreignKey: "dealId", as: "deal" });
+DealFile.belongsTo(MasterUser, { foreignKey: "uploadedBy", as: "uploader" });
+MasterUser.hasMany(DealFile, { foreignKey: "uploadedBy", as: "uploadedFiles" });
+
 // Person-Deal associations (belongsTo is already defined in dealsModels.js)
 Person.hasMany(Deal, { foreignKey: "personId", as: "Deals" });
 
@@ -217,6 +224,7 @@ module.exports = {
   Deal,
   Pipeline,
   PipelineStage,
+  DealFile,
   CustomField,
   CustomFieldValue,
   Email,

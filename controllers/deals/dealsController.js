@@ -27,7 +27,11 @@ const UserCredential = require("../../models/email/userCredentialModel"); // Add
 const sequelize = require("../../config/db");
 const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
-const Currency = require("../../models/admin/masters/currencyModel")
+const Currency = require("../../models/admin/masters/currencyModel");
+const DealFile = require("../../models/deals/dealFileModel");
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
 // Create a new deal with validation
 
 exports.createDeal = async (req, res) => {
@@ -7811,3 +7815,501 @@ exports.bulkDeleteDeals = async (req, res) => {
     });
   }
 };
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(__dirname, '../../uploads/deals');
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const extension = path.extname(file.originalname);
+    cb(null, `deal-${req.params.dealId}-${uniqueSuffix}${extension}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow most common file types
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/bmp',
+      'image/webp',
+      'text/plain',
+      'text/csv',
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/json',
+      'video/mp4',
+      'video/avi',
+      'video/quicktime',
+      'audio/mp3',
+      'audio/wav'
+    ];
+
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${file.mimetype} not allowed`), false);
+    }
+  }
+});
+
+/**
+ * Upload file(s) to a deal
+ */
+exports.uploadDealFiles = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const masterUserID = req.adminId;
+    const uploadedBy = req.user?.id || req.adminId;
+
+    // Check if deal exists and user has access
+    const deal = await Deal.findOne({
+      where: { dealId, masterUserID }
+    });
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Deal not found'
+      });
+    }
+
+    // Ensure upload directory exists
+    const uploadPath = path.join(__dirname, '../../uploads/deals');
+    try {
+      await fs.access(uploadPath);
+    } catch (error) {
+      await fs.mkdir(uploadPath, { recursive: true });
+    }
+
+    // Handle file upload
+    upload.array('files', 10)(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: 'File upload failed',
+          error: err.message
+        });
+      }
+
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No files uploaded'
+        });
+      }
+
+      const uploadedFiles = [];
+
+      // Process each uploaded file
+      for (const file of req.files) {
+        const fileCategory = getFileCategory(file.mimetype);
+        const fileExtension = path.extname(file.originalname).toLowerCase();
+
+        const dealFile = await DealFile.create({
+          dealId,
+          fileName: file.originalname,
+          fileDisplayName: req.body.displayName || file.originalname,
+          filePath: file.path,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          fileExtension,
+          fileCategory,
+          description: req.body.description || null,
+          tags: req.body.tags ? JSON.parse(req.body.tags) : null,
+          isPublic: req.body.isPublic === 'true',
+          uploadedBy,
+          masterUserID
+        });
+
+        uploadedFiles.push({
+          fileId: dealFile.fileId,
+          fileName: dealFile.fileName,
+          fileSize: dealFile.fileSize,
+          fileCategory: dealFile.fileCategory,
+          uploadedAt: dealFile.createdAt
+        });
+      }
+
+      // Log audit trail
+      await logAuditTrail(
+        PROGRAMS.DEAL_MANAGEMENT,
+        "DEAL_FILES_UPLOADED",
+        uploadedBy,
+        `${uploadedFiles.length} file(s) uploaded to deal ${dealId}`,
+        dealId
+      );
+
+      res.status(201).json({
+        success: true,
+        message: `${uploadedFiles.length} file(s) uploaded successfully`,
+        data: {
+          dealId,
+          files: uploadedFiles
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error('Upload deal files error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to upload files',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all files for a deal
+ */
+exports.getDealFiles = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const masterUserID = req.adminId;
+    const { category, search, sortBy = 'createdAt', sortOrder = 'DESC', page = 1, limit = 50 } = req.query;
+
+    // Check if deal exists and user has access
+    const deal = await Deal.findOne({
+      where: { dealId, masterUserID }
+    });
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: 'Deal not found'
+      });
+    }
+
+    // Build where conditions
+    const whereConditions = {
+      dealId,
+      masterUserID,
+      isActive: true
+    };
+
+    if (category) {
+      whereConditions.fileCategory = category;
+    }
+
+    if (search) {
+      whereConditions[Op.or] = [
+        { fileName: { [Op.iLike]: `%${search}%` } },
+        { fileDisplayName: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    // Get files with pagination
+    const offset = (page - 1) * limit;
+    const { count, rows: files } = await DealFile.findAndCountAll({
+      where: whereConditions,
+      include: [
+        {
+          model: MasterUser,
+          as: 'uploader',
+          attributes: ['id', 'firstName', 'lastName', 'email']
+        }
+      ],
+      order: [[sortBy, sortOrder.toUpperCase()]],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Format file data
+    const formattedFiles = files.map(file => ({
+      fileId: file.fileId,
+      fileName: file.fileName,
+      fileDisplayName: file.fileDisplayName,
+      fileSize: file.fileSize,
+      fileSizeFormatted: formatFileSize(file.fileSize),
+      mimeType: file.mimeType,
+      fileExtension: file.fileExtension,
+      fileCategory: file.fileCategory,
+      description: file.description,
+      tags: file.tags,
+      isPublic: file.isPublic,
+      version: file.version,
+      downloadCount: file.downloadCount,
+      lastAccessedAt: file.lastAccessedAt,
+      uploadedBy: file.uploader ? {
+        id: file.uploader.id,
+        name: `${file.uploader.firstName} ${file.uploader.lastName}`,
+        email: file.uploader.email
+      } : null,
+      createdAt: file.createdAt,
+      updatedAt: file.updatedAt
+    }));
+
+    // Get file statistics
+    const stats = await DealFile.findAll({
+      where: { dealId, masterUserID, isActive: true },
+      attributes: [
+        'fileCategory',
+        [fn('COUNT', col('fileId')), 'count'],
+        [fn('SUM', col('fileSize')), 'totalSize']
+      ],
+      group: ['fileCategory'],
+      raw: true
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Deal files retrieved successfully',
+      data: {
+        dealId,
+        files: formattedFiles,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(count / limit),
+          totalFiles: count,
+          hasNext: (page * limit) < count,
+          hasPrev: page > 1
+        },
+        statistics: {
+          totalFiles: count,
+          totalSize: files.reduce((sum, file) => sum + file.fileSize, 0),
+          categoryBreakdown: stats.reduce((acc, stat) => {
+            acc[stat.fileCategory] = {
+              count: parseInt(stat.count),
+              size: parseInt(stat.totalSize || 0)
+            };
+            return acc;
+          }, {})
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get deal files error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve deal files',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Download a specific file
+ */
+exports.downloadDealFile = async (req, res) => {
+  try {
+    const { dealId, fileId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Find the file
+    const dealFile = await DealFile.findOne({
+      where: { fileId, dealId, masterUserID, isActive: true }
+    });
+
+    if (!dealFile) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Check if file exists on disk
+    try {
+      await fs.access(dealFile.filePath);
+    } catch (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    // Update download count and last accessed time
+    await dealFile.update({
+      downloadCount: dealFile.downloadCount + 1,
+      lastAccessedAt: new Date()
+    });
+
+    // Set appropriate headers
+    res.setHeader('Content-Disposition', `attachment; filename="${dealFile.fileName}"`);
+    res.setHeader('Content-Type', dealFile.mimeType);
+
+    // Send file
+    res.sendFile(path.resolve(dealFile.filePath));
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.DEAL_MANAGEMENT,
+      "DEAL_FILE_DOWNLOADED",
+      req.user?.id || req.adminId,
+      `File ${dealFile.fileName} downloaded from deal ${dealId}`,
+      dealId
+    );
+
+  } catch (error) {
+    console.error('Download deal file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download file',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Delete a file
+ */
+exports.deleteDealFile = async (req, res) => {
+  try {
+    const { dealId, fileId } = req.params;
+    const masterUserID = req.adminId;
+
+    // Find the file
+    const dealFile = await DealFile.findOne({
+      where: { fileId, dealId, masterUserID, isActive: true }
+    });
+
+    if (!dealFile) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Soft delete the file
+    await dealFile.update({ isActive: false });
+
+    // Optionally delete physical file (uncomment if you want hard delete)
+    // try {
+    //   await fs.unlink(dealFile.filePath);
+    // } catch (error) {
+    //   console.warn('Could not delete physical file:', error.message);
+    // }
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.DEAL_MANAGEMENT,
+      "DEAL_FILE_DELETED",
+      req.user?.id || req.adminId,
+      `File ${dealFile.fileName} deleted from deal ${dealId}`,
+      dealId
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'File deleted successfully',
+      data: {
+        fileId: dealFile.fileId,
+        fileName: dealFile.fileName
+      }
+    });
+
+  } catch (error) {
+    console.error('Delete deal file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete file',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update file metadata
+ */
+exports.updateDealFile = async (req, res) => {
+  try {
+    const { dealId, fileId } = req.params;
+    const { fileDisplayName, description, tags, isPublic } = req.body;
+    const masterUserID = req.adminId;
+
+    // Find the file
+    const dealFile = await DealFile.findOne({
+      where: { fileId, dealId, masterUserID, isActive: true }
+    });
+
+    if (!dealFile) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Update file metadata
+    const updateData = {};
+    if (fileDisplayName) updateData.fileDisplayName = fileDisplayName;
+    if (description !== undefined) updateData.description = description;
+    if (tags) updateData.tags = Array.isArray(tags) ? tags : JSON.parse(tags);
+    if (isPublic !== undefined) updateData.isPublic = isPublic;
+
+    await dealFile.update(updateData);
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.DEAL_MANAGEMENT,
+      "DEAL_FILE_UPDATED",
+      req.user?.id || req.adminId,
+      `File ${dealFile.fileName} metadata updated in deal ${dealId}`,
+      dealId
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'File updated successfully',
+      data: {
+        fileId: dealFile.fileId,
+        fileName: dealFile.fileName,
+        fileDisplayName: dealFile.fileDisplayName,
+        description: dealFile.description,
+        tags: dealFile.tags,
+        isPublic: dealFile.isPublic
+      }
+    });
+
+  } catch (error) {
+    console.error('Update deal file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update file',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Helper function to determine file category based on MIME type
+ */
+function getFileCategory(mimeType) {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.includes('pdf')) return 'document';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'document';
+  if (mimeType.includes('excel') || mimeType.includes('spreadsheet') || mimeType.includes('csv')) return 'spreadsheet';
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'presentation';
+  if (mimeType.includes('zip') || mimeType.includes('archive') || mimeType.includes('compressed')) return 'archive';
+  return 'other';
+}
+
+/**
+ * Helper function to format file size
+ */
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
