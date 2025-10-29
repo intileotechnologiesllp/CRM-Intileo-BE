@@ -3992,24 +3992,149 @@ exports.getDealsByStage = async (req, res) => {
   try {
     const { pipeline, pipelineId, includeActivities = false } = req.query;
     
-    const allStages = [
-      "Qualified",
-      "Contact Made",
-      "Proposal Made",
-      "Negotiations Started",
-      // ...add all your stages here
-    ];
+    // 🔥 DYNAMIC STAGE FETCHING - Get stages from pipeline system
+    let allStages = [];
+    let stageMetadata = new Map(); // Store stage colors, order, etc.
+    let pipelineInfo = null;
+
+    console.log(`🚀 [getDealsByStage] Fetching dynamic stages for user: ${req.adminId}`);
+    console.log(`📊 [getDealsByStage] Pipeline filters - pipeline: ${pipeline}, pipelineId: ${pipelineId}`);
+
+    try {
+      // Import pipeline models
+      const Pipeline = require("../../models/deals/pipelineModel");
+      const PipelineStage = require("../../models/deals/pipelineStageModel");
+
+      let pipelineWhere = {
+        isActive: true
+      };
+
+      // Determine which pipeline to use
+      if (pipelineId) {
+        // Use specific pipeline ID
+        pipelineWhere.pipelineId = parseInt(pipelineId);
+        console.log(`🎯 [getDealsByStage] Using specific pipeline ID: ${pipelineId}`);
+      } else if (pipeline) {
+        // Use pipeline by name
+        pipelineWhere.pipelineName = pipeline;
+        console.log(`🎯 [getDealsByStage] Using pipeline by name: ${pipeline}`);
+      } else {
+        // Use user's default pipeline
+        pipelineWhere.masterUserID = req.adminId;
+        pipelineWhere.isDefault = true;
+        console.log(`🎯 [getDealsByStage] Using user's default pipeline for user: ${req.adminId}`);
+      }
+
+      // Fetch the pipeline with its stages
+      const selectedPipeline = await Pipeline.findOne({
+        where: pipelineWhere,
+        include: [
+          {
+            model: PipelineStage,
+            as: "stages",
+            where: { isActive: true },
+            required: false,
+            order: [["stageOrder", "ASC"]],
+          },
+        ],
+      });
+
+      if (selectedPipeline && selectedPipeline.stages && selectedPipeline.stages.length > 0) {
+        // Use dynamic stages from pipeline
+        allStages = selectedPipeline.stages.map((stage) => stage.stageName);
+        pipelineInfo = {
+          pipelineId: selectedPipeline.pipelineId,
+          pipelineName: selectedPipeline.pipelineName,
+          isDefault: selectedPipeline.isDefault
+        };
+
+        // Store stage metadata
+        selectedPipeline.stages.forEach((stage) => {
+          stageMetadata.set(stage.stageName, {
+            stageId: stage.stageId,
+            stageOrder: stage.stageOrder,
+            color: stage.color,
+            dealRottenDays: stage.dealRottenDays,
+            probability: stage.probability,
+            isActive: stage.isActive
+          });
+        });
+
+        console.log(`✅ [getDealsByStage] Found pipeline "${selectedPipeline.pipelineName}" with ${allStages.length} stages:`, allStages);
+      } else {
+        // Fallback to system-wide stages if no pipeline found
+        console.log(`⚠️ [getDealsByStage] No pipeline found, fetching all unique stages from deals`);
+        
+        const uniqueStages = await Deal.findAll({
+          attributes: [[Sequelize.fn('DISTINCT', Sequelize.col('pipelineStage')), 'pipelineStage']],
+          where: {
+            pipelineStage: { [Op.ne]: null },
+            isConvertedToLead: {
+              [Op.or]: [
+                { [Op.is]: null },
+                { [Op.eq]: false }
+              ]
+            }
+          },
+          raw: true
+        });
+
+        allStages = uniqueStages.map(stage => stage.pipelineStage).filter(Boolean);
+        console.log(`📝 [getDealsByStage] Using unique stages from deals:`, allStages);
+      }
+    } catch (pipelineError) {
+      console.error("❌ [getDealsByStage] Pipeline system error:", pipelineError.message);
+      // Fallback to hardcoded stages
+      allStages = [
+        "Qualified",
+        "Contact Made", 
+        "Proposal Made",
+        "Negotiations Started"
+      ];
+      console.log(`🔧 [getDealsByStage] Fallback to hardcoded stages:`, allStages);
+    }
+
+    // If still no stages found, use hardcoded fallback
+    if (allStages.length === 0) {
+      allStages = [
+        "Qualified",
+        "Contact Made",
+        "Proposal Made", 
+        "Negotiations Started"
+      ];
+      console.log(`🔧 [getDealsByStage] No stages found, using hardcoded fallback:`, allStages);
+    }
 
     const result = [];
     let totalDeals = 0;
 
-    // Build pipeline filter conditions
+    // Build pipeline filter conditions for deals query
     const pipelineFilter = {};
     if (pipeline) {
       pipelineFilter.pipeline = pipeline;
     }
     if (pipelineId) {
       pipelineFilter.pipelineId = parseInt(pipelineId);
+    }
+
+    // Apply user filtering for non-admin users
+    let baseWhere = {
+      // Exclude deals that have been converted to leads
+      isConvertedToLead: {
+        [Op.or]: [
+          { [Op.is]: null },
+          { [Op.eq]: false }
+        ]
+      },
+      ...pipelineFilter
+    };
+
+    if (req.role !== "admin") {
+      baseWhere[Op.or] = [
+        { masterUserID: req.adminId },
+        { ownerId: req.adminId }
+      ];
+      console.log(`👤 [getDealsByStage] Non-admin user, filtering by masterUserID/ownerId: ${req.adminId}`);
     }
 
     // Build include array for associations
@@ -4022,7 +4147,7 @@ exports.getDealsByStage = async (req, res) => {
       },
       {
         model: Organization,
-        as: "Organization",
+        as: "Organization", 
         attributes: ["leadOrganizationId"],
         required: false,
       },
@@ -4062,17 +4187,13 @@ exports.getDealsByStage = async (req, res) => {
       }
     ];
 
+    // Process each stage
     for (const stage of allStages) {
+      console.log(`🔍 [getDealsByStage] Processing stage: "${stage}"`);
+      
       const whereCondition = {
-        pipelineStage: stage,
-        // Exclude deals that have been converted to leads
-        isConvertedToLead: {
-          [Op.or]: [
-            { [Op.is]: null },
-            { [Op.eq]: false }
-          ]
-        },
-        ...pipelineFilter
+        ...baseWhere,
+        pipelineStage: stage
       };
 
       const deals = await Deal.findAll({
@@ -4088,10 +4209,39 @@ exports.getDealsByStage = async (req, res) => {
       const dealCount = deals.length;
       totalDeals += dealCount;
 
-      // Format deals with activity summary
+      console.log(`📈 [getDealsByStage] Stage "${stage}": ${dealCount} deals, $${totalValue} total value`);
+
+      // Get stage metadata
+      const metadata = stageMetadata.get(stage) || {};
+
+      // Format deals with activity summary and stage metadata
       const formattedDeals = deals.map(deal => {
         const dealData = deal.toJSON();
         
+        // Add stage metadata to each deal
+        dealData.stageMetadata = {
+          stageOrder: metadata.stageOrder || null,
+          stageColor: metadata.color || '#007BFF',
+          dealRottenDays: metadata.dealRottenDays || null,
+          probability: metadata.probability || 0
+        };
+
+        // Calculate days in current stage (if rotten days are configured)
+        if (metadata.dealRottenDays) {
+          const daysSinceCreated = Math.floor(
+            (new Date() - new Date(deal.createdAt)) / (1000 * 60 * 60 * 24)
+          );
+          const isRotten = daysSinceCreated > metadata.dealRottenDays;
+          
+          dealData.stageDays = {
+            daysSinceCreated,
+            isRotten,
+            dealRottenDays: metadata.dealRottenDays,
+            daysOverdue: isRotten ? daysSinceCreated - metadata.dealRottenDays : 0,
+            rottenStatus: isRotten ? "rotten" : "fresh"
+          };
+        }
+
         // Always add Activities array (empty if no activities)
         const activities = dealData.Activities || [];
         dealData.Activities = activities;
@@ -4115,28 +4265,57 @@ exports.getDealsByStage = async (req, res) => {
         return dealData;
       });
 
+      // Calculate stage statistics
+      const rottenDealsCount = formattedDeals.filter(deal => deal.stageDays?.isRotten).length;
+
       result.push({
         stage,
+        stageMetadata: {
+          stageId: metadata.stageId || null,
+          stageOrder: metadata.stageOrder || null,
+          color: metadata.color || '#007BFF',
+          dealRottenDays: metadata.dealRottenDays || null,
+          probability: metadata.probability || 0,
+          hasRottenDaysConfigured: !!metadata.dealRottenDays
+        },
         totalValue,
         dealCount,
+        rottenDealsCount,
+        freshDealsCount: dealCount - rottenDealsCount,
+        rottenPercentage: dealCount > 0 ? Math.round((rottenDealsCount / dealCount) * 100) : 0,
         deals: formattedDeals,
       });
     }
 
-    // Add filter information to response
+    console.log(`✅ [getDealsByStage] Processed ${allStages.length} stages, ${totalDeals} total deals`);
+
+    // Add comprehensive response metadata
     const responseData = {
       totalDeals,
       stages: result,
+      pipelineInfo: pipelineInfo || {
+        pipelineId: null,
+        pipelineName: pipeline || 'Unknown',
+        isDefault: false,
+        source: 'fallback'
+      },
       filters: {
         pipeline: pipeline || null,
         pipelineId: pipelineId || null,
-        includeActivities: includeActivities === 'true' || includeActivities === true
+        includeActivities: includeActivities === 'true' || includeActivities === true,
+        userRole: req.role,
+        userFiltered: req.role !== "admin"
+      },
+      stagesInfo: {
+        totalStages: allStages.length,
+        dynamicStages: stageMetadata.size > 0,
+        stageSource: stageMetadata.size > 0 ? 'pipeline_system' : 'fallback'
       }
     };
 
     res.status(200).json(responseData);
   } catch (error) {
-    console.error("Error in getDealsByStage:", error);
+    console.error("❌ [getDealsByStage] Error:", error);
     res.status(500).json({ 
       message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
