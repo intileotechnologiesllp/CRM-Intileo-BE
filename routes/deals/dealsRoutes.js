@@ -73,6 +73,12 @@ router.post(
   validatePrivilege(3, "create"),
   dealsController.markDealAsLost
 );
+router.post(
+  "/update-question-shared/:dealId",
+  verifyToken,
+  validatePrivilege(3, "update"),
+  dealsController.updateQuestionShared
+);
 router.get(
   "/mark-deal-as-open/:dealId",
   verifyToken,
