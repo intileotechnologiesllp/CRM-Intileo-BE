@@ -6520,6 +6520,41 @@ exports.markDealAsWon = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+exports.checkDealQuestionSharedStatus = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const adminId = req.adminId;
+    // Fetch the questionShared custom field value for this deal
+    const questionSharedCustomField = await CustomFieldValue.findOne({
+      where: {
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: {
+            isActive: true,
+            fieldName: "questioner_shared?"
+          },
+          required: true,
+        },
+      ],
+    });
+    const customFieldQuestionSharedValue = questionSharedCustomField ? questionSharedCustomField.value : null;
+    console.log(`[CHECK_QUESTION_SHARED] Custom field questionShared value for deal ${dealId}: ${customFieldQuestionSharedValue}`);
+res.status(200).json({
+      message: "Question shared status retrieved successfully.",
+      questionShared: customFieldQuestionSharedValue
+    });
+  } catch (error) {
+    console.log(error);
+ res.status(500).json({ message: "Internal server error" });
+  }   
+};
+
 
 exports.markDealAsLost = async (req, res) => {
   try {
