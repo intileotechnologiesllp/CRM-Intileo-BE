@@ -856,6 +856,9 @@ exports.getLeads = async (req, res) => {
       if (!leadAttributes.includes("leadId")) {
         leadAttributes.unshift("leadId");
       }
+      // if (!leadAttributes.includes("valueCurrency")) {
+      //   leadAttributes.unshift("valueCurrency");
+      // }
       // Always include the sortBy field for ordering
       if (!leadAttributes.includes(sortBy)) {
         leadAttributes.push(sortBy);

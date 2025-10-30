@@ -5091,9 +5091,242 @@ exports.getDealDetail = async (req, res) => {
     // Limit final email results and add optimization metadata
     const limitedEmails = allEmails.slice(0, safeEmailLimit);
 
+    // Enrich emails with connected person, organization, leads, and deals
+    console.log(`🔗 [getDealDetail] Enriching ${limitedEmails.length} emails with connected entities`);
+    
+    let enrichedEmails = limitedEmails;
+    if (limitedEmails.length > 0) {
+      // Extract all unique email addresses from sender and recipient fields
+      const emailAddresses = new Set();
+      
+      limitedEmails.forEach(email => {
+        if (email.sender) {
+          emailAddresses.add(email.sender.toLowerCase());
+        }
+        if (email.recipient) {
+          // Handle multiple recipients separated by comma/semicolon
+          const recipients = email.recipient.split(/[,;]/).map(r => r.trim().toLowerCase());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              emailAddresses.add(recipient);
+            }
+          });
+        }
+        if (email.cc) {
+          // Handle CC recipients
+          const ccRecipients = email.cc.split(/[,;]/).map(r => r.trim().toLowerCase());
+          ccRecipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              emailAddresses.add(recipient);
+            }
+          });
+        }
+        if (email.bcc) {
+          // Handle BCC recipients
+          const bccRecipients = email.bcc.split(/[,;]/).map(r => r.trim().toLowerCase());
+          bccRecipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              emailAddresses.add(recipient);
+            }
+          });
+        }
+      });
+      
+      const uniqueEmailAddresses = Array.from(emailAddresses);
+      console.log(`📧 [getDealDetail] Found ${uniqueEmailAddresses.length} unique email addresses to lookup`);
+      
+      // Bulk fetch all related entities for these email addresses
+      const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
+        // Find persons by email
+        Person.findAll({
+          where: {
+            email: { [Op.in]: uniqueEmailAddresses }
+          },
+          attributes: ['personId', 'contactPerson', 'email', 'phone', 'jobTitle', 'leadOrganizationId'],
+          raw: true
+        }),
+        
+        // Find organizations by email (if organizations have email field)
+        Organization.findAll({
+          where: {
+            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['leadOrganizationId', 'organization','address'],
+          raw: true
+        }),
+        
+        // Find leads by email
+        Lead.findAll({
+          where: {
+            email: { [Op.in]: uniqueEmailAddresses }
+          },
+          attributes: ['leadId', 'title', 'email', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        }),
+        
+        // Find deals by email (if deals have email field)
+        Deal.findAll({
+          where: {
+            ...(Deal.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['dealId', 'title', 'value', 'currency', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        })
+      ]);
+      
+      // Create lookup maps for efficient matching
+      const personEmailMap = new Map();
+      const organizationEmailMap = new Map();
+      const leadEmailMap = new Map();
+      const dealEmailMap = new Map();
+      
+      // Build person email map
+      connectedPersons.forEach(person => {
+        if (person.email) {
+          const emailKey = person.email.toLowerCase();
+          if (!personEmailMap.has(emailKey)) {
+            personEmailMap.set(emailKey, []);
+          }
+          personEmailMap.get(emailKey).push(person);
+        }
+      });
+      
+      // Build organization email map
+      connectedOrganizations.forEach(org => {
+        if (org.email) {
+          const emailKey = org.email.toLowerCase();
+          if (!organizationEmailMap.has(emailKey)) {
+            organizationEmailMap.set(emailKey, []);
+          }
+          organizationEmailMap.get(emailKey).push(org);
+        }
+      });
+      
+      // Build lead email map
+      connectedLeads.forEach(leadItem => {
+        if (leadItem.email) {
+          const emailKey = leadItem.email.toLowerCase();
+          if (!leadEmailMap.has(emailKey)) {
+            leadEmailMap.set(emailKey, []);
+          }
+          leadEmailMap.get(emailKey).push(leadItem);
+        }
+      });
+      
+      // Build deal email map
+      connectedDeals.forEach(dealItem => {
+        if (dealItem.email) {
+          const emailKey = dealItem.email.toLowerCase();
+          if (!dealEmailMap.has(emailKey)) {
+            dealEmailMap.set(emailKey, []);
+          }
+          dealEmailMap.get(emailKey).push(dealItem);
+        }
+      });
+      
+      console.log(`🔍 [getDealDetail] Email mapping results - Persons: ${connectedPersons.length}, Organizations: ${connectedOrganizations.length}, Leads: ${connectedLeads.length}, Deals: ${connectedDeals.length}`);
+      
+      // Enrich each email with connected entities
+      enrichedEmails = limitedEmails.map(email => {
+        const emailObj = email.toJSON ? email.toJSON() : email;
+        
+        // Initialize connected entities arrays
+        emailObj.connectedPersons = [];
+        emailObj.connectedOrganizations = [];
+        emailObj.connectedLeads = [];
+        emailObj.connectedDeals = [];
+        
+        // Helper function to add connected entities for an email address
+        const addConnectedEntities = (emailAddress) => {
+          const emailKey = emailAddress.toLowerCase();
+          
+          // Add connected persons
+          if (personEmailMap.has(emailKey)) {
+            emailObj.connectedPersons.push(...personEmailMap.get(emailKey));
+          }
+          
+          // Add connected organizations
+          if (organizationEmailMap.has(emailKey)) {
+            emailObj.connectedOrganizations.push(...organizationEmailMap.get(emailKey));
+          }
+          
+          // Add connected leads
+          if (leadEmailMap.has(emailKey)) {
+            emailObj.connectedLeads.push(...leadEmailMap.get(emailKey));
+          }
+          
+          // Add connected deals
+          if (dealEmailMap.has(emailKey)) {
+            emailObj.connectedDeals.push(...dealEmailMap.get(emailKey));
+          }
+        };
+        
+        // Check sender email
+        if (emailObj.sender) {
+          addConnectedEntities(emailObj.sender);
+        }
+        
+        // Check recipient emails
+        if (emailObj.recipient) {
+          const recipients = emailObj.recipient.split(/[,;]/).map(r => r.trim());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              addConnectedEntities(recipient);
+            }
+          });
+        }
+        
+        // Check CC emails
+        if (emailObj.cc) {
+          const ccRecipients = emailObj.cc.split(/[,;]/).map(r => r.trim());
+          ccRecipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              addConnectedEntities(recipient);
+            }
+          });
+        }
+        
+        // Check BCC emails
+        if (emailObj.bcc) {
+          const bccRecipients = emailObj.bcc.split(/[,;]/).map(r => r.trim());
+          bccRecipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              addConnectedEntities(recipient);
+            }
+          });
+        }
+        
+        // Remove duplicates from each array
+        emailObj.connectedPersons = emailObj.connectedPersons.filter((person, index, self) => 
+          index === self.findIndex(p => p.personId === person.personId)
+        );
+        emailObj.connectedOrganizations = emailObj.connectedOrganizations.filter((org, index, self) => 
+          index === self.findIndex(o => o.leadOrganizationId === org.leadOrganizationId)
+        );
+        emailObj.connectedLeads = emailObj.connectedLeads.filter((leadItem, index, self) => 
+          index === self.findIndex(l => l.leadId === leadItem.leadId)
+        );
+        emailObj.connectedDeals = emailObj.connectedDeals.filter((dealItem, index, self) => 
+          index === self.findIndex(d => d.dealId === dealItem.dealId)
+        );
+        
+        return emailObj;
+      });
+      
+      // Log enrichment statistics
+      const enrichmentStats = {
+        totalEmails: enrichedEmails.length,
+        emailsWithPersons: enrichedEmails.filter(e => e.connectedPersons.length > 0).length,
+        emailsWithOrganizations: enrichedEmails.filter(e => e.connectedOrganizations.length > 0).length,
+        emailsWithLeads: enrichedEmails.filter(e => e.connectedLeads.length > 0).length,
+        emailsWithDeals: enrichedEmails.filter(e => e.connectedDeals.length > 0).length
+      };
+      console.log(`📊 [getDealDetail] Email enrichment stats:`, enrichmentStats);
+    }
+
     // Process emails for optimization
-    const optimizedEmails = limitedEmails.map((email) => {
-      const emailData = email.toJSON();
+    const optimizedEmails = enrichedEmails.map((email) => {
+      const emailData = email.toJSON ? email.toJSON() : email;
 
       // Truncate email body if present (for memory optimization)
       if (emailData.body) {
@@ -5352,6 +5585,17 @@ exports.getDealDetail = async (req, res) => {
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
+        // Email entity enrichment information
+        entityEnrichment: {
+          enabled: true,
+          description: "Each email is enriched with connected persons, organizations, leads, and deals based on email addresses",
+          connectedEntityFields: [
+            "connectedPersons", 
+            "connectedOrganizations", 
+            "connectedLeads", 
+            "connectedDeals"
+          ]
+        },
         // Email visibility information
         visibilityFiltering: {
           currentUserEmail: currentUserEmail,
@@ -7277,7 +7521,7 @@ exports.duplicateDeal = async (req, res) => {
     const transaction = await sequelize.transaction();
 
     try {
-      // 1. Get the original deal with admin permission check
+      // 1. Get the original deal with admin permission check and pipeline data
       let whereCondition = { dealId: dealId };
       
       // If user is not admin, restrict to their own deals only
@@ -7285,8 +7529,26 @@ exports.duplicateDeal = async (req, res) => {
         whereCondition.masterUserID = masterUserID;
       }
       
+      // Import pipeline models for fetching pipeline and stage data
+      const Pipeline = require("../../models/deals/pipelineModel");
+      const PipelineStage = require("../../models/deals/pipelineStageModel");
+      
       const originalDeal = await Deal.findOne({
         where: whereCondition,
+        include: [
+          {
+            model: Pipeline,
+            as: "pipelineData",
+            attributes: ["pipelineId", "pipelineName", "description", "color", "isDefault"],
+            required: false
+          },
+          {
+            model: PipelineStage,
+            as: "stageData",
+            attributes: ["stageId", "stageName", "stageOrder", "probability", "dealRottenDays", "color"],
+            required: false
+          }
+        ],
         transaction
       });
 
@@ -7338,6 +7600,8 @@ exports.duplicateDeal = async (req, res) => {
       duplicateData.masterUserID = masterUserID;
 
       console.log(`[DUPLICATE] New deal title: ${newTitle}`);
+      console.log(`[DUPLICATE] Pipeline: ${duplicateData.pipeline || 'None'} (ID: ${duplicateData.pipelineId || 'None'})`);
+      console.log(`[DUPLICATE] Stage: ${duplicateData.pipelineStage || 'None'} (ID: ${duplicateData.stageId || 'None'})`);
 
       // 4. Create the duplicate deal
       const newDeal = await Deal.create(duplicateData, { transaction });
@@ -7385,6 +7649,10 @@ exports.duplicateDeal = async (req, res) => {
 
       console.log(`[DUPLICATE] Successfully duplicated ${duplicatedCustomFieldValues.length} custom field values`);
 
+      // Note: We don't copy DealStageHistory as it's historical data
+      // The new deal should start fresh in its current stage without copying the stage progression history
+      // If needed, a new DealStageHistory entry will be created when the deal moves through stages
+
       // 7. Log audit trail (if available)
       try {
         const { logAuditTrail } = require("../../utils/auditTrailLogger");
@@ -7427,12 +7695,34 @@ exports.duplicateDeal = async (req, res) => {
 
       console.log(`[DUPLICATE] ✅ Successfully duplicated deal ${dealId} → ${newDeal.dealId}`);
 
-      // 9. Return the new deal with its custom field values
+      // 9. Prepare pipeline and stage information for response
+      const pipelineInfo = originalDeal.pipelineData ? {
+        pipelineId: originalDeal.pipelineData.pipelineId,
+        pipelineName: originalDeal.pipelineData.pipelineName,
+        description: originalDeal.pipelineData.description,
+        color: originalDeal.pipelineData.color,
+        isDefault: originalDeal.pipelineData.isDefault
+      } : null;
+
+      const stageInfo = originalDeal.stageData ? {
+        stageId: originalDeal.stageData.stageId,
+        stageName: originalDeal.stageData.stageName,
+        stageOrder: originalDeal.stageData.stageOrder,
+        probability: originalDeal.stageData.probability,
+        dealRottenDays: originalDeal.stageData.dealRottenDays,
+        color: originalDeal.stageData.color
+      } : null;
+
+      // 10. Return the new deal with its custom field values and pipeline data
       res.status(201).json({
         message: `Deal "${originalDeal.title}" duplicated successfully as "${newTitle}"`,
         originalDeal: {
           dealId: originalDeal.dealId,
           title: originalDeal.title,
+          pipeline: originalDeal.pipeline,
+          pipelineStage: originalDeal.pipelineStage,
+          pipelineId: originalDeal.pipelineId,
+          stageId: originalDeal.stageId
         },
         newDeal: {
           dealId: newDeal.dealId,
@@ -7441,14 +7731,29 @@ exports.duplicateDeal = async (req, res) => {
           currency: newDeal.currency,
           pipeline: newDeal.pipeline,
           pipelineStage: newDeal.pipelineStage,
+          pipelineId: newDeal.pipelineId,
+          stageId: newDeal.stageId,
           expectedCloseDate: newDeal.expectedCloseDate,
           status: newDeal.status,
           createdAt: newDeal.createdAt,
         },
+        pipelineData: pipelineInfo,
+        stageData: stageInfo,
         duplicatedFields: duplicatedCustomFieldValues,
         summary: {
           totalCustomFields: duplicatedCustomFieldValues.length,
           duplicationTime: new Date().toISOString(),
+          pipelineIncluded: !!pipelineInfo,
+          stageIncluded: !!stageInfo,
+          pipelineDetails: pipelineInfo ? {
+            name: pipelineInfo.pipelineName,
+            isDefault: pipelineInfo.isDefault
+          } : "No pipeline associated",
+          stageDetails: stageInfo ? {
+            name: stageInfo.stageName,
+            order: stageInfo.stageOrder,
+            probability: `${stageInfo.probability}%`
+          } : "No stage associated"
         },
       });
 
