@@ -4952,7 +4952,7 @@ exports.getDealDetail = async (req, res) => {
     let currentUserEmail = null;
     try {
       const userCredential = await UserCredential.findOne({
-        where: { userId: req.adminId },
+        where: { masterUserID: req.adminId },
         attributes: ['email']
       });
       currentUserEmail = userCredential?.email;
