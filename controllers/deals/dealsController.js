@@ -6524,8 +6524,10 @@ exports.markDealAsWon = async (req, res) => {
 exports.markDealAsLost = async (req, res) => {
   try {
     const { dealId } = req.params;
-    const { lostReason } = req.body; // Accept lostReason from request body
+    const { lostReason, questionShared, skipQuestionCheck = false } = req.body; // Accept lostReason, questionShared, and skipQuestionCheck
     const adminId = req.adminId;
+
+    console.log(`[MARK_LOST] Processing deal ${dealId} - skipQuestionCheck: ${skipQuestionCheck}, questionShared: ${questionShared}`);
 
     // Fetch deal with associated person to get email - no permission restrictions
     const deal = await Deal.findOne({
@@ -6547,6 +6549,103 @@ exports.markDealAsLost = async (req, res) => {
     if (deal.status === 'lost') {
       return res.status(400).json({ message: "Deal is already marked as lost." });
     }
+
+    console.log(`[MARK_LOST] Deal found: ${deal.title}`);
+
+    // Step 1: Check if questionShared custom field is already saved and valid
+    // Fetch the questionShared custom field value for this deal
+    const questionSharedCustomField = await CustomFieldValue.findOne({
+      where: {
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: { 
+            isActive: true,
+            fieldName: "questioner_shared?" // Look for custom field named "questionShared"
+          },
+          required: true,
+        },
+      ],
+    });
+
+    const customFieldQuestionSharedValue = questionSharedCustomField ? questionSharedCustomField.value : null;
+    console.log(`[MARK_LOST] Custom field questionShared value: ${customFieldQuestionSharedValue}`);
+
+    const isQuestionSharedSaved = customFieldQuestionSharedValue !== null && 
+                                  customFieldQuestionSharedValue !== undefined && 
+                                  customFieldQuestionSharedValue !== '';
+
+    // If skipQuestionCheck is true, we're coming from the second call after questionShared was saved
+    if (!skipQuestionCheck && !isQuestionSharedSaved) {
+      console.log(`[MARK_LOST] Question shared custom field not saved for deal ${dealId}, requesting save first`);
+      return res.status(428).json({ 
+        message: "Question shared status is required before marking deal as lost.",
+        requiresQuestionShared: true,
+        dealId: dealId,
+        dealTitle: deal.title,
+        currentQuestionSharedStatus: customFieldQuestionSharedValue || null,
+        action: "save_question_shared_first",
+        fieldType: "custom_field"
+      });
+    }
+
+    // Step 2: If questionShared is provided in this request, update the custom field first
+    if (questionShared !== undefined && questionShared !== null) {
+      console.log(`[MARK_LOST] Updating questionShared custom field to: ${questionShared}`);
+      
+      // Find or create the custom field definition first
+      const questionSharedField = await CustomField.findOne({
+        where: {
+          fieldName: "questioner_shared?",
+          entityType: "deal",
+          masterUserID: adminId,
+          isActive: true
+        }
+      });
+
+      if (!questionSharedField) {
+        return res.status(400).json({
+          message: "questionShared custom field not found. Please create the custom field first.",
+          fieldName: "questionShared",
+          entityType: "deal"
+        });
+      }
+
+      // Update or create the custom field value
+      if (questionSharedCustomField) {
+        // Update existing value
+        await questionSharedCustomField.update({ value: questionShared.toString() });
+      } else {
+        // Create new value
+        await CustomFieldValue.create({
+          entityId: dealId.toString(),
+          entityType: "deal",
+          masterUserID: adminId,
+          fieldId: questionSharedField.fieldId,
+          value: questionShared.toString()
+        });
+      }
+      
+      // If this was just to save questionShared and we're not ready to mark as lost yet
+      if (!skipQuestionCheck) {
+        return res.status(200).json({
+          message: "Question shared status updated successfully. You can now proceed to mark the deal as lost.",
+          dealId: dealId,
+          questionSharedUpdated: true,
+          newQuestionSharedStatus: questionShared.toString(),
+          readyForLostReason: true,
+          fieldType: "custom_field"
+        });
+      }
+    }
+
+    // Step 3: Proceed with marking deal as lost
+    console.log(`[MARK_LOST] Proceeding to mark deal ${dealId} as lost`);
 
     await deal.update({ status: "lost" });
 
@@ -6574,28 +6673,77 @@ exports.markDealAsLost = async (req, res) => {
       note: "Marked as lost",
     });
 
-    // Get admin email for sending feedback request
-    const adminUser = await MasterUser.findOne({ 
-      where: { masterUserID: adminId },
-      attributes: ['email']
+    // Step 4: Conditional email sending based on questionShared custom field status
+    // Re-fetch the custom field value in case it was just updated
+    const updatedQuestionSharedCustomField = await CustomFieldValue.findOne({
+      where: {
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: adminId,
+      },
+      include: [
+        {
+          model: CustomField,
+          as: "CustomField",
+          where: { 
+            isActive: true,
+            fieldName: "questioner_shared?"
+          },
+          required: true,
+        },
+      ],
     });
 
-    // Check if admin user has email credentials configured for sending emails
-    let userCredential = null;
-    if (adminUser && adminUser.email) {
-      userCredential = await UserCredential.findOne({ 
-        where: { email: adminUser.email },
-        attributes: ['email', 'smtpHost', 'smtpPort', 'appPassword']
-      });
-    }
+    const finalQuestionSharedValue = updatedQuestionSharedCustomField ? updatedQuestionSharedCustomField.value : null;
 
-    // Send feedback request email if all conditions are met
-    if (deal.Person && deal.Person.email && adminUser && adminUser.email && userCredential && userCredential.appPassword) {
-      const personFirstName = deal.Person.contactPerson || "Valued Client";
-      
-      const emailSubject = "Request for Feedback on Recent Contract Bid";
-      
-      const emailBody = `Dear ${personFirstName},
+    let emailSent = false;
+    let emailStatus = {
+      hasContactEmail: !!(deal.Person && deal.Person.email),
+      hasAdminEmail: false,
+      hasCredentials: false,
+      hasAppPassword: false,
+      questionSharedStatus: finalQuestionSharedValue,
+      emailSendingEnabled: false,
+      fieldType: "custom_field"
+    };
+
+    // Only proceed with email if questionShared is 'yes' or 'true'
+    const shouldSendEmail = finalQuestionSharedValue && 
+                           (finalQuestionSharedValue.toLowerCase() === 'yes' || 
+                            finalQuestionSharedValue.toLowerCase() === 'true' || 
+                            finalQuestionSharedValue === true);
+
+    console.log(`[MARK_LOST] Should send email: ${shouldSendEmail} (questionShared custom field: ${finalQuestionSharedValue})`);
+
+    if (shouldSendEmail) {
+      // Get admin email for sending feedback request
+      const adminUser = await MasterUser.findOne({ 
+        where: { masterUserID: adminId },
+        attributes: ['email']
+      });
+
+      emailStatus.hasAdminEmail = !!(adminUser && adminUser.email);
+
+      // Check if admin user has email credentials configured for sending emails
+      let userCredential = null;
+      if (adminUser && adminUser.email) {
+        userCredential = await UserCredential.findOne({ 
+          where: { email: adminUser.email },
+          attributes: ['email', 'smtpHost', 'smtpPort', 'appPassword']
+        });
+      }
+
+      emailStatus.hasCredentials = !!userCredential;
+      emailStatus.hasAppPassword = !!(userCredential && userCredential.appPassword);
+      emailStatus.emailSendingEnabled = shouldSendEmail;
+
+      // Send feedback request email if all conditions are met
+      if (deal.Person && deal.Person.email && adminUser && adminUser.email && userCredential && userCredential.appPassword) {
+        const personFirstName = deal.Person.contactPerson || "Valued Client";
+        
+        const emailSubject = "Request for Feedback on Recent Contract Bid";
+        
+        const emailBody = `Dear ${personFirstName},
 
 We hope you're well. We recently received the notification that our bid for the contract was unsuccessful. Could you kindly provide feedback on our proposal? Your insights are valuable for us.
 
@@ -6606,50 +6754,173 @@ Thank you for your consideration.
 Best Regards,
 Earthood Team`;
 
-      try {
-        await sendEmail(adminUser.email, {
-          from: adminUser.email,
-          to: deal.Person.email,
-          subject: emailSubject,
-          text: emailBody,
-        });
-        console.log(`Feedback request email sent to ${deal.Person.email} for lost deal ${dealId}`);
-      } catch (emailError) {
-        console.error(`Failed to send feedback email for deal ${dealId}:`, emailError);
-        // Continue with the response even if email fails
+        try {
+          await sendEmail(adminUser.email, {
+            from: adminUser.email,
+            to: deal.Person.email,
+            subject: emailSubject,
+            text: emailBody,
+          });
+          emailSent = true;
+          console.log(`[MARK_LOST] ✅ Feedback request email sent to ${deal.Person.email} for lost deal ${dealId}`);
+        } catch (emailError) {
+          console.error(`[MARK_LOST] ❌ Failed to send feedback email for deal ${dealId}:`, emailError);
+          // Continue with the response even if email fails
+        }
+      } else {
+        // Log specific reasons why email wasn't sent
+        if (!deal.Person || !deal.Person.email) {
+          console.log(`[MARK_LOST] No contact person email found for deal ${dealId}, skipping feedback email`);
+        }
+        if (!adminUser || !adminUser.email) {
+          console.log(`[MARK_LOST] No admin email found for user ${adminId}, skipping feedback email`);
+        }
+        if (!userCredential) {
+          console.log(`[MARK_LOST] No email credentials found for admin email ${adminUser?.email}, skipping feedback email`);
+        }
+        if (userCredential && !userCredential.appPassword) {
+          console.log(`[MARK_LOST] No app password configured for admin email ${adminUser?.email}, skipping feedback email`);
+        }
       }
     } else {
-      // Log specific reasons why email wasn't sent
-      if (!deal.Person || !deal.Person.email) {
-        console.log(`No contact person email found for deal ${dealId}, skipping feedback email`);
-      }
-      if (!adminUser || !adminUser.email) {
-        console.log(`No admin email found for user ${adminId}, skipping feedback email`);
-      }
-      if (!userCredential) {
-        console.log(`No email credentials found for admin email ${adminUser?.email}, skipping feedback email`);
-      }
-      if (userCredential && !userCredential.appPassword) {
-        console.log(`No app password configured for admin email ${adminUser?.email}, skipping feedback email`);
-      }
+      console.log(`[MARK_LOST] Email not sent because questionShared custom field is '${finalQuestionSharedValue}' (not 'yes')`);
+      emailStatus.emailSendingEnabled = false;
     }
 
     res.status(200).json({ 
       message: "Deal marked as lost", 
-      deal,
-      emailSent: !!(deal.Person && deal.Person.email && adminUser && adminUser.email && userCredential && userCredential.appPassword),
-      emailStatus: {
-        hasContactEmail: !!(deal.Person && deal.Person.email),
-        hasAdminEmail: !!(adminUser && adminUser.email),
-        hasCredentials: !!userCredential,
-        hasAppPassword: !!(userCredential && userCredential.appPassword)
+      deal: {
+        dealId: deal.dealId,
+        title: deal.title,
+        status: "lost",
+        questionSharedCustomField: finalQuestionSharedValue
+      },
+      emailSent: emailSent,
+      emailStatus: emailStatus,
+      lostReason: lostReason || null,
+      questionSharedBasedEmail: {
+        questionSharedStatus: finalQuestionSharedValue,
+        emailTriggered: shouldSendEmail,
+        emailDelivered: emailSent,
+        rule: "Email is only sent when questionShared custom field is 'yes' or 'true'",
+        fieldType: "custom_field"
       }
     });
   } catch (error) {
-    console.error("Error in markDealAsLost:", error);
+    console.error("[MARK_LOST] Error in markDealAsLost:", error);
     res.status(500).json({ 
       message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Update questionShared custom field status for a deal
+exports.updateQuestionShared = async (req, res) => {
+  try {
+    const { dealId } = req.params;
+    const { questionShared } = req.body;
+    const adminId = req.adminId;
+
+    console.log(`[UPDATE_QUESTION] Updating questionShared custom field for deal ${dealId} to: ${questionShared}`);
+
+    // Validate input
+    if (questionShared === undefined || questionShared === null) {
+      return res.status(400).json({ 
+        message: "questionShared value is required",
+        validValues: ["yes", "no", "true", "false"],
+        fieldType: "custom_field"
+      });
+    }
+
+    // Find the deal
+    const deal = await Deal.findOne({
+      where: { dealId },
+      attributes: ['dealId', 'title', 'status', 'masterUserID']
+    });
+
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    // Check permissions (non-admin users can only update their own deals)
+    if (req.role !== 'admin' && deal.masterUserID !== adminId) {
+      return res.status(403).json({ 
+        message: "Access denied. You can only update deals you own." 
+      });
+    }
+
+    console.log(`[UPDATE_QUESTION] Deal found: ${deal.title}`);
+
+    // Find the questionShared custom field definition
+    const questionSharedField = await CustomField.findOne({
+      where: {
+        fieldName: "questionShared",
+        entityType: "deal",
+        masterUserID: adminId,
+        isActive: true
+      }
+    });
+
+    if (!questionSharedField) {
+      return res.status(400).json({
+        message: "questionShared custom field not found. Please create the custom field first.",
+        fieldName: "questionShared",
+        entityType: "deal",
+        fieldType: "custom_field"
+      });
+    }
+
+    // Find existing custom field value
+    const existingCustomFieldValue = await CustomFieldValue.findOne({
+      where: {
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: adminId,
+        fieldId: questionSharedField.fieldId
+      }
+    });
+
+    let previousValue = null;
+    if (existingCustomFieldValue) {
+      // Update existing value
+      previousValue = existingCustomFieldValue.value;
+      await existingCustomFieldValue.update({ value: questionShared.toString() });
+    } else {
+      // Create new value
+      await CustomFieldValue.create({
+        entityId: dealId.toString(),
+        entityType: "deal",
+        masterUserID: adminId,
+        fieldId: questionSharedField.fieldId,
+        value: questionShared.toString()
+      });
+    }
+
+    console.log(`[UPDATE_QUESTION] ✅ Successfully updated questionShared custom field for deal ${dealId}`);
+
+    res.status(200).json({
+      message: "Question shared custom field status updated successfully",
+      dealId: dealId,
+      dealTitle: deal.title,
+      previousQuestionShared: previousValue,
+      newQuestionShared: questionShared.toString(),
+      canProceedToMarkLost: true,
+      emailWillBeSent: questionShared.toString().toLowerCase() === 'yes' || questionShared.toString().toLowerCase() === 'true',
+      fieldType: "custom_field",
+      customField: {
+        fieldId: questionSharedField.fieldId,
+        fieldName: questionSharedField.fieldName,
+        fieldLabel: questionSharedField.fieldLabel
+      }
+    });
+
+  } catch (error) {
+    console.error("[UPDATE_QUESTION] Error updating questionShared custom field:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      fieldType: "custom_field"
     });
   }
 };
