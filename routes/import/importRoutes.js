@@ -101,6 +101,17 @@ router.post('/validate/:sessionId', columnMappingController.validateData);
  */
 router.post('/execute/:sessionId', importExecutionController.executeImport);
 
+/**
+ * @route POST /api/import/finish/:sessionId
+ * @desc Finish import with multi-entity support based on column mapping
+ * @access Private
+ * @body {string} duplicateHandling - How to handle duplicates ('skip', 'update', 'create_new')
+ * @body {number} batchSize - Number of records to process in each batch (default: 100)
+ * @body {boolean} continueOnError - Whether to continue import on errors (default: true)
+ * @body {boolean} processInBackground - Whether to process in background (default: true)
+ */
+router.post('/finish/:sessionId', importExecutionController.finishImport);
+
 // ===== ERROR REPORTING ROUTES =====
 
 /**

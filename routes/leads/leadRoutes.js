@@ -98,4 +98,14 @@ router.get("/labels/filter", verifyToken, validatePrivilege(2, "view"), leadCont
 // Delete a label (soft delete)
 router.delete("/labels/:labelId", verifyToken, validatePrivilege(2, "delete"), leadController.deleteLeadLabel);
 
+// ===========================================
+// EXCEL IMPORT ROUTES
+// ===========================================
+
+// Import leads from Excel file
+router.post("/import/excel", verifyToken, validatePrivilege(2, "create"), leadController.importLeadsFromExcel);
+
+// Download Excel import template
+router.get("/import/template", verifyToken, validatePrivilege(2, "view"), leadController.getExcelImportTemplate);
+
 module.exports = router;
