@@ -34,6 +34,37 @@ const {
 
 const { sendEmail } = require("../../utils/emailSend");
 
+// Import Excel/CSV handling utilities
+const XLSX = require('xlsx');
+const csv = require('csv-parser');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+
+// Configure multer for file uploads
+const upload = multer({
+  dest: path.join(__dirname, '../../uploads/excel_imports/'),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept only Excel and CSV files
+    const allowedTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.ms-excel', // .xls
+      'text/csv', // .csv
+      'application/csv'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype) || 
+        file.originalname.match(/\.(xlsx|xls|csv)$/i)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only Excel (.xlsx, .xls) and CSV files are allowed.'), false);
+    }
+  }
+});
+
 // Helper function to get user's visibility permissions for leads
 async function getUserLeadVisibilityPermissions(userId, userRole) {
   if (userRole === "admin") {
@@ -4520,6 +4551,200 @@ exports.getAllLeadDetails = async (req, res) => {
       relatedEmails = limitedEmails;
     }
 
+    // Enrich emails with connected person, organization, leads, and deals
+    console.log(`🔗 [getAllLeadDetails] Enriching ${relatedEmails.length} emails with connected entities`);
+    
+    if (relatedEmails.length > 0) {
+      // Extract all unique email addresses from sender and recipient fields
+      const emailAddresses = new Set();
+      
+      relatedEmails.forEach(email => {
+        if (email.sender) {
+          emailAddresses.add(email.sender.toLowerCase());
+        }
+        if (email.recipient) {
+          // Handle multiple recipients separated by comma/semicolon
+          const recipients = email.recipient.split(/[,;]/).map(r => r.trim().toLowerCase());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              emailAddresses.add(recipient);
+            }
+          });
+        }
+      });
+      
+      const uniqueEmailAddresses = Array.from(emailAddresses);
+      console.log(`📧 [getAllLeadDetails] Found ${uniqueEmailAddresses.length} unique email addresses to lookup`);
+      
+      // Bulk fetch all related entities for these email addresses
+      const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
+        // Find persons by email
+        Person.findAll({
+          where: {
+            email: { [Op.in]: uniqueEmailAddresses }
+          },
+          attributes: ['personId', 'contactPerson', 'email', 'phone', 'jobTitle', 'leadOrganizationId'],
+          raw: true
+        }),
+        
+        // Find organizations by email (if organizations have email field)
+        Organization.findAll({
+          where: {
+            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['leadOrganizationId', 'organization', 'address'],
+          raw: true
+        }),
+        
+        // Find leads by email
+        Lead.findAll({
+          where: {
+            email: { [Op.in]: uniqueEmailAddresses }
+          },
+          attributes: ['leadId', 'title', 'email', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        }),
+        
+        // Find deals by email (if deals have email field)
+        Deal.findAll({
+          where: {
+            ...(Deal.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['dealId', 'title', 'value', 'currency', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        })
+      ]);
+      
+      // Create lookup maps for efficient matching
+      const personEmailMap = new Map();
+      const organizationEmailMap = new Map();
+      const leadEmailMap = new Map();
+      const dealEmailMap = new Map();
+      
+      // Build person email map
+      connectedPersons.forEach(person => {
+        if (person.email) {
+          const emailKey = person.email.toLowerCase();
+          if (!personEmailMap.has(emailKey)) {
+            personEmailMap.set(emailKey, []);
+          }
+          personEmailMap.get(emailKey).push(person);
+        }
+      });
+      
+      // Build organization email map
+      connectedOrganizations.forEach(org => {
+        if (org.email) {
+          const emailKey = org.email.toLowerCase();
+          if (!organizationEmailMap.has(emailKey)) {
+            organizationEmailMap.set(emailKey, []);
+          }
+          organizationEmailMap.get(emailKey).push(org);
+        }
+      });
+      
+      // Build lead email map
+      connectedLeads.forEach(leadItem => {
+        if (leadItem.email) {
+          const emailKey = leadItem.email.toLowerCase();
+          if (!leadEmailMap.has(emailKey)) {
+            leadEmailMap.set(emailKey, []);
+          }
+          leadEmailMap.get(emailKey).push(leadItem);
+        }
+      });
+      
+      // Build deal email map
+      connectedDeals.forEach(deal => {
+        if (deal.email) {
+          const emailKey = deal.email.toLowerCase();
+          if (!dealEmailMap.has(emailKey)) {
+            dealEmailMap.set(emailKey, []);
+          }
+          dealEmailMap.get(emailKey).push(deal);
+        }
+      });
+      
+      console.log(`🔍 [getAllLeadDetails] Email mapping results - Persons: ${connectedPersons.length}, Organizations: ${connectedOrganizations.length}, Leads: ${connectedLeads.length}, Deals: ${connectedDeals.length}`);
+      
+      // Enrich each email with connected entities
+      relatedEmails = relatedEmails.map(email => {
+        const emailObj = email.toJSON ? email.toJSON() : email;
+        
+        // Initialize connected entities arrays
+        emailObj.connectedPersons = [];
+        emailObj.connectedOrganizations = [];
+        emailObj.connectedLeads = [];
+        emailObj.connectedDeals = [];
+        
+        // Helper function to add connected entities for an email address
+        const addConnectedEntities = (emailAddress) => {
+          const emailKey = emailAddress.toLowerCase();
+          
+          // Add connected persons
+          if (personEmailMap.has(emailKey)) {
+            emailObj.connectedPersons.push(...personEmailMap.get(emailKey));
+          }
+          
+          // Add connected organizations
+          if (organizationEmailMap.has(emailKey)) {
+            emailObj.connectedOrganizations.push(...organizationEmailMap.get(emailKey));
+          }
+          
+          // Add connected leads
+          if (leadEmailMap.has(emailKey)) {
+            emailObj.connectedLeads.push(...leadEmailMap.get(emailKey));
+          }
+          
+          // Add connected deals
+          if (dealEmailMap.has(emailKey)) {
+            emailObj.connectedDeals.push(...dealEmailMap.get(emailKey));
+          }
+        };
+        
+        // Check sender email
+        if (emailObj.sender) {
+          addConnectedEntities(emailObj.sender);
+        }
+        
+        // Check recipient emails
+        if (emailObj.recipient) {
+          const recipients = emailObj.recipient.split(/[,;]/).map(r => r.trim());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              addConnectedEntities(recipient);
+            }
+          });
+        }
+        
+        // Remove duplicates from each array
+        emailObj.connectedPersons = emailObj.connectedPersons.filter((person, index, self) => 
+          index === self.findIndex(p => p.personId === person.personId)
+        );
+        emailObj.connectedOrganizations = emailObj.connectedOrganizations.filter((org, index, self) => 
+          index === self.findIndex(o => o.leadOrganizationId === org.leadOrganizationId)
+        );
+        emailObj.connectedLeads = emailObj.connectedLeads.filter((leadItem, index, self) => 
+          index === self.findIndex(l => l.leadId === leadItem.leadId)
+        );
+        emailObj.connectedDeals = emailObj.connectedDeals.filter((deal, index, self) => 
+          index === self.findIndex(d => d.dealId === deal.dealId)
+        );
+        
+        return emailObj;
+      });
+      
+      // Log enrichment statistics
+      const enrichmentStats = {
+        totalEmails: relatedEmails.length,
+        emailsWithPersons: relatedEmails.filter(e => e.connectedPersons.length > 0).length,
+        emailsWithOrganizations: relatedEmails.filter(e => e.connectedOrganizations.length > 0).length,
+        emailsWithLeads: relatedEmails.filter(e => e.connectedLeads.length > 0).length,
+        emailsWithDeals: relatedEmails.filter(e => e.connectedDeals.length > 0).length
+      };
+      console.log(`📊 [getAllLeadDetails] Email enrichment stats:`, enrichmentStats);
+    }
+
     const notes = await LeadNote.findAll({
       where: { leadId },
       order: [["createdAt", "DESC"]],
@@ -4730,6 +4955,16 @@ exports.getAllLeadDetails = async (req, res) => {
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+        entityEnrichment: {
+          enabled: true,
+          description: "Each email is enriched with connected persons, organizations, leads, and deals based on email addresses",
+          connectedEntityFields: [
+            "connectedPersons", 
+            "connectedOrganizations", 
+            "connectedLeads", 
+            "connectedDeals"
+          ]
+        },
         visibilityFiltering: {
           enabled: true,
           userEmail: currentUserEmail || null,
@@ -7430,6 +7665,591 @@ exports.getLeadLabelsWithStats = async (req, res) => {
     res.status(500).json({ 
       message: "Internal server error",
       error: error.message 
+    });
+  }
+};
+
+// Excel Import API for Leads
+exports.importLeadsFromExcel = async (req, res) => {
+  try {
+    // Use multer middleware to handle file upload
+    upload.single('excelFile')(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: 'File upload error',
+          error: err.message
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No file uploaded. Please upload an Excel or CSV file.'
+        });
+      }
+
+      try {
+        // Check user permissions
+        if (!["admin", "general", "master"].includes(req.role)) {
+          await logAuditTrail(
+            PROGRAMS.LEAD_MANAGEMENT,
+            "LEAD_EXCEL_IMPORT_DENIED",
+            req.adminId,
+            "Access denied for Excel import. Insufficient permissions.",
+            null
+          );
+          
+          // Clean up uploaded file
+          if (fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+          
+          return res.status(403).json({
+            success: false,
+            message: "Access denied. You do not have permission to import leads."
+          });
+        }
+
+        // Parse the Excel/CSV file
+        const parsedData = await parseUploadedFile(req.file);
+
+        if (!parsedData || parsedData.length === 0) {
+          // Clean up uploaded file
+          if (fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+          
+          return res.status(400).json({
+            success: false,
+            message: 'No data found in the uploaded file or invalid file format.'
+          });
+        }
+
+        // Get import options from request body
+        const {
+          duplicateHandling = 'skip', // 'skip', 'update', 'create_new'
+          skipHeaderRow = true,
+          validateEmail = true,
+          validatePhone = true,
+          defaultOwner = req.adminId,
+          batchSize = 100
+        } = req.body;
+
+        // Process the data in batches
+        const importResult = await processLeadImport(parsedData, {
+          duplicateHandling,
+          skipHeaderRow,
+          validateEmail,
+          validatePhone,
+          defaultOwner,
+          batchSize,
+          masterUserID: req.adminId,
+          role: req.role
+        });
+
+        // Clean up uploaded file
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+
+        // Log successful import
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_EXCEL_IMPORT_COMPLETED",
+          req.adminId,
+          `Excel import completed. Processed: ${importResult.totalProcessed}, Created: ${importResult.successful}, Failed: ${importResult.failed}, Skipped: ${importResult.skipped}`,
+          null
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'Excel import completed successfully',
+          data: {
+            totalRows: importResult.totalProcessed,
+            successful: importResult.successful,
+            failed: importResult.failed,
+            skipped: importResult.skipped,
+            duplicatesHandled: importResult.duplicatesHandled,
+            errors: importResult.errors.slice(0, 10), // Show first 10 errors
+            totalErrors: importResult.errors.length,
+            importOptions: {
+              duplicateHandling,
+              skipHeaderRow,
+              validateEmail,
+              validatePhone
+            }
+          }
+        });
+
+      } catch (parseError) {
+        console.error('Error processing Excel import:', parseError);
+        
+        // Clean up uploaded file
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_EXCEL_IMPORT_ERROR",
+          req.adminId,
+          `Excel import failed: ${parseError.message}`,
+          null
+        );
+
+        res.status(500).json({
+          success: false,
+          message: 'Failed to process Excel import',
+          error: parseError.message
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in Excel import endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during Excel import',
+      error: error.message
+    });
+  }
+};
+
+// Helper function to parse uploaded file (Excel or CSV)
+async function parseUploadedFile(file) {
+  return new Promise((resolve, reject) => {
+    try {
+      const fileExtension = path.extname(file.originalname).toLowerCase();
+      
+      if (fileExtension === '.csv') {
+        // Parse CSV file
+        const results = [];
+        fs.createReadStream(file.path)
+          .pipe(csv({ headers: false }))
+          .on('data', (data) => {
+            results.push(Object.values(data));
+          })
+          .on('end', () => {
+            resolve(results);
+          })
+          .on('error', (error) => {
+            reject(error);
+          });
+      } else if (fileExtension === '.xlsx' || fileExtension === '.xls') {
+        // Parse Excel file
+        const workbook = XLSX.readFile(file.path);
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        resolve(jsonData);
+      } else {
+        reject(new Error('Unsupported file format'));
+      }
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// Helper function to process lead import with createDeal-like functionality
+async function processLeadImport(data, options) {
+  const {
+    duplicateHandling,
+    skipHeaderRow,
+    validateEmail,
+    validatePhone,
+    defaultOwner,
+    batchSize,
+    masterUserID,
+    role
+  } = options;
+
+  let successful = 0;
+  let failed = 0;
+  let skipped = 0;
+  let duplicatesHandled = 0;
+  const errors = [];
+
+  // Skip header row if requested
+  const dataRows = skipHeaderRow ? data.slice(1) : data;
+  const totalProcessed = dataRows.length;
+
+  console.log(`Starting lead import: ${totalProcessed} rows to process`);
+
+  // Expected column structure (can be customized)
+  // [contactPerson, email, phone, company, title, proposalValue, sourceChannel, status, notes]
+  const expectedColumns = [
+    'contactPerson', 'email', 'phone', 'company', 'title', 
+    'proposalValue', 'sourceChannel', 'status', 'notes', 'organization',
+    'projectLocation', 'organizationCountry', 'serviceType'
+  ];
+
+  // Process data in batches
+  for (let i = 0; i < dataRows.length; i += batchSize) {
+    const batch = dataRows.slice(i, i + batchSize);
+    const transaction = await sequelize.transaction();
+
+    try {
+      for (let rowIndex = 0; rowIndex < batch.length; rowIndex++) {
+        const row = batch[rowIndex];
+        const globalRowIndex = i + rowIndex + (skipHeaderRow ? 2 : 1); // +2 because header is row 1, data starts from 2
+
+        try {
+          // Parse row data into lead object
+          const leadData = parseRowToLeadData(row, expectedColumns);
+
+          // Validate required fields
+          if (!leadData.contactPerson || leadData.contactPerson.trim() === '') {
+            errors.push({
+              row: globalRowIndex,
+              error: 'Contact Person is required',
+              data: row
+            });
+            failed++;
+            continue;
+          }
+
+          // Email validation
+          if (validateEmail && leadData.email && !isValidEmail(leadData.email)) {
+            errors.push({
+              row: globalRowIndex,
+              error: 'Invalid email format',
+              data: row
+            });
+            failed++;
+            continue;
+          }
+
+          // Phone validation
+          if (validatePhone && leadData.phone && !isValidPhone(leadData.phone)) {
+            errors.push({
+              row: globalRowIndex,
+              error: 'Invalid phone format',
+              data: row
+            });
+            failed++;
+            continue;
+          }
+
+          // Check for duplicates (similar to createDeal logic)
+          const duplicateCheck = await checkLeadDuplicate(leadData, masterUserID);
+
+          if (duplicateCheck.isDuplicate) {
+            if (duplicateHandling === 'skip') {
+              skipped++;
+              continue;
+            } else if (duplicateHandling === 'update') {
+              // Update existing lead
+              await updateExistingLead(duplicateCheck.existingLead, leadData, transaction);
+              duplicatesHandled++;
+              continue;
+            }
+            // For 'create_new', proceed with creation
+          }
+
+          // Prepare lead payload (similar to createDeal structure)
+          const leadPayload = {
+            contactPerson: leadData.contactPerson.trim(),
+            email: leadData.email ? leadData.email.trim().toLowerCase() : null,
+            phone: leadData.phone ? leadData.phone.trim() : null,
+            company: leadData.company ? leadData.company.trim() : null,
+            organization: leadData.organization ? leadData.organization.trim() : leadData.company,
+            title: leadData.title ? leadData.title.trim() : `Lead: ${leadData.contactPerson}`,
+            proposalValue: parseFloat(leadData.proposalValue) || 0,
+            proposalValueCurrency: 'INR',
+            sourceChannel: leadData.sourceChannel ? leadData.sourceChannel.trim() : 'Excel Import',
+            status: leadData.status ? leadData.status.trim() : 'New',
+            notes: leadData.notes ? leadData.notes.trim() : null,
+            projectLocation: leadData.projectLocation ? leadData.projectLocation.trim() : null,
+            organizationCountry: leadData.organizationCountry ? leadData.organizationCountry.trim() : null,
+            serviceType: leadData.serviceType ? leadData.serviceType.trim() : null,
+            
+            // System fields
+            masterUserID: masterUserID,
+            ownerId: defaultOwner,
+            createdBy: masterUserID,
+            
+            // Import metadata
+            importSource: 'Excel Import',
+            importDate: new Date(),
+            isArchived: false,
+            
+            // Default values
+            priority: 'Medium',
+            leadScore: 0,
+            isQualified: false
+          };
+
+          // Create the lead
+          const newLead = await Lead.create(leadPayload, { transaction });
+
+          // Create lead details if needed (similar to createDeal details creation)
+          if (leadData.notes || leadData.sourceChannel) {
+            await LeadDetails.create({
+              leadId: newLead.leadId,
+              description: leadData.notes,
+              sourceChannel: leadData.sourceChannel,
+              createdBy: masterUserID,
+              masterUserID: masterUserID
+            }, { transaction });
+          }
+
+          // Create associated person if email is provided
+          if (leadData.email && leadData.contactPerson) {
+            try {
+              const existingPerson = await Person.findOne({
+                where: { email: leadData.email },
+                transaction
+              });
+
+              if (!existingPerson) {
+                const personPayload = {
+                  contactPerson: leadData.contactPerson,
+                  email: leadData.email,
+                  phone: leadData.phone,
+                  organization: leadData.company || leadData.organization,
+                  masterUserID: masterUserID,
+                  ownerId: defaultOwner,
+                  createdBy: masterUserID
+                };
+
+                const newPerson = await Person.create(personPayload, { transaction });
+
+                // Link person to lead
+                await newLead.update({ personId: newPerson.personId }, { transaction });
+              } else {
+                // Link existing person to lead
+                await newLead.update({ personId: existingPerson.personId }, { transaction });
+              }
+            } catch (personError) {
+              console.warn(`Failed to create/link person for lead ${newLead.leadId}:`, personError.message);
+            }
+          }
+
+          successful++;
+
+        } catch (rowError) {
+          console.error(`Error processing row ${globalRowIndex}:`, rowError);
+          errors.push({
+            row: globalRowIndex,
+            error: rowError.message,
+            data: row
+          });
+          failed++;
+        }
+      }
+
+      // Commit transaction for this batch
+      await transaction.commit();
+
+    } catch (batchError) {
+      // Rollback transaction for this batch
+      await transaction.rollback();
+      console.error(`Batch processing error for rows ${i + 1}-${i + batch.length}:`, batchError);
+      
+      // Mark all rows in this batch as failed
+      for (let j = 0; j < batch.length; j++) {
+        errors.push({
+          row: i + j + (skipHeaderRow ? 2 : 1),
+          error: `Batch processing failed: ${batchError.message}`,
+          data: batch[j]
+        });
+        failed++;
+      }
+    }
+
+    // Small delay to prevent overwhelming the database
+    if (i + batchSize < dataRows.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  return {
+    totalProcessed,
+    successful,
+    failed,
+    skipped,
+    duplicatesHandled,
+    errors
+  };
+}
+
+// Helper function to parse row data into lead object
+function parseRowToLeadData(row, expectedColumns) {
+  const leadData = {};
+  
+  expectedColumns.forEach((column, index) => {
+    if (row[index] !== undefined && row[index] !== null && row[index] !== '') {
+      leadData[column] = String(row[index]).trim();
+    }
+  });
+
+  return leadData;
+}
+
+// Helper function to check for lead duplicates
+async function checkLeadDuplicate(leadData, masterUserID) {
+  try {
+    const whereConditions = [];
+
+    // Check by email
+    if (leadData.email) {
+      whereConditions.push({ email: leadData.email });
+    }
+
+    // Check by phone
+    if (leadData.phone) {
+      whereConditions.push({ phone: leadData.phone });
+    }
+
+    // Check by contact person and company combination
+    if (leadData.contactPerson && leadData.company) {
+      whereConditions.push({
+        contactPerson: leadData.contactPerson,
+        [Op.or]: [
+          { company: leadData.company },
+          { organization: leadData.company }
+        ]
+      });
+    }
+
+    if (whereConditions.length === 0) {
+      return { isDuplicate: false };
+    }
+
+    const existingLead = await Lead.findOne({
+      where: {
+        [Op.and]: [
+          { masterUserID: masterUserID },
+          { [Op.or]: whereConditions }
+        ]
+      }
+    });
+
+    return {
+      isDuplicate: !!existingLead,
+      existingLead
+    };
+
+  } catch (error) {
+    console.error('Error checking lead duplicate:', error);
+    return { isDuplicate: false };
+  }
+}
+
+// Helper function to update existing lead
+async function updateExistingLead(existingLead, newData, transaction) {
+  const updateData = {};
+
+  // Update fields that have new values
+  Object.keys(newData).forEach(key => {
+    if (newData[key] && newData[key] !== '' && 
+        key !== 'masterUserID' && key !== 'ownerId' && key !== 'createdBy') {
+      updateData[key] = newData[key];
+    }
+  });
+
+  // Add update metadata
+  updateData.lastModifiedDate = new Date();
+  updateData.importSource = 'Excel Import Update';
+
+  await existingLead.update(updateData, { transaction });
+}
+
+// Email validation helper
+function isValidEmail(email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+// Phone validation helper
+function isValidPhone(phone) {
+  const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+  return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+}
+
+// Get Excel Import Template
+exports.getExcelImportTemplate = async (req, res) => {
+  try {
+    // Create a sample Excel template for lead import
+    const templateHeaders = [
+      'Contact Person*',
+      'Email',
+      'Phone',
+      'Company',
+      'Title',
+      'Proposal Value',
+      'Source Channel',
+      'Status',
+      'Notes',
+      'Organization',
+      'Project Location',
+      'Organization Country',
+      'Service Type'
+    ];
+
+    const sampleData = [
+      [
+        'John Doe',
+        'john.doe@example.com',
+        '+1-555-0123',
+        'Example Corp',
+        'Business Development Lead',
+        '50000',
+        'Website',
+        'New',
+        'Interested in our enterprise solution',
+        'Example Corp',
+        'New York',
+        'USA',
+        'Consulting'
+      ],
+      [
+        'Jane Smith',
+        'jane.smith@demo.com',
+        '+1-555-0124',
+        'Demo Industries',
+        'Product Inquiry',
+        '25000',
+        'Email Campaign',
+        'Qualified',
+        'Requested demo for team of 50',
+        'Demo Industries',
+        'California',
+        'USA',
+        'Software License'
+      ]
+    ];
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const wsData = [templateHeaders, ...sampleData];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Set column widths
+    const columnWidths = templateHeaders.map(() => ({ wch: 20 }));
+    ws['!cols'] = columnWidths;
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Lead Import Template');
+
+    // Generate buffer
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    // Set response headers
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=lead_import_template.xlsx');
+
+    res.send(buffer);
+
+  } catch (error) {
+    console.error('Error generating Excel template:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate Excel template',
+      error: error.message
     });
   }
 };

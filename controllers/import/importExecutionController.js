@@ -6,6 +6,10 @@ const ImportData = require('../../models/import/importDataModel');
 const Lead = require('../../models/leads/leadsModel');
 const Person = require('../../models/leads/leadPersonModel');
 const Deal = require('../../models/deals/dealsModels');
+const Organization = require('../../models/leads/leadOrganizationModel'); // Add Organization model
+const Activity = require('../../models/activity/activityModel'); // Add Activity model
+const LeadDetails = require('../../models/leads/leadDetailsModel'); // Add LeadDetails model
+const DealDetails = require('../../models/deals/dealsDetailModel'); // Add DealDetails model
 const CustomFieldValue = require('../../models/customFieldValueModel');
 const { logAuditTrail } = require('../../utils/auditTrailLogger');
 const PROGRAMS = require('../../utils/programConstants');
@@ -107,6 +111,310 @@ exports.executeImport = async (req, res) => {
     });
   }
 };
+
+/**
+ * Finish Import - Process multi-entity import based on column mapping
+ */
+exports.finishImport = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { 
+      duplicateHandling = 'skip',
+      batchSize = 100,
+      continueOnError = true,
+      processInBackground = true 
+    } = req.body;
+    const masterUserID = req.adminId;
+
+    // Find import session
+    const importRecord = await ImportData.findOne({
+      where: { sessionId, masterUserID }
+    });
+
+    if (!importRecord) {
+      return res.status(404).json({
+        success: false,
+        message: 'Import session not found'
+      });
+    }
+
+    // Validate import is ready for execution
+    if (!importRecord.columnMapping) {
+      return res.status(400).json({
+        success: false,
+        message: 'Column mapping must be saved before finishing import'
+      });
+    }
+
+    if (!['mapping', 'validated'].includes(importRecord.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Import is not ready for execution. Current status: ' + importRecord.status
+      });
+    }
+
+    // Analyze column mapping to determine entity types
+    const entityTypes = analyzeColumnMappingEntities(importRecord.columnMapping);
+    
+    if (entityTypes.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid entity mappings found in column configuration'
+      });
+    }
+
+    console.log('Multi-entity import detected:', entityTypes);
+
+    // Update import status
+    await importRecord.update({
+      status: 'importing',
+      startedAt: new Date(),
+      progress: 0,
+      processedRows: 0,
+      successfulImports: 0,
+      failedImports: 0,
+      duplicatesSkipped: 0,
+      importOptions: {
+        ...importRecord.importOptions,
+        duplicateHandling,
+        batchSize,
+        continueOnError,
+        entityTypes,
+        isMultiEntity: true
+      }
+    });
+
+    if (processInBackground) {
+      // Start multi-entity import process in background
+      processMultiEntityImportInBackground(importRecord, {
+        duplicateHandling,
+        batchSize,
+        continueOnError,
+        entityTypes
+      }).catch(error => {
+        console.error('Background multi-entity import process failed:', error);
+        importRecord.markAsFailed(`Multi-entity import execution failed: ${error.message}`);
+      });
+
+      // Log audit trail
+      await logAuditTrail(
+        PROGRAMS.LEAD_MANAGEMENT,
+        "MULTI_ENTITY_IMPORT_STARTED",
+        masterUserID,
+        `Multi-entity import started for session ${sessionId}. Entity types: ${entityTypes.join(', ')}`,
+        importRecord.importId
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Multi-entity import execution started',
+        data: {
+          sessionId,
+          status: 'importing',
+          entityTypes,
+          message: 'Multi-entity import is now running in the background. Use the status endpoint to monitor progress.'
+        }
+      });
+    } else {
+      // Process synchronously (for smaller datasets)
+      const result = await processMultiEntityImportInBackground(importRecord, {
+        duplicateHandling,
+        batchSize,
+        continueOnError,
+        entityTypes
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Multi-entity import completed',
+        data: {
+          sessionId,
+          entityTypes,
+          result
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('Finish import error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to finish import execution',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Analyze column mapping to determine entity types
+ */
+function analyzeColumnMappingEntities(columnMapping) {
+  const entityTypes = new Set();
+  
+  Object.values(columnMapping).forEach(fieldMapping => {
+    if (fieldMapping && fieldMapping.entityType) {
+      entityTypes.add(fieldMapping.entityType);
+    }
+  });
+  
+  return Array.from(entityTypes);
+}
+
+/**
+ * Process multi-entity import in background
+ */
+async function processMultiEntityImportInBackground(importRecord, options) {
+  const { duplicateHandling, batchSize, continueOnError, entityTypes } = options;
+  let transaction;
+
+  try {
+    console.log(`Starting multi-entity import for entities: ${entityTypes.join(', ')}`);
+    
+    // Read and parse file data
+    const fileData = await readImportFile(importRecord.filePath, importRecord.fileType);
+    
+    // Get total rows
+    const totalRows = fileData.length;
+    await importRecord.update({ totalRows });
+
+    // Process data in batches with multi-entity support
+    let processedRows = 0;
+    let successfulImports = 0;
+    let failedImports = 0;
+    let duplicatesSkipped = 0;
+    const errors = [];
+    const entityStats = {};
+
+    // Initialize entity statistics
+    entityTypes.forEach(entityType => {
+      entityStats[entityType] = {
+        successful: 0,
+        failed: 0,
+        duplicatesSkipped: 0
+      };
+    });
+
+    for (let i = 0; i < fileData.length; i += batchSize) {
+      const batch = fileData.slice(i, i + batchSize);
+      
+      // Start transaction for this batch
+      transaction = await sequelize.transaction();
+
+      try {
+        const batchResult = await processBatch(batch, importRecord, duplicateHandling, transaction);
+        
+        // Update counters
+        processedRows += batch.length;
+        successfulImports += batchResult.successful;
+        failedImports += batchResult.failed;
+        duplicatesSkipped += batchResult.duplicatesSkipped;
+        errors.push(...batchResult.errors);
+
+        // Update entity-specific statistics
+        batchResult.errors.forEach(error => {
+          if (error.entity && entityStats[error.entity]) {
+            entityStats[error.entity].failed++;
+          }
+        });
+
+        // Commit transaction
+        await transaction.commit();
+        transaction = null;
+
+        // Update progress
+        const progress = (processedRows / totalRows) * 100;
+        await importRecord.update({
+          processedRows,
+          successfulImports,
+          failedImports,
+          duplicatesSkipped,
+          progress: Math.round(progress),
+          errorLog: errors.slice(-100), // Keep last 100 errors
+          entityStats
+        });
+
+        console.log(`Processed batch ${i + 1}-${i + batch.length}, Progress: ${Math.round(progress)}%`);
+
+        // Small delay to prevent overwhelming the database
+        if (i + batchSize < fileData.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+      } catch (batchError) {
+        // Rollback transaction
+        if (transaction) {
+          await transaction.rollback();
+          transaction = null;
+        }
+
+        console.error(`Multi-entity batch ${i}-${i + batchSize} failed:`, batchError);
+        
+        if (!continueOnError) {
+          throw new Error(`Multi-entity batch processing failed: ${batchError.message}`);
+        }
+
+        // Add batch error to log
+        errors.push({
+          rowRange: `${i + 1}-${i + batch.length}`,
+          error: `Multi-entity batch processing failed: ${batchError.message}`,
+          entityTypes,
+          timestamp: new Date()
+        });
+
+        failedImports += batch.length;
+        processedRows += batch.length;
+      }
+    }
+
+    // Mark import as completed
+    await importRecord.markAsCompleted({
+      processedRows: totalRows,
+      successfulImports,
+      failedImports,
+      duplicatesSkipped,
+      errorLog: errors,
+      entityStats,
+      entityTypes
+    });
+
+    // Generate error report if there are errors
+    if (errors.length > 0) {
+      await generateErrorReport(importRecord, errors);
+    }
+
+    // Log completion
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "MULTI_ENTITY_IMPORT_COMPLETED",
+      importRecord.masterUserID,
+      `Multi-entity import completed for session ${importRecord.sessionId}. Entities: ${entityTypes.join(', ')}, Processed: ${totalRows}, Success: ${successfulImports}, Failed: ${failedImports}`,
+      importRecord.importId
+    );
+
+    console.log(`Multi-entity import ${importRecord.sessionId} completed successfully`);
+    console.log('Entity Statistics:', entityStats);
+
+    return {
+      totalRows,
+      successfulImports,
+      failedImports,
+      duplicatesSkipped,
+      entityTypes,
+      entityStats,
+      errors: errors.length
+    };
+
+  } catch (error) {
+    // Rollback any pending transaction
+    if (transaction) {
+      await transaction.rollback();
+    }
+
+    console.error('Multi-entity import process failed:', error);
+    await importRecord.markAsFailed(error.message);
+    throw error;
+  }
+}
 
 /**
  * Process import in background
@@ -219,7 +527,7 @@ async function processImportInBackground(importRecord, options) {
 }
 
 /**
- * Process a batch of records
+ * Process a batch of records with multi-entity support
  */
 async function processBatch(batch, importRecord, duplicateHandling, transaction) {
   let successful = 0;
@@ -228,44 +536,28 @@ async function processBatch(batch, importRecord, duplicateHandling, transaction)
   const errors = [];
   const columnMapping = importRecord.columnMapping;
 
+  // Group column mappings by entity type
+  const entityMappings = groupColumnMappingsByEntity(columnMapping);
+  console.log('Entity mappings found:', Object.keys(entityMappings));
+
   for (let rowIndex = 0; rowIndex < batch.length; rowIndex++) {
     const rowData = batch[rowIndex];
     
     try {
-      // Transform row data according to column mapping
-      const transformedData = transformRowData(rowData, columnMapping);
-      
-      // Validate required fields
-      const validationError = validateRequiredFields(transformedData, importRecord.entityType);
-      if (validationError) {
-        errors.push({
-          row: rowIndex + 1,
-          error: validationError,
-          data: transformedData,
-          timestamp: new Date()
-        });
-        failed++;
-        continue;
-      }
+      // Process each entity type found in the column mapping
+      const rowResults = await processRowForMultipleEntities(
+        rowData, 
+        entityMappings, 
+        importRecord, 
+        duplicateHandling, 
+        transaction,
+        rowIndex + 1
+      );
 
-      // Check for duplicates
-      const duplicateCheck = await checkForDuplicates(transformedData, importRecord.entityType);
-      
-      if (duplicateCheck.isDuplicate) {
-        if (duplicateHandling === 'skip') {
-          duplicatesSkipped++;
-          continue;
-        } else if (duplicateHandling === 'update') {
-          await updateExistingRecord(duplicateCheck.record, transformedData, importRecord.entityType, transaction);
-          successful++;
-          continue;
-        }
-        // For 'create_new', we continue with normal creation
-      }
-
-      // Create new record
-      await createRecord(transformedData, importRecord.entityType, importRecord.masterUserID, transaction);
-      successful++;
+      successful += rowResults.successful;
+      failed += rowResults.failed;
+      duplicatesSkipped += rowResults.duplicatesSkipped;
+      errors.push(...rowResults.errors);
 
     } catch (recordError) {
       console.error(`Error processing row ${rowIndex + 1}:`, recordError);
@@ -358,6 +650,408 @@ function readExcelFile(filePath, resolve, reject) {
 }
 
 /**
+ * Group column mappings by entity type
+ */
+function groupColumnMappingsByEntity(columnMapping) {
+  const entityMappings = {};
+  
+  Object.entries(columnMapping).forEach(([columnIndex, fieldMapping]) => {
+    if (!fieldMapping || !fieldMapping.entityType) return;
+    
+    const entityType = fieldMapping.entityType;
+    if (!entityMappings[entityType]) {
+      entityMappings[entityType] = {};
+    }
+    
+    entityMappings[entityType][columnIndex] = fieldMapping;
+  });
+  
+  return entityMappings;
+}
+
+/**
+ * Process a single row for multiple entity types
+ */
+async function processRowForMultipleEntities(rowData, entityMappings, importRecord, duplicateHandling, transaction, rowNumber) {
+  let successful = 0;
+  let failed = 0;
+  let duplicatesSkipped = 0;
+  const errors = [];
+  const createdEntities = {}; // Store created entities for relationship linking
+
+  // Process each entity type in order (persons first, then organizations, then leads/deals, finally activities)
+  const entityOrder = ['person', 'organization', 'lead', 'deal', 'activity'];
+  
+  for (const entityType of entityOrder) {
+    if (!entityMappings[entityType]) continue;
+    
+    try {
+      console.log(`Processing ${entityType} for row ${rowNumber}`);
+      
+      // Transform row data for this entity type
+      const transformedData = transformRowDataForEntity(rowData, entityMappings[entityType]);
+      
+      // Skip if no meaningful data for this entity
+      if (isEmptyEntityData(transformedData, entityType)) {
+        console.log(`Skipping ${entityType} - no meaningful data in row ${rowNumber}`);
+        continue;
+      }
+      
+      // Validate required fields for this entity type
+      const validationError = validateRequiredFields(transformedData, entityType);
+      if (validationError) {
+        errors.push({
+          row: rowNumber,
+          entity: entityType,
+          error: validationError,
+          data: transformedData,
+          timestamp: new Date()
+        });
+        failed++;
+        continue;
+      }
+
+      // Check for duplicates
+      const duplicateCheck = await checkForDuplicates(transformedData, entityType, importRecord.masterUserID);
+      
+      if (duplicateCheck.isDuplicate) {
+        if (duplicateHandling === 'skip') {
+          duplicatesSkipped++;
+          continue;
+        } else if (duplicateHandling === 'update') {
+          const updatedRecord = await updateExistingRecord(
+            duplicateCheck.record, 
+            transformedData, 
+            entityType, 
+            transaction
+          );
+          createdEntities[entityType] = updatedRecord;
+          successful++;
+          continue;
+        }
+        // For 'create_new', we continue with normal creation
+      }
+
+      // Create new record with relationship linking
+      const newRecord = await createRecordWithRelationships(
+        transformedData, 
+        entityType, 
+        importRecord.masterUserID, 
+        transaction,
+        createdEntities
+      );
+      
+      // Store created entity for potential relationship linking
+      createdEntities[entityType] = newRecord;
+      successful++;
+
+    } catch (entityError) {
+      console.error(`Error processing ${entityType} for row ${rowNumber}:`, entityError);
+      errors.push({
+        row: rowNumber,
+        entity: entityType,
+        error: entityError.message,
+        data: rowData,
+        timestamp: new Date()
+      });
+      failed++;
+    }
+  }
+
+  return {
+    successful,
+    failed,
+    duplicatesSkipped,
+    errors
+  };
+}
+
+/**
+ * Transform row data for specific entity type
+ */
+function transformRowDataForEntity(rowData, entityMapping) {
+  const transformedData = {};
+
+  Object.entries(entityMapping).forEach(([columnIndex, fieldMapping]) => {
+    if (!fieldMapping || !fieldMapping.field) return;
+
+    const cellValue = rowData[parseInt(columnIndex)];
+    let transformedValue = cellValue;
+
+    // Apply transformations if specified
+    if (fieldMapping.transform) {
+      transformedValue = applyTransformations(cellValue, fieldMapping.transform);
+    }
+
+    transformedData[fieldMapping.field] = transformedValue;
+  });
+
+  return transformedData;
+}
+
+/**
+ * Check if entity data is empty or meaningless
+ */
+function isEmptyEntityData(data, entityType) {
+  const requiredFields = {
+    lead: ['contactPerson'],
+    person: ['contactPerson'],
+    deal: ['title'],
+    organization: ['organizationName'],
+    activity: ['subject', 'activityType']
+  };
+
+  const required = requiredFields[entityType] || [];
+  
+  // Check if at least one required field has meaningful data
+  return !required.some(field => data[field] && String(data[field]).trim() !== '');
+}
+
+/**
+ * Create record with relationship linking support
+ */
+async function createRecordWithRelationships(data, entityType, masterUserID, transaction, createdEntities) {
+  try {
+    let Model;
+    let recordData = { ...data };
+
+    // Set common system fields
+    recordData.masterUserID = masterUserID;
+    recordData.ownerId = masterUserID;
+    recordData.createdBy = masterUserID;
+
+    switch (entityType) {
+      case 'lead':
+        Model = Lead;
+        recordData = await prepareLinkDataForLead(recordData, createdEntities);
+        break;
+      case 'person':
+        Model = Person;
+        recordData = await prepareLinkDataForPerson(recordData, createdEntities);
+        break;
+      case 'deal':
+        Model = Deal;
+        recordData = await prepareLinkDataForDeal(recordData, createdEntities);
+        break;
+      case 'organization':
+        Model = Organization;
+        recordData = await prepareLinkDataForOrganization(recordData, createdEntities);
+        break;
+      case 'activity':
+        Model = Activity;
+        recordData = await prepareLinkDataForActivity(recordData, createdEntities);
+        break;
+      default:
+        throw new Error(`Unsupported entity type: ${entityType}`);
+    }
+
+    // Separate custom fields from standard fields
+    const { customFields, standardFields } = separateFields(recordData, entityType);
+
+    // Create record with standard fields
+    const newRecord = await Model.create(standardFields, { transaction });
+
+    // Handle custom fields if any
+    if (Object.keys(customFields).length > 0) {
+      await createCustomFields(newRecord, customFields, entityType, transaction);
+    }
+
+    // Create related detail records if needed
+    await createEntityDetails(newRecord, data, entityType, masterUserID, transaction);
+
+    console.log(`Created ${entityType} record with ID:`, newRecord[getPrimaryKeyField(entityType)]);
+    return newRecord;
+
+  } catch (error) {
+    throw new Error(`Failed to create ${entityType} record: ${error.message}`);
+  }
+}
+
+/**
+ * Prepare lead data with relationship links
+ */
+async function prepareLinkDataForLead(data, createdEntities) {
+  const leadData = { ...data };
+  
+  // Link to person if created
+  if (createdEntities.person) {
+    leadData.personId = createdEntities.person.personId;
+  }
+  
+  // Link to organization if created
+  if (createdEntities.organization) {
+    leadData.leadOrganizationId = createdEntities.organization.organizationId;
+    leadData.organization = createdEntities.organization.organizationName;
+  }
+  
+  // Set default values
+  leadData.proposalValueCurrency = leadData.proposalValueCurrency || 'INR';
+  leadData.status = leadData.status || 'New';
+  leadData.sourceChannel = leadData.sourceChannel || 'Import';
+  leadData.isArchived = false;
+  
+  return leadData;
+}
+
+/**
+ * Prepare person data with relationship links
+ */
+async function prepareLinkDataForPerson(data, createdEntities) {
+  const personData = { ...data };
+  
+  // Link to organization if created
+  if (createdEntities.organization) {
+    personData.organizationId = createdEntities.organization.organizationId;
+    personData.organization = createdEntities.organization.organizationName;
+  }
+  
+  return personData;
+}
+
+/**
+ * Prepare deal data with relationship links
+ */
+async function prepareLinkDataForDeal(data, createdEntities) {
+  const dealData = { ...data };
+  
+  // Link to person if created
+  if (createdEntities.person) {
+    dealData.personId = createdEntities.person.personId;
+    dealData.contactPerson = createdEntities.person.contactPerson;
+    dealData.email = createdEntities.person.email;
+    dealData.phone = createdEntities.person.phone;
+  }
+  
+  // Link to organization if created
+  if (createdEntities.organization) {
+    dealData.organizationId = createdEntities.organization.organizationId;
+    dealData.organization = createdEntities.organization.organizationName;
+  }
+  
+  // Link to lead if created
+  if (createdEntities.lead) {
+    dealData.leadId = createdEntities.lead.leadId;
+  }
+  
+  // Set default values
+  dealData.currency = dealData.currency || 'INR';
+  dealData.status = dealData.status || 'Open';
+  dealData.stage = dealData.stage || 'New Deal';
+  dealData.pipeline = dealData.pipeline || 'Default Pipeline';
+  dealData.pipelineStage = dealData.pipelineStage || dealData.stage;
+  dealData.probability = dealData.probability || 50;
+  dealData.isArchived = false;
+  
+  return dealData;
+}
+
+/**
+ * Prepare organization data
+ */
+async function prepareLinkDataForOrganization(data, createdEntities) {
+  const orgData = { ...data };
+  
+  // Set default values
+  orgData.isActive = true;
+  
+  return orgData;
+}
+
+/**
+ * Prepare activity data with relationship links
+ */
+async function prepareLinkDataForActivity(data, createdEntities) {
+  const activityData = { ...data };
+  
+  // Link to person if created
+  if (createdEntities.person) {
+    activityData.personId = createdEntities.person.personId;
+  }
+  
+  // Link to deal if created
+  if (createdEntities.deal) {
+    activityData.dealId = createdEntities.deal.dealId;
+  }
+  
+  // Link to lead if created
+  if (createdEntities.lead) {
+    activityData.leadId = createdEntities.lead.leadId;
+  }
+  
+  // Link to organization if created
+  if (createdEntities.organization) {
+    activityData.organizationId = createdEntities.organization.organizationId;
+  }
+  
+  // Set default values
+  activityData.done = false;
+  activityData.status = activityData.status || 'Open';
+  activityData.activityType = activityData.activityType || 'General';
+  
+  if (!activityData.dueDate && !activityData.dueTime) {
+    // Set default due date to tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    activityData.dueDate = tomorrow;
+  }
+  
+  return activityData;
+}
+
+/**
+ * Create entity-specific detail records
+ */
+async function createEntityDetails(record, originalData, entityType, masterUserID, transaction) {
+  try {
+    switch (entityType) {
+      case 'lead':
+        if (originalData.notes || originalData.sourceChannel) {
+          await LeadDetails.create({
+            leadId: record.leadId,
+            description: originalData.notes,
+            sourceChannel: originalData.sourceChannel,
+            createdBy: masterUserID,
+            masterUserID: masterUserID
+          }, { transaction });
+        }
+        break;
+        
+      case 'deal':
+        if (originalData.notes || originalData.sourceChannel) {
+          await DealDetails.create({
+            dealId: record.dealId,
+            responsiblePerson: record.contactPerson,
+            sourceOrgin: originalData.sourceChannel,
+            currency: record.currency || 'INR',
+            masterUserID: masterUserID
+          }, { transaction });
+        }
+        break;
+        
+      // Add more detail creation logic for other entities as needed
+    }
+  } catch (error) {
+    console.warn(`Failed to create details for ${entityType}:`, error.message);
+    // Don't fail the main record creation
+  }
+}
+
+/**
+ * Get primary key field name for entity type
+ */
+function getPrimaryKeyField(entityType) {
+  const primaryKeys = {
+    lead: 'leadId',
+    person: 'personId',
+    deal: 'dealId',
+    organization: 'organizationId',
+    activity: 'activityId'
+  };
+  
+  return primaryKeys[entityType] || 'id';
+}
+
+/**
  * Transform row data according to column mapping
  */
 function transformRowData(rowData, columnMapping) {
@@ -426,23 +1120,23 @@ function transformDate(value, format) {
 }
 
 /**
- * Validate required fields
+ * Validate required fields for each entity type
  */
 function validateRequiredFields(data, entityType) {
   // Define required fields for each entity type
   const requiredFields = {
-    lead: ['contactPerson'], // At minimum, leads need a contact person
+    lead: ['contactPerson'],
     person: ['contactPerson'],
-    deal: ['dealTitle'],
+    deal: ['title'],
     organization: ['organizationName'],
-    activity: ['activityTitle']
+    activity: ['subject']
   };
 
   const required = requiredFields[entityType] || [];
   
   for (const field of required) {
-    if (!data[field] || data[field] === '') {
-      return `Required field '${field}' is missing or empty`;
+    if (!data[field] || String(data[field]).trim() === '') {
+      return `Required field '${field}' is missing or empty for ${entityType}`;
     }
   }
 
@@ -450,25 +1144,34 @@ function validateRequiredFields(data, entityType) {
 }
 
 /**
- * Check for duplicate records
+ * Check for duplicate records with enhanced entity support
  */
-async function checkForDuplicates(data, entityType) {
+async function checkForDuplicates(data, entityType, masterUserID) {
   try {
     let Model;
     let duplicateCheckFields = [];
+    let whereClause = {};
 
     switch (entityType) {
       case 'lead':
         Model = Lead;
-        duplicateCheckFields = ['emailAddress', 'phoneNumber'];
+        duplicateCheckFields = ['email', 'phone', 'contactPerson'];
         break;
       case 'person':
         Model = Person;
-        duplicateCheckFields = ['emailAddress', 'phoneNumber'];
+        duplicateCheckFields = ['email', 'phone', 'contactPerson'];
         break;
       case 'deal':
         Model = Deal;
-        duplicateCheckFields = ['dealTitle'];
+        duplicateCheckFields = ['title', 'contactPerson'];
+        break;
+      case 'organization':
+        Model = Organization;
+        duplicateCheckFields = ['organizationName', 'website'];
+        break;
+      case 'activity':
+        Model = Activity;
+        duplicateCheckFields = ['subject', 'activityType'];
         break;
       default:
         return { isDuplicate: false };
@@ -478,7 +1181,7 @@ async function checkForDuplicates(data, entityType) {
     const whereConditions = [];
     
     duplicateCheckFields.forEach(field => {
-      if (data[field]) {
+      if (data[field] && String(data[field]).trim() !== '') {
         whereConditions.push({ [field]: data[field] });
       }
     });
@@ -487,9 +1190,33 @@ async function checkForDuplicates(data, entityType) {
       return { isDuplicate: false };
     }
 
+    // Add masterUserID to scope duplicates to the current user
+    whereClause = {
+      [Op.and]: [
+        { masterUserID: masterUserID },
+        { [Op.or]: whereConditions }
+      ]
+    };
+
+    // Special handling for different entity types
+    if (entityType === 'organization') {
+      // For organizations, also check if not archived
+      whereClause[Op.and].push({ isActive: true });
+    } else if (entityType === 'activity') {
+      // For activities, only check recent activities (not done ones from long ago)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      whereClause[Op.and].push({ 
+        [Op.or]: [
+          { done: false },
+          { createdAt: { [Op.gte]: thirtyDaysAgo } }
+        ]
+      });
+    }
+
     // Check for existing record
     const existingRecord = await Model.findOne({
-      where: { [Op.or]: whereConditions }
+      where: whereClause
     });
 
     return {
@@ -508,13 +1235,25 @@ async function checkForDuplicates(data, entityType) {
  */
 async function updateExistingRecord(record, data, entityType, transaction) {
   try {
-    await record.update(data, { transaction });
+    // Filter out system fields that shouldn't be updated
+    const updateData = { ...data };
+    delete updateData.masterUserID;
+    delete updateData.ownerId;
+    delete updateData.createdBy;
+    delete updateData.createdAt;
+    
+    // Add update timestamp
+    updateData.updatedAt = new Date();
+    
+    await record.update(updateData, { transaction });
     
     // Handle custom fields if present
     await updateCustomFields(record, data, entityType, transaction);
     
+    return record; // Return the updated record
+    
   } catch (error) {
-    throw new Error(`Failed to update existing record: ${error.message}`);
+    throw new Error(`Failed to update existing ${entityType} record: ${error.message}`);
   }
 }
 
