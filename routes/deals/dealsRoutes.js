@@ -153,6 +153,12 @@ router.delete(
   validatePrivilege(3, "delete"),
   dealsController.deleteDealFile
 );
+router.get(
+  "/check-question-shared/:dealId",
+  verifyToken,
+  validatePrivilege(3, "view"),
+  dealsController.checkDealQuestionSharedStatus
+);
 
 module.exports = router;
 
