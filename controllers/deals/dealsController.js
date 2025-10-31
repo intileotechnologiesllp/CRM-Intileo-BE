@@ -5522,6 +5522,7 @@ exports.getDealDetail = async (req, res) => {
       totalActivities: 0,
       activityTypes: {},
       mostFrequentTypes: [],
+      topActivityType: {},
       activityTypeDistribution: {},
       recentActivityTypes: {},
       activityTrends: {
@@ -5630,9 +5631,9 @@ exports.getDealDetail = async (req, res) => {
         totalActivities: activities.length,
         activityTypes: activityTypeCounts,
         mostFrequentTypes: sortedActivityTypes,
+        topActivityType: sortedActivityTypes[0] || {},
         activityTypeDistribution: distribution,
         recentActivityTypes: recentActivityTypes,
-        topActivityType: sortedActivityTypes[0] || null,
         diversityScore: Object.keys(activityTypeCounts).length, // Number of different activity types
         insights: {
           mostActiveType: sortedActivityTypes[0]?.activityType || 'None',
