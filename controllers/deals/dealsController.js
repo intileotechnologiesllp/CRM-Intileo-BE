@@ -9370,7 +9370,7 @@ exports.deleteDealFile = async (req, res) => {
 
     // Find the file
     const dealFile = await DealFile.findOne({
-      where: { fileId, dealId, masterUserID, isActive: true }
+      where: { fileId, dealId, isActive: true }
     });
 
     if (!dealFile) {
@@ -9429,7 +9429,7 @@ exports.updateDealFile = async (req, res) => {
 
     // Find the file
     const dealFile = await DealFile.findOne({
-      where: { fileId, dealId, masterUserID, isActive: true }
+      where: { fileId, dealId, isActive: true }
     });
 
     if (!dealFile) {

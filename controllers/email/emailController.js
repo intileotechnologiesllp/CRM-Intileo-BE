@@ -52,7 +52,7 @@ const { htmlToText } = require("html-to-text");
 const { simpleParser } = require("mailparser");
 const Attachment = require("../../models/email/attachmentModel");
 const Template = require("../../models/email/templateModel");
-const { Sequelize } = require("sequelize");
+const { Sequelize, Op } = require("sequelize");
 const nodemailer = require("nodemailer");
 const amqp = require('amqplib'); // Added for auto-pagination queue system
 const {
@@ -68,6 +68,8 @@ const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Lead, Deal, Person, Organization } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
+const CustomField = require("../../models/customFieldModel");
+const CustomFieldValue = require("../../models/customFieldValueModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { syncImapFlags } = require("../../services/imapSyncService");
 const flagSyncQueue = require("../../services/flagSyncQueueService");
@@ -4512,6 +4514,8 @@ const getLinkedEntities = async (email) => {
       deals: [],
       persons: [],
       organizations: [],
+      emailMatchedLeads: [], // New separate array for email-matched leads
+      emailMatchedDeals: [], // New separate array for email-matched deals
     };
 
     // Extract emails from sender and recipient
@@ -4540,15 +4544,19 @@ const getLinkedEntities = async (email) => {
     }
 
     // LINKING STRATEGY:
-    // 1. For Leads & Deals: Prioritize direct linkage (email.leadId/dealId) over email matching
-    //    - Each email should link to at most ONE lead and ONE deal
+    // 1. For Leads & Deals: Separate direct linkage from email matching
+    //    - Direct linkage: email.leadId/dealId (explicit associations)
+    //    - Email matching: leads/deals with same email addresses as email participants
     // 2. For Persons: Allow multiple persons with same email (different roles/organizations)
     // 3. For Organizations: Derived from persons' organizations
 
-    // Search for leads ONLY by explicit linkage (no email matching)
-    let leads = [];
+    // Search for leads by both explicit linkage AND email matching
+    let directLeads = [];
+    let emailMatchedLeads = [];
+    
+    // First, get directly linked leads
     if (email.leadId) {
-      leads = await Lead.findAll({
+      directLeads = await Lead.findAll({
         where: { leadId: email.leadId },
         include: [
           {
@@ -4561,10 +4569,33 @@ const getLinkedEntities = async (email) => {
       });
     }
 
-    // Search for deals ONLY by explicit linkage (no email matching)
-    let deals = [];
+    // Then, search for leads by email address matching
+    if (uniqueEmails.length > 0) {
+      emailMatchedLeads = await Lead.findAll({
+        where: {
+          email: { [Sequelize.Op.in]: uniqueEmails },
+          ...(email.leadId && { leadId: { [Sequelize.Op.ne]: email.leadId } }) // Exclude directly linked lead to avoid duplicates
+        },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+        limit: 20, // Reasonable limit to prevent performance issues
+        order: [["createdAt", "DESC"]],
+      });
+    }
+
+    // Search for deals by both explicit linkage AND email matching
+    let directDeals = [];
+    let emailMatchedDeals = [];
+    
+    // First, get directly linked deals
     if (email.dealId) {
-      deals = await Deal.findAll({
+      directDeals = await Deal.findAll({
         where: { dealId: email.dealId },
         include: [
           {
@@ -4574,6 +4605,26 @@ const getLinkedEntities = async (email) => {
             required: false,
           },
         ],
+      });
+    }
+
+    // Then, search for deals by email address matching
+    if (uniqueEmails.length > 0) {
+      emailMatchedDeals = await Deal.findAll({
+        where: {
+          email: { [Sequelize.Op.in]: uniqueEmails },
+          ...(email.dealId && { dealId: { [Sequelize.Op.ne]: email.dealId } }) // Exclude directly linked deal to avoid duplicates
+        },
+        include: [
+          {
+            model: MasterUser,
+            as: "Owner",
+            attributes: ["name", "masterUserID"],
+            required: false,
+          },
+        ],
+        limit: 20, // Reasonable limit to prevent performance issues
+        order: [["createdAt", "DESC"]],
       });
     }
 
@@ -4608,25 +4659,78 @@ const getLinkedEntities = async (email) => {
     }
 
     // Format the results and fetch activities for persons
-    linkedEntities.leads = leads.map((lead) => ({
+    // Format directly linked leads
+    linkedEntities.leads = directLeads.map((lead) => ({
       leadId: lead.leadId,
       title: lead.title,
       contactPerson: lead.contactPerson,
       organization: lead.organization,
+      email: lead.email,
+      phone: lead.phone,
       status: lead.status,
+      value: lead.value,
+      currency: lead.currency,
       owner: lead.Owner ? lead.Owner.name : null,
       createdAt: lead.createdAt,
+      linkType: 'direct'
     }));
 
-    linkedEntities.deals = deals.map((deal) => ({
+    // Format email-matched leads
+    linkedEntities.emailMatchedLeads = emailMatchedLeads.map((lead) => ({
+      leadId: lead.leadId,
+      title: lead.title,
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      email: lead.email,
+      phone: lead.phone,
+      status: lead.status,
+      value: lead.value,
+      currency: lead.currency,
+      owner: lead.Owner ? lead.Owner.name : null,
+      createdAt: lead.createdAt,
+      linkType: 'email_match',
+      matchedEmails: uniqueEmails.filter(emailAddr => emailAddr === lead.email)
+    }));
+
+    // Format directly linked deals
+    linkedEntities.deals = directDeals.map((deal) => ({
       dealId: deal.dealId,
       title: deal.title,
       contactPerson: deal.contactPerson,
       organization: deal.organization,
+      email: deal.email,
+      phone: deal.phone,
       status: deal.status,
       value: deal.value,
+      currency: deal.valueCurrency || deal.currency,
+      proposalValue: deal.proposalValue,
+      proposalCurrency: deal.proposalValueCurrency || deal.proposalCurrency,
+      pipeline: deal.pipeline,
+      pipelineStage: deal.pipelineStage,
       owner: deal.Owner ? deal.Owner.name : null,
       createdAt: deal.createdAt,
+      linkType: 'direct'
+    }));
+
+    // Format email-matched deals
+    linkedEntities.emailMatchedDeals = emailMatchedDeals.map((deal) => ({
+      dealId: deal.dealId,
+      title: deal.title,
+      contactPerson: deal.contactPerson,
+      organization: deal.organization,
+      email: deal.email,
+      phone: deal.phone,
+      status: deal.status,
+      value: deal.value,
+      currency: deal.valueCurrency || deal.currency,
+      proposalValue: deal.proposalValue,
+      proposalCurrency: deal.proposalValueCurrency || deal.proposalCurrency,
+      pipeline: deal.pipeline,
+      pipelineStage: deal.pipelineStage,
+      owner: deal.Owner ? deal.Owner.name : null,
+      createdAt: deal.createdAt,
+      linkType: 'email_match',
+      matchedEmails: uniqueEmails.filter(emailAddr => emailAddr === deal.email)
     }));
 
     // Get all person IDs for activity lookup
@@ -4747,6 +4851,8 @@ const getAggregatedLinkedEntities = async (emails) => {
       deals: [],
       persons: [],
       organizations: [],
+      emailMatchedLeads: [], // New separate array for email-matched leads
+      emailMatchedDeals: [], // New separate array for email-matched deals
       conversationStats: {
         totalEmails: emails.length,
         uniqueParticipants: new Set(),
@@ -4954,7 +5060,7 @@ const getAggregatedLinkedEntities = async (emails) => {
     for (const email of emails) {
       const linkedEntities = await getLinkedEntities(email);
 
-      // Aggregate leads (deduplicate by leadId)
+      // Aggregate leads (deduplicate by leadId and preserve email matching info)
       linkedEntities.leads.forEach((lead) => {
         if (!seenLeads.has(lead.leadId)) {
           seenLeads.add(lead.leadId);
@@ -4970,11 +5076,43 @@ const getAggregatedLinkedEntities = async (emails) => {
         }
       });
 
-      // Aggregate deals (deduplicate by dealId)
+      // Aggregate deals (deduplicate by dealId and preserve email matching info)
       linkedEntities.deals.forEach((deal) => {
         if (!seenDeals.has(deal.dealId)) {
           seenDeals.add(deal.dealId);
           aggregatedEntities.deals.push({
+            ...deal,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate email-matched leads (deduplicate by leadId)
+      linkedEntities.emailMatchedLeads.forEach((lead) => {
+        if (!seenLeads.has(lead.leadId)) {
+          seenLeads.add(lead.leadId);
+          aggregatedEntities.emailMatchedLeads.push({
+            ...lead,
+            sourceEmail: {
+              emailId: email.emailID,
+              messageId: email.messageId,
+              subject: email.subject,
+              createdAt: email.createdAt,
+            },
+          });
+        }
+      });
+
+      // Aggregate email-matched deals (deduplicate by dealId)
+      linkedEntities.emailMatchedDeals.forEach((deal) => {
+        if (!seenDeals.has(deal.dealId)) {
+          seenDeals.add(deal.dealId);
+          aggregatedEntities.emailMatchedDeals.push({
             ...deal,
             sourceEmail: {
               emailId: email.emailID,
@@ -5132,6 +5270,14 @@ const getAggregatedLinkedEntities = async (emails) => {
     aggregatedEntities.organizations.sort(
       (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
     );
+    
+    // Sort email-matched entities by creation date (most recent first)
+    aggregatedEntities.emailMatchedLeads.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    aggregatedEntities.emailMatchedDeals.sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
 
     return aggregatedEntities;
   } catch (error) {
@@ -5141,6 +5287,8 @@ const getAggregatedLinkedEntities = async (emails) => {
       deals: [],
       persons: [],
       organizations: [],
+      emailMatchedLeads: [],
+      emailMatchedDeals: [],
       conversationStats: {
         totalEmails: 0,
         uniqueParticipants: [],
@@ -7561,6 +7709,504 @@ exports.triggerFlagSync = async (req, res) => {
     console.error(`❌ [FLAG SYNC API] Failed to trigger manual flag sync:`, error.message);
     res.status(500).json({
       message: "Failed to trigger manual flag sync",
+      error: error.message
+    });
+  }
+};
+
+// Search for existing leads and deals
+exports.searchLeadsAndDeals = async (req, res) => {
+  try {
+    const { q, page = 1, limit = 10 } = req.query;
+    const masterUserID = req.adminId;
+
+    // Validate search query
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({
+        message: "Search query must be at least 2 characters long",
+        query: q
+      });
+    }
+
+    const searchTerm = q.trim();
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const searchLimit = Math.min(parseInt(limit), 50); // Maximum 50 results per page
+
+    console.log(`🔍 [SEARCH] Searching leads and deals for: "${searchTerm}" by user ${masterUserID}`);
+
+    // First, search for custom field values matching espl_proposal_no
+    let customFieldMatches = {
+      leadIds: [],
+      dealIds: []
+    };
+
+    try {
+      // Find the espl_proposal_no custom field
+      const esplProposalField = await CustomField.findOne({
+        where: {
+          fieldName: 'espl_proposal_no',
+          // masterUserID: masterUserID
+        }
+      });
+
+      if (esplProposalField) {
+        console.log(`📋 [SEARCH] Found espl_proposal_no custom field: ${esplProposalField.fieldId}`);
+        
+        // Search for custom field values matching the search term
+        const customFieldValues = await CustomFieldValue.findAll({
+          where: {
+            fieldId: esplProposalField.fieldId,
+            value: { [Op.like]: `%${searchTerm}%` },
+            masterUserID: masterUserID
+          }
+        });
+
+        // Separate lead and deal IDs from custom field matches
+        customFieldValues.forEach(cfv => {
+          if (cfv.entityType === 'lead') {
+            customFieldMatches.leadIds.push(cfv.entityId);
+          }
+          if (cfv.entityType === 'deal') {
+            customFieldMatches.dealIds.push(cfv.entityId);
+          }
+        });
+
+        console.log(`📋 [SEARCH] Custom field matches: ${customFieldMatches.leadIds.length} leads, ${customFieldMatches.dealIds.length} deals`);
+      }
+    } catch (cfError) {
+      console.error('⚠️ [SEARCH] Custom field search error:', cfError.message);
+      // Continue with regular search even if custom field search fails
+    }
+
+    // Build search conditions for leads
+    const leadSearchConditions = {
+      [Op.and]: [
+        { masterUserID }, // User filter
+        {
+          [Op.or]: [
+            // Regular field searches
+            { title: { [Op.like]: `%${searchTerm}%` } },
+            // { contactPerson: { [Op.like]: `%${searchTerm}%` } },
+            // { organization: { [Op.like]: `%${searchTerm}%` } },
+            // { email: { [Op.like]: `%${searchTerm}%` } },
+            // { phone: { [Op.like]: `%${searchTerm}%` } },
+            // { sourceChannel: { [Op.like]: `%${searchTerm}%` } },
+            // Custom field matches (if any)
+            ...(customFieldMatches.leadIds.length > 0 ? [
+              { leadId: { [Op.in]: customFieldMatches.leadIds } }
+            ] : [])
+          ]
+        }
+      ]
+    };
+
+    // Build search conditions for deals
+    const dealSearchConditions = {
+      [Op.and]: [
+        { masterUserID }, // User filter
+        {
+          [Op.or]: [
+            // Regular field searches
+            { title: { [Op.like]: `%${searchTerm}%` } },
+            // { contactPerson: { [Op.like]: `%${searchTerm}%` } },
+            // { organization: { [Op.like]: `%${searchTerm}%` } },
+            // { email: { [Op.like]: `%${searchTerm}%` } },
+            // { phone: { [Op.like]: `%${searchTerm}%` } },
+            // { sourceChannel: { [Op.like]: `%${searchTerm}%` } },
+            // Custom field matches (if any)
+            ...(customFieldMatches.dealIds.length > 0 ? [
+              { dealId: { [Op.in]: customFieldMatches.dealIds } }
+            ] : [])
+          ]
+        }
+      ]
+    };
+
+    // Search leads with pagination
+    const { count: totalLeads, rows: leads } = await Lead.findAndCountAll({
+      where: leadSearchConditions,
+      include: [
+        {
+          model: Person,
+          as: "LeadPerson",
+          attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
+          required: false
+        },
+        {
+          model: Organization,
+          as: "LeadOrganization", 
+          attributes: ["leadOrganizationId", "organization", "address"],
+          required: false
+        }
+      ],
+      order: [["updatedAt", "DESC"]],
+      limit: searchLimit,
+      offset: offset,
+      distinct: true
+    });
+
+    // Search deals with pagination
+    const { count: totalDeals, rows: deals } = await Deal.findAndCountAll({
+      where: dealSearchConditions,
+      include: [
+        {
+          model: Person,
+          as: "Person",
+          attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
+          required: false
+        },
+        {
+          model: Organization,
+          as: "Organization",
+          attributes: ["leadOrganizationId", "organization", "address"],
+          required: false
+        }
+      ],
+      order: [["updatedAt", "DESC"]],
+      limit: searchLimit,
+      offset: offset,
+      distinct: true
+    });
+
+    // Find deals related to the found leads
+    const leadIds = leads.map(lead => lead.leadId);
+    let relatedDeals = [];
+    
+    if (leadIds.length > 0) {
+      relatedDeals = await Deal.findAll({
+        where: {
+          [Op.and]: [
+            { masterUserID },
+            { leadId: { [Op.in]: leadIds } }
+          ]
+        },
+        include: [
+          {
+            model: Person,
+            as: "Person",
+            attributes: ["personId", "contactPerson", "email", "phone", "jobTitle"],
+            required: false
+          },
+          {
+            model: Organization,
+            as: "Organization",
+            attributes: ["leadOrganizationId", "organization", "address"],
+            required: false
+          }
+        ],
+        order: [["updatedAt", "DESC"]],
+        limit: 20 // Limit related deals to prevent large responses
+      });
+    }
+
+    // Format leads response
+    const formattedLeads = leads.map(lead => ({
+      type: 'lead',
+      leadId: lead.leadId,
+      title: lead.title,
+      contactPerson: lead.contactPerson,
+      organization: lead.organization,
+      email: lead.email,
+      phone: lead.phone,
+      status: lead.status,
+      source: lead.sourceChannel, // Map sourceChannel to source for consistency
+      value: lead.value,
+      currency: lead.currency,
+      createdAt: lead.createdAt,
+      updatedAt: lead.updatedAt,
+      person: lead.LeadPerson ? {
+        personId: lead.LeadPerson.personId,
+        contactPerson: lead.LeadPerson.contactPerson,
+        email: lead.LeadPerson.email,
+        phone: lead.LeadPerson.phone,
+        jobTitle: lead.LeadPerson.jobTitle
+      } : null,
+      organization_details: lead.LeadOrganization ? {
+        leadOrganizationId: lead.LeadOrganization.leadOrganizationId,
+        organization: lead.LeadOrganization.organization,
+        address: lead.LeadOrganization.address
+      } : null
+    }));
+
+    // Format deals response (both direct search results and related deals)
+    const formatDeal = (deal) => ({
+      type: 'deal',
+      dealId: deal.dealId,
+      title: deal.title,
+      contactPerson: deal.contactPerson,
+      organization: deal.organization,
+      email: deal.email,
+      phone: deal.phone,
+      status: deal.status || 'open',
+      pipeline: deal.pipeline,
+      pipelineStage: deal.pipelineStage,
+      value: deal.value,
+      currency: deal.valueCurrency || deal.currency,
+      proposalValue: deal.proposalValue,
+      proposalCurrency: deal.proposalValueCurrency || deal.proposalCurrency,
+      leadId: deal.leadId,
+      createdAt: deal.createdAt,
+      updatedAt: deal.updatedAt,
+      person: deal.Person ? {
+        personId: deal.Person.personId,
+        contactPerson: deal.Person.contactPerson,
+        email: deal.Person.email,
+        phone: deal.Person.phone,
+        jobTitle: deal.Person.jobTitle
+      } : null,
+      organization_details: deal.Organization ? {
+        leadOrganizationId: deal.Organization.leadOrganizationId,
+        organization: deal.Organization.organization,
+        address: deal.Organization.address
+      } : null
+    });
+
+    const formattedDeals = deals.map(formatDeal);
+    const formattedRelatedDeals = relatedDeals.map(formatDeal);
+
+    // Combine and deduplicate deals (direct search + related to leads)
+    const allDealsMap = new Map();
+    formattedDeals.forEach(deal => allDealsMap.set(deal.dealId, deal));
+    formattedRelatedDeals.forEach(deal => allDealsMap.set(deal.dealId, deal));
+    const combinedDeals = Array.from(allDealsMap.values());
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(Math.max(totalLeads, totalDeals) / searchLimit);
+    const hasMoreLeads = totalLeads > offset + leads.length;
+    const hasMoreDeals = totalDeals > offset + deals.length;
+
+    console.log(`📊 [SEARCH] Results: ${leads.length} leads, ${combinedDeals.length} deals (${formattedRelatedDeals.length} related to leads)`);
+
+    res.status(200).json({
+      message: "Search completed successfully",
+      searchQuery: searchTerm,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: totalPages,
+        limit: searchLimit,
+        hasMoreLeads: hasMoreLeads,
+        hasMoreDeals: hasMoreDeals
+      },
+      results: {
+        leads: {
+          total: totalLeads,
+          returned: leads.length,
+          data: formattedLeads
+        },
+        deals: {
+          total: totalDeals,
+          directMatches: formattedDeals.length,
+          relatedToLeads: formattedRelatedDeals.length,
+          combined: combinedDeals.length,
+          data: combinedDeals
+        },
+        summary: {
+          totalLeads: totalLeads,
+          totalDeals: combinedDeals.length,
+          searchFields: [
+            "title", "contactPerson", "organization", 
+            "email", "phone", "sourceChannel (leads) / sourceChannel (deals)", "espl_proposal_no (custom field)"
+          ]
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [SEARCH] Error searching leads and deals:', error);
+    res.status(500).json({
+      message: "Internal server error during search",
+      error: error.message
+    });
+  }
+};
+
+// API to link email to specific lead or deal
+exports.linkEmailToEntity = async (req, res) => {
+  try {
+    const { emailId, entityType, entityId } = req.body;
+    const masterUserID = req.adminId;
+
+    // Validate required fields
+    if (!emailId || !entityType || !entityId) {
+      return res.status(400).json({
+        message: 'Missing required fields: emailId, entityType, and entityId are required.'
+      });
+    }
+
+    // Validate entityType
+    if (!['lead', 'deal'].includes(entityType.toLowerCase())) {
+      return res.status(400).json({
+        message: 'Invalid entityType. Must be "lead" or "deal".'
+      });
+    }
+
+    // Check if email exists and belongs to the user
+    const email = await Email.findOne({
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      }
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or does not belong to this user.'
+      });
+    }
+
+    // Verify the entity exists
+    let entity;
+    if (entityType.toLowerCase() === 'lead') {
+      entity = await Lead.findOne({
+        where: { leadId: entityId}
+      });
+      if (!entity) {
+        return res.status(404).json({
+          message: 'Lead not found or does not belong to this user.'
+        });
+      }
+    } else if (entityType.toLowerCase() === 'deal') {
+      entity = await Deal.findOne({
+        where: { dealId: entityId }
+      });
+      if (!entity) {
+        return res.status(404).json({
+          message: 'Deal not found or does not belong to this user.'
+        });
+      }
+    }
+
+    // Update the email with the linkage
+    const updateData = {};
+    if (entityType.toLowerCase() === 'lead') {
+      updateData.leadId = entityId;
+    } else if (entityType.toLowerCase() === 'deal') {
+      updateData.dealId = entityId;
+    }
+
+    await Email.update(updateData, {
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      }
+    });
+
+    // Get updated email details
+    const updatedEmail = await Email.findOne({
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      },
+      attributes: ['emailID', 'subject', 'sender', 'recipient', 'leadId', 'dealId', 'createdAt']
+    });
+
+    res.status(200).json({
+      message: `Email successfully linked to ${entityType}.`,
+      data: {
+        emailId: emailId,
+        entityType: entityType.toLowerCase(),
+        entityId: entityId,
+        entityTitle: entity.title,
+        linkedEmail: {
+          emailID: updatedEmail.emailID,
+          subject: updatedEmail.subject,
+          sender: updatedEmail.sender,
+          recipient: updatedEmail.recipient,
+          leadId: updatedEmail.leadId,
+          dealId: updatedEmail.dealId,
+          createdAt: updatedEmail.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error linking email to entity:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// API to unlink email from lead or deal
+exports.unlinkEmailFromEntity = async (req, res) => {
+  try {
+    const { emailId, entityType } = req.body;
+    const masterUserID = req.adminId;
+
+    // Validate required fields
+    if (!emailId || !entityType) {
+      return res.status(400).json({
+        message: 'Missing required fields: emailId and entityType are required.'
+      });
+    }
+
+    // Validate entityType
+    if (!['lead', 'deal'].includes(entityType.toLowerCase())) {
+      return res.status(400).json({
+        message: 'Invalid entityType. Must be "lead" or "deal".'
+      });
+    }
+
+    // Check if email exists and belongs to the user
+    const email = await Email.findOne({
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      }
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or does not belong to this user.'
+      });
+    }
+
+    // Update the email to remove the linkage
+    const updateData = {};
+    if (entityType.toLowerCase() === 'lead') {
+      updateData.leadId = null;
+    } else if (entityType.toLowerCase() === 'deal') {
+      updateData.dealId = null;
+    }
+
+    await Email.update(updateData, {
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      }
+    });
+
+    // Get updated email details
+    const updatedEmail = await Email.findOne({
+      where: {
+        emailID: emailId,
+        // masterUserID: masterUserID
+      },
+      attributes: ['emailID', 'subject', 'sender', 'recipient', 'leadId', 'dealId', 'createdAt']
+    });
+
+    res.status(200).json({
+      message: `Email successfully unlinked from ${entityType}.`,
+      data: {
+        emailId: emailId,
+        entityType: entityType.toLowerCase(),
+        unlinkedEmail: {
+          emailID: updatedEmail.emailID,
+          subject: updatedEmail.subject,
+          sender: updatedEmail.sender,
+          recipient: updatedEmail.recipient,
+          leadId: updatedEmail.leadId,
+          dealId: updatedEmail.dealId,
+          createdAt: updatedEmail.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error unlinking email from entity:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
       error: error.message
     });
   }
