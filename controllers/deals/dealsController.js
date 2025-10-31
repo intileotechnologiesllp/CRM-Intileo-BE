@@ -5339,45 +5339,62 @@ exports.getDealDetail = async (req, res) => {
       return emailData;
     });
 
-    // Optimized file/attachment fetching with size limits
-    const emailIDs = limitedEmails.map((email) => email.emailID);
+    // Fetch deal files directly uploaded to this deal
     let files = [];
-    if (emailIDs.length > 0) {
-      files = await Attachment.findAll({
-        where: { emailID: emailIDs },
-        attributes: [
-          "attachmentID",
-          "emailID",
-          "filename",
-          "contentType",
-          "size",
-          "filePath",
-          "createdAt",
-        ],
-        order: [["createdAt", "DESC"]],
-        limit: 20, // Limit attachments to prevent large responses
+    
+    const dealFiles = await DealFile.findAll({
+      where: { dealId },
+      attributes: [
+        "fileId",
+        "dealId", 
+        "fileName",
+        "fileSize",
+        "fileCategory",
+        "filePath",
+        "uploadedBy",
+        "downloadCount",
+        "createdAt",
+        "updatedAt"
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: 20 // Limit deal files to prevent large responses
+    });
+
+    // Add deal files to the files array with uploader names
+    if (dealFiles.length > 0) {
+      // Get unique uploader IDs to fetch user names in bulk
+      const uploaderIds = [...new Set(dealFiles.map(f => f.uploadedBy).filter(id => id))];
+      
+      // Fetch all uploader users in one query
+      const uploaderUsers = await MasterUser.findAll({
+        where: {
+          masterUserID: { [Op.in]: uploaderIds }
+        },
+        attributes: ["masterUserID", "name"],
+        raw: true
+      });
+      
+      // Create a map for quick lookup
+      const uploaderMap = new Map();
+      uploaderUsers.forEach(user => {
+        uploaderMap.set(user.masterUserID, user.name);
       });
 
-      // Build a map for quick email lookup
-      const emailMap = new Map();
-      limitedEmails.forEach((email) => emailMap.set(email.emailID, email));
-
-      // Combine each attachment with minimal email data
-      files = files.map((file) => {
-        const email = emailMap.get(file.emailID);
-        return {
-          ...file.toJSON(),
-          email: email
-            ? {
-                emailID: email.emailID,
-                subject: email.subject,
-                createdAt: email.createdAt,
-                sender: email.sender,
-                senderName: email.senderName,
-              }
-            : null,
-        };
-      });
+      // Format deal files
+      files = dealFiles.map((file) => ({
+        fileId: file.fileId,
+        dealId: file.dealId,
+        filename: file.fileName,
+        fileSize: file.fileSize,
+        fileCategory: file.fileCategory,
+        filePath: file.filePath,
+        uploadedBy: file.uploadedBy,
+        uploaderName: uploaderMap.get(file.uploadedBy) || 'Unknown',
+        downloadCount: file.downloadCount || 0,
+        createdAt: file.createdAt,
+        updatedAt: file.updatedAt,
+        fileType: 'deal_file'
+      }));
     }
 
     // Fetch notes for this deal
@@ -5958,6 +5975,36 @@ exports.getDealDetail = async (req, res) => {
           description: currentUserEmail 
             ? "Emails filtered by visibility - showing shared emails and private emails owned by current user"
             : "User email not found - showing only shared emails and legacy emails"
+        }
+      },
+      // Files metadata for deal files only
+      _filesMetadata: {
+        totalFiles: files.length,
+        dealFiles: files.length,
+        fileTypes: {
+          deal_file: "Files directly uploaded to this deal"
+        },
+        fileSources: {
+          description: "Files are directly uploaded to this deal (email attachments excluded)",
+          dealFilesLimit: 20
+        },
+        fileCategories: files.reduce((acc, file) => {
+          if (file.fileCategory) {
+            acc[file.fileCategory] = (acc[file.fileCategory] || 0) + 1;
+          }
+          return acc;
+        }, {}),
+        fileStats: {
+          totalSize: files.reduce((sum, file) => sum + (file.fileSize || 0), 0),
+          avgFileSize: files.length > 0 
+            ? Math.round(files.reduce((sum, file) => sum + (file.fileSize || 0), 0) / files.length)
+            : 0,
+          oldestFile: files.length > 0 
+            ? new Date(Math.min(...files.map(f => new Date(f.createdAt).getTime()))).toISOString()
+            : null,
+          newestFile: files.length > 0 
+            ? new Date(Math.max(...files.map(f => new Date(f.createdAt).getTime()))).toISOString()
+            : null
         }
       },
       // Enhanced pipeline data (optional for frontend to use)
