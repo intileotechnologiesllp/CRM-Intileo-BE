@@ -72,5 +72,10 @@ router.get("/imap/health", verifyToken, validatePrivilege(4, "view"), imapTestCo
 router.post("/imap/test-sync", verifyToken, validatePrivilege(4, "view"), imapTestController.testImapSync);
 router.get("/imap/stats", verifyToken, validatePrivilege(4, "view"), imapTestController.getImapStats);
 router.post("/update-default-email-visibility",verifyToken, validatePrivilege(4, "edit"),emailController.updateDefaultEmailVisibility); // Endpoint to trigger the update script
+router.get("/search-leads-deals", verifyToken, validatePrivilege(4, "view"), emailController.searchLeadsAndDeals);
+
+// Email entity linking
+router.post("/link-to-entity", verifyToken, validatePrivilege(4, "edit"), emailController.linkEmailToEntity);
+router.post("/unlink-from-entity", verifyToken, validatePrivilege(4, "edit"), emailController.unlinkEmailFromEntity);
 
 module.exports = router;
