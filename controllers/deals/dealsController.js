@@ -4805,7 +4805,7 @@ exports.getDealDetail = async (req, res) => {
     const createdAt = deal.createdAt;
     const dealAgeDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
     const dealAge = dealAgeDays < 1 ? "< 1 day" : `${dealAgeDays} days`;
-    const inactiveDays = 0; // Placeholder until you have activities
+    // inactiveDays and inactiveFromDate will be calculated after activities are processed
 
     // Send all person data
     const personArr = deal.Person
@@ -5475,6 +5475,355 @@ exports.getDealDetail = async (req, res) => {
       activities = Array.from(actMap.values());
     }
 
+    // Calculate inactive days and inactive from date based on last activity
+    let inactiveDays = 0;
+    let inactiveFromDate = null;
+    
+    if (activities.length > 0) {
+      // Find the most recent activity (activities are already sorted by startDateTime DESC)
+      const lastActivity = activities[0];
+      if (lastActivity && lastActivity.startDateTime) {
+        const lastActivityDate = new Date(lastActivity.startDateTime);
+        const daysSinceLastActivity = Math.floor((now - lastActivityDate) / (1000 * 60 * 60 * 24));
+        
+        if (daysSinceLastActivity > 0) {
+          inactiveDays = daysSinceLastActivity;
+          inactiveFromDate = lastActivityDate.toISOString();
+        }
+      }
+    } else {
+      // If no activities, inactive since deal creation
+      const daysSinceCreation = Math.floor((now - new Date(deal.createdAt)) / (1000 * 60 * 60 * 24));
+      inactiveDays = daysSinceCreation;
+      inactiveFromDate = deal.createdAt;
+    }
+
+    // ====== ACTIVITY TYPE ANALYTICS (Like Pipedrive) ======
+    console.log(`📊 [getDealDetail] Analyzing activity types for deal ${dealId}`);
+    
+    let activityTypeAnalytics = {
+      totalActivities: 0,
+      activityTypes: {},
+      mostFrequentTypes: [],
+      activityTypeDistribution: {},
+      recentActivityTypes: {},
+      activityTrends: {
+        description: "Most frequent activity types related to this deal",
+        methodology: "Counts all activities linked to this deal and ranks them by type"
+      }
+    };
+
+    if (activities.length > 0) {
+      // Count activities by type
+      const activityTypeCounts = {};
+      const activityTypeDetails = {};
+      const recentActivityTypes = {}; // Last 30 days
+      
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      activities.forEach(activity => {
+        const activityType = activity.activityType || activity.type || 'Other';
+        const activityDate = new Date(activity.startDateTime || activity.createdAt);
+        
+        // Overall counts
+        if (!activityTypeCounts[activityType]) {
+          activityTypeCounts[activityType] = 0;
+          activityTypeDetails[activityType] = {
+            count: 0,
+            latestActivity: null,
+            oldestActivity: null,
+            avgDaysApart: 0,
+            activities: []
+          };
+        }
+        
+        activityTypeCounts[activityType]++;
+        activityTypeDetails[activityType].count++;
+        activityTypeDetails[activityType].activities.push({
+          activityId: activity.activityId || activity.id,
+          title: activity.title || activity.subject,
+          date: activityDate,
+          assignedTo: activity.assignedToName
+        });
+        
+        // Update latest/oldest dates
+        if (!activityTypeDetails[activityType].latestActivity || 
+            activityDate > new Date(activityTypeDetails[activityType].latestActivity)) {
+          activityTypeDetails[activityType].latestActivity = activityDate;
+        }
+        
+        if (!activityTypeDetails[activityType].oldestActivity || 
+            activityDate < new Date(activityTypeDetails[activityType].oldestActivity)) {
+          activityTypeDetails[activityType].oldestActivity = activityDate;
+        }
+        
+        // Recent activities (last 30 days)
+        if (activityDate >= thirtyDaysAgo) {
+          if (!recentActivityTypes[activityType]) {
+            recentActivityTypes[activityType] = 0;
+          }
+          recentActivityTypes[activityType]++;
+        }
+      });
+
+      // Calculate average days apart for each activity type
+      Object.keys(activityTypeDetails).forEach(activityType => {
+        const details = activityTypeDetails[activityType];
+        if (details.count > 1 && details.latestActivity && details.oldestActivity) {
+          const daysDiff = Math.floor(
+            (new Date(details.latestActivity) - new Date(details.oldestActivity)) / (1000 * 60 * 60 * 24)
+          );
+          details.avgDaysApart = Math.round(daysDiff / (details.count - 1));
+        }
+      });
+
+      // Sort activity types by frequency (most frequent first)
+      const sortedActivityTypes = Object.entries(activityTypeCounts)
+        .sort(([,a], [,b]) => b - a)
+        .map(([type, count], index) => {
+          const details = activityTypeDetails[type];
+          const percentage = Math.round((count / activities.length) * 100);
+          
+          return {
+            rank: index + 1,
+            activityType: type,
+            count: count,
+            percentage: percentage,
+            latestActivity: details.latestActivity,
+            oldestActivity: details.oldestActivity,
+            avgDaysApart: details.avgDaysApart,
+            recentCount: recentActivityTypes[type] || 0,
+            isTopType: index < 3, // Top 3 types
+            activities: details.activities.slice(0, 5) // Show last 5 activities of this type
+          };
+        });
+
+      // Create distribution object for easy frontend consumption
+      const distribution = {};
+      sortedActivityTypes.forEach(item => {
+        distribution[item.activityType] = {
+          count: item.count,
+          percentage: item.percentage,
+          rank: item.rank
+        };
+      });
+
+      activityTypeAnalytics = {
+        totalActivities: activities.length,
+        activityTypes: activityTypeCounts,
+        mostFrequentTypes: sortedActivityTypes,
+        activityTypeDistribution: distribution,
+        recentActivityTypes: recentActivityTypes,
+        topActivityType: sortedActivityTypes[0] || null,
+        diversityScore: Object.keys(activityTypeCounts).length, // Number of different activity types
+        insights: {
+          mostActiveType: sortedActivityTypes[0]?.activityType || 'None',
+          totalTypes: Object.keys(activityTypeCounts).length,
+          recentActivityCount: Object.values(recentActivityTypes).reduce((sum, count) => sum + count, 0),
+          averageActivitiesPerType: sortedActivityTypes.length > 0 
+            ? Math.round(activities.length / sortedActivityTypes.length) 
+            : 0,
+          dominantTypePercentage: sortedActivityTypes[0]?.percentage || 0
+        },
+        activityTrends: {
+          description: "Most frequent activity types related to this deal",
+          methodology: "Counts all activities linked to this deal and ranks them by type",
+          periodAnalyzed: "All activities + Recent 30 days",
+          totalActivitiesAnalyzed: activities.length
+        }
+      };
+
+      console.log(`📈 [getDealDetail] Activity type analytics: ${Object.keys(activityTypeCounts).length} types, top type: ${sortedActivityTypes[0]?.activityType} (${sortedActivityTypes[0]?.count} activities)`);
+    } else {
+      console.log(`📊 [getDealDetail] No activities found for analytics`);
+    }
+
+    // ====== MOST ACTIVE USERS ANALYTICS (Like Pipedrive) ======
+    console.log(`👥 [getDealDetail] Analyzing most active users for deal ${dealId}`);
+    
+    let mostActiveUsersAnalytics = {
+      totalUsers: 0,
+      userActivityCounts: {},
+      mostActiveUsers: [],
+      userActivityDistribution: {},
+      recentUserActivity: {},
+      userInsights: {
+        description: "Users (team members) who performed activities most frequently in this deal",
+        methodology: "Counts activities by user and ranks them by frequency"
+      }
+    };
+
+    if (activities.length > 0) {
+      // Count activities by user
+      const userActivityCounts = {};
+      const userActivityDetails = {};
+      const recentUserActivity = {}; // Last 30 days
+      
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      activities.forEach(activity => {
+        // Get user info - use assignedTo ID and name
+        const userId = activity.assignedTo;
+        const userName = activity.assignedToName || 'Unknown User';
+        const userKey = userId ? `${userId}` : 'unassigned';
+        const activityDate = new Date(activity.startDateTime || activity.createdAt);
+        const activityType = activity.activityType || activity.type || 'Other';
+        
+        // Initialize user tracking
+        if (!userActivityCounts[userKey]) {
+          userActivityCounts[userKey] = 0;
+          userActivityDetails[userKey] = {
+            userId: userId,
+            userName: userName,
+            count: 0,
+            activityTypes: {},
+            latestActivity: null,
+            oldestActivity: null,
+            activities: [],
+            isActive: false // Will be set to true if user has recent activities
+          };
+        }
+        
+        // Increment counts
+        userActivityCounts[userKey]++;
+        userActivityDetails[userKey].count++;
+        
+        // Track activity types per user
+        if (!userActivityDetails[userKey].activityTypes[activityType]) {
+          userActivityDetails[userKey].activityTypes[activityType] = 0;
+        }
+        userActivityDetails[userKey].activityTypes[activityType]++;
+        
+        // Add activity to user's list
+        userActivityDetails[userKey].activities.push({
+          activityId: activity.activityId || activity.id,
+          title: activity.title || activity.subject,
+          type: activityType,
+          date: activityDate
+        });
+        
+        // Update latest/oldest dates
+        if (!userActivityDetails[userKey].latestActivity || 
+            activityDate > new Date(userActivityDetails[userKey].latestActivity)) {
+          userActivityDetails[userKey].latestActivity = activityDate;
+        }
+        
+        if (!userActivityDetails[userKey].oldestActivity || 
+            activityDate < new Date(userActivityDetails[userKey].oldestActivity)) {
+          userActivityDetails[userKey].oldestActivity = activityDate;
+        }
+        
+        // Recent activities (last 30 days)
+        if (activityDate >= thirtyDaysAgo) {
+          if (!recentUserActivity[userKey]) {
+            recentUserActivity[userKey] = 0;
+          }
+          recentUserActivity[userKey]++;
+          userActivityDetails[userKey].isActive = true;
+        }
+      });
+
+      // Sort users by activity count (most active first)
+      const sortedActiveUsers = Object.entries(userActivityCounts)
+        .sort(([,a], [,b]) => b - a)
+        .map(([userKey, count], index) => {
+          const details = userActivityDetails[userKey];
+          const percentage = Math.round((count / activities.length) * 100);
+          
+          // Get top activity types for this user
+          const userTopActivityTypes = Object.entries(details.activityTypes)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 3)
+            .map(([type, typeCount]) => ({
+              type,
+              count: typeCount,
+              percentage: Math.round((typeCount / count) * 100)
+            }));
+          
+          return {
+            rank: index + 1,
+            userId: details.userId,
+            userName: details.userName,
+            totalActivities: count,
+            percentage: percentage,
+            recentActivities: recentUserActivity[userKey] || 0,
+            latestActivity: details.latestActivity,
+            oldestActivity: details.oldestActivity,
+            isActive: details.isActive,
+            topActivityTypes: userTopActivityTypes,
+            activityTypeCount: Object.keys(details.activityTypes).length,
+            recentActivities: details.activities
+              .sort((a, b) => new Date(b.date) - new Date(a.date))
+              .slice(0, 5), // Show 5 most recent activities
+            engagement: {
+              level: percentage >= 40 ? 'High' : percentage >= 20 ? 'Medium' : 'Low',
+              consistency: details.isActive ? 'Active' : 'Inactive',
+              specialization: userTopActivityTypes[0]?.type || 'Mixed'
+            }
+          };
+        });
+
+      // Create distribution object for easy frontend consumption
+      const userDistribution = {};
+      sortedActiveUsers.forEach(user => {
+        userDistribution[user.userId || 'unassigned'] = {
+          userName: user.userName,
+          count: user.totalActivities,
+          percentage: user.percentage,
+          rank: user.rank,
+          engagement: user.engagement
+        };
+      });
+
+      // Calculate user engagement insights
+      const activeUsers = sortedActiveUsers.filter(user => user.isActive);
+      const highEngagementUsers = sortedActiveUsers.filter(user => user.engagement.level === 'High');
+      const totalUniqueUsers = sortedActiveUsers.length;
+
+      mostActiveUsersAnalytics = {
+        totalUsers: totalUniqueUsers,
+        userActivityCounts: userActivityCounts,
+        mostActiveUsers: sortedActiveUsers,
+        userActivityDistribution: userDistribution,
+        recentUserActivity: recentUserActivity,
+        topUser: sortedActiveUsers[0] || null,
+        activeUsersCount: activeUsers.length,
+        highEngagementUsersCount: highEngagementUsers.length,
+        insights: {
+          mostActiveUser: sortedActiveUsers[0]?.userName || 'None',
+          totalUniqueUsers: totalUniqueUsers,
+          activeUsersLast30Days: activeUsers.length,
+          highEngagementUsers: highEngagementUsers.length,
+          averageActivitiesPerUser: totalUniqueUsers > 0 
+            ? Math.round(activities.length / totalUniqueUsers) 
+            : 0,
+          topUserPercentage: sortedActiveUsers[0]?.percentage || 0,
+          engagementDistribution: {
+            high: highEngagementUsers.length,
+            medium: sortedActiveUsers.filter(u => u.engagement.level === 'Medium').length,
+            low: sortedActiveUsers.filter(u => u.engagement.level === 'Low').length
+          }
+        },
+        userInsights: {
+          description: "Users (team members) who performed activities most frequently in this deal",
+          methodology: "Counts activities by user and ranks them by frequency",
+          periodAnalyzed: "All activities + Recent 30 days",
+          totalActivitiesAnalyzed: activities.length,
+          userEngagementLevels: {
+            high: "40%+ of deal activities",
+            medium: "20-39% of deal activities", 
+            low: "Under 20% of deal activities"
+          }
+        }
+      };
+
+      console.log(`👥 [getDealDetail] User activity analytics: ${totalUniqueUsers} users, top user: ${sortedActiveUsers[0]?.userName} (${sortedActiveUsers[0]?.totalActivities} activities)`);
+    } else {
+      console.log(`👥 [getDealDetail] No activities found for user analytics`);
+    }
+
     // Fetch custom field values for this deal
     const customFieldValues = await CustomFieldValue.findAll({
       where: {
@@ -5562,6 +5911,7 @@ exports.getDealDetail = async (req, res) => {
         dealAge: `${totalDealDays} days`,
         avgTimeToWon,
         inactiveDays,
+        inactiveFromDate,
         createdAt,
         totalDealDays,
       },
@@ -5575,6 +5925,10 @@ exports.getDealDetail = async (req, res) => {
         fieldsByCategory,
         fieldsByGroup,
       },
+      // Activity Type Analytics (Like Pipedrive)
+      activityAnalytics: activityTypeAnalytics,
+      // Most Active Users Analytics (Like Pipedrive)
+      userActivityAnalytics: mostActiveUsersAnalytics,
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
         totalEmails: totalEmailsCount,
@@ -8670,7 +9024,7 @@ exports.uploadDealFiles = async (req, res) => {
 
     // Check if deal exists and user has access
     const deal = await Deal.findOne({
-      where: { dealId, masterUserID }
+      where: { dealId}
     });
 
     if (!deal) {
@@ -8777,7 +9131,7 @@ exports.getDealFiles = async (req, res) => {
 
     // Check if deal exists and user has access
     const deal = await Deal.findOne({
-      where: { dealId, masterUserID }
+      where: { dealId}
     });
 
     if (!deal) {
@@ -8814,7 +9168,7 @@ exports.getDealFiles = async (req, res) => {
         {
           model: MasterUser,
           as: 'uploader',
-          attributes: ['id', 'firstName', 'lastName', 'email']
+          attributes: ['masterUserID', 'email']
         }
       ],
       order: [[sortBy, sortOrder.toUpperCase()]],
@@ -8839,8 +9193,8 @@ exports.getDealFiles = async (req, res) => {
       downloadCount: file.downloadCount,
       lastAccessedAt: file.lastAccessedAt,
       uploadedBy: file.uploader ? {
-        id: file.uploader.id,
-        name: `${file.uploader.firstName} ${file.uploader.lastName}`,
+        id: file.uploader.masterUserID,
+        // name: `${file.uploader.firstName} ${file.uploader.lastName}`,
         email: file.uploader.email
       } : null,
       createdAt: file.createdAt,
