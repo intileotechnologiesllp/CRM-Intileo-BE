@@ -547,6 +547,7 @@ exports.getAllLeadContactPersons = async (req, res) => {
 exports.addFilterToFavorites = async (req, res) => {
   try {
     const { filterId } = req.params;
+    const { filterEntityType } = req.query; // Get expected entity type from query params
     const masterUserID = req.adminId;
 
     // Check if filter exists and user has access to it
@@ -566,6 +567,19 @@ exports.addFilterToFavorites = async (req, res) => {
       });
     }
 
+    // Validate filterEntityType if provided
+    if (filterEntityType && filter.filterEntityType !== filterEntityType) {
+      return res.status(400).json({
+        message: `Filter entity type mismatch. Expected '${filterEntityType}' but filter is of type '${filter.filterEntityType}'.`,
+        details: {
+          requestedEntityType: filterEntityType,
+          actualEntityType: filter.filterEntityType,
+          filterId: filter.filterId,
+          filterName: filter.filterName
+        }
+      });
+    }
+
     // Check if already favorite
     if (filter.isFavorite) {
       return res.status(409).json({
@@ -573,6 +587,7 @@ exports.addFilterToFavorites = async (req, res) => {
         filter: {
           filterId: filter.filterId,
           filterName: filter.filterName,
+          filterEntityType: filter.filterEntityType,
           isFavorite: filter.isFavorite
         }
       });
@@ -599,7 +614,32 @@ exports.addFilterToFavorites = async (req, res) => {
         filterEntityType: filter.filterEntityType,
         visibility: filter.visibility,
         isFavorite: filter.isFavorite,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        createdAt: filter.createdAt,
         updatedAt: filter.updatedAt
+      },
+      entityInfo: {
+        entityType: filter.filterEntityType,
+        totalFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        }),
+        favoriteFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            isFavorite: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        })
       }
     });
 
@@ -618,6 +658,7 @@ exports.addFilterToFavorites = async (req, res) => {
 exports.removeFilterFromFavorites = async (req, res) => {
   try {
     const { filterId } = req.params;
+    const { filterEntityType } = req.query; // Get expected entity type from query params
     const masterUserID = req.adminId;
 
     // Check if filter exists and user has access to it
@@ -634,6 +675,19 @@ exports.removeFilterFromFavorites = async (req, res) => {
     if (!filter) {
       return res.status(404).json({
         message: "Filter not found or you don't have access to it."
+      });
+    }
+
+    // Validate filterEntityType if provided
+    if (filterEntityType && filter.filterEntityType !== filterEntityType) {
+      return res.status(400).json({
+        message: `Filter entity type mismatch. Expected '${filterEntityType}' but filter is of type '${filter.filterEntityType}'.`,
+        details: {
+          requestedEntityType: filterEntityType,
+          actualEntityType: filter.filterEntityType,
+          filterId: filter.filterId,
+          filterName: filter.filterName
+        }
       });
     }
 
@@ -670,7 +724,32 @@ exports.removeFilterFromFavorites = async (req, res) => {
         filterEntityType: filter.filterEntityType,
         visibility: filter.visibility,
         isFavorite: filter.isFavorite,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        createdAt: filter.createdAt,
         updatedAt: filter.updatedAt
+      },
+      entityInfo: {
+        entityType: filter.filterEntityType,
+        totalFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        }),
+        favoriteFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            isFavorite: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        })
       }
     });
 
