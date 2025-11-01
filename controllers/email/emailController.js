@@ -5624,96 +5624,34 @@ exports.getOneEmail = async (req, res) => {
       order: [["createdAt", "ASC"]],
     });
 
-    // Remove the main email from relatedEmails (by messageId) BEFORE checking for enhanced threading
+    // Remove the main email from relatedEmails (by messageId)
     relatedEmails = relatedEmails.filter(
       (email) => email.messageId !== mainEmail.messageId
     );
 
-    // 🚀 ENHANCED THREADING: If no related emails found via standard threading,
-    // try subject-based and participant-based matching
-    if (relatedEmails.length === 0 && mainEmail.subject) {
-      console.log(`[getOneEmail] 🔍 No standard thread matches found for email ${emailId}, trying enhanced threading...`);
-
-      // Extract base subject (remove Re:, Fwd:, etc.)
-      const baseSubject = mainEmail.subject
-        .replace(/^(Re|Fwd|Fw):\s*/i, '')
-        .trim();
-
-      // Get participants from main email
-      const participants = [
-        mainEmail.sender,
-        mainEmail.recipient,
-        ...(mainEmail.cc ? mainEmail.cc.split(',').map(cc => cc.trim()) : []),
-        ...(mainEmail.bcc ? mainEmail.bcc.split(',').map(bcc => bcc.trim()) : [])
-      ].filter(Boolean);
-
-      // Find emails with similar subjects and overlapping participants
-      const subjectBasedEmails = await Email.findAll({
-        where: {
-          [Sequelize.Op.and]: [
-            {
-              [Sequelize.Op.or]: [
-                { subject: { [Sequelize.Op.like]: `%${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Re: ${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Fwd: ${baseSubject}%` } },
-                { subject: { [Sequelize.Op.like]: `%Fw: ${baseSubject}%` } }
-              ]
-            },
-            {
-              [Sequelize.Op.or]: [
-                { sender: { [Sequelize.Op.in]: participants } },
-                { recipient: { [Sequelize.Op.in]: participants } },
-                { cc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } },
-                { bcc: { [Sequelize.Op.like]: participants.map(p => `%${p}%`).join('') } }
-              ]
-            }
-          ],
-          folder: { [Sequelize.Op.in]: ["inbox", "sent"] },
-          messageId: { [Sequelize.Op.ne]: mainEmail.messageId } // Exclude main email
-        },
-        include: [
-          {
-            model: Attachment,
-            as: "attachments",
-          },
-        ],
-        order: [["createdAt", "ASC"]],
-        limit: 20 // Limit to prevent too many false matches
-      });
-
-      if (subjectBasedEmails.length > 0) {
-        console.log(`[getOneEmail] ✅ Found ${subjectBasedEmails.length} emails via enhanced threading for subject: "${baseSubject}"`);
-        relatedEmails = subjectBasedEmails;
-      }
-    }
-    // Remove the main email from relatedEmails
-    //relatedEmails = relatedEmails.filter(email => email.emailID !== mainEmail.emailID);
-    // Remove the main email from relatedEmails (by messageId)
-
-    // relatedEmails = relatedEmails.filter(
-    //   (email) => email.messageId !== mainEmail.messageId
-    // );
-
-    // Deduplicate relatedEmails by messageId (keep the first occurrence)
-    // const seen = new Set();
-    // relatedEmails = relatedEmails.filter(email => {
-    //   if (seen.has(email.messageId)) return false;
-    //   seen.add(email.messageId);
-    //   return true;
-    // });
+    // � STANDARD EMAIL THREADING ONLY:
+    // Using only RFC-compliant email headers for threading:
+    // - Message-ID: Unique identifier for each email
+    // - In-Reply-To: References the Message-ID of the message being replied to
+    // - References: Contains chain of previous Message-IDs in the thread
+    // No subject-based or participant-based fallback to prevent false positives
+    console.log(`[getOneEmail] 📧 Found ${relatedEmails.length} related emails using standard threading (Message-ID, In-Reply-To, References) for email ${emailId}`);
+    
     let allEmails = [mainEmail, ...relatedEmails];
 
-    //......changes
+    // Deduplicate emails by messageId (keep the first occurrence)
     const seen = new Set();
     allEmails = allEmails.filter((email) => {
       if (seen.has(email.messageId)) return false;
       seen.add(email.messageId);
       return true;
     });
+    
     const emailMap = {};
     allEmails.forEach((email) => {
       emailMap[email.messageId] = email;
     });
+    
     const conversation = [];
     let current = allEmails.find(
       (email) => !email.inReplyTo || !emailMap[email.inReplyTo]
