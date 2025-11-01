@@ -875,3 +875,235 @@ exports.updateProfile = async (req, res) => {
       .json({ message: "Failed to update profile.", error: error.message });
   }
 };
+
+// Set Permission Sets for Master User
+exports.setMasterUserPermissions = async (req, res) => {
+  const masterUserID = req.adminId; // Get from authenticated user context
+  const { permissionSetId, globalPermissionSetId } = req.body;
+
+  try {
+    console.log(`[setMasterUserPermissions] 🔍 Setting permissions for authenticated user: ${masterUserID}`);
+    console.log(`[setMasterUserPermissions] 📝 Request body:`, { permissionSetId, globalPermissionSetId });
+
+    // Validate that masterUserID exists (should always exist if user is authenticated)
+    if (!masterUserID) {
+      return res.status(401).json({
+        message: "User not authenticated. Please login again."
+      });
+    }
+
+    // Validate that at least one permission set ID is provided
+    if (permissionSetId === undefined && globalPermissionSetId === undefined) {
+      return res.status(400).json({
+        message: "At least one permission set ID (permissionSetId or globalPermissionSetId) is required in the request body."
+      });
+    }
+
+    // Find the master user
+    console.log(`[setMasterUserPermissions] 🔍 Looking for masterUserID: ${masterUserID}`);
+    
+    const masterUser = await MasterUser.findOne({
+      where: { masterUserID: masterUserID }
+    });
+
+    console.log(`[setMasterUserPermissions] 👤 Found user:`, masterUser ? 
+      { id: masterUser.masterUserID, name: masterUser.name, email: masterUser.email } : 
+      'User not found'
+    );
+
+    if (!masterUser) {
+      await logAuditTrail(
+        PROGRAMS.MASTER_USER_MANAGEMENT,
+        "SET_MASTER_USER_PERMISSIONS",
+        req.role,
+        `Master user not found for authenticated user ID: ${masterUserID}`,
+        req.adminId
+      );
+      return res.status(404).json({ 
+        message: `Your user profile was not found. Please contact support.`,
+        authenticatedUserId: masterUserID
+      });
+    }
+
+    // Validate permission sets exist if provided
+    const validationPromises = [];
+    let permissionSetData = null;
+    let globalPermissionSetData = null;
+
+    if (permissionSetId) {
+      validationPromises.push(
+        permissionSet.findOne({
+          where: { permissionSetId }
+        }).then(result => {
+          if (!result) {
+            throw new Error(`Permission set with ID ${permissionSetId} not found`);
+          }
+          permissionSetData = result;
+          return result;
+        })
+      );
+    }
+
+    if (globalPermissionSetId) {
+      validationPromises.push(
+        permissionSet.findOne({
+          where: { permissionSetId: globalPermissionSetId }
+        }).then(result => {
+          if (!result) {
+            throw new Error(`Global permission set with ID ${globalPermissionSetId} not found`);
+          }
+          globalPermissionSetData = result;
+          return result;
+        })
+      );
+    }
+
+    // Wait for all validation checks
+    await Promise.all(validationPromises);
+
+    // Prepare update fields
+    const updateFields = {};
+    if (permissionSetId !== undefined) {
+      updateFields.permissionSetId = permissionSetId;
+    }
+    if (globalPermissionSetId !== undefined) {
+      updateFields.globalPermissionSetId = globalPermissionSetId;
+    }
+
+    // Update the master user with new permission sets
+    await masterUser.update(updateFields);
+
+    // Log the update in audit trail
+    await historyLogger(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "SET_MASTER_USER_PERMISSIONS",
+      masterUser.creatorId,
+      masterUser.masterUserID,
+      req.adminId,
+      `Permission sets updated for master user "${masterUser.name}" by "${req.role}"`,
+      {
+        previousPermissionSetId: masterUser.permissionSetId,
+        previousGlobalPermissionSetId: masterUser.globalPermissionSetId,
+        newPermissionSetId: permissionSetId,
+        newGlobalPermissionSetId: globalPermissionSetId,
+        permissionSetName: permissionSetData ? permissionSetData.name : null,
+        globalPermissionSetName: globalPermissionSetData ? globalPermissionSetData.name : null
+      }
+    );
+
+    // Fetch updated user with permission details
+    const updatedUser = await MasterUser.findByPk(masterUserID, {
+      attributes: [
+        "masterUserID",
+        "name",
+        "email",
+        "permissionSetId",
+        "globalPermissionSetId",
+        "updatedAt"
+      ]
+    });
+
+    // Fetch permission set details for response
+    let responsePermissionSet = null;
+    let responseGlobalPermissionSet = null;
+
+    if (updatedUser.permissionSetId) {
+      responsePermissionSet = await permissionSet.findOne({
+        where: { permissionSetId: updatedUser.permissionSetId }
+      });
+    }
+
+    if (updatedUser.globalPermissionSetId) {
+      responseGlobalPermissionSet = await permissionSet.findOne({
+        where: { permissionSetId: updatedUser.globalPermissionSetId }
+      });
+    }
+
+    res.status(200).json({
+      message: "Permission sets updated successfully.",
+      masterUser: {
+        masterUserID: updatedUser.masterUserID,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        permissionSetId: updatedUser.permissionSetId,
+        globalPermissionSetId: updatedUser.globalPermissionSetId,
+        updatedAt: updatedUser.updatedAt
+      },
+      permissionSets: {
+        permission: responsePermissionSet ? {
+          permissionSetId: responsePermissionSet.permissionSetId,
+          name: responsePermissionSet.name,
+          description: responsePermissionSet.description
+        } : null,
+        globalPermission: responseGlobalPermissionSet ? {
+          permissionSetId: responseGlobalPermissionSet.permissionSetId,
+          name: responseGlobalPermissionSet.name,
+          description: responseGlobalPermissionSet.description
+        } : null
+      }
+    });
+
+  } catch (error) {
+    console.error("Error setting master user permissions:", error);
+    
+    await logAuditTrail(
+      PROGRAMS.MASTER_USER_MANAGEMENT,
+      "SET_MASTER_USER_PERMISSIONS",
+      req.role,
+      error.message || "Internal server error",
+      req.adminId
+    );
+
+    if (error.message.includes("not found")) {
+      return res.status(404).json({ 
+        message: error.message 
+      });
+    }
+
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+// Debug helper: List all master users with their IDs (for debugging purposes)
+exports.listMasterUserIds = async (req, res) => {
+  try {
+    const users = await MasterUser.findAll({
+      attributes: [
+        'masterUserID',
+        'name', 
+        'email',
+        'userType',
+        'isActive',
+        'permissionSetId',
+        'globalPermissionSetId'
+      ],
+      order: [['masterUserID', 'ASC']]
+    });
+
+    console.log(`[listMasterUserIds] 📋 Found ${users.length} total users`);
+
+    res.status(200).json({
+      message: `Found ${users.length} master users`,
+      totalUsers: users.length,
+      users: users.map(user => ({
+        masterUserID: user.masterUserID,
+        name: user.name,
+        email: user.email,
+        userType: user.userType,
+        isActive: user.isActive,
+        currentPermissionSetId: user.permissionSetId,
+        currentGlobalPermissionSetId: user.globalPermissionSetId
+      }))
+    });
+
+  } catch (error) {
+    console.error("Error listing master users:", error);
+    res.status(500).json({ 
+      message: "Failed to list master users",
+      error: error.message 
+    });
+  }
+};

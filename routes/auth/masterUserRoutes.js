@@ -57,5 +57,6 @@ router.get("/profile", verifyToken,masterUserController.getProfile);
 router.post("/update-profile", verifyToken,upload.single("profileImage"),masterUserController.updateProfile);
 router.post("/start-google-oauth", verifyToken,masterUserController.startGoogleOAuth);
 router.get("/oauth2callback", masterUserController.handleGoogleOAuthCallback);
+router.post("/set-permission-sets", verifyToken,masterUserController.setMasterUserPermissions);
 
 module.exports = router;
