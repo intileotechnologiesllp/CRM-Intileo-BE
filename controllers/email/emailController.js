@@ -70,6 +70,7 @@ const { Lead, Deal, Person, Organization } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
+const Label = require("../../models/admin/masters/labelModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { syncImapFlags } = require("../../services/imapSyncService");
 const flagSyncQueue = require("../../services/flagSyncQueueService");
@@ -8205,6 +8206,775 @@ exports.unlinkEmailFromEntity = async (req, res) => {
 
   } catch (error) {
     console.error('Error unlinking email from entity:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// ===============================
+// LABEL MANAGEMENT APIs
+// ===============================
+
+// Create new label
+exports.createLabel = async (req, res) => {
+  const { labelName, labelColor, description } = req.body;
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate required fields
+    if (!labelName || labelName.trim() === '') {
+      return res.status(400).json({
+        message: 'Label name is required'
+      });
+    }
+
+    // Validate label name length
+    if (labelName.length > 50) {
+      return res.status(400).json({
+        message: 'Label name must be 50 characters or less'
+      });
+    }
+
+    // Check if label with same name already exists for this user
+    const existingLabel = await Label.findOne({
+      where: {
+        labelName: labelName.trim(),
+        masterUserID: masterUserID
+      }
+    });
+
+    if (existingLabel) {
+      return res.status(409).json({
+        message: 'Label with this name already exists'
+      });
+    }
+
+    // Set default color if not provided
+    const defaultColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+    const finalColor = labelColor && labelColor.match(/^#[0-9A-F]{6}$/i) 
+      ? labelColor 
+      : defaultColors[Math.floor(Math.random() * defaultColors.length)];
+
+    // Create new label
+    const newLabel = await Label.create({
+      labelName: labelName.trim(),
+      labelColor: finalColor,
+      description: description ? description.trim() : null,
+      masterUserID: masterUserID,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    res.status(201).json({
+      message: 'Label created successfully',
+      data: {
+        labelId: newLabel.labelId,
+        labelName: newLabel.labelName,
+        labelColor: newLabel.labelColor,
+        description: newLabel.description,
+        masterUserID: newLabel.masterUserID,
+        isActive: newLabel.isActive,
+        createdAt: newLabel.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Get all labels for a user
+exports.getAllLabels = async (req, res) => {
+  const { page = 1, pageSize = 50, search = '' } = req.query;
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate pagination
+    const limit = Math.min(parseInt(pageSize) || 50, 100);
+    const offset = (parseInt(page) - 1) * limit;
+
+    // Build where conditions
+    const whereConditions = {
+      masterUserID: masterUserID,
+      isActive: true
+    };
+
+    // Add search condition if provided
+    if (search && search.trim() !== '') {
+      whereConditions.labelName = {
+        [Sequelize.Op.like]: `%${search.trim()}%`
+      };
+    }
+
+    // Get labels with pagination
+    const { count, rows: labels } = await Label.findAndCountAll({
+      where: whereConditions,
+      attributes: ['labelId', 'labelName', 'labelColor', 'description', 'createdAt', 'updatedAt'],
+      order: [['createdAt', 'DESC']],
+      limit: limit,
+      offset: offset
+    });
+
+    // Calculate email count for each label (optional)
+    const labelsWithCounts = await Promise.all(
+      labels.map(async (label) => {
+        try {
+          const emailCount = await Email.count({
+            where: {
+              masterUserID: masterUserID,
+              labels: {
+                [Sequelize.Op.like]: `%${label.labelId}%`
+              }
+            }
+          });
+
+          return {
+            ...label.toJSON(),
+            emailCount: emailCount
+          };
+        } catch (error) {
+          return {
+            ...label.toJSON(),
+            emailCount: 0
+          };
+        }
+      })
+    );
+
+    const totalPages = Math.ceil(count / limit);
+
+    res.status(200).json({
+      message: 'Labels fetched successfully',
+      data: {
+        labels: labelsWithCounts,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: totalPages,
+          totalLabels: count,
+          pageSize: limit
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching labels:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Update label
+exports.updateLabel = async (req, res) => {
+  const { labelId } = req.params;
+  const { labelName, labelColor, description } = req.body;
+  const masterUserID = req.adminId;
+
+  try {
+    // Find label
+    const label = await Label.findOne({
+      where: {
+        labelId: labelId,
+        masterUserID: masterUserID
+      }
+    });
+
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found or access denied'
+      });
+    }
+
+    // Validate label name if provided
+    if (labelName && labelName.trim() !== '') {
+      if (labelName.length > 50) {
+        return res.status(400).json({
+          message: 'Label name must be 50 characters or less'
+        });
+      }
+
+      // Check if another label with same name exists
+      const existingLabel = await Label.findOne({
+        where: {
+          labelName: labelName.trim(),
+          masterUserID: masterUserID,
+          labelId: { [Sequelize.Op.ne]: labelId }
+        }
+      });
+
+      if (existingLabel) {
+        return res.status(409).json({
+          message: 'Label with this name already exists'
+        });
+      }
+    }
+
+    // Validate color format if provided
+    if (labelColor && !labelColor.match(/^#[0-9A-F]{6}$/i)) {
+      return res.status(400).json({
+        message: 'Invalid color format. Use hex format like #FF6B6B'
+      });
+    }
+
+    // Update fields
+    const updateData = {
+      updatedAt: new Date()
+    };
+
+    if (labelName && labelName.trim() !== '') {
+      updateData.labelName = labelName.trim();
+    }
+
+    if (labelColor) {
+      updateData.labelColor = labelColor;
+    }
+
+    if (description !== undefined) {
+      updateData.description = description ? description.trim() : null;
+    }
+
+    // Update label
+    const [updatedRows] = await Label.update(updateData, {
+      where: {
+        labelId: labelId,
+        masterUserID: masterUserID
+      }
+    });
+
+    if (updatedRows === 0) {
+      return res.status(404).json({
+        message: 'Label not found or no changes made'
+      });
+    }
+
+    // Fetch updated label
+    const updatedLabel = await Label.findOne({
+      where: {
+        labelId: labelId,
+        masterUserID: masterUserID
+      },
+      attributes: ['labelId', 'labelName', 'labelColor', 'description', 'createdAt', 'updatedAt']
+    });
+
+    res.status(200).json({
+      message: 'Label updated successfully',
+      data: updatedLabel
+    });
+
+  } catch (error) {
+    console.error('Error updating label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Delete label (soft delete)
+exports.deleteLabel = async (req, res) => {
+  const { labelId } = req.params;
+  const masterUserID = req.adminId;
+
+  try {
+    // Find label
+    const label = await Label.findOne({
+      where: {
+        labelId: labelId,
+        masterUserID: masterUserID,
+        isActive: true
+      }
+    });
+
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found or access denied'
+      });
+    }
+
+    // Count emails using this label
+    const emailCount = await Email.count({
+      where: {
+        masterUserID: masterUserID,
+        labels: {
+          [Sequelize.Op.like]: `%${labelId}%`
+        }
+      }
+    });
+
+    // Soft delete the label
+    await Label.update(
+      { 
+        isActive: false,
+        updatedAt: new Date()
+      },
+      {
+        where: {
+          labelId: labelId,
+          masterUserID: masterUserID
+        }
+      }
+    );
+
+    // Remove label from all emails
+    if (emailCount > 0) {
+      const emails = await Email.findAll({
+        where: {
+          masterUserID: masterUserID,
+          labels: {
+            [Sequelize.Op.like]: `%${labelId}%`
+          }
+        }
+      });
+
+      for (const email of emails) {
+        try {
+          let currentLabels = [];
+          if (email.labels) {
+            currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+          }
+
+          // Remove the deleted label
+          const updatedLabels = currentLabels.filter(id => id !== parseInt(labelId));
+
+          await email.update({
+            labels: JSON.stringify(updatedLabels),
+            updatedAt: new Date()
+          });
+        } catch (e) {
+          console.error(`Error removing label from email ${email.emailID}:`, e);
+        }
+      }
+    }
+
+    res.status(200).json({
+      message: 'Label deleted successfully',
+      data: {
+        labelId: parseInt(labelId),
+        labelName: label.labelName,
+        emailsAffected: emailCount
+      }
+    });
+
+  } catch (error) {
+    console.error('Error deleting label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Link email to label
+exports.linkEmailToLabel = async (req, res) => {
+  const { emailId, labelId } = req.body;
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate required fields
+    if (!emailId || !labelId) {
+      return res.status(400).json({
+        message: 'Email ID and Label ID are required'
+      });
+    }
+
+    // Check if email exists and belongs to user
+    const email = await Email.findOne({
+      where: {
+        emailID: emailId,
+        masterUserID: masterUserID
+      }
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or access denied'
+      });
+    }
+
+    // Check if label exists
+    const label = await Label.findOne({
+      where: {
+        labelId: labelId
+      }
+    });
+
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found'
+      });
+    }
+
+    // Parse current labels (if any) and add new label
+    let currentLabels = [];
+    if (email.labels) {
+      try {
+        currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+      } catch (e) {
+        currentLabels = [];
+      }
+    }
+
+    // Check if label is already linked
+    if (currentLabels.includes(parseInt(labelId))) {
+      return res.status(409).json({
+        message: 'Email is already linked to this label'
+      });
+    }
+
+    // Add label to the list
+    currentLabels.push(parseInt(labelId));
+
+    // Update email with new labels
+    const updatedEmail = await email.update({
+      labels: JSON.stringify(currentLabels),
+      updatedAt: new Date()
+    });
+
+    res.status(200).json({
+      message: 'Email linked to label successfully',
+      data: {
+        emailId: updatedEmail.emailID,
+        labelId: parseInt(labelId),
+        labels: currentLabels,
+        subject: updatedEmail.subject,
+        createdAt: updatedEmail.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error linking email to label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Unlink email from label
+exports.unlinkEmailFromLabel = async (req, res) => {
+  const { emailId, labelId } = req.body;
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate required fields
+    if (!emailId || !labelId) {
+      return res.status(400).json({
+        message: 'Email ID and Label ID are required'
+      });
+    }
+
+    // Check if email exists and belongs to user
+    const email = await Email.findOne({
+      where: {
+        emailID: emailId,
+        masterUserID: masterUserID
+      }
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or access denied'
+      });
+    }
+
+    // Parse current labels
+    let currentLabels = [];
+    if (email.labels) {
+      try {
+        currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+      } catch (e) {
+        currentLabels = [];
+      }
+    }
+
+    // Check if label is linked
+    const labelIndex = currentLabels.indexOf(parseInt(labelId));
+    if (labelIndex === -1) {
+      return res.status(404).json({
+        message: 'Email is not linked to this label'
+      });
+    }
+
+    // Remove label from the list
+    currentLabels.splice(labelIndex, 1);
+
+    // Update email with updated labels
+    const updatedEmail = await email.update({
+      labels: JSON.stringify(currentLabels),
+      updatedAt: new Date()
+    });
+
+    res.status(200).json({
+      message: 'Email unlinked from label successfully',
+      data: {
+        emailId: updatedEmail.emailID,
+        labelId: parseInt(labelId),
+        labels: currentLabels,
+        subject: updatedEmail.subject,
+        createdAt: updatedEmail.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Error unlinking email from label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Get all labels for an email
+exports.getEmailLabels = async (req, res) => {
+  const { emailId } = req.params;
+  const masterUserID = req.adminId;
+
+  try {
+    // Check if email exists and belongs to user
+    const email = await Email.findOne({
+      where: {
+        emailID: emailId,
+        masterUserID: masterUserID
+      },
+      attributes: ['emailID', 'subject', 'labels', 'createdAt']
+    });
+
+    if (!email) {
+      return res.status(404).json({
+        message: 'Email not found or access denied'
+      });
+    }
+
+    // Parse labels
+    let labelIds = [];
+    if (email.labels) {
+      try {
+        labelIds = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+      } catch (e) {
+        labelIds = [];
+      }
+    }
+
+    // Get label details
+    let labels = [];
+    if (labelIds.length > 0) {
+      labels = await Label.findAll({
+        where: {
+          labelId: { [Sequelize.Op.in]: labelIds }
+        },
+        attributes: ['labelId', 'labelName', 'labelColor', 'createdAt']
+      });
+    }
+
+    res.status(200).json({
+      message: 'Email labels fetched successfully',
+      data: {
+        emailId: email.emailID,
+        subject: email.subject,
+        labels: labels,
+        totalLabels: labels.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching email labels:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Get all emails by label
+exports.getEmailsByLabel = async (req, res) => {
+  const { labelId } = req.params;
+  const { page = 1, pageSize = 20 } = req.query;
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate pagination
+    const limit = Math.min(parseInt(pageSize) || 20, 50);
+    const offset = (parseInt(page) - 1) * limit;
+
+    // Check if label exists
+    const label = await Label.findOne({
+      where: { labelId: labelId },
+      attributes: ['labelId', 'labelName', 'labelColor']
+    });
+
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found'
+      });
+    }
+
+    // Find emails that contain this label ID in their labels field
+    const { count, rows: emails } = await Email.findAndCountAll({
+      where: {
+        masterUserID: masterUserID,
+        labels: {
+          [Sequelize.Op.like]: `%${labelId}%`
+        }
+      },
+      attributes: [
+        'emailID', 'messageId', 'subject', 'sender', 'senderName', 
+        'recipient', 'createdAt', 'isRead', 'folder', 'labels'
+      ],
+      order: [['createdAt', 'DESC']],
+      limit: limit,
+      offset: offset
+    });
+
+    // Filter emails to ensure they actually contain the label ID
+    // (to avoid false positives from LIKE query)
+    const filteredEmails = emails.filter(email => {
+      if (!email.labels) return false;
+      try {
+        const labelIds = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+        return labelIds.includes(parseInt(labelId));
+      } catch (e) {
+        return false;
+      }
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    res.status(200).json({
+      message: 'Emails fetched successfully',
+      data: {
+        label: label,
+        emails: filteredEmails,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: totalPages,
+          totalEmails: filteredEmails.length,
+          pageSize: limit
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching emails by label:', error);
+    res.status(500).json({
+      message: 'Internal server error.',
+      error: error.message
+    });
+  }
+};
+
+// Bulk label operations
+exports.bulkLabelEmails = async (req, res) => {
+  const { emailIds, labelId, operation } = req.body; // operation: 'add' or 'remove'
+  const masterUserID = req.adminId;
+
+  try {
+    // Validate required fields
+    if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+      return res.status(400).json({
+        message: 'Email IDs array is required'
+      });
+    }
+
+    if (!labelId || !operation || !['add', 'remove'].includes(operation)) {
+      return res.status(400).json({
+        message: 'Label ID and valid operation (add/remove) are required'
+      });
+    }
+
+    // Check if label exists
+    const label = await Label.findOne({
+      where: { labelId: labelId }
+    });
+
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found'
+      });
+    }
+
+    // Get emails that belong to the user
+    const emails = await Email.findAll({
+      where: {
+        emailID: { [Sequelize.Op.in]: emailIds },
+        masterUserID: masterUserID
+      }
+    });
+
+    if (emails.length === 0) {
+      return res.status(404).json({
+        message: 'No valid emails found for this user'
+      });
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const email of emails) {
+      try {
+        // Parse current labels
+        let currentLabels = [];
+        if (email.labels) {
+          try {
+            currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
+          } catch (e) {
+            currentLabels = [];
+          }
+        }
+
+        let updated = false;
+
+        if (operation === 'add') {
+          // Add label if not already present
+          if (!currentLabels.includes(parseInt(labelId))) {
+            currentLabels.push(parseInt(labelId));
+            updated = true;
+          }
+        } else if (operation === 'remove') {
+          // Remove label if present
+          const labelIndex = currentLabels.indexOf(parseInt(labelId));
+          if (labelIndex !== -1) {
+            currentLabels.splice(labelIndex, 1);
+            updated = true;
+          }
+        }
+
+        if (updated) {
+          await email.update({
+            labels: JSON.stringify(currentLabels),
+            updatedAt: new Date()
+          });
+        }
+
+        successCount++;
+      } catch (error) {
+        console.error(`Error processing email ${email.emailID}:`, error);
+        errorCount++;
+      }
+    }
+
+    res.status(200).json({
+      message: `Bulk label operation completed`,
+      data: {
+        operation: operation,
+        labelId: parseInt(labelId),
+        labelName: label.labelName,
+        totalEmails: emailIds.length,
+        foundEmails: emails.length,
+        successCount: successCount,
+        errorCount: errorCount
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in bulk label operation:', error);
     res.status(500).json({
       message: 'Internal server error.',
       error: error.message

@@ -829,12 +829,91 @@ exports.getActivities = async (req, res) => {
       return result;
     });
 
-    res.status(200).json({
+    // Calculate overdue and upcoming counts when dateFilter is "To-do"
+    let responseData = {
       total,
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
       activities: activitiesWithTitle,
-    });
+    };
+
+    if (dateFilter === "To-do") {
+      try {
+        const now = moment().startOf("day");
+        
+        // Build base where condition for counts (same permission logic as main query)
+        let baseCountWhere = { isDone: false };
+        
+        // Apply same permission logic as main query
+        if (masterUserID) {
+          baseCountWhere.masterUserID = masterUserID;
+        } else if (req.role !== "admin") {
+          baseCountWhere[Op.or] = [
+            { masterUserID: req.adminId },
+            { assignedTo: req.adminId }
+          ];
+        }
+        
+        // Apply additional filters if provided (same as main query)
+        if (assignedTo) baseCountWhere.assignedTo = assignedTo;
+        if (personId) baseCountWhere.personId = personId;
+        if (leadOrganizationId) baseCountWhere.leadOrganizationId = leadOrganizationId;
+        if (dealId) baseCountWhere.dealId = dealId;
+        if (leadId) baseCountWhere.leadId = leadId;
+        
+        // Handle activity type filter
+        if (type) {
+          if (Array.isArray(type)) {
+            baseCountWhere.type = { [Op.in]: type };
+          } else if (typeof type === 'string' && type.includes(',')) {
+            const typeArray = type.split(',').map(t => t.trim()).filter(t => t);
+            baseCountWhere.type = { [Op.in]: typeArray };
+          } else {
+            baseCountWhere.type = type;
+          }
+        }
+        
+        // Handle search filter
+        if (search) {
+          baseCountWhere[Op.or] = [
+            { subject: { [Op.like]: `%${search}%` } },
+            { description: { [Op.like]: `%${search}%` } },
+          ];
+        }
+        
+        // Count overdue activities (startDateTime < today and not done)
+        const overdueWhere = {
+          ...baseCountWhere,
+          startDateTime: { [Op.lt]: now.toDate() }
+        };
+        
+        // Count upcoming activities (startDateTime >= today and not done)
+        const upcomingWhere = {
+          ...baseCountWhere,
+          startDateTime: { [Op.gte]: now.toDate() }
+        };
+        
+        // Execute count queries in parallel
+        const [overdueResult, upcomingResult] = await Promise.all([
+          Activity.count({ where: overdueWhere }),
+          Activity.count({ where: upcomingWhere })
+        ]);
+        
+        // Add counts to response
+        responseData.counts = {
+          overdue: overdueResult,
+          upcoming: upcomingResult,
+          total: overdueResult + upcomingResult
+        };
+        
+        console.log(`To-do counts: Overdue: ${overdueResult}, Upcoming: ${upcomingResult}`);
+      } catch (countError) {
+        console.error("Error calculating To-do counts:", countError);
+        // Continue with response even if count calculation fails
+      }
+    }
+
+    res.status(200).json(responseData);
   } catch (error) {
     console.error("Error fetching activities:", error);
     res.status(500).json({ message: "Internal server error" });
