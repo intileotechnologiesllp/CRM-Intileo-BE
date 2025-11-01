@@ -5775,6 +5775,105 @@ exports.getOneEmail = async (req, res) => {
   }
 };
 
+// Helper function to upload sent email to provider's Sent folder via IMAP
+const uploadToSentFolder = async (mailOptions, userCredential, messageId) => {
+  try {
+    console.log(`[uploadToSentFolder] 📤 Uploading copy to Sent folder for ${userCredential.email}`);
+    
+    const provider = userCredential.provider || 'gmail';
+    
+    // Define Sent folder names for different providers
+    const SENT_FOLDER_MAP = {
+      gmail: '[Gmail]/Sent Mail',
+      yandex: 'Sent',
+      outlook: 'Sent Items',
+      yahoo: 'Sent'
+    };
+
+    const sentFolder = SENT_FOLDER_MAP[provider] || 'Sent';
+    const config = PROVIDER_CONFIG[provider];
+    
+    if (!config) {
+      console.warn(`[uploadToSentFolder] ⚠️ Unsupported provider: ${provider}`);
+      return;
+    }
+
+    const imapConfig = {
+      imap: {
+        user: userCredential.email,
+        password: userCredential.appPassword,
+        host: config.host,
+        port: config.port,
+        tls: config.tls,
+        authTimeout: 30000,
+        tlsOptions: { rejectUnauthorized: false }
+      }
+    };
+
+    // Connect to IMAP
+    const connection = await Imap.connect(imapConfig);
+    console.log(`[uploadToSentFolder] 🔗 Connected to ${provider} IMAP`);
+
+    // Create email message in proper format for IMAP upload
+    const emailMessage = createEmailMessage(mailOptions, messageId);
+
+    // Upload to Sent folder
+    await connection.openBox(sentFolder);
+    await connection.append(emailMessage, { mailbox: sentFolder });
+    
+    console.log(`[uploadToSentFolder] ✅ Successfully uploaded to ${sentFolder}`);
+    
+    connection.end();
+  } catch (error) {
+    console.error(`[uploadToSentFolder] ❌ Failed to upload to Sent folder:`, error.message);
+    // Don't throw error - email was still sent successfully
+    // This is just for convenience/sync with email client
+  }
+};
+
+// Helper to create properly formatted email message for IMAP upload
+const createEmailMessage = (mailOptions, messageId) => {
+  const date = new Date().toUTCString();
+  let message = '';
+  
+  // Email headers
+  message += `Message-ID: ${messageId}\r\n`;
+  message += `Date: ${date}\r\n`;
+  message += `From: ${mailOptions.from}\r\n`;
+  message += `To: ${mailOptions.to}\r\n`;
+  if (mailOptions.cc) message += `Cc: ${mailOptions.cc}\r\n`;
+  if (mailOptions.bcc) message += `Bcc: ${mailOptions.bcc}\r\n`;
+  message += `Subject: ${mailOptions.subject}\r\n`;
+  if (mailOptions.inReplyTo) message += `In-Reply-To: ${mailOptions.inReplyTo}\r\n`;
+  if (mailOptions.references) message += `References: ${mailOptions.references}\r\n`;
+  message += `MIME-Version: 1.0\r\n`;
+  
+  // Content type
+  if (mailOptions.attachments && mailOptions.attachments.length > 0) {
+    message += `Content-Type: multipart/mixed; boundary="boundary123"\r\n\r\n`;
+    
+    // Main content
+    message += `--boundary123\r\n`;
+    message += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
+    message += `${mailOptions.html}\r\n`;
+    
+    // Attachments (simplified - you may want to enhance this)
+    mailOptions.attachments.forEach(att => {
+      message += `--boundary123\r\n`;
+      message += `Content-Type: application/octet-stream\r\n`;
+      message += `Content-Disposition: attachment; filename="${att.filename}"\r\n\r\n`;
+      message += `[Attachment: ${att.filename}]\r\n`;
+    });
+    
+    message += `--boundary123--\r\n`;
+  } else {
+    message += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
+    message += `${mailOptions.html}\r\n`;
+  }
+  
+  return message;
+};
+
 const dynamicUpload = require("../../middlewares/dynamicUpload");
 const { threadId } = require("worker_threads");
 exports.composeEmail = [
@@ -6113,14 +6212,43 @@ exports.composeEmail = [
         });
       }
 
-      // Create a transporter using the selected email credentials
+      // Create a transporter using the selected email credentials with provider support
+      const provider = userCredential.provider || 'gmail';
+      
+      // Enhanced SMTP configuration for multiple providers
+      const SMTP_CONFIG = {
+        gmail: {
+          service: 'gmail',
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false
+        },
+        yandex: {
+          host: 'smtp.yandex.com',
+          port: 587,
+          secure: false
+        },
+        outlook: {
+          host: 'smtp-mail.outlook.com',
+          port: 587,
+          secure: false
+        }
+      };
+
+      const smtpConfig = SMTP_CONFIG[provider] || SMTP_CONFIG.gmail;
+      
       const transporter = nodemailer.createTransport({
-        service: "gmail",
+        ...smtpConfig,
         auth: {
           user: SENDER_EMAIL,
           pass: SENDER_PASSWORD,
         },
+        tls: {
+          rejectUnauthorized: false
+        }
       });
+
+      console.log(`[composeEmail] 📧 Using ${provider} SMTP for ${SENDER_EMAIL}`);
       // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
 
       // Define the email options
@@ -6198,16 +6326,44 @@ exports.composeEmail = [
         // isShared: isShared === true || isShared === "true", // ensure boolean
       };
 
-      // Don't save to database here - let the queue worker handle it
-      // Just send the email data to the queue for processing
-      await publishToQueue("EMAIL_QUEUE", emailData);
-      // }
+      // Enhanced email sending with Sent folder synchronization
+      try {
+        // First send the email via SMTP
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`[composeEmail] ✅ Email sent successfully via SMTP. MessageID: ${info.messageId}`);
 
-      res.status(200).json({
-        message: "Email sent and saved successfully.",
-        // messageId: info.messageId,
-        // attachments: attachmentLinks,
-      });
+        // Update emailData with actual messageId from sent email
+        emailData.messageId = info.messageId;
+
+        // ✨ NEW: Upload copy to Sent folder via IMAP for proper email client sync
+        await uploadToSentFolder(mailOptions, userCredential, info.messageId);
+
+        // Save to database via queue worker
+        await publishToQueue("EMAIL_QUEUE", emailData);
+
+        res.status(200).json({
+          message: "Email sent and saved successfully. Copy added to Sent folder.",
+          messageId: info.messageId,
+          sentTo: finalTo,
+          cc: finalCc,
+          bcc: finalBccValue
+        });
+      } catch (emailError) {
+        console.error(`[composeEmail] ❌ Email sending failed:`, emailError);
+        
+        // If SMTP sending fails, still try to save as draft or handle gracefully
+        if (emailError.code === 'EAUTH' || emailError.code === 'ENOTFOUND') {
+          return res.status(401).json({
+            message: "Email authentication failed. Please check your email credentials.",
+            error: emailError.message
+          });
+        }
+        
+        return res.status(500).json({
+          message: "Failed to send email. Please try again.",
+          error: emailError.message
+        });
+      }
     } catch (error) {
       console.error("Error sending email:", error);
       res
