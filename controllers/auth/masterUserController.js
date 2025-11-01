@@ -378,7 +378,7 @@ exports.getMasterUsers = async (req, res) => {
       }
     };
 
-    // Function to format user data with privileges and last login
+    // Function to format user data with privileges, permission sets, and last login
     const formatUserData = async (user) => {
       const privileges = user.privileges
         ? {
@@ -392,9 +392,39 @@ exports.getMasterUsers = async (req, res) => {
 
       const lastLoginData = await getLastLoginData(user.masterUserID);
 
+      // Fetch permission sets if they exist
+      let permission = null;
+      let globalPermission = null;
+      
+      if (user.permissionSetId) {
+        try {
+          permission = await permissionSet.findOne({
+            where: {
+              permissionSetId: user.permissionSetId
+            }
+          });
+        } catch (error) {
+          console.error(`Error fetching permission set for user ${user.masterUserID}:`, error);
+        }
+      }
+      
+      if (user.globalPermissionSetId) {
+        try {
+          globalPermission = await permissionSet.findOne({
+            where: {
+              permissionSetId: user.globalPermissionSetId
+            }
+          });
+        } catch (error) {
+          console.error(`Error fetching global permission set for user ${user.masterUserID}:`, error);
+        }
+      }
+
       return {
         ...user.toJSON(),
         privileges,
+        permission,
+        globalPermission,
         ...lastLoginData
       };
     };
