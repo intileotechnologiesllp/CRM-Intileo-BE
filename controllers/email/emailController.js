@@ -3888,7 +3888,7 @@ async function getEmailsInternal(req, res, masterUserID) {
       "recipientName",
       "visibility",
       "userEmail",
-      "labels"
+      "labelId"
     ];
 
     // Fetch emails from the database
@@ -8379,42 +8379,31 @@ exports.linkEmailToLabel = async (req, res) => {
       });
     }
 
-    // Check if label exists
+    // Check if label exists (excluding sale-inbox labels to avoid conflicts)
     const label = await Label.findOne({
       where: {
-        labelId: labelId
+        labelId: labelId,
+        entityType: { [Sequelize.Op.ne]: 'sale-inbox' }, // General labels only
+        isActive: true
       }
     });
 
     if (!label) {
       return res.status(404).json({
-        message: 'Label not found'
+        message: 'Label not found or is a sale-inbox label (use sale-inbox endpoints for those)'
       });
     }
 
-    // Parse current labels (if any) and add new label
-    let currentLabels = [];
-    if (email.labels) {
-      try {
-        currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
-      } catch (e) {
-        currentLabels = [];
-      }
-    }
-
-    // Check if label is already linked
-    if (currentLabels.includes(parseInt(labelId))) {
+    // Check if email already has this label
+    if (email.labelId === parseInt(labelId)) {
       return res.status(409).json({
         message: 'Email is already linked to this label'
       });
     }
 
-    // Add label to the list
-    currentLabels.push(parseInt(labelId));
-
-    // Update email with new labels
+    // Update email with the new label (replaces any existing label)
     const updatedEmail = await email.update({
-      labels: JSON.stringify(currentLabels),
+      labelId: parseInt(labelId),
       updatedAt: new Date()
     });
 
@@ -8423,7 +8412,9 @@ exports.linkEmailToLabel = async (req, res) => {
       data: {
         emailId: updatedEmail.emailID,
         labelId: parseInt(labelId),
-        labels: currentLabels,
+        labelName: label.labelName,
+        labelColor: label.labelColor,
+        entityType: label.entityType,
         subject: updatedEmail.subject,
         createdAt: updatedEmail.createdAt
       }
@@ -8465,30 +8456,31 @@ exports.unlinkEmailFromLabel = async (req, res) => {
       });
     }
 
-    // Parse current labels
-    let currentLabels = [];
-    if (email.labels) {
-      try {
-        currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
-      } catch (e) {
-        currentLabels = [];
-      }
-    }
-
-    // Check if label is linked
-    const labelIndex = currentLabels.indexOf(parseInt(labelId));
-    if (labelIndex === -1) {
+    // Check if email has the specified label
+    if (email.labelId !== parseInt(labelId)) {
       return res.status(404).json({
         message: 'Email is not linked to this label'
       });
     }
 
-    // Remove label from the list
-    currentLabels.splice(labelIndex, 1);
+    // Verify label exists and is not a sale-inbox label
+    const label = await Label.findOne({
+      where: {
+        labelId: labelId,
+        entityType: { [Sequelize.Op.ne]: 'sale-inbox' }, // General labels only
+        isActive: true
+      }
+    });
 
-    // Update email with updated labels
+    if (!label) {
+      return res.status(404).json({
+        message: 'Label not found or is a sale-inbox label (use sale-inbox endpoints for those)'
+      });
+    }
+
+    // Remove label from email
     const updatedEmail = await email.update({
-      labels: JSON.stringify(currentLabels),
+      labelId: null,
       updatedAt: new Date()
     });
 
@@ -8497,7 +8489,9 @@ exports.unlinkEmailFromLabel = async (req, res) => {
       data: {
         emailId: updatedEmail.emailID,
         labelId: parseInt(labelId),
-        labels: currentLabels,
+        labelName: label.labelName,
+        labelColor: label.labelColor,
+        entityType: label.entityType,
         subject: updatedEmail.subject,
         createdAt: updatedEmail.createdAt
       }
@@ -8524,7 +8518,7 @@ exports.getEmailLabels = async (req, res) => {
         emailID: emailId,
         masterUserID: masterUserID
       },
-      attributes: ['emailID', 'subject', 'labels', 'createdAt']
+      attributes: ['emailID', 'subject', 'labelId', 'createdAt']
     });
 
     if (!email) {
@@ -8533,24 +8527,16 @@ exports.getEmailLabels = async (req, res) => {
       });
     }
 
-    // Parse labels
-    let labelIds = [];
-    if (email.labels) {
-      try {
-        labelIds = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
-      } catch (e) {
-        labelIds = [];
-      }
-    }
-
-    // Get label details
-    let labels = [];
-    if (labelIds.length > 0) {
-      labels = await Label.findAll({
+    // Get label details if email has a label
+    let label = null;
+    if (email.labelId) {
+      label = await Label.findOne({
         where: {
-          labelId: { [Sequelize.Op.in]: labelIds }
+          labelId: email.labelId,
+          entityType: { [Sequelize.Op.ne]: 'sale-inbox' }, // General labels only
+          isActive: true
         },
-        attributes: ['labelId', 'labelName', 'labelColor', 'createdAt']
+        attributes: ['labelId', 'labelName', 'labelColor', 'entityType', 'description', 'createdAt']
       });
     }
 
@@ -8559,8 +8545,9 @@ exports.getEmailLabels = async (req, res) => {
       data: {
         emailId: email.emailID,
         subject: email.subject,
-        labels: labels,
-        totalLabels: labels.length
+        label: label,
+        hasLabel: !!label,
+        labelId: email.labelId
       }
     });
 
@@ -8584,45 +8571,35 @@ exports.getEmailsByLabel = async (req, res) => {
     const limit = Math.min(parseInt(pageSize) || 20, 50);
     const offset = (parseInt(page) - 1) * limit;
 
-    // Check if label exists
+    // Check if label exists and is not a sale-inbox label
     const label = await Label.findOne({
-      where: { labelId: labelId },
-      attributes: ['labelId', 'labelName', 'labelColor']
+      where: { 
+        labelId: labelId,
+        entityType: { [Sequelize.Op.ne]: 'sale-inbox' }, // General labels only
+        isActive: true
+      },
+      attributes: ['labelId', 'labelName', 'labelColor', 'entityType', 'description']
     });
 
     if (!label) {
       return res.status(404).json({
-        message: 'Label not found'
+        message: 'Label not found or is a sale-inbox label (use sale-inbox endpoints for those)'
       });
     }
 
-    // Find emails that contain this label ID in their labels field
+    // Find emails that have this label ID
     const { count, rows: emails } = await Email.findAndCountAll({
       where: {
         masterUserID: masterUserID,
-        labels: {
-          [Sequelize.Op.like]: `%${labelId}%`
-        }
+        labelId: labelId
       },
       attributes: [
         'emailID', 'messageId', 'subject', 'sender', 'senderName', 
-        'recipient', 'createdAt', 'isRead', 'folder', 'labels'
+        'recipient', 'createdAt', 'isRead', 'folder', 'labelId'
       ],
       order: [['createdAt', 'DESC']],
       limit: limit,
       offset: offset
-    });
-
-    // Filter emails to ensure they actually contain the label ID
-    // (to avoid false positives from LIKE query)
-    const filteredEmails = emails.filter(email => {
-      if (!email.labels) return false;
-      try {
-        const labelIds = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
-        return labelIds.includes(parseInt(labelId));
-      } catch (e) {
-        return false;
-      }
     });
 
     const totalPages = Math.ceil(count / limit);
@@ -8631,11 +8608,12 @@ exports.getEmailsByLabel = async (req, res) => {
       message: 'Emails fetched successfully',
       data: {
         label: label,
-        emails: filteredEmails,
+        emails: emails,
         pagination: {
           currentPage: parseInt(page),
           totalPages: totalPages,
-          totalEmails: filteredEmails.length,
+          totalEmails: emails.length,
+          totalEmailsFound: count,
           pageSize: limit
         }
       }
@@ -8669,14 +8647,18 @@ exports.bulkLabelEmails = async (req, res) => {
       });
     }
 
-    // Check if label exists
+    // Check if label exists and is not a sale-inbox label
     const label = await Label.findOne({
-      where: { labelId: labelId }
+      where: { 
+        labelId: labelId,
+        entityType: { [Sequelize.Op.ne]: 'sale-inbox' }, // General labels only
+        isActive: true
+      }
     });
 
     if (!label) {
       return res.status(404).json({
-        message: 'Label not found'
+        message: 'Label not found or is a sale-inbox label (use sale-inbox endpoints for those)'
       });
     }
 
@@ -8685,7 +8667,8 @@ exports.bulkLabelEmails = async (req, res) => {
       where: {
         emailID: { [Sequelize.Op.in]: emailIds },
         masterUserID: masterUserID
-      }
+      },
+      attributes: ['emailID', 'labelId', 'subject']
     });
 
     if (emails.length === 0) {
@@ -8696,44 +8679,38 @@ exports.bulkLabelEmails = async (req, res) => {
 
     let successCount = 0;
     let errorCount = 0;
+    let alreadyProcessedCount = 0;
 
     for (const email of emails) {
       try {
-        // Parse current labels
-        let currentLabels = [];
-        if (email.labels) {
-          try {
-            currentLabels = Array.isArray(email.labels) ? email.labels : JSON.parse(email.labels);
-          } catch (e) {
-            currentLabels = [];
-          }
-        }
-
         let updated = false;
 
         if (operation === 'add') {
-          // Add label if not already present
-          if (!currentLabels.includes(parseInt(labelId))) {
-            currentLabels.push(parseInt(labelId));
+          // Set label if not already set to this label
+          if (email.labelId !== parseInt(labelId)) {
+            await email.update({
+              labelId: parseInt(labelId),
+              updatedAt: new Date()
+            });
             updated = true;
+            successCount++;
+          } else {
+            alreadyProcessedCount++;
           }
         } else if (operation === 'remove') {
-          // Remove label if present
-          const labelIndex = currentLabels.indexOf(parseInt(labelId));
-          if (labelIndex !== -1) {
-            currentLabels.splice(labelIndex, 1);
+          // Remove label if it matches the specified label
+          if (email.labelId === parseInt(labelId)) {
+            await email.update({
+              labelId: null,
+              updatedAt: new Date()
+            });
             updated = true;
+            successCount++;
+          } else {
+            alreadyProcessedCount++;
           }
         }
 
-        if (updated) {
-          await email.update({
-            labels: JSON.stringify(currentLabels),
-            updatedAt: new Date()
-          });
-        }
-
-        successCount++;
       } catch (error) {
         console.error(`Error processing email ${email.emailID}:`, error);
         errorCount++;
@@ -8746,10 +8723,13 @@ exports.bulkLabelEmails = async (req, res) => {
         operation: operation,
         labelId: parseInt(labelId),
         labelName: label.labelName,
+        labelColor: label.labelColor,
+        entityType: label.entityType,
         totalEmails: emailIds.length,
         foundEmails: emails.length,
         successCount: successCount,
-        errorCount: errorCount
+        errorCount: errorCount,
+        alreadyProcessedCount: alreadyProcessedCount
       }
     });
 
