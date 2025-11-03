@@ -32,13 +32,13 @@ const Label = sequelize.define("Label", {
     }
   },
   entityType: {
-    type: DataTypes.ENUM('lead', 'deal', 'person', 'organization', 'all'),
+    type: DataTypes.ENUM('lead', 'deal', 'person', 'organization', 'sale-inbox', 'email', 'contact', 'all'),
     allowNull: false,
     defaultValue: 'all',
     validate: {
       isIn: {
-        args: [['lead', 'deal', 'person', 'organization', 'all']],
-        msg: "Entity type must be one of: lead, deal, person, organization, all"
+        args: [['lead', 'deal', 'person', 'organization', 'sale-inbox', 'email', 'contact', 'all']],
+        msg: "Entity type must be one of: lead, deal, person, organization, sale-inbox, email, contact, all"
       }
     }
   },
