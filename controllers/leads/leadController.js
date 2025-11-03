@@ -7007,15 +7007,28 @@ exports.convertBulkLeadsToDeals = async (req, res) => {
 // ===========================================
 
 /**
- * Get all available labels for leads
+ * Get all available labels for all entity types or specific entity type
  */
 exports.getLeadLabels = async (req, res) => {
   try {
+    const { entityType } = req.query; // Optional query parameter to filter by entity type
+    
+    // Build where clause - if entityType provided, filter by it, otherwise get all active labels
+    let whereClause = { isActive: true };
+    
+    if (entityType) {
+      // Validate entity type
+      const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact', 'organization', 'all'];
+      if (!validEntityTypes.includes(entityType)) {
+        return res.status(400).json({
+          message: `Invalid entity type. Valid types are: ${validEntityTypes.join(', ')}`
+        });
+      }
+      whereClause.entityType = entityType;
+    }
+
     const labels = await Label.findAll({
-      where: {
-        entityType: { [Op.in]: ['lead', 'all'] },
-        isActive: true
-      },
+      where: whereClause,
       attributes: [
         'labelId',
         'labelName', 
@@ -7025,17 +7038,31 @@ exports.getLeadLabels = async (req, res) => {
         'createdBy',
         'creationDate'
       ],
-      order: [['labelName', 'ASC']]
+      order: [['entityType', 'ASC'], ['labelName', 'ASC']] // Order by entity type first, then label name
+    });
+
+    // Group labels by entity type for better organization
+    const labelsByEntityType = {};
+    labels.forEach(label => {
+      if (!labelsByEntityType[label.entityType]) {
+        labelsByEntityType[label.entityType] = [];
+      }
+      labelsByEntityType[label.entityType].push(label);
     });
 
     res.status(200).json({
-      message: "Lead labels fetched successfully",
+      message: entityType ? 
+        `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} labels fetched successfully` :
+        "All labels fetched successfully",
       labels: labels,
-      count: labels.length
+      labelsByEntityType: labelsByEntityType,
+      count: labels.length,
+      entityTypeFilter: entityType || 'all',
+      availableEntityTypes: Object.keys(labelsByEntityType)
     });
 
   } catch (error) {
-    console.error("Error fetching lead labels:", error);
+    console.error("Error fetching labels:", error);
     res.status(500).json({ 
       message: "Internal server error",
       error: error.message 
@@ -7048,7 +7075,7 @@ exports.getLeadLabels = async (req, res) => {
  */
 exports.createLeadLabel = async (req, res) => {
   try {
-    const { labelName, labelColor, description } = req.body;
+    const { labelName, labelColor, description, entityType } = req.body;
 
     // Validation
     if (!labelName || !labelName.trim()) {
@@ -7057,22 +7084,27 @@ exports.createLeadLabel = async (req, res) => {
       });
     }
 
-    // Check if label already exists
+    // Validate and set entityType - default to 'lead' if not provided
+    const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact', 'organization', 'all'];
+    const targetEntityType = entityType && validEntityTypes.includes(entityType) ? entityType : 'lead';
+
+    // Check if label already exists for the same entity type
     const existingLabel = await Label.findOne({
       where: {
         labelName: labelName.trim(),
-        entityType: { [Op.in]: ['lead', 'all'] },
+        entityType: targetEntityType,
         isActive: true
       }
     });
 
     if (existingLabel) {
       return res.status(409).json({
-        message: "A label with this name already exists.",
+        message: `A label with this name already exists for ${targetEntityType} entity.`,
         existingLabel: {
           labelId: existingLabel.labelId,
           labelName: existingLabel.labelName,
-          labelColor: existingLabel.labelColor
+          labelColor: existingLabel.labelColor,
+          entityType: existingLabel.entityType
         }
       });
     }
@@ -7085,7 +7117,7 @@ exports.createLeadLabel = async (req, res) => {
     const newLabel = await Label.create({
       labelName: labelName.trim(),
       labelColor: labelColor || '#007bff', // Default blue color
-      entityType: 'lead',
+      entityType: targetEntityType,
       description: description || null,
       isActive: true,
       createdBy: userName,
@@ -7096,14 +7128,14 @@ exports.createLeadLabel = async (req, res) => {
     // Log audit trail
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
-      "CREATE_LEAD_LABEL",
+      "CREATE_LABEL",
       req.adminId,
-      `Created new lead label: ${labelName}`,
+      `Created new ${targetEntityType} label: ${labelName}`,
       newLabel.labelId
     );
 
     res.status(201).json({
-      message: "Lead label created successfully",
+      message: `${targetEntityType.charAt(0).toUpperCase() + targetEntityType.slice(1)} label created successfully`,
       label: {
         labelId: newLabel.labelId,
         labelName: newLabel.labelName,
@@ -7151,11 +7183,10 @@ exports.updateLeadLabel = async (req, res) => {
       });
     }
 
-    // Find the existing label
+    // Find the existing label - now supports any entity type
     const existingLabel = await Label.findOne({
       where: {
         labelId: labelId.trim(),
-        entityType: { [Op.in]: ['lead', 'all'] },
         isActive: true
       }
     });
@@ -7171,11 +7202,11 @@ exports.updateLeadLabel = async (req, res) => {
     
     // Only update provided fields
     if (labelName && labelName.trim() && labelName.trim() !== existingLabel.labelName) {
-      // Check if new name already exists (excluding current label)
+      // Check if new name already exists for the same entity type (excluding current label)
       const duplicateLabel = await Label.findOne({
         where: {
           labelName: labelName.trim(),
-          entityType: { [Op.in]: ['lead', 'all'] },
+          entityType: existingLabel.entityType, // Check within same entity type
           isActive: true,
           labelId: { [Op.ne]: labelId }
         }
@@ -7183,11 +7214,12 @@ exports.updateLeadLabel = async (req, res) => {
 
       if (duplicateLabel) {
         return res.status(409).json({
-          message: "A label with this name already exists.",
+          message: `A label with this name already exists for ${existingLabel.entityType} entity.`,
           conflictingLabel: {
             labelId: duplicateLabel.labelId,
             labelName: duplicateLabel.labelName,
-            labelColor: duplicateLabel.labelColor
+            labelColor: duplicateLabel.labelColor,
+            entityType: duplicateLabel.entityType
           }
         });
       }
@@ -7238,55 +7270,98 @@ exports.updateLeadLabel = async (req, res) => {
     // Fetch updated label
     const updatedLabel = await Label.findByPk(labelId);
 
-    // If label name was changed, update all leads that have this label
+    // If label name was changed, update all entities that have this label based on entity type
     if (updateData.labelName && updateData.labelName !== existingLabel.labelName) {
-      // Find all leads with the old label name
-      const leadsWithLabel = await Lead.findAll({
-        where: {
-          valueLabels: {
-            [Op.or]: [
-              { [Op.like]: `%,${existingLabel.labelName},%` },
-              { [Op.like]: `${existingLabel.labelName},%` },
-              { [Op.like]: `%,${existingLabel.labelName}` },
-              { [Op.like]: existingLabel.labelName }
-            ]
+      let updatedEntitiesCount = 0;
+      
+      // Update entities based on the label's entity type
+      switch (existingLabel.entityType) {
+        case 'lead':
+          // Find all leads with the old label name
+          const leadsWithLabel = await Lead.findAll({
+            where: {
+              valueLabels: {
+                [Op.or]: [
+                  { [Op.like]: `%,${existingLabel.labelName},%` },
+                  { [Op.like]: `${existingLabel.labelName},%` },
+                  { [Op.like]: `%,${existingLabel.labelName}` },
+                  { [Op.like]: existingLabel.labelName }
+                ]
+              }
+            }
+          });
+
+          // Update each lead's valueLabels
+          for (const lead of leadsWithLabel) {
+            let labels = lead.valueLabels ? lead.valueLabels.split(',').map(l => l.trim()) : [];
+            
+            // Replace old label name with new label name
+            labels = labels.map(label => 
+              label === existingLabel.labelName ? updateData.labelName : label
+            );
+
+            await Lead.update(
+              { valueLabels: labels.join(',') },
+              { where: { leadId: lead.leadId } }
+            );
           }
-        }
-      });
+          updatedEntitiesCount = leadsWithLabel.length;
+          break;
 
-      // Update each lead's valueLabels
-      for (const lead of leadsWithLabel) {
-        let labels = lead.valueLabels ? lead.valueLabels.split(',').map(l => l.trim()) : [];
-        
-        // Replace old label name with new label name
-        labels = labels.map(label => 
-          label === existingLabel.labelName ? updateData.labelName : label
-        );
+        case 'deal':
+          // Similar logic for deals if you have a Deal model with labels
+          // const dealsWithLabel = await Deal.findAll({ ... });
+          // Update deal labels here
+          console.log(`Deal entity label update not implemented yet for label: ${existingLabel.labelName}`);
+          break;
 
-        await Lead.update(
-          { valueLabels: labels.join(',') },
-          { where: { leadId: lead.leadId } }
-        );
+        case 'sale-inbox':
+          // Similar logic for sale-inbox entities
+          console.log(`Sale-inbox entity label update not implemented yet for label: ${existingLabel.labelName}`);
+          break;
+
+        case 'email':
+          // Similar logic for email entities
+          console.log(`Email entity label update not implemented yet for label: ${existingLabel.labelName}`);
+          break;
+
+        case 'contact':
+        case 'organization':
+          // Similar logic for contact/organization entities
+          console.log(`${existingLabel.entityType} entity label update not implemented yet for label: ${existingLabel.labelName}`);
+          break;
+
+        case 'all':
+          // Update all entity types - would need to iterate through all types
+          console.log(`Universal label update not implemented yet for label: ${existingLabel.labelName}`);
+          break;
+
+        default:
+          console.log(`Unknown entity type: ${existingLabel.entityType} for label: ${existingLabel.labelName}`);
+          break;
       }
 
-      console.log(`Updated ${leadsWithLabel.length} leads with new label name: ${existingLabel.labelName} -> ${updateData.labelName}`);
+      if (updatedEntitiesCount > 0) {
+        console.log(`Updated ${updatedEntitiesCount} ${existingLabel.entityType} entities with new label name: ${existingLabel.labelName} -> ${updateData.labelName}`);
+      }
     }
 
     // Log audit trail
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
-      "UPDATE_LEAD_LABEL",
+      "UPDATE_LABEL",
       req.adminId,
-      `Updated lead label: ${existingLabel.labelName} ${updateData.labelName ? `-> ${updateData.labelName}` : ''}`,
+      `Updated ${existingLabel.entityType} label: ${existingLabel.labelName} ${updateData.labelName ? `-> ${updateData.labelName}` : ''}`,
       labelId
     );
 
     res.status(200).json({
-      message: "Lead label updated successfully",
+      message: `${existingLabel.entityType.charAt(0).toUpperCase() + existingLabel.entityType.slice(1)} label updated successfully`,
       previousLabel: {
         labelId: existingLabel.labelId,
         labelName: existingLabel.labelName,
         labelColor: existingLabel.labelColor,
+        entityType: existingLabel.entityType,
         description: existingLabel.description
       },
       updatedLabel: {
@@ -7543,17 +7618,16 @@ exports.getLeadsByLabels = async (req, res) => {
 };
 
 /**
- * Delete a label (soft delete - set isActive to false)
+ * Delete a label (soft delete - set isActive to false) for any entity type
  */
 exports.deleteLeadLabel = async (req, res) => {
   try {
     const { labelId } = req.params;
 
-    // Find the label
+    // Find the label - now supports any entity type
     const label = await Label.findOne({
       where: {
         labelId,
-        entityType: { [Op.in]: ['lead', 'all'] },
         isActive: true
       }
     });
@@ -7562,12 +7636,64 @@ exports.deleteLeadLabel = async (req, res) => {
       return res.status(404).json({ message: "Label not found or already deleted." });
     }
 
-    // Check if label is being used by any leads
-    const leadsUsingLabel = await Lead.count({
-      where: {
-        valueLabels: { [Op.like]: `%${label.labelName}%` }
-      }
-    });
+    // Check if label is being used by entities based on entity type
+    let entitiesUsingLabel = 0;
+    let entityTypeDescription = '';
+    
+    switch (label.entityType) {
+      case 'lead':
+        entitiesUsingLabel = await Lead.count({
+          where: {
+            valueLabels: { [Op.like]: `%${label.labelName}%` }
+          }
+        });
+        entityTypeDescription = 'leads';
+        break;
+        
+      case 'deal':
+        // Add deal entity check when Deal model has labels
+        // entitiesUsingLabel = await Deal.count({
+        //   where: { valueLabels: { [Op.like]: `%${label.labelName}%` } }
+        // });
+        entityTypeDescription = 'deals';
+        console.log(`Deal entity label usage check not implemented yet for label: ${label.labelName}`);
+        break;
+        
+      case 'sale-inbox':
+        // Add sale-inbox entity check when model has labels
+        entityTypeDescription = 'sale-inbox items';
+        console.log(`Sale-inbox entity label usage check not implemented yet for label: ${label.labelName}`);
+        break;
+        
+      case 'email':
+        // Add email entity check when Email model has labels
+        entityTypeDescription = 'emails';
+        console.log(`Email entity label usage check not implemented yet for label: ${label.labelName}`);
+        break;
+        
+      case 'contact':
+      case 'organization':
+        // Add contact/organization entity check when models have labels
+        entityTypeDescription = `${label.entityType}s`;
+        console.log(`${label.entityType} entity label usage check not implemented yet for label: ${label.labelName}`);
+        break;
+        
+      case 'all':
+        // Check all entity types when label is universal
+        entitiesUsingLabel = await Lead.count({
+          where: {
+            valueLabels: { [Op.like]: `%${label.labelName}%` }
+          }
+        });
+        // Add other entity counts here when implemented
+        entityTypeDescription = 'entities';
+        break;
+        
+      default:
+        entityTypeDescription = `${label.entityType} entities`;
+        console.log(`Unknown entity type: ${label.entityType} for label: ${label.labelName}`);
+        break;
+    }
 
     // Get user info for audit
     const user = await MasterUser.findByPk(req.adminId);
@@ -7585,24 +7711,28 @@ exports.deleteLeadLabel = async (req, res) => {
     // Log audit trail
     await logAuditTrail(
       PROGRAMS.LEAD_MANAGEMENT,
-      "DELETE_LEAD_LABEL",
+      "DELETE_LABEL",
       req.adminId,
-      `Deleted lead label: ${label.labelName} (was used by ${leadsUsingLabel} leads)`,
+      `Deleted ${label.entityType} label: ${label.labelName} (was used by ${entitiesUsingLabel} ${entityTypeDescription})`,
       labelId
     );
 
     res.status(200).json({
-      message: "Lead label deleted successfully",
+      message: `${label.entityType.charAt(0).toUpperCase() + label.entityType.slice(1)} label deleted successfully`,
       deletedLabel: {
         labelId: label.labelId,
         labelName: label.labelName,
-        leadsAffected: leadsUsingLabel
+        entityType: label.entityType,
+        entitiesAffected: entitiesUsingLabel,
+        entityTypeDescription: entityTypeDescription
       },
-      note: leadsUsingLabel > 0 ? `This label was being used by ${leadsUsingLabel} leads. You may want to update those leads.` : null
+      note: entitiesUsingLabel > 0 ? 
+        `This label was being used by ${entitiesUsingLabel} ${entityTypeDescription}. You may want to update those ${entityTypeDescription}.` : 
+        `This label was not being used by any ${entityTypeDescription}.`
     });
 
   } catch (error) {
-    console.error("Error deleting lead label:", error);
+    console.error("Error deleting label:", error);
     res.status(500).json({ 
       message: "Internal server error",
       error: error.message 
