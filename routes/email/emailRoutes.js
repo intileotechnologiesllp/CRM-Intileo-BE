@@ -77,5 +77,6 @@ router.get("/search-leads-deals", verifyToken, validatePrivilege(4, "view"), ema
 // Email entity linking
 router.post("/link-to-entity", verifyToken, validatePrivilege(4, "edit"), emailController.linkEmailToEntity);
 router.post("/unlink-from-entity", verifyToken, validatePrivilege(4, "edit"), emailController.unlinkEmailFromEntity);
-
+router.post("/link-labels", verifyToken, validatePrivilege(4, "edit"), emailController.linkEmailToSaleInboxLabel);
+router.post("/unlink-labels", verifyToken, validatePrivilege(4, "edit"), emailController.unlinkEmailFromSaleInboxLabel);
 module.exports = router;

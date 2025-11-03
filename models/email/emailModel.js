@@ -140,6 +140,11 @@ const Email = sequelize.define(
       allowNull: true,
       comment: 'Email address of the user who owns this email (for privacy filtering)'
     },
+    labelId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'ID of the single label associated with this email'
+    },
   },
   {
     indexes: [
