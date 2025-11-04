@@ -5071,6 +5071,331 @@ exports.getPersonsByOrganization = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Helper function to enrich persons with timeline activities (Pipedrive-style)
+const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, endDate, userIdRequesting, userRole) => {
+  try {
+    console.log('[DEBUG] enrichPersonsWithTimeline called with:', {
+      personsCount: persons.length,
+      activityFilters,
+      startDate,
+      endDate,
+      userIdRequesting,
+      userRole
+    });
+
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+    
+    // Import models dynamically to avoid circular dependencies
+    const Activity = require("../../models/activity/activityModel");
+    const Email = require("../../models/email/emailModel");
+    const Deal = require("../../models/deals/dealsModels");
+    
+    const personIds = persons.map(p => p.personId).filter(Boolean);
+    const orgIds = persons.map(p => p.leadOrganizationId).filter(Boolean);
+    
+    console.log('[DEBUG] Extracted IDs:', { personIds, orgIds });
+    
+    if (personIds.length === 0) {
+      console.log('[DEBUG] No person IDs found, returning original persons');
+      return persons;
+    }
+
+    const timelineActivities = {};
+    
+    // Initialize timeline for each person
+    personIds.forEach(personId => {
+      timelineActivities[personId] = {
+        deals: [],
+        emails: [],
+        notes: [],
+        meeting: [],
+        task: [],
+        deadline: [],
+        timeline: []
+      };
+    });
+
+    console.log('[DEBUG] Initialized timeline activities for persons:', Object.keys(timelineActivities));
+
+    // Fetch Deals if requested
+    if (activityFilters.includes('deals')) {
+      console.log('[DEBUG] Fetching deals...');
+      let dealWhere = {
+        [Op.or]: [
+          { personId: { [Op.in]: personIds } },
+          { leadOrganizationId: { [Op.in]: orgIds } }
+        ]
+      };
+      
+      // Add role-based filtering for deals
+      if (userRole !== 'admin') {
+        dealWhere = {
+          [Op.and]: [
+            dealWhere,
+            { [Op.or]: [{ masterUserID: userIdRequesting }, { ownerId: userIdRequesting }] }
+          ]
+        };
+      }
+
+      console.log('[DEBUG] Deal where clause:', JSON.stringify(dealWhere, null, 2));
+
+      const deals = await Deal.findAll({
+        where: dealWhere,
+        attributes: [
+          'dealId', 'title', 'value', 'currency', 'pipelineStage', 'status',
+          'personId', 'leadOrganizationId', 'createdAt', 'updatedAt', 'expectedCloseDate'
+        ],
+        raw: true
+      });
+
+      console.log('[DEBUG] Found deals:', deals.length);
+      if (deals.length > 0) {
+        console.log('[DEBUG] Sample deal:', deals[0]);
+      }
+
+      deals.forEach(deal => {
+        const timelineItem = {
+          type: 'deal',
+          id: deal.dealId,
+          title: deal.title,
+          value: deal.value,
+          currency: deal.currency,
+          stage: deal.pipelineStage,
+          status: deal.status,
+          date: deal.createdAt,
+          expectedCloseDate: deal.expectedCloseDate,
+          quarter: getQuarter(deal.createdAt)
+        };
+
+        if (deal.personId && timelineActivities[deal.personId]) {
+          timelineActivities[deal.personId].deals.push(timelineItem);
+          timelineActivities[deal.personId].timeline.push(timelineItem);
+          console.log('[DEBUG] Added deal to person:', deal.personId);
+        }
+        
+        // Also add to persons in the same organization
+        if (deal.leadOrganizationId) {
+          personIds.forEach(personId => {
+            const person = persons.find(p => p.personId === personId);
+            if (person && person.leadOrganizationId === deal.leadOrganizationId && !deal.personId) {
+              timelineActivities[personId].deals.push(timelineItem);
+              timelineActivities[personId].timeline.push(timelineItem);
+              console.log('[DEBUG] Added deal to person via organization:', personId);
+            }
+          });
+        }
+      });
+    }
+
+    // Fetch Emails if requested
+    if (activityFilters.includes('emails')) {
+      let emailWhere = {
+        createdAt: { [Op.between]: [startDate, endDate] },
+        masterUserID: userRole === 'admin' ? { [Op.ne]: null } : userIdRequesting
+      };
+
+      const emails = await Email.findAll({
+        where: emailWhere,
+        attributes: [
+          'emailID', 'subject', 'sender', 'senderName', 'recipient', 
+          'folder', 'isRead', 'createdAt', 'masterUserID'
+        ],
+        raw: true
+      });
+
+      // Match emails to persons by email address
+      emails.forEach(email => {
+        const timelineItem = {
+          type: 'email',
+          id: email.emailID,
+          subject: email.subject,
+          sender: email.sender,
+          senderName: email.senderName,
+          recipient: email.recipient,
+          folder: email.folder,
+          isRead: email.isRead,
+          date: email.createdAt,
+          quarter: getQuarter(email.createdAt)
+        };
+
+        // Match emails to persons by email address
+        personIds.forEach(personId => {
+          const person = persons.find(p => p.personId === personId);
+          if (person && person.email) {
+            const personEmail = person.email.toLowerCase();
+            const emailSender = (email.sender || '').toLowerCase();
+            const emailRecipient = (email.recipient || '').toLowerCase();
+            
+            if (emailSender.includes(personEmail) || emailRecipient.includes(personEmail)) {
+              timelineActivities[personId].emails.push(timelineItem);
+              timelineActivities[personId].timeline.push(timelineItem);
+            }
+          }
+        });
+      });
+    }
+
+    // Fetch Activities (Meeting, Task, Deadline, Notes) if requested
+    const activityTypes = activityFilters.filter(f => ['meeting', 'task', 'deadline', 'notes'].includes(f));
+    if (activityTypes.length > 0) {
+      let activityWhere = {
+        [Op.or]: [
+          { personId: { [Op.in]: personIds } },
+          { leadOrganizationId: { [Op.in]: orgIds } }
+        ],
+        startDateTime: { [Op.between]: [startDate, endDate] }
+      };
+
+      // Add role-based filtering for activities
+      if (userRole !== 'admin') {
+        activityWhere = {
+          ...activityWhere,
+          [Op.and]: [
+            activityWhere,
+            { [Op.or]: [{ masterUserID: userIdRequesting }, { assignedTo: userIdRequesting }] }
+          ]
+        };
+      }
+
+      const activities = await Activity.findAll({
+        where: activityWhere,
+        attributes: [
+          'activityId', 'type', 'subject', 'startDateTime', 'endDateTime',
+          'priority', 'location', 'notes', 'isDone', 'dueDate',
+          'personId', 'leadOrganizationId', 'createdAt'
+        ],
+        raw: true
+      });
+
+      activities.forEach(activity => {
+        const activityType = activity.type.toLowerCase();
+        
+        const timelineItem = {
+          type: activityType,
+          id: activity.activityId,
+          subject: activity.subject,
+          startDateTime: activity.startDateTime,
+          endDateTime: activity.endDateTime,
+          priority: activity.priority,
+          location: activity.location,
+          notes: activity.notes,
+          isDone: activity.isDone,
+          dueDate: activity.dueDate,
+          date: activity.startDateTime || activity.createdAt,
+          quarter: getQuarter(activity.startDateTime || activity.createdAt)
+        };
+
+        if (activity.personId && timelineActivities[activity.personId]) {
+          // Add to specific activity type if it's in the filter
+          if (activityFilters.includes(activityType)) {
+            timelineActivities[activity.personId][activityType].push(timelineItem);
+          }
+          
+          // Add to notes category if activity has notes and notes filter is active
+          if (activityFilters.includes('notes') && activity.notes) {
+            timelineActivities[activity.personId].notes.push(timelineItem);
+          }
+          
+          // Add to deadline category if activity has dueDate and deadline filter is active
+          if (activityFilters.includes('deadline') && activity.dueDate) {
+            timelineActivities[activity.personId].deadline.push(timelineItem);
+          }
+          
+          timelineActivities[activity.personId].timeline.push(timelineItem);
+        }
+        
+        // Also add to persons in the same organization
+        if (activity.leadOrganizationId) {
+          personIds.forEach(personId => {
+            const person = persons.find(p => p.personId === personId);
+            if (person && person.leadOrganizationId === activity.leadOrganizationId && !activity.personId) {
+              if (activityFilters.includes(activityType)) {
+                timelineActivities[personId][activityType].push(timelineItem);
+              }
+              
+              if (activityFilters.includes('notes') && activity.notes) {
+                timelineActivities[personId].notes.push(timelineItem);
+              }
+              
+              if (activityFilters.includes('deadline') && activity.dueDate) {
+                timelineActivities[personId].deadline.push(timelineItem);
+              }
+              
+              timelineActivities[personId].timeline.push(timelineItem);
+            }
+          });
+        }
+      });
+    }
+
+    // Sort timeline activities by date for each person
+    Object.keys(timelineActivities).forEach(personId => {
+      Object.keys(timelineActivities[personId]).forEach(key => {
+        if (Array.isArray(timelineActivities[personId][key])) {
+          timelineActivities[personId][key].sort((a, b) => new Date(b.date) - new Date(a.date));
+        }
+      });
+    });
+
+    console.log('[DEBUG] Final timeline activities summary:');
+    Object.keys(timelineActivities).forEach(personId => {
+      const activities = timelineActivities[personId];
+      console.log(`[DEBUG] Person ${personId}:`, {
+        deals: activities.deals.length,
+        emails: activities.emails.length,
+        notes: activities.notes.length,
+        meeting: activities.meeting.length,
+        task: activities.task.length,
+        deadline: activities.deadline.length,
+        timeline: activities.timeline.length
+      });
+    });
+
+    // Attach timeline data to persons
+    const enrichedPersons = persons.map(person => ({
+      ...person,
+      timelineActivities: timelineActivities[person.personId] || {
+        deals: [],
+        emails: [],
+        notes: [],
+        meeting: [],
+        task: [],
+        deadline: [],
+        timeline: []
+      }
+    }));
+
+    console.log('[DEBUG] Returning enriched persons:', enrichedPersons.length);
+    console.log('[DEBUG] Sample enriched person:', enrichedPersons[0] ? {
+      personId: enrichedPersons[0].personId,
+      contactPerson: enrichedPersons[0].contactPerson,
+      hasTimelineActivities: !!enrichedPersons[0].timelineActivities,
+      timelineKeys: enrichedPersons[0].timelineActivities ? Object.keys(enrichedPersons[0].timelineActivities) : []
+    } : 'No persons found');
+
+    return enrichedPersons;
+
+  } catch (error) {
+    console.error('Error enriching persons with timeline:', error);
+    // Return persons without timeline data if there's an error
+    return persons;
+  }
+};
+
+// Helper function to determine quarter from date
+const getQuarter = (date) => {
+  const d = new Date(date);
+  const month = d.getMonth() + 1; // getMonth() returns 0-11
+  const year = d.getFullYear();
+  
+  if (month <= 3) return `Q1 ${year}`;
+  if (month <= 6) return `Q2 ${year}`;
+  if (month <= 9) return `Q3 ${year}`;
+  return `Q4 ${year}`;
+};
+
 exports.getPersonsAndOrganizations = async (req, res) => {
   try {
     // Import required models at the beginning of the function
@@ -5099,6 +5424,15 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     const orgLimit = parseInt(req.query.orgLimit) || 20;
     const orgOffset = (orgPage - 1) * orgLimit;
     const orgSearch = req.query.orgSearch || "";
+
+    // Timeline activity filters - similar to Pipedrive interface
+    const activityFilters = req.query.activityFilters ? 
+      (Array.isArray(req.query.activityFilters) ? req.query.activityFilters : req.query.activityFilters.split(',')) 
+      : ['deals', 'emails', 'notes', 'meeting', 'task', 'deadline'];
+    
+    const includeTimeline = req.query.includeTimeline === 'true' || req.query.includeTimeline === true;
+    const timelineStartDate = req.query.timelineStartDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year ago
+    const timelineEndDate = req.query.timelineEndDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year from now
 
     // Dynamic filter config (from body or query) -- now supports filterId as number or object
     const LeadFilter = require("../../models/leads/leadFiltersModel");
@@ -6376,6 +6710,29 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     // Filter persons based on person column preferences
     const filteredPersons = filterDataByColumnPreference(persons, personColumnPref, 'person');
 
+    console.log('[DEBUG] Timeline enrichment check:', {
+      includeTimeline,
+      filteredPersonsLength: filteredPersons.length,
+      activityFilters
+    });
+
+    // Fetch timeline activities for persons if requested
+    let personsWithTimeline = filteredPersons;
+    if (includeTimeline && filteredPersons.length > 0) {
+      console.log('[DEBUG] Calling enrichPersonsWithTimeline...');
+      personsWithTimeline = await enrichPersonsWithTimeline(
+        filteredPersons, 
+        activityFilters, 
+        timelineStartDate, 
+        timelineEndDate,
+        req.adminId,
+        req.role
+      );
+      console.log('[DEBUG] Timeline enrichment completed, returned persons:', personsWithTimeline.length);
+    } else {
+      console.log('[DEBUG] Timeline enrichment skipped - includeTimeline:', includeTimeline, 'filteredPersonsLength:', filteredPersons.length);
+    }
+
     // Similarly filter organizations and add organization data
     let filteredOrganizations = [];
     if (organizations && organizations.length > 0) {
@@ -6394,15 +6751,18 @@ exports.getPersonsAndOrganizations = async (req, res) => {
 
     // Return both filtered datasets in separate arrays
     res.status(200).json({
-      totalRecords: filteredPersons.length + filteredOrganizations.length,
-      totalPages: Math.ceil((filteredPersons.length + filteredOrganizations.length) / personLimit),
+      totalRecords: personsWithTimeline.length + filteredOrganizations.length,
+      totalPages: Math.ceil((personsWithTimeline.length + filteredOrganizations.length) / personLimit),
       currentPage: personPage,
-      persons: filteredPersons, // Filtered person data with entity: 'person'
+      persons: personsWithTimeline, // Filtered person data with entity: 'person' and timeline activities
       organizations: filteredOrganizations, // Filtered organization data with entity: 'organization'
+      activityFilters: activityFilters, // Active timeline filters
+      timelineEnabled: includeTimeline, // Whether timeline data was included
+      timelineRange: includeTimeline ? { startDate: timelineStartDate, endDate: timelineEndDate } : null,
       summary: {
-        personCount: filteredPersons.length,
+        personCount: personsWithTimeline.length,
         organizationCount: filteredOrganizations.length,
-        totalCount: filteredPersons.length + filteredOrganizations.length
+        totalCount: personsWithTimeline.length + filteredOrganizations.length
       }
     });
   } catch (error) {
