@@ -1527,6 +1527,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const CustomField = require("../../models/customFieldModel");
     const CustomFieldValue = require("../../models/customFieldValueModel");
     const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
 
     // Pagination and search for organizations
     const orgPage = parseInt(req.query.orgPage) || 1;
@@ -1534,9 +1535,53 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     const orgOffset = (orgPage - 1) * orgLimit;
     const orgSearch = req.query.orgSearch || "";
 
+    // Pagination and search for persons
+    const personPage = parseInt(req.query.personPage) || 1;
+    const personLimit = parseInt(req.query.personLimit) || 20;
+    const personOffset = (personPage - 1) * personLimit;
+    const personSearch = req.query.personSearch || "";
+
     // Sorting parameters
     const sortBy = req.query.sortBy || "createdAt";
     const sortOrder = req.query.sortOrder || "DESC";
+
+    // Timeline activity filters - similar to Pipedrive interface
+    const activityFilters = req.query.activityFilters ? 
+      (Array.isArray(req.query.activityFilters) ? req.query.activityFilters : req.query.activityFilters.split(',')) 
+      : ['deals', 'emails', 'notes', 'meeting', 'task', 'deadline'];
+    
+    const includeTimeline = req.query.includeTimeline === 'true' || req.query.includeTimeline === true;
+    
+    // Timeline granularity options (weekly, monthly, quarterly)
+    const timelineGranularity = req.query.timelineGranularity || 'quarterly'; // weekly, monthly, quarterly
+    
+    // Date range filtering options (similar to Pipedrive's dropdown)
+    const dateRangeFilter = req.query.dateRangeFilter || '12-months-back'; // 1-month-back, 3-months-back, 6-months-back, 12-months-back
+    
+    // Calculate start date based on date range filter
+    let calculatedStartDate;
+    const now = new Date();
+    switch (dateRangeFilter) {
+      case '1-month-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        break;
+      case '3-months-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+        break;
+      case '6-months-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+        break;
+      case '12-months-back':
+      default:
+        calculatedStartDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        break;
+    }
+    
+    const timelineStartDate = req.query.timelineStartDate || calculatedStartDate.toISOString();
+    const timelineEndDate = req.query.timelineEndDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year from now
+    
+    // Overdue activities tracking flag
+    const includeOverdueCount = req.query.includeOverdueCount === 'true' || req.query.includeOverdueCount === true || includeTimeline;
 
     // Dynamic filter config (from body or query)
     const LeadFilter = require("../../models/leads/leadFiltersModel");
@@ -1982,13 +2027,31 @@ exports.getOrganizationsAndPersons = async (req, res) => {
           }
         });
       }
-    } else if (orgSearch) {
+    } else {
       // Fallback to search logic if no filterConfig
-      organizationWhere[Op.or] = [
-        { organization: { [Op.like]: `%${orgSearch}%` } },
-        { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
-        { address: { [Op.like]: `%${orgSearch}%` } },
-      ];
+      if (orgSearch) {
+        organizationWhere[Op.or] = [
+          { organization: { [Op.like]: `%${orgSearch}%` } },
+          { organizationLabels: { [Op.like]: `%${orgSearch}%` } },
+          { address: { [Op.like]: `%${orgSearch}%` } },
+        ];
+      }
+      
+      if (personSearch) {
+        // If personSearch is a single character, search by first letter
+        if (personSearch.length === 1) {
+          personWhere.contactPerson = { [Op.like]: `${personSearch}%` };
+        } else {
+          personWhere[Op.or] = [
+            { contactPerson: { [Op.like]: `%${personSearch}%` } },
+            { email: { [Op.like]: `%${personSearch}%` } },
+            { phone: { [Op.like]: `%${personSearch}%` } },
+            { jobTitle: { [Op.like]: `%${personSearch}%` } },
+            { personLabels: { [Op.like]: `%${personSearch}%` } },
+            { organization: { [Op.like]: `%${personSearch}%` } },
+          ];
+        }
+      }
     }
 
     // Debug: log all where clauses
@@ -2553,14 +2616,27 @@ exports.getOrganizationsAndPersons = async (req, res) => {
 
     const orgIds = organizations.map((o) => o.leadOrganizationId);
 
-    // Merge personWhere from filters with role-based filtering - same as getLeads API
+    // Merge personWhere from filters with role-based filtering - similar to getPersonsAndOrganizations API
     let finalPersonWhere = { ...personWhere };
 
-    // Fetch persons using EXACT same logic as getLeads API
-    let persons = [];
-    if (req.role === "admin") {
-      persons = await Person.findAll({
+    // Fetch persons using pagination logic similar to getPersonsAndOrganizations API
+    let personQueryResult = { count: 0, rows: [] };
+    if (req.role === "admin" && !req.query.masterUserID) {
+      personQueryResult = await Person.findAndCountAll({
         where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
+        raw: true,
+      });
+    } else if (req.query.masterUserID) {
+      // If masterUserID is provided, filter by that as well
+      finalPersonWhere.masterUserID = req.query.masterUserID;
+      personQueryResult = await Person.findAndCountAll({
+        where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
         raw: true,
       });
     } else {
@@ -2580,11 +2656,21 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         finalPersonWhere = roleBasedPersonFilter;
       }
 
-      persons = await Person.findAll({
+      personQueryResult = await Person.findAndCountAll({
         where: finalPersonWhere,
+        order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
         raw: true,
       });
     }
+
+    // Extract persons and total count from query result
+    let persons = personQueryResult.rows;
+    const totalPersonsCount = personQueryResult.count;
+
+    console.log("[DEBUG] persons count:", persons.length);
+    console.log("[DEBUG] total persons count from DB:", totalPersonsCount);
 
     // Build a map: { [leadOrganizationId]: [ { personId, contactPerson }, ... ] } - same as getLeads API
     const orgPersonsMap = {};
@@ -2737,14 +2823,139 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       return { ...o, ...customFields };
     });
 
-    // Return organizations in EXACT same format as getLeads API
+    // Get the persons associated with the organizations for timeline enrichment
+    let personsForTimeline = [];
+    
+    // Fetch and apply person column preferences for filtering
+    const personColumnPref = await PersonColumnPreference.findOne({ where: {} });
+    
+    // Helper function to filter person data based on column preferences
+    const filterPersonDataByColumnPreference = (personData, columnPreference) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return personData;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = ['personId', 'leadOrganizationId', 'organization', 'ownerName', 'contactPerson'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return personData.map(person => {
+        const filteredPerson = {};
+        finalAllowedFields.forEach(field => {
+          if (person.hasOwnProperty(field)) {
+            filteredPerson[field] = person[field];
+          }
+        });
+        return filteredPerson;
+      });
+    };
+
+    // Apply person column filtering to all persons
+    persons = filterPersonDataByColumnPreference(persons, personColumnPref);
+    
+    if (includeTimeline && persons.length > 0) {
+      console.log('[DEBUG] Preparing persons for timeline enrichment in getOrganizationsAndPersons...');
+      
+      // Format persons for timeline enrichment
+      personsForTimeline = persons.map(p => ({
+        ...p,
+        ownerName: ownerMap[p.ownerId] || null,
+      }));
+
+      console.log('[DEBUG] Calling enrichPersonsWithTimeline for', personsForTimeline.length, 'persons...');
+      
+      try {
+        const enrichedPersons = await enrichPersonsWithTimeline(
+          personsForTimeline, 
+          activityFilters, 
+          timelineStartDate, 
+          timelineEndDate,
+          req.adminId,
+          req.role,
+          timelineGranularity,
+          includeOverdueCount
+        );
+
+        console.log('[DEBUG] Timeline enrichment completed for', enrichedPersons.length, 'persons');
+
+        // Update the persons array in orgPersonsMap with timeline data
+        enrichedPersons.forEach(enrichedPerson => {
+          if (enrichedPerson.leadOrganizationId && orgPersonsMap[enrichedPerson.leadOrganizationId]) {
+            // Find and update the person in the organization's persons array
+            const personIndex = orgPersonsMap[enrichedPerson.leadOrganizationId].findIndex(
+              p => p.personId === enrichedPerson.personId
+            );
+            if (personIndex !== -1) {
+              orgPersonsMap[enrichedPerson.leadOrganizationId][personIndex] = {
+                ...orgPersonsMap[enrichedPerson.leadOrganizationId][personIndex],
+                timelineActivities: enrichedPerson.timelineActivities,
+                overdueStats: enrichedPerson.overdueStats,
+                availableActivityTypes: enrichedPerson.availableActivityTypes
+              };
+            }
+          }
+        });
+
+        // Update organizations with enriched persons data
+        organizations = organizations.map(org => ({
+          ...org,
+          persons: orgPersonsMap[org.leadOrganizationId] || []
+        }));
+
+        console.log('[DEBUG] Updated organizations with timeline-enriched persons');
+      } catch (error) {
+        console.error('[DEBUG] Error enriching persons with timeline:', error);
+        // Continue without timeline data if enrichment fails
+      }
+    } else {
+      console.log('[DEBUG] Timeline enrichment skipped - includeTimeline:', includeTimeline, 'personsLength:', persons.length);
+    }
+
+    // Return organizations in enhanced format with timeline support and person pagination
     res.status(200).json({
+      // Organization pagination metadata
       totalRecords: organizations.length,
       totalPages: Math.ceil(organizations.length / orgLimit),
       currentPage: orgPage,
       sortBy: finalSortBy,
       sortOrder: finalSortOrder,
-      organizations: organizations, // Return organizations exactly as they are in getLeads API
+      organizations: organizations, // Return organizations with timeline-enriched persons
+      
+      // Person pagination metadata (similar to getPersonsAndOrganizations)
+      personPagination: {
+        totalRecords: totalPersonsCount,
+        totalPages: Math.ceil(totalPersonsCount / personLimit),
+        currentPage: personPage,
+        limit: personLimit
+      },
+      
+      // Timeline metadata (similar to getPersonsAndOrganizations)
+      activityFilters: activityFilters, // Active timeline filters
+      timelineEnabled: includeTimeline, // Whether timeline data was included
+      timelineRange: includeTimeline ? { startDate: timelineStartDate, endDate: timelineEndDate } : null,
+      timelineGranularity: timelineGranularity, // weekly, monthly, quarterly
+      dateRangeFilter: dateRangeFilter, // 1-month-back, 3-months-back, 6-months-back, 12-months-back
+      overdueTrackingEnabled: includeOverdueCount, // Whether overdue activity counting is enabled
+      
+      // Summary statistics
+      summary: {
+        currentPageOrganizationCount: organizations.length,
+        currentPagePersonCount: persons.length,
+        totalOrganizationCount: organizations.length,
+        totalPersonCount: totalPersonsCount,
+        totalDatabaseCount: organizations.length + totalPersonsCount
+      }
     });
   } catch (error) {
     console.error("Error fetching organizations and persons:", error);
@@ -5093,6 +5304,7 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
     const Activity = require("../../models/activity/activityModel");
     const Email = require("../../models/email/emailModel");
     const Deal = require("../../models/deals/dealsModels");
+    const ActivityType = require("../../models/activity/activityTypeModel");
     
     const personIds = persons.map(p => p.personId).filter(Boolean);
     const orgIds = persons.map(p => p.leadOrganizationId).filter(Boolean);
@@ -5104,20 +5316,49 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       return persons;
     }
 
+    // Fetch all active ActivityTypes from database
+    const activityTypes = await ActivityType.findAll({
+      where: { isActive: true },
+      attributes: ['activityTypeId', 'name', 'icon'],
+      raw: true
+    });
+    
+    console.log('[DEBUG] Found ActivityTypes:', activityTypes.length);
+    
+    // Create maps for quick lookup
+    const activityTypeMap = {};
+    const activityTypeCategories = ['deals', 'emails', 'notes']; // Static categories
+    
+    activityTypes.forEach(type => {
+      const typeName = type.name.toLowerCase();
+      activityTypeMap[typeName] = type;
+      if (!activityTypeCategories.includes(typeName)) {
+        activityTypeCategories.push(typeName);
+      }
+    });
+    
+    console.log('[DEBUG] Activity type categories:', activityTypeCategories);
+
     const timelineActivities = {};
     const overdueStats = {};
     
-    // Initialize timeline for each person
+    // Initialize timeline for each person with dynamic categories
     personIds.forEach(personId => {
-      timelineActivities[personId] = {
+      const personTimeline = {
         deals: [],
         emails: [],
         notes: [],
-        meeting: [],
-        task: [],
-        deadline: [],
         timeline: []
       };
+      
+      // Add dynamic activity type categories
+      activityTypes.forEach(type => {
+        const typeName = type.name.toLowerCase();
+        personTimeline[typeName] = [];
+      });
+      
+      timelineActivities[personId] = personTimeline;
+      
       overdueStats[personId] = {
         overdueCount: 0,
         totalActivitiesCount: 0,
@@ -5245,9 +5486,13 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       });
     }
 
-    // Fetch Activities (Meeting, Task, Deadline, Notes) if requested
-    const activityTypes = activityFilters.filter(f => ['meeting', 'task', 'deadline', 'notes'].includes(f));
-    if (activityTypes.length > 0) {
+    // Fetch Activities with dynamic types if requested
+    const requestedActivityTypes = activityFilters.filter(f => 
+      !['deals', 'emails', 'notes'].includes(f) && 
+      (activityTypeCategories.includes(f) || f === 'meeting' || f === 'task' || f === 'deadline')
+    );
+    
+    if (requestedActivityTypes.length > 0) {
       let activityWhere = {
         [Op.or]: [
           { personId: { [Op.in]: personIds } },
@@ -5277,6 +5522,8 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
         raw: true
       });
 
+      console.log('[DEBUG] Found activities:', activities.length);
+
       activities.forEach(activity => {
         const activityType = activity.type.toLowerCase();
         
@@ -5284,6 +5531,13 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
         const now = new Date();
         const dueDate = activity.dueDate ? new Date(activity.dueDate) : null;
         const isOverdue = dueDate && dueDate < now && !activity.isDone;
+        
+        // Get ActivityType metadata
+        const activityTypeMeta = activityTypeMap[activityType] || {
+          activityTypeId: null,
+          name: activity.type,
+          icon: 'default'
+        };
         
         const timelineItem = {
           type: activityType,
@@ -5298,7 +5552,13 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
           dueDate: activity.dueDate,
           date: activity.startDateTime || activity.createdAt,
           quarter: getQuarter(activity.startDateTime || activity.createdAt, granularity),
-          isOverdue: isOverdue
+          isOverdue: isOverdue,
+          // Add ActivityType metadata
+          activityTypeMeta: {
+            id: activityTypeMeta.activityTypeId,
+            name: activityTypeMeta.name,
+            icon: activityTypeMeta.icon
+          }
         };
 
         if (activity.personId && timelineActivities[activity.personId]) {
@@ -5311,8 +5571,8 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
             }
           }
           
-          // Add to specific activity type if it's in the filter
-          if (activityFilters.includes(activityType)) {
+          // Add to specific activity type category if it exists in timeline structure
+          if (timelineActivities[activity.personId][activityType]) {
             timelineActivities[activity.personId][activityType].push(timelineItem);
           }
           
@@ -5323,6 +5583,10 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
           
           // Add to deadline category if activity has dueDate and deadline filter is active
           if (activityFilters.includes('deadline') && activity.dueDate) {
+            // Create deadline category if not exists
+            if (!timelineActivities[activity.personId].deadline) {
+              timelineActivities[activity.personId].deadline = [];
+            }
             timelineActivities[activity.personId].deadline.push(timelineItem);
           }
           
@@ -5343,7 +5607,8 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
                 }
               }
               
-              if (activityFilters.includes(activityType)) {
+              // Add to specific activity type category if it exists
+              if (timelineActivities[personId][activityType]) {
                 timelineActivities[personId][activityType].push(timelineItem);
               }
               
@@ -5352,6 +5617,9 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
               }
               
               if (activityFilters.includes('deadline') && activity.dueDate) {
+                if (!timelineActivities[personId].deadline) {
+                  timelineActivities[personId].deadline = [];
+                }
                 timelineActivities[personId].deadline.push(timelineItem);
               }
               
@@ -5374,36 +5642,56 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
     console.log('[DEBUG] Final timeline activities summary:');
     Object.keys(timelineActivities).forEach(personId => {
       const activities = timelineActivities[personId];
-      console.log(`[DEBUG] Person ${personId}:`, {
+      const summary = {
         deals: activities.deals.length,
         emails: activities.emails.length,
         notes: activities.notes.length,
-        meeting: activities.meeting.length,
-        task: activities.task.length,
-        deadline: activities.deadline.length,
         timeline: activities.timeline.length
+      };
+      
+      // Add dynamic activity type counts
+      activityTypes.forEach(type => {
+        const typeName = type.name.toLowerCase();
+        if (activities[typeName]) {
+          summary[typeName] = activities[typeName].length;
+        }
       });
+      
+      console.log(`[DEBUG] Person ${personId}:`, summary);
     });
 
     // Attach timeline data and overdue statistics to persons
-    const enrichedPersons = persons.map(person => ({
-      ...person,
-      timelineActivities: timelineActivities[person.personId] || {
+    const enrichedPersons = persons.map(person => {
+      const baseTimeline = {
         deals: [],
         emails: [],
         notes: [],
-        meeting: [],
-        task: [],
-        deadline: [],
         timeline: []
-      },
-      // Add overdue statistics (Pipedrive-style red warning indicator)
-      overdueStats: includeOverdueCount ? overdueStats[person.personId] || {
-        overdueCount: 0,
-        totalActivitiesCount: 0,
-        hasOverdueActivities: false
-      } : undefined
-    }));
+      };
+      
+      // Add dynamic activity type arrays
+      activityTypes.forEach(type => {
+        const typeName = type.name.toLowerCase();
+        baseTimeline[typeName] = [];
+      });
+      
+      return {
+        ...person,
+        timelineActivities: timelineActivities[person.personId] || baseTimeline,
+        // Add overdue statistics (Pipedrive-style red warning indicator)
+        overdueStats: includeOverdueCount ? overdueStats[person.personId] || {
+          overdueCount: 0,
+          totalActivitiesCount: 0,
+          hasOverdueActivities: false
+        } : undefined,
+        // Include available activity types for reference
+        availableActivityTypes: activityTypes.map(type => ({
+          id: type.activityTypeId,
+          name: type.name,
+          icon: type.icon
+        }))
+      };
+    });
 
     console.log('[DEBUG] Returning enriched persons:', enrichedPersons.length);
     console.log('[DEBUG] Sample enriched person:', enrichedPersons[0] ? {
