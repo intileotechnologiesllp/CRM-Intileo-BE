@@ -27,29 +27,29 @@ const cleanEmailBody = (body) => {
 
 
 
-router.post("/create-default-email", verifyToken, validatePrivilege(4, "create"), emailSettingsController.createOrUpdateDefaultEmail);
-router.get("/get-default-email",verifyToken, validatePrivilege(4, "view"), emailSettingsController.getDefaultEmail);
-router.post("/update-default-email",verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateDefaultEmail);
-router.get("/archive-email/:emailId",verifyToken, validatePrivilege(4, "view"), emailSettingsController.archiveEmail);
-router.post("/fetch-sync-email",verifyToken, validatePrivilege(4, "create"), emailSettingsController.queueSyncEmails);
-router.get("/fetch-sync-data",verifyToken, validatePrivilege(4, "view"), emailSettingsController.fetchsyncdata)
-router.post("/restore-emails",verifyToken, validatePrivilege(4, "edit"), emailSettingsController.restoreEmails);
-router.post("/permanently-delete-emails",verifyToken, validatePrivilege(4, "delete"), emailSettingsController.permanentlyDeleteEmails);
-router.post("/mark-as-unread",verifyToken, validatePrivilege(4, "edit"), emailSettingsController.markAsUnread);
-router.post("/update-signature",verifyToken, validatePrivilege(4, "edit"), upload.single("signatureImage"),emailSettingsController.updateSignature);
-router.post("/bulk-archive", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.bulkArchiveEmails);
-router.post("/mark-as-read", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.markAsRead);
-router.post("/update-email-shared/:emailID", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateEmailSharing);
-router.post("/update-smart-bcc", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.setSmartBcc);
-router.post("/update-blocked-email", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.updateBlockedAddress);
-router.post("/remove-blocked-email", verifyToken, validatePrivilege(4, "edit"), emailSettingsController.removeBlockedAddress);
-router.get("/get-signature", verifyToken, validatePrivilege(4, "view"), emailSettingsController.getSignature);
-router.get("/get-blocked-addresses", verifyToken, validatePrivilege(4, "view"), emailSettingsController.getBlockedAddress);
-router.get("/get-smart-bcc", verifyToken, validatePrivilege(4, "view"), emailSettingsController.getSmartBcc);
-router.get("/get-email-autopopulate",verifyToken, validatePrivilege(4, "view"), emailSettingsController.getEmailAutocomplete);
-router.get("/download-attachment",verifyToken, validatePrivilege(4, "create"), emailSettingsController.downloadAttachment);
-router.get("/mark-as-unraed-single/:emailID",verifyToken, validatePrivilege(4, "view"), emailSettingsController.markAsUnreadSingle);
-router.get("/diagnoseAttachment", verifyToken, validatePrivilege(4, "view"), emailSettingsController.diagnoseAttachment);
+router.post("/create-default-email", verifyToken, emailSettingsController.createOrUpdateDefaultEmail);
+router.get("/get-default-email",verifyToken, emailSettingsController.getDefaultEmail);
+router.post("/update-default-email",verifyToken, emailSettingsController.updateDefaultEmail);
+router.get("/archive-email/:emailId",verifyToken, emailSettingsController.archiveEmail);
+router.post("/fetch-sync-email",verifyToken, emailSettingsController.queueSyncEmails);
+router.get("/fetch-sync-data",verifyToken, emailSettingsController.fetchsyncdata)
+router.post("/restore-emails",verifyToken, emailSettingsController.restoreEmails);
+router.post("/permanently-delete-emails",verifyToken, emailSettingsController.permanentlyDeleteEmails);
+router.post("/mark-as-unread",verifyToken, emailSettingsController.markAsUnread);
+router.post("/update-signature",verifyToken, upload.single("signatureImage"),emailSettingsController.updateSignature);
+router.post("/bulk-archive", verifyToken, emailSettingsController.bulkArchiveEmails);
+router.post("/mark-as-read", verifyToken, emailSettingsController.markAsRead);
+router.post("/update-email-shared/:emailID", verifyToken, emailSettingsController.updateEmailSharing);
+router.post("/update-smart-bcc", verifyToken, emailSettingsController.setSmartBcc);
+router.post("/update-blocked-email", verifyToken, emailSettingsController.updateBlockedAddress);
+router.post("/remove-blocked-email", verifyToken, emailSettingsController.removeBlockedAddress);
+router.get("/get-signature", verifyToken, emailSettingsController.getSignature);
+router.get("/get-blocked-addresses", verifyToken, emailSettingsController.getBlockedAddress);
+router.get("/get-smart-bcc", verifyToken, emailSettingsController.getSmartBcc);
+router.get("/get-email-autopopulate",verifyToken, emailSettingsController.getEmailAutocomplete);
+router.get("/download-attachment",verifyToken, emailSettingsController.downloadAttachment);
+router.get("/mark-as-unread-single/:emailID",verifyToken, emailSettingsController.markAsUnreadSingle);
+router.get("/diagnoseAttachment", verifyToken, emailSettingsController.diagnoseAttachment);
 
 
 
