@@ -377,7 +377,7 @@ exports.getActivities = async (req, res) => {
       "leadOrganizationId",
       "personId",
       "activityId",
-      // "type",
+      "type",
       "startDateTime",
       "endDateTime",
       "activityTypeFlag"
