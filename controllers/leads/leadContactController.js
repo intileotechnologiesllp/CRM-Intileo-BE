@@ -7840,3 +7840,506 @@ exports.bulkUpdateOrganizationOwners = async (req, res) => {
     });
   }
 };
+
+// ===================================================================
+// ENTITY FILE MANAGEMENT FUNCTIONALITY (PERSON & ORGANIZATION)
+// ===================================================================
+
+const EntityFile = require("../../models/leads/entityFileModel");
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const { fn, col } = require('sequelize');
+
+// Configure multer for entity files (unified for both person and organization)
+const entityFileStorage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const entityType = req.params.personId ? 'persons' : 'organizations';
+    const uploadPath = path.join(__dirname, `../../uploads/${entityType}`);
+    try {
+      await fs.access(uploadPath);
+    } catch (error) {
+      await fs.mkdir(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const extension = path.extname(file.originalname);
+    const entityType = req.params.personId ? 'person' : 'org';
+    const entityId = req.params.personId || req.params.leadOrganizationId;
+    cb(null, `${entityType}-${entityId}-${uniqueSuffix}${extension}`);
+  }
+});
+
+const entityFileUpload = multer({
+  storage: entityFileStorage,
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow most common file types
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/bmp',
+      'image/webp',
+      'text/plain',
+      'text/csv',
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/json',
+      'video/mp4',
+      'video/avi',
+      'video/quicktime',
+      'audio/mp3',
+      'audio/wav'
+    ];
+
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${file.mimetype} not allowed`), false);
+    }
+  }
+});
+
+/**
+ * Helper function to determine file category based on MIME type
+ */
+function getFileCategory(mimeType) {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.includes('pdf')) return 'document';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'document';
+  if (mimeType.includes('excel') || mimeType.includes('spreadsheet') || mimeType.includes('csv')) return 'spreadsheet';
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'presentation';
+  if (mimeType.includes('zip') || mimeType.includes('archive') || mimeType.includes('compressed')) return 'archive';
+  return 'other';
+}
+
+/**
+ * Helper function to format file size
+ */
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+/**
+ * Upload file(s) to an entity (person or organization)
+ */
+exports.uploadEntityFiles = async (req, res) => {
+  try {
+    const { personId, leadOrganizationId } = req.params;
+    const masterUserID = req.adminId;
+    const uploadedBy = req.user?.id || req.adminId;
+    
+    // Determine entity type and ID
+    const entityType = personId ? 'person' : 'organization';
+    const entityId = personId || leadOrganizationId;
+    
+    // Get appropriate model
+    const EntityModel = entityType === 'person' 
+      ? require("../../models/leads/leadPersonModel")
+      : require("../../models/leads/leadOrganizationModel");
+    
+    const idField = entityType === 'person' ? 'personId' : 'leadOrganizationId';
+
+    // Check if entity exists and user has access
+    const entity = await EntityModel.findOne({
+      where: { [idField]: entityId }
+    });
+
+    if (!entity) {
+      return res.status(404).json({
+        success: false,
+        message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
+      });
+    }
+
+    // Handle file upload
+    entityFileUpload.array('files', 10)(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: 'File upload failed',
+          error: err.message
+        });
+      }
+
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No files uploaded'
+        });
+      }
+
+      const uploadedFiles = [];
+
+      // Process each uploaded file
+      for (const file of req.files) {
+        const fileCategory = getFileCategory(file.mimetype);
+        const fileExtension = path.extname(file.originalname).toLowerCase();
+
+        const entityFile = await EntityFile.createForEntity(entityId, entityType, {
+          fileName: file.originalname,
+          fileDisplayName: req.body.displayName || file.originalname,
+          filePath: file.path,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          fileExtension,
+          fileCategory,
+          description: req.body.description || null,
+          tags: req.body.tags ? JSON.parse(req.body.tags) : null,
+          isPublic: req.body.isPublic === 'true',
+          uploadedBy,
+          masterUserID
+        });
+
+        uploadedFiles.push({
+          fileId: entityFile.fileId,
+          fileName: entityFile.fileName,
+          fileSize: entityFile.fileSize,
+          fileCategory: entityFile.fileCategory,
+          entityType: entityFile.entityType,
+          uploadedAt: entityFile.createdAt
+        });
+      }
+
+      res.status(201).json({
+        success: true,
+        message: `${uploadedFiles.length} file(s) uploaded successfully`,
+        data: {
+          entityId,
+          entityType,
+          files: uploadedFiles
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error('Upload entity files error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to upload files',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all files for an entity (person or organization)
+ */
+exports.getEntityFiles = async (req, res) => {
+  try {
+    const { personId, leadOrganizationId } = req.params;
+    const masterUserID = req.adminId;
+    const { category, search, sortBy = 'createdAt', sortOrder = 'DESC', page = 1, limit = 50 } = req.query;
+    const { Op } = require("sequelize");
+    
+    // Determine entity type and ID
+    const entityType = personId ? 'person' : 'organization';
+    const entityId = personId || leadOrganizationId;
+    
+    // Get appropriate model
+    const EntityModel = entityType === 'person' 
+      ? require("../../models/leads/leadPersonModel")
+      : require("../../models/leads/leadOrganizationModel");
+    
+    const MasterUser = require("../../models/master/masterUserModel");
+    const idField = entityType === 'person' ? 'personId' : 'leadOrganizationId';
+
+    // Check if entity exists and user has access
+    const entity = await EntityModel.findOne({
+      where: { [idField]: entityId }
+    });
+
+    if (!entity) {
+      return res.status(404).json({
+        success: false,
+        message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} not found`
+      });
+    }
+
+    // Build where conditions
+    const whereConditions = {
+      entityId,
+      entityType,
+      masterUserID,
+      isActive: true
+    };
+
+    if (category) {
+      whereConditions.fileCategory = category;
+    }
+
+    if (search) {
+      whereConditions[Op.or] = [
+        { fileName: { [Op.iLike]: `%${search}%` } },
+        { fileDisplayName: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    // Get files with pagination
+    const offset = (page - 1) * limit;
+    const { count, rows: files } = await EntityFile.findAndCountAll({
+      where: whereConditions,
+      include: [
+        {
+          model: MasterUser,
+          as: 'uploader',
+          attributes: ['masterUserID', 'email']
+        }
+      ],
+      order: [[sortBy, sortOrder.toUpperCase()]],
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+
+    // Format file data
+    const formattedFiles = files.map(file => ({
+      fileId: file.fileId,
+      fileName: file.fileName,
+      fileDisplayName: file.fileDisplayName,
+      fileSize: file.fileSize,
+      fileSizeFormatted: formatFileSize(file.fileSize),
+      mimeType: file.mimeType,
+      fileExtension: file.fileExtension,
+      fileCategory: file.fileCategory,
+      entityType: file.entityType,
+      description: file.description,
+      tags: file.tags,
+      isPublic: file.isPublic,
+      version: file.version,
+      downloadCount: file.downloadCount,
+      lastAccessedAt: file.lastAccessedAt,
+      uploadedBy: file.uploader ? {
+        id: file.uploader.masterUserID,
+        email: file.uploader.email
+      } : null,
+      createdAt: file.createdAt,
+      updatedAt: file.updatedAt
+    }));
+
+    // Get file statistics
+    const stats = await EntityFile.findAll({
+      where: { entityId, entityType, masterUserID, isActive: true },
+      attributes: [
+        'fileCategory',
+        [fn('COUNT', col('fileId')), 'count'],
+        [fn('SUM', col('fileSize')), 'totalSize']
+      ],
+      group: ['fileCategory'],
+      raw: true
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `${entityType.charAt(0).toUpperCase() + entityType.slice(1)} files retrieved successfully`,
+      data: {
+        entityId,
+        entityType,
+        files: formattedFiles,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(count / limit),
+          totalFiles: count,
+          hasNext: (page * limit) < count,
+          hasPrev: page > 1
+        },
+        statistics: {
+          totalFiles: count,
+          totalSize: files.reduce((sum, file) => sum + file.fileSize, 0),
+          categoryBreakdown: stats.reduce((acc, stat) => {
+            acc[stat.fileCategory] = {
+              count: parseInt(stat.count),
+              size: parseInt(stat.totalSize || 0)
+            };
+            return acc;
+          }, {})
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get entity files error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve entity files',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Download a specific entity file
+ */
+exports.downloadEntityFile = async (req, res) => {
+  try {
+    const { personId, leadOrganizationId, fileId } = req.params;
+    const masterUserID = req.adminId;
+    
+    // Determine entity type and ID
+    const entityType = personId ? 'person' : 'organization';
+    const entityId = personId || leadOrganizationId;
+
+    // Find the file
+    const entityFile = await EntityFile.findOne({
+      where: { fileId, entityId, entityType, masterUserID, isActive: true }
+    });
+
+    if (!entityFile) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Check if file exists on disk
+    try {
+      await fs.access(entityFile.filePath);
+    } catch (error) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found on server'
+      });
+    }
+
+    // Update download count and last accessed time
+    await entityFile.update({
+      downloadCount: entityFile.downloadCount + 1,
+      lastAccessedAt: new Date()
+    });
+
+    // Set appropriate headers
+    res.setHeader('Content-Disposition', `attachment; filename="${entityFile.fileName}"`);
+    res.setHeader('Content-Type', entityFile.mimeType);
+
+    // Send file
+    res.sendFile(path.resolve(entityFile.filePath));
+
+  } catch (error) {
+    console.error('Download entity file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download file',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Delete an entity file
+ */
+exports.deleteEntityFile = async (req, res) => {
+  try {
+    const { personId, leadOrganizationId, fileId } = req.params;
+    const masterUserID = req.adminId;
+    
+    // Determine entity type and ID
+    const entityType = personId ? 'person' : 'organization';
+    const entityId = personId || leadOrganizationId;
+
+    // Find the file
+    const entityFile = await EntityFile.findOne({
+      where: { fileId, entityId, entityType, masterUserID, isActive: true }
+    });
+
+    if (!entityFile) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Soft delete the file
+    await entityFile.update({ isActive: false });
+
+    res.status(200).json({
+      success: true,
+      message: 'File deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete entity file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete file',
+      error: error.message
+    });
+  }
+};
+
+// ===================================================================
+// CONVENIENCE FUNCTIONS FOR BACKWARD COMPATIBILITY
+// ===================================================================
+
+/**
+ * Upload file(s) to a person (wrapper for uploadEntityFiles)
+ */
+exports.uploadPersonFiles = async (req, res) => {
+  return exports.uploadEntityFiles(req, res);
+};
+
+/**
+ * Get all files for a person (wrapper for getEntityFiles)
+ */
+exports.getPersonFiles = async (req, res) => {
+  return exports.getEntityFiles(req, res);
+};
+
+/**
+ * Download a specific person file (wrapper for downloadEntityFile)
+ */
+exports.downloadPersonFile = async (req, res) => {
+  return exports.downloadEntityFile(req, res);
+};
+
+/**
+ * Delete a person file (wrapper for deleteEntityFile)
+ */
+exports.deletePersonFile = async (req, res) => {
+  return exports.deleteEntityFile(req, res);
+};
+
+/**
+ * Upload file(s) to an organization (wrapper for uploadEntityFiles)
+ */
+exports.uploadOrganizationFiles = async (req, res) => {
+  return exports.uploadEntityFiles(req, res);
+};
+
+/**
+ * Get all files for an organization (wrapper for getEntityFiles)
+ */
+exports.getOrganizationFiles = async (req, res) => {
+  return exports.getEntityFiles(req, res);
+};
+
+/**
+ * Download a specific organization file (wrapper for downloadEntityFile)
+ */
+exports.downloadOrganizationFile = async (req, res) => {
+  return exports.downloadEntityFile(req, res);
+};
+
+/**
+ * Delete an organization file (wrapper for deleteEntityFile)
+ */
+exports.deleteOrganizationFile = async (req, res) => {
+  return exports.deleteEntityFile(req, res);
+};
