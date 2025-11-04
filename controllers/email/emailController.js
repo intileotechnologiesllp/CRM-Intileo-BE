@@ -5917,6 +5917,46 @@ const createEmailMessage = (mailOptions, messageId) => {
   return message;
 };
 
+// Helper function to validate App Password format for different providers
+const validateAppPassword = (password, email, provider) => {
+  if (!password) return { valid: false, message: "App Password is required" };
+  
+  // Remove spaces if any (some users copy with spaces)
+  const cleanPassword = password.replace(/\s/g, '');
+  
+  if (provider === 'gmail' || (email && email.includes('@gmail.com'))) {
+    // Gmail App Passwords are typically 16 characters long and contain only letters and numbers
+    if (cleanPassword.length !== 16) {
+      return { 
+        valid: false, 
+        message: `Gmail App Password should be 16 characters long (current: ${cleanPassword.length})` 
+      };
+    }
+    
+    if (!/^[a-zA-Z0-9]+$/.test(cleanPassword)) {
+      return { 
+        valid: false, 
+        message: "Gmail App Password should contain only letters and numbers" 
+      };
+    }
+  } else if (provider === 'yandex' || (email && (email.includes('@yandex.') || email.includes('@ya.ru')))) {
+    // Yandex App Passwords are typically 16 characters long
+    if (cleanPassword.length < 8) {
+      return { 
+        valid: false, 
+        message: `Yandex App Password seems too short (current: ${cleanPassword.length} chars)` 
+      };
+    }
+    
+    // Yandex App Passwords can contain letters, numbers, and sometimes special characters
+    if (!/^[a-zA-Z0-9]+$/.test(cleanPassword)) {
+      console.warn(`[validateAppPassword] Yandex App Password contains special characters, this might be normal`);
+    }
+  }
+  
+  return { valid: true, message: `App Password format is valid for ${provider}` };
+};
+
 const dynamicUpload = require("../../middlewares/dynamicUpload");
 const { threadId } = require("worker_threads");
 exports.composeEmail = [
@@ -5951,6 +5991,32 @@ exports.composeEmail = [
         // Use the default email account
         SENDER_EMAIL = defaultEmail.email;
         SENDER_PASSWORD = defaultEmail.appPassword;
+
+        // Validation and debugging for default email
+        console.log(`[composeEmail] 🔐 Using Default Email: ${SENDER_EMAIL}`);
+        console.log(`[composeEmail] 🔐 Default Email Provider: ${defaultEmail.provider || 'Not Set'}`);
+        console.log(`[composeEmail] 🔐 Has App Password: ${!!defaultEmail.appPassword}`);
+        console.log(`[composeEmail] 🔐 App Password Length: ${defaultEmail.appPassword ? defaultEmail.appPassword.length : 0} chars`);
+        
+        // Validate required fields
+        if (!SENDER_EMAIL || !SENDER_PASSWORD) {
+          return res.status(400).json({
+            message: "Default email configuration is incomplete. Email and App Password are required.",
+            missingFields: {
+              email: !SENDER_EMAIL,
+              appPassword: !SENDER_PASSWORD
+            }
+          });
+        }
+
+        // Validate App Password format based on provider
+        const passwordValidation = validateAppPassword(SENDER_PASSWORD, SENDER_EMAIL, defaultEmail.provider);
+        if (!passwordValidation.valid) {
+          console.warn(`[composeEmail] ⚠️ App Password validation failed: ${passwordValidation.message}`);
+          // Don't block sending, but log the warning for troubleshooting
+        } else {
+          console.log(`[composeEmail] ✅ ${passwordValidation.message}`);
+        }
 
         // If senderName is not provided in DefaultEmail, fetch it from MasterUser
         if (defaultEmail.senderName) {
@@ -6259,6 +6325,13 @@ exports.composeEmail = [
       // Use defaultEmail.provider if default email is set, otherwise use userCredential.provider
       const provider = defaultEmail ? (defaultEmail.provider || 'gmail') : (userCredential.provider || 'gmail');
       
+      console.log(`[composeEmail] 🔧 Provider detection: defaultEmail exists: ${!!defaultEmail}`);
+      if (defaultEmail) {
+        console.log(`[composeEmail] 🔧 DefaultEmail provider field: ${defaultEmail.provider}`);
+      }
+      console.log(`[composeEmail] 🔧 UserCredential provider field: ${userCredential.provider}`);
+      console.log(`[composeEmail] 🔧 Final provider selected: ${provider}`);
+      
       // Enhanced SMTP configuration for multiple providers
       const SMTP_CONFIG = {
         gmail: {
@@ -6408,17 +6481,46 @@ exports.composeEmail = [
       } catch (emailError) {
         console.error(`[composeEmail] ❌ Email sending failed:`, emailError);
         
-        // If SMTP sending fails, still try to save as draft or handle gracefully
-        if (emailError.code === 'EAUTH' || emailError.code === 'ENOTFOUND') {
+        // Enhanced error handling for different types of failures
+        if (emailError.code === 'EAUTH') {
+          let troubleshootingMessage;
+          
+          if (provider === 'gmail') {
+            troubleshootingMessage = "For Gmail: 1) Enable 2-Factor Authentication, 2) Generate App Password from Google Account settings, 3) Use App Password instead of regular password";
+          } else if (provider === 'yandex') {
+            troubleshootingMessage = "For Yandex: 1) Enable 2-Factor Authentication in Yandex ID, 2) Generate App Password from https://passport.yandex.com/profile/access, 3) Use App Password instead of regular password";
+          } else {
+            troubleshootingMessage = "Please verify your email credentials and App Password for your email provider";
+          }
+            
+          console.error(`[composeEmail] 🔐 Authentication failed for ${SENDER_EMAIL} using ${provider} provider`);
+          console.error(`[composeEmail] 📝 Troubleshooting: ${troubleshootingMessage}`);
+          
           return res.status(401).json({
-            message: "Email authentication failed. Please check your email credentials.",
+            message: "Email authentication failed. Invalid credentials.",
+            provider: provider,
+            email: SENDER_EMAIL,
+            troubleshooting: troubleshootingMessage,
+            errorCode: emailError.code,
+            responseCode: emailError.responseCode,
+            isDefaultEmail: !!defaultEmail,
+            yandexAppPasswordUrl: provider === 'yandex' ? 'https://passport.yandex.com/profile/access' : undefined
+          });
+        }
+        
+        if (emailError.code === 'ENOTFOUND') {
+          return res.status(500).json({
+            message: "SMTP server not found. Please check your provider configuration.",
+            provider: provider,
             error: emailError.message
           });
         }
         
         return res.status(500).json({
           message: "Failed to send email. Please try again.",
-          error: emailError.message
+          provider: provider,
+          error: emailError.message,
+          errorCode: emailError.code
         });
       }
     } catch (error) {
