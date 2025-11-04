@@ -5819,6 +5819,7 @@ const uploadToSentFolder = async (mailOptions, userCredential, messageId) => {
     console.log(`[uploadToSentFolder] 📤 Uploading copy to Sent folder for ${userCredential.email}`);
     
     const provider = userCredential.provider || 'gmail';
+    console.log(`[uploadToSentFolder] 🔧 Using provider: ${provider}`);
     
     // Define Sent folder names for different providers
     const SENT_FOLDER_MAP = {
@@ -5829,12 +5830,16 @@ const uploadToSentFolder = async (mailOptions, userCredential, messageId) => {
     };
 
     const sentFolder = SENT_FOLDER_MAP[provider] || 'Sent';
+    console.log(`[uploadToSentFolder] 📁 Target folder: ${sentFolder}`);
+    
     const config = PROVIDER_CONFIG[provider];
     
     if (!config) {
       console.warn(`[uploadToSentFolder] ⚠️ Unsupported provider: ${provider}`);
       return;
     }
+
+    console.log(`[uploadToSentFolder] 🔗 IMAP config: ${config.host}:${config.port}`);
 
     const imapConfig = {
       imap: {
@@ -6251,7 +6256,8 @@ exports.composeEmail = [
       }
 
       // Create a transporter using the selected email credentials with provider support
-      const provider = userCredential.provider || 'gmail';
+      // Use defaultEmail.provider if default email is set, otherwise use userCredential.provider
+      const provider = defaultEmail ? (defaultEmail.provider || 'gmail') : (userCredential.provider || 'gmail');
       
       // Enhanced SMTP configuration for multiple providers
       const SMTP_CONFIG = {
@@ -6270,6 +6276,11 @@ exports.composeEmail = [
           host: 'smtp-mail.outlook.com',
           port: 587,
           secure: false
+        },
+        yahoo: {
+          host: 'smtp.mail.yahoo.com',
+          port: 587,
+          secure: false
         }
       };
 
@@ -6286,7 +6297,7 @@ exports.composeEmail = [
         }
       });
 
-      console.log(`[composeEmail] 📧 Using ${provider} SMTP for ${SENDER_EMAIL}`);
+      console.log(`[composeEmail] 📧 Using ${provider} SMTP for ${SENDER_EMAIL} ${defaultEmail ? '(Default Email)' : '(UserCredential)'}`);
       // If isDraft is false and draftId is provided, update the draft's folder to 'sent'
 
       // Define the email options
@@ -6374,17 +6385,25 @@ exports.composeEmail = [
         emailData.messageId = info.messageId;
 
         // ✨ NEW: Upload copy to Sent folder via IMAP for proper email client sync
-        await uploadToSentFolder(mailOptions, userCredential, info.messageId);
+        // Create a credential object with the correct provider for uploadToSentFolder
+        const credentialForUpload = {
+          email: SENDER_EMAIL,
+          appPassword: SENDER_PASSWORD,
+          provider: provider // Use the correctly determined provider
+        };
+        await uploadToSentFolder(mailOptions, credentialForUpload, info.messageId);
 
         // Save to database via queue worker
         await publishToQueue("EMAIL_QUEUE", emailData);
 
         res.status(200).json({
-          message: "Email sent and saved successfully. Copy added to Sent folder.",
+          message: `Email sent and saved successfully. Copy added to Sent folder. Provider: ${provider}`,
           messageId: info.messageId,
           sentTo: finalTo,
           cc: finalCc,
-          bcc: finalBccValue
+          bcc: finalBccValue,
+          provider: provider,
+          sentFolder: provider === 'gmail' ? '[Gmail]/Sent Mail' : provider === 'yandex' ? 'Sent' : provider === 'outlook' ? 'Sent Items' : 'Sent'
         });
       } catch (emailError) {
         console.error(`[composeEmail] ❌ Email sending failed:`, emailError);
