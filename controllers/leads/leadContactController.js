@@ -5073,7 +5073,7 @@ exports.getPersonsByOrganization = async (req, res) => {
 };
 
 // Helper function to enrich persons with timeline activities (Pipedrive-style)
-const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, endDate, userIdRequesting, userRole) => {
+const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, endDate, userIdRequesting, userRole, granularity = 'quarterly', includeOverdueCount = true) => {
   try {
     console.log('[DEBUG] enrichPersonsWithTimeline called with:', {
       personsCount: persons.length,
@@ -5081,7 +5081,9 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       startDate,
       endDate,
       userIdRequesting,
-      userRole
+      userRole,
+      granularity,
+      includeOverdueCount
     });
 
     const { Op } = require("sequelize");
@@ -5103,6 +5105,7 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
     }
 
     const timelineActivities = {};
+    const overdueStats = {};
     
     // Initialize timeline for each person
     personIds.forEach(personId => {
@@ -5114,6 +5117,11 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
         task: [],
         deadline: [],
         timeline: []
+      };
+      overdueStats[personId] = {
+        overdueCount: 0,
+        totalActivitiesCount: 0,
+        hasOverdueActivities: false
       };
     });
 
@@ -5272,6 +5280,11 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       activities.forEach(activity => {
         const activityType = activity.type.toLowerCase();
         
+        // Track overdue activities
+        const now = new Date();
+        const dueDate = activity.dueDate ? new Date(activity.dueDate) : null;
+        const isOverdue = dueDate && dueDate < now && !activity.isDone;
+        
         const timelineItem = {
           type: activityType,
           id: activity.activityId,
@@ -5284,10 +5297,20 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
           isDone: activity.isDone,
           dueDate: activity.dueDate,
           date: activity.startDateTime || activity.createdAt,
-          quarter: getQuarter(activity.startDateTime || activity.createdAt)
+          quarter: getQuarter(activity.startDateTime || activity.createdAt, granularity),
+          isOverdue: isOverdue
         };
 
         if (activity.personId && timelineActivities[activity.personId]) {
+          // Track overdue stats for this person
+          if (includeOverdueCount) {
+            overdueStats[activity.personId].totalActivitiesCount++;
+            if (isOverdue) {
+              overdueStats[activity.personId].overdueCount++;
+              overdueStats[activity.personId].hasOverdueActivities = true;
+            }
+          }
+          
           // Add to specific activity type if it's in the filter
           if (activityFilters.includes(activityType)) {
             timelineActivities[activity.personId][activityType].push(timelineItem);
@@ -5311,6 +5334,15 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
           personIds.forEach(personId => {
             const person = persons.find(p => p.personId === personId);
             if (person && person.leadOrganizationId === activity.leadOrganizationId && !activity.personId) {
+              // Track overdue stats for this person
+              if (includeOverdueCount) {
+                overdueStats[personId].totalActivitiesCount++;
+                if (isOverdue) {
+                  overdueStats[personId].overdueCount++;
+                  overdueStats[personId].hasOverdueActivities = true;
+                }
+              }
+              
               if (activityFilters.includes(activityType)) {
                 timelineActivities[personId][activityType].push(timelineItem);
               }
@@ -5353,7 +5385,7 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       });
     });
 
-    // Attach timeline data to persons
+    // Attach timeline data and overdue statistics to persons
     const enrichedPersons = persons.map(person => ({
       ...person,
       timelineActivities: timelineActivities[person.personId] || {
@@ -5364,7 +5396,13 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
         task: [],
         deadline: [],
         timeline: []
-      }
+      },
+      // Add overdue statistics (Pipedrive-style red warning indicator)
+      overdueStats: includeOverdueCount ? overdueStats[person.personId] || {
+        overdueCount: 0,
+        totalActivitiesCount: 0,
+        hasOverdueActivities: false
+      } : undefined
     }));
 
     console.log('[DEBUG] Returning enriched persons:', enrichedPersons.length);
@@ -5372,7 +5410,8 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
       personId: enrichedPersons[0].personId,
       contactPerson: enrichedPersons[0].contactPerson,
       hasTimelineActivities: !!enrichedPersons[0].timelineActivities,
-      timelineKeys: enrichedPersons[0].timelineActivities ? Object.keys(enrichedPersons[0].timelineActivities) : []
+      timelineKeys: enrichedPersons[0].timelineActivities ? Object.keys(enrichedPersons[0].timelineActivities) : [],
+      overdueCount: enrichedPersons[0].overdueStats ? enrichedPersons[0].overdueStats.overdueCount : 'N/A'
     } : 'No persons found');
 
     return enrichedPersons;
@@ -5384,16 +5423,25 @@ const enrichPersonsWithTimeline = async (persons, activityFilters, startDate, en
   }
 };
 
-// Helper function to determine quarter from date
-const getQuarter = (date) => {
+// Helper function to determine time period from date based on granularity
+const getQuarter = (date, granularity = 'quarterly') => {
   const d = new Date(date);
   const month = d.getMonth() + 1; // getMonth() returns 0-11
   const year = d.getFullYear();
+  const week = Math.ceil(d.getDate() / 7);
   
-  if (month <= 3) return `Q1 ${year}`;
-  if (month <= 6) return `Q2 ${year}`;
-  if (month <= 9) return `Q3 ${year}`;
-  return `Q4 ${year}`;
+  switch (granularity.toLowerCase()) {
+    case 'weekly':
+      return `Week ${week}, ${d.toLocaleDateString('en-US', { month: 'short' })} ${year}`;
+    case 'monthly':
+      return `${d.toLocaleDateString('en-US', { month: 'long' })} ${year}`;
+    case 'quarterly':
+    default:
+      if (month <= 3) return `Q1 ${year}`;
+      if (month <= 6) return `Q2 ${year}`;
+      if (month <= 9) return `Q3 ${year}`;
+      return `Q4 ${year}`;
+  }
 };
 
 exports.getPersonsAndOrganizations = async (req, res) => {
@@ -5431,8 +5479,37 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       : ['deals', 'emails', 'notes', 'meeting', 'task', 'deadline'];
     
     const includeTimeline = req.query.includeTimeline === 'true' || req.query.includeTimeline === true;
-    const timelineStartDate = req.query.timelineStartDate || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year ago
+    
+    // Timeline granularity options (weekly, monthly, quarterly)
+    const timelineGranularity = req.query.timelineGranularity || 'quarterly'; // weekly, monthly, quarterly
+    
+    // Date range filtering options (similar to Pipedrive's dropdown)
+    const dateRangeFilter = req.query.dateRangeFilter || '12-months-back'; // 1-month-back, 3-months-back, 6-months-back, 12-months-back
+    
+    // Calculate start date based on date range filter
+    let calculatedStartDate;
+    const now = new Date();
+    switch (dateRangeFilter) {
+      case '1-month-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+        break;
+      case '3-months-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+        break;
+      case '6-months-back':
+        calculatedStartDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+        break;
+      case '12-months-back':
+      default:
+        calculatedStartDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+        break;
+    }
+    
+    const timelineStartDate = req.query.timelineStartDate || calculatedStartDate.toISOString();
     const timelineEndDate = req.query.timelineEndDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(); // 1 year from now
+    
+    // Overdue activities tracking flag
+    const includeOverdueCount = req.query.includeOverdueCount === 'true' || req.query.includeOverdueCount === true || includeTimeline;
 
     // Dynamic filter config (from body or query) -- now supports filterId as number or object
     const LeadFilter = require("../../models/leads/leadFiltersModel");
@@ -6366,24 +6443,35 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         }
       : {};
 
-    // Fetch organizations first - same logic as getLeads API
-    let organizations = [];
+    // Fetch organizations with proper pagination
+    let orgQueryResult = { count: 0, rows: [] };
     if (req.role === "admin") {
-      organizations = await Organization.findAll({
+      orgQueryResult = await Organization.findAndCountAll({
         where: orgWhere,
+        limit: orgLimit,
+        offset: orgOffset,
         raw: true,
       });
     } else {
-      organizations = await Organization.findAll({
+      orgQueryResult = await Organization.findAndCountAll({
         where: {
           ...orgWhere,
           [Op.or]: [{ masterUserID: req.adminId }, { ownerId: req.adminId }],
         },
+        limit: orgLimit,
+        offset: orgOffset,
         raw: true,
       });
     }
 
+    // Extract organizations and total count from query result
+    let organizations = orgQueryResult.rows;
+    const totalOrganizationsCount = orgQueryResult.count;
+
     const orgIds = organizations.map((o) => o.leadOrganizationId);
+
+    console.log("[DEBUG] organizations count:", organizations.length);
+    console.log("[DEBUG] total organizations count from DB:", totalOrganizationsCount);
 
     // Apply Lead, Activity, Deal, Organization, and Person filters by restricting to persons found in those entities
     const allFilteredPersonIds = [
@@ -6457,7 +6545,22 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         totalRecords: 0,
         totalPages: 0,
         currentPage: personPage,
+        organizationPagination: {
+          totalRecords: 0,
+          totalPages: 0,
+          currentPage: orgPage,
+          limit: orgLimit
+        },
         persons: [],
+        organizations: [],
+        summary: {
+          currentPagePersonCount: 0,
+          currentPageOrganizationCount: 0,
+          currentPageTotalCount: 0,
+          totalPersonCount: 0,
+          totalOrganizationCount: 0,
+          totalDatabaseCount: 0
+        }
       });
     }
 
@@ -6466,20 +6569,24 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       JSON.stringify(finalPersonWhere, null, 2)
     );
 
-    // Fetch persons using updated filtering logic
-    let persons = [];
+    // Fetch persons using updated filtering logic with proper pagination
+    let personQueryResult = { count: 0, rows: [] };
     if (req.role === "admin" && !req.query.masterUserID) {
-      persons = await Person.findAll({
+      personQueryResult = await Person.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
         raw: true,
       });
     } else if (req.query.masterUserID) {
       // If masterUserID is provided, filter by that as well
       finalPersonWhere.masterUserID = req.query.masterUserID;
-      persons = await Person.findAll({
+      personQueryResult = await Person.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
         raw: true,
       });
     } else {
@@ -6499,14 +6606,21 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         finalPersonWhere = roleBasedPersonFilter;
       }
 
-      persons = await Person.findAll({
+      personQueryResult = await Person.findAndCountAll({
         where: finalPersonWhere,
         order: [[sortBy, sortOrder]], 
+        limit: personLimit,
+        offset: personOffset,
         raw: true,
       });
     }
 
+    // Extract persons and total count from query result
+    let persons = personQueryResult.rows;
+    const totalPersonsCount = personQueryResult.count;
+
     console.log("[DEBUG] persons count:", persons.length);
+    console.log("[DEBUG] total persons count from DB:", totalPersonsCount);
     console.log(
       "[DEBUG] persons sample:",
       persons && persons.length > 0 ? persons[0] : null
@@ -6568,14 +6682,20 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     // Add leadCount to persons - same logic as getLeads API
     persons = persons.map((p) => {
       let ownerName = null;
+      let organizationName = p.organization; // Keep existing organization name if present
+      
       if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
         const org = orgMap[p.leadOrganizationId];
+        // Set organization name from the related organization
+        organizationName = org.organization || p.organization;
+        
         if (org.ownerId && ownerMap[org.ownerId]) {
           ownerName = ownerMap[org.ownerId];
         }
       }
       return {
         ...p,
+        organization: organizationName, // Ensure organization field is populated
         ownerName,
         leadCount: personLeadCountMap[p.personId] || 0,
       };
@@ -6726,7 +6846,9 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         timelineStartDate, 
         timelineEndDate,
         req.adminId,
-        req.role
+        req.role,
+        timelineGranularity,
+        includeOverdueCount
       );
       console.log('[DEBUG] Timeline enrichment completed, returned persons:', personsWithTimeline.length);
     } else {
@@ -6749,20 +6871,51 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       filteredOrganizations = filterDataByColumnPreference(organizations, orgColumnPref, 'organization');
     }
 
-    // Return both filtered datasets in separate arrays
+    // Return both filtered datasets in separate arrays with proper pagination metadata
     res.status(200).json({
-      totalRecords: personsWithTimeline.length + filteredOrganizations.length,
-      totalPages: Math.ceil((personsWithTimeline.length + filteredOrganizations.length) / personLimit),
+      // Pagination metadata based on actual database counts
+      totalRecords: totalPersonsCount + totalOrganizationsCount,
+      totalPages: Math.ceil(totalPersonsCount / personLimit), // Person pagination
       currentPage: personPage,
+      
+      // Separate pagination for organizations
+      organizationPagination: {
+        totalRecords: totalOrganizationsCount,
+        totalPages: Math.ceil(totalOrganizationsCount / orgLimit),
+        currentPage: orgPage,
+        limit: orgLimit
+      },
+      
       persons: personsWithTimeline, // Filtered person data with entity: 'person' and timeline activities
       organizations: filteredOrganizations, // Filtered organization data with entity: 'organization'
       activityFilters: activityFilters, // Active timeline filters
       timelineEnabled: includeTimeline, // Whether timeline data was included
       timelineRange: includeTimeline ? { startDate: timelineStartDate, endDate: timelineEndDate } : null,
+      
+      // Pipedrive-style enhancements
+      timelineGranularity: timelineGranularity, // weekly, monthly, quarterly
+      dateRangeFilter: dateRangeFilter, // 1-month-back, 3-months-back, 6-months-back, 12-months-back
+      overdueTrackingEnabled: includeOverdueCount, // Whether overdue activity counting is enabled
+      
+      // Summary with overdue statistics and database counts
       summary: {
-        personCount: personsWithTimeline.length,
-        organizationCount: filteredOrganizations.length,
-        totalCount: personsWithTimeline.length + filteredOrganizations.length
+        // Current page counts (what's actually returned)
+        currentPagePersonCount: personsWithTimeline.length,
+        currentPageOrganizationCount: filteredOrganizations.length,
+        currentPageTotalCount: personsWithTimeline.length + filteredOrganizations.length,
+        
+        // Total database counts (for pagination)
+        totalPersonCount: totalPersonsCount,
+        totalOrganizationCount: totalOrganizationsCount,
+        totalDatabaseCount: totalPersonsCount + totalOrganizationsCount,
+        
+        // Calculate overall overdue statistics (similar to Pipedrive's red number)
+        overdueStats: includeOverdueCount ? {
+          totalPersonsWithOverdue: personsWithTimeline.filter(p => p.overdueStats && p.overdueStats.hasOverdueActivities).length,
+          totalOverdueActivities: personsWithTimeline.reduce((sum, p) => sum + (p.overdueStats ? p.overdueStats.overdueCount : 0), 0),
+          percentageWithOverdue: personsWithTimeline.length > 0 ? 
+            Math.round((personsWithTimeline.filter(p => p.overdueStats && p.overdueStats.hasOverdueActivities).length / personsWithTimeline.length) * 100) : 0
+        } : null
       }
     });
   } catch (error) {
