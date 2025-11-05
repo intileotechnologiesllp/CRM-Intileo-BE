@@ -834,6 +834,14 @@ exports.fetchSyncEmails = async (req, res) => {
           console.debug(`[fetchSyncEmails] Truncated long messageId: ${parsedEmail.messageId.substring(0, 50)}...`);
         }
 
+        // Extract UID from IMAP message attributes
+        const extractedUID = message.uid || message.attributes?.uid || null;
+        if (extractedUID) {
+          console.debug(`[fetchSyncEmails] 🔍 UID EXTRACTED: ${extractedUID} for email ${messageIdForDb}`);
+        } else {
+          console.debug(`[fetchSyncEmails] ⚠️ UID NOT FOUND for email ${messageIdForDb} - message.uid: ${message.uid}, message.attributes?.uid: ${message.attributes?.uid}`);
+        }
+
         const emailData = {
           messageId: messageIdForDb,
           inReplyTo: parsedEmail.headers.get("in-reply-to") || null,
@@ -855,6 +863,7 @@ exports.fetchSyncEmails = async (req, res) => {
           folder: dbFolderName, // Use mapped folder name
           createdAt: parsedEmail.date || new Date(),
           isRead: isRead, // Save read/unread status
+          uid: extractedUID, // Save IMAP UID for email body fetching and management
         };
         // Save email to the database
         const existingEmail = await Email.findOne({
@@ -865,9 +874,9 @@ exports.fetchSyncEmails = async (req, res) => {
           try {
             savedEmail = await Email.create(emailData);
             if (isSentFolder) {
-              console.log(`[fetchSyncEmails] ${folderLogPrefix} ✅ SENT EMAIL SAVED: ${emailData.messageId} | Subject: "${emailData.subject}" | Folder: "${emailData.folder}" | From: ${emailData.sender} | To: ${emailData.recipient}`);
+              console.log(`[fetchSyncEmails] ${folderLogPrefix} ✅ SENT EMAIL SAVED: ${emailData.messageId} | Subject: "${emailData.subject}" | Folder: "${emailData.folder}" | From: ${emailData.sender} | To: ${emailData.recipient} | UID: ${emailData.uid}`);
             } else {
-              console.debug(`[fetchSyncEmails] Email saved: ${emailData.messageId}`);
+              console.debug(`[fetchSyncEmails] Email saved: ${emailData.messageId} | UID: ${emailData.uid}`);
             }
           } catch (createError) {
             if (isSentFolder) {
@@ -886,21 +895,40 @@ exports.fetchSyncEmails = async (req, res) => {
             continue; // Skip this email and continue with the next one
           }
         } else {
-          // Email already exists - check if we need to update the folder for sent emails
+          // Email already exists - check if we need to update the folder for sent emails or add UID
+          let needsUpdate = false;
+          const updateData = {};
+          
           if (isSentFolder && existingEmail.folder !== dbFolderName) {
+            updateData.folder = dbFolderName;
+            needsUpdate = true;
+          }
+          
+          // Check if existing email needs UID update
+          if (!existingEmail.uid && extractedUID) {
+            updateData.uid = extractedUID;
+            needsUpdate = true;
+            console.log(`[fetchSyncEmails] 🔄 UID UPDATE NEEDED: Email ${emailData.messageId} - existing UID: ${existingEmail.uid}, new UID: ${extractedUID}`);
+          }
+          
+          if (needsUpdate) {
             try {
-              await existingEmail.update({ folder: dbFolderName });
-              console.log(`[fetchSyncEmails] ${folderLogPrefix} 🔄 SENT EMAIL FOLDER UPDATED: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Updated from "${existingEmail.folder}" to "${dbFolderName}"`);
+              await existingEmail.update(updateData);
+              if (isSentFolder) {
+                console.log(`[fetchSyncEmails] ${folderLogPrefix} 🔄 SENT EMAIL UPDATED: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Folder: "${existingEmail.folder}" -> "${dbFolderName}" | UID: ${existingEmail.uid} -> ${extractedUID}`);
+              } else if (updateData.uid) {
+                console.log(`[fetchSyncEmails] 🔄 UID UPDATED: Email ${emailData.messageId} now has UID ${extractedUID}`);
+              }
               savedEmail = existingEmail;
             } catch (updateError) {
-              console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ FAILED TO UPDATE SENT EMAIL FOLDER ${emailData.messageId}:`, updateError.message);
+              console.error(`[fetchSyncEmails] ${folderLogPrefix} ❌ FAILED TO UPDATE EMAIL ${emailData.messageId}:`, updateError.message);
               savedEmail = existingEmail;
             }
           } else {
             if (isSentFolder) {
-              console.log(`[fetchSyncEmails] ${folderLogPrefix} ℹ️ SENT EMAIL ALREADY EXISTS: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Current folder: "${existingEmail.folder}"`);
+              console.log(`[fetchSyncEmails] ${folderLogPrefix} ℹ️ SENT EMAIL ALREADY EXISTS: ${emailData.messageId} | Subject: "${existingEmail.subject}" | Current folder: "${existingEmail.folder}" | UID: ${existingEmail.uid}`);
             } else {
-              console.debug(`[fetchSyncEmails] Email already exists: ${emailData.messageId}`);
+              console.debug(`[fetchSyncEmails] Email already exists: ${emailData.messageId} | UID: ${existingEmail.uid}`);
             }
             savedEmail = existingEmail;
           }
