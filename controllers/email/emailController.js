@@ -6322,8 +6322,15 @@ exports.composeEmail = [
       }
 
       // Create a transporter using the selected email credentials with provider support
-      // Use defaultEmail.provider if default email is set, otherwise use userCredential.provider
-      const provider = defaultEmail ? (defaultEmail.provider || 'gmail') : (userCredential.provider || 'gmail');
+      // Use defaultEmail.provider if set, otherwise fall back to userCredential.provider, then gmail
+      let provider;
+      if (defaultEmail && defaultEmail.provider) {
+        provider = defaultEmail.provider;
+      } else if (userCredential && userCredential.provider) {
+        provider = userCredential.provider;
+      } else {
+        provider = 'gmail'; // final fallback
+      }
       
       console.log(`[composeEmail] 🔧 Provider detection: defaultEmail exists: ${!!defaultEmail}`);
       if (defaultEmail) {

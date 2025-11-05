@@ -126,6 +126,61 @@ router.post("/update-person-columns", verifyToken, validatePrivilege(5, "edit"),
 router.post("/update-person-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonOwner);
 router.post("/update-organization-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationOwner);
 
+// ===================================================================
+// FILE MANAGEMENT ROUTES FOR PERSONS AND ORGANIZATIONS
+// ===================================================================
+
+// Person file management routes
+router.post(
+  "/upload-person-files/:personId",
+  verifyToken,
+  validatePrivilege(5, "create"),
+  leadContactsController.uploadPersonFiles
+);
+router.get(
+  "/get-person-files/:personId",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getPersonFiles
+);
+router.get(
+  "/download-person-file/:personId/:fileId",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.downloadPersonFile
+);
+router.delete(
+  "/delete-person-file/:personId/:fileId",
+  verifyToken,
+  validatePrivilege(5, "delete"),
+  leadContactsController.deletePersonFile
+);
+
+// Organization file management routes
+router.post(
+  "/upload-organization-files/:leadOrganizationId",
+  verifyToken,
+  validatePrivilege(5, "create"),
+  leadContactsController.uploadOrganizationFiles
+);
+router.get(
+  "/get-organization-files/:leadOrganizationId",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getOrganizationFiles
+);
+router.get(
+  "/download-organization-file/:leadOrganizationId/:fileId",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.downloadOrganizationFile
+);
+router.delete(
+  "/delete-organization-file/:leadOrganizationId/:fileId",
+  verifyToken,
+  validatePrivilege(5, "delete"),
+  leadContactsController.deleteOrganizationFile
+);
 
 
 module.exports = router
