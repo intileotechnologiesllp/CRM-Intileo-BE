@@ -20,23 +20,37 @@ class FlagSyncQueueService {
       if (this.isInitialized) return;
       
       console.log('🔌 [FLAG SYNC QUEUE] Initializing RabbitMQ connection...');
-      this.connection = await amqp.connect(process.env.RABBITMQ_URL ||'amqp://localhost');
-      this.channel = await this.connection.createChannel();
-      
-      // Declare the main flag sync queue with durability
-      // First, try to check if queue exists with different settings
-      try {
-        await this.channel.checkQueue('SYNC_FLAGS_QUEUE');
-        console.log('ℹ️ [FLAG SYNC QUEUE] Using existing SYNC_FLAGS_QUEUE');
-      } catch (checkError) {
-        // Queue doesn't exist, create it
-        console.log('🔧 [FLAG SYNC QUEUE] Creating new SYNC_FLAGS_QUEUE');
-      }
-      
-      // Assert queue with minimal settings to avoid conflicts
-      await this.channel.assertQueue('SYNC_FLAGS_QUEUE', {
-        durable: true
+      this.connection = await amqp.connect(process.env.RABBITMQ_URL || 'amqp://localhost');
+      // Attach connection-level handlers to avoid unhandled events
+      this.connection.on('error', (err) => {
+        console.error('❌ [FLAG SYNC QUEUE] RabbitMQ connection error:', err && err.message ? err.message : err);
       });
+      this.connection.on('close', () => {
+        console.warn('⚠️ [FLAG SYNC QUEUE] RabbitMQ connection closed');
+        this.isInitialized = false;
+      });
+
+      this.channel = await this.connection.createChannel();
+      // Attach channel-level handlers to avoid unhandled events that can crash the process
+      this.channel.on('error', (err) => {
+        console.error('❌ [FLAG SYNC QUEUE] RabbitMQ channel error:', err && err.message ? err.message : err);
+      });
+      this.channel.on('close', () => {
+        console.warn('⚠️ [FLAG SYNC QUEUE] RabbitMQ channel closed');
+        this.isInitialized = false;
+      });
+
+      // Assert the main flag sync queue (idempotent). Prefer assertQueue instead of checkQueue
+      // to avoid race conditions and ensure the queue exists (if the RabbitMQ user has permission).
+      try {
+        await this.channel.assertQueue('SYNC_FLAGS_QUEUE', { durable: true });
+        console.log('ℹ️ [FLAG SYNC QUEUE] SYNC_FLAGS_QUEUE is ready (asserted)');
+      } catch (assertErr) {
+        // If asserting fails (for example due to permissions or vhost misconfiguration),
+        // log a clear error and rethrow so initialization caller can handle it.
+        console.error('❌ [FLAG SYNC QUEUE] Failed to assert SYNC_FLAGS_QUEUE:', assertErr && assertErr.message ? assertErr.message : assertErr);
+        throw assertErr;
+      }
       
       this.isInitialized = true;
       console.log('✅ [FLAG SYNC QUEUE] Successfully initialized RabbitMQ connection');

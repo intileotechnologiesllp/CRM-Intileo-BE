@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const sequelize = require("./config/db"); // Import Sequelize instance
+const { connectMongoDB } = require("./config/mongodb"); // Import MongoDB connection
 const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models
 const Admin = require("./models/adminModel"); // Import models
 const MasterUser = require("./models/master/masterUserModel"); // Import MasterUser model
@@ -53,6 +54,7 @@ const activityTypeRoutes = require('./routes/activity/activityTypeRoutes.js'); /
 const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js"); // Import user favorites routes
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
+const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import MongoDB routes
 const { loadPrograms } = require("./utils/programCache");
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
@@ -128,6 +130,7 @@ app.use("/api/favorites", userFavoritesRoutes); // Register user favorites route
 app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
+app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -184,13 +187,22 @@ sequelize
 // Start server
 (async () => {
   try {
+    // Initialize MongoDB connection
+    console.log("🔄 Initializing MongoDB connection...");
+    await connectMongoDB();
+    
     await loadPrograms();
-    // Start server after loading programs
+    // Start server after loading programs and connecting to MongoDB
     const PORT = process.env.PORT || 3056 ;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 MySQL Database: Connected via Sequelize`);
+      console.log(`🍃 MongoDB: Connected via Mongoose`);
+      console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
+    });
     console.log("Program cache loaded.");
   } catch (err) {
-    console.error("Failed to load program cache:", err);
+    console.error("Failed to initialize application:", err);
     process.exit(1);
   }
 })();
