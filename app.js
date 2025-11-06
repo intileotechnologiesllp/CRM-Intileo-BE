@@ -3,6 +3,7 @@ const express = require("express");
 const path = require("path");
 const sequelize = require("./config/db"); // Import Sequelize instance
 const { connectMongoDB } = require("./config/mongodb"); // Import MongoDB connection
+const { connectRedis } = require("./config/redis"); // Import Redis connection
 const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models
 const Admin = require("./models/adminModel"); // Import models
 const MasterUser = require("./models/master/masterUserModel"); // Import MasterUser model
@@ -191,13 +192,18 @@ sequelize
     console.log("🔄 Initializing MongoDB connection...");
     await connectMongoDB();
     
+    // Initialize Redis connection
+    console.log("🔄 Initializing Redis connection...");
+    await connectRedis();
+    
     await loadPrograms();
-    // Start server after loading programs and connecting to MongoDB
+    // Start server after loading programs and connecting to databases
     const PORT = process.env.PORT || 3056 ;
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 MySQL Database: Connected via Sequelize`);
       console.log(`🍃 MongoDB: Connected via Mongoose`);
+      console.log(`🔴 Redis: Connected for caching & sessions`);
       console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
     });
     console.log("Program cache loaded.");
