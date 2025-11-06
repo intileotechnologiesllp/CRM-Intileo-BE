@@ -209,70 +209,37 @@ exports.createLead = async (req, res) => {
     console.log("Request body email ID:", req.body.emailID);
   }
 
-  // --- Add validation here ---
-  // Validate emailID is required when sourceOrgin is 0 (email-created lead)
-  if ((sourceOrgin === 0 || sourceOrgin === "0") && !emailID) {
-    return res.status(400).json({
-      message:
-        "emailID is required when sourceOrgin is 0 (email-created lead).",
-    });
-  }
+  console.log("Request body sourceOrgin:", sourceOrgin);
 
-  // Enhanced email format validation
-  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ 
-      message: "Invalid email format. Please provide a valid email address." 
-    });
-  }
-
-  // Validate email length
-  if (email.length > 254) {
-    return res.status(400).json({ 
-      message: "Email address is too long. Maximum length is 254 characters." 
-    });
-  }
-
-  // Phone number validation (if phone is provided) - Only numerical values allowed
-  if (phone && phone.trim() !== "") {
-    // Strict validation: only digits and optional plus sign at the beginning
-    const phoneRegex = /^\+?\d{7,15}$/;
-    
-    if (!phoneRegex.test(phone.trim())) {
-      return res.status(400).json({ 
-        message: "Invalid phone number format. Phone number should contain only digits (7-15 digits) with optional + for country code. No spaces, dashes, or other characters allowed." 
-      });
-    }
-  }
-
-  if (proposalValue && proposalValue < 0) {
-    return res
-      .status(400)
-      .json({ message: "Proposal value must be positive." });
+  // Log emailID only when it's relevant (sourceOrgin is 0)
+  if (sourceOrgin === 0 || sourceOrgin === "0") {
+    console.log("Request body email ID:", req.body.emailID);
   }
 
   // Note: Removed email uniqueness check to allow multiple leads per contact person
   // Each contact can have multiple projects/leads with different titles
 
   // Check for duplicate combination of contactPerson, organization, AND title (allow multiple projects per contact)
-  const existingContactOrgTitleLead = await Lead.findOne({
-    where: {
-      contactPerson: contactPerson,
-      organization: organization,
-      title: title,
-    },
-  });
-  if (existingContactOrgTitleLead) {
-    return res.status(409).json({
-      message:
-        "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
-      existingLeadId: existingContactOrgTitleLead.leadId,
-      existingLeadTitle: existingContactOrgTitleLead.title,
-      existingContactPerson: existingContactOrgTitleLead.contactPerson,
-      existingOrganization: existingContactOrgTitleLead.organization,
+  // Only check duplicates if all three fields have values
+  if (contactPerson && organization && title) {
+    const existingContactOrgTitleLead = await Lead.findOne({
+      where: {
+        contactPerson: contactPerson,
+        organization: organization,
+        title: title,
+      },
     });
+    if (existingContactOrgTitleLead) {
+      return res.status(409).json({
+        message:
+          "A lead with this exact combination of contact person, organization, and title already exists. Please use a different title for a new project with the same contact.",
+        existingLeadId: existingContactOrgTitleLead.leadId,
+        existingLeadTitle: existingContactOrgTitleLead.title,
+        existingContactPerson: existingContactOrgTitleLead.contactPerson,
+        existingOrganization: existingContactOrgTitleLead.organization,
+      });
+    }
   }
-  // --- End validation ---
 
   console.log(req.role, "role of the user............");
 
@@ -339,13 +306,16 @@ exports.createLead = async (req, res) => {
       }
     }
 
-    // 1. Find or create Organization
-    let orgRecord = await Organization.findOne({ where: { organization } });
-    if (!orgRecord) {
-      orgRecord = await Organization.create({
-        organization,
-        masterUserID: req.adminId,
-      });
+    // 1. Find or create Organization (only if organization is provided)
+    let orgRecord = null;
+    if (organization && organization.trim() !== "") {
+      orgRecord = await Organization.findOne({ where: { organization } });
+      if (!orgRecord) {
+        orgRecord = await Organization.create({
+          organization,
+          masterUserID: req.adminId,
+        });
+      }
     }
     console.log(
       "orgRecord after create/find:",
@@ -353,20 +323,24 @@ exports.createLead = async (req, res) => {
       orgRecord?.organization
     );
 
-    // Defensive: If orgRecord is still not found, stop!
-    if (!orgRecord || !orgRecord.leadOrganizationId) {
+    // Defensive: If organization was provided but failed to create/find, stop!
+    if (organization && organization.trim() !== "" && (!orgRecord || !orgRecord.leadOrganizationId)) {
       return res
         .status(500)
         .json({ message: "Failed to create/find organization." });
     }
-    // 2. Find or create Person (linked to organization)
-    let personRecord = await Person.findOne({ where: { email } });
-    if (!personRecord) {
+    
+    // 2. Find or create Person (linked to organization if available)
+    let personRecord = null;
+    if (email && email.trim() !== "") {
+      personRecord = await Person.findOne({ where: { email } });
+    }
+    if (!personRecord && (email && email.trim() !== "")) {
       personRecord = await Person.create({
         contactPerson,
         email,
         phone,
-        leadOrganizationId: orgRecord.leadOrganizationId,
+        leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : null,
         masterUserID: req.adminId,
       });
     }
@@ -400,8 +374,8 @@ exports.createLead = async (req, res) => {
     }
 
     const lead = await Lead.create({
-      personId: personRecord.personId, // <-- Add this
-      leadOrganizationId: orgRecord.leadOrganizationId,
+      personId: personRecord ? personRecord.personId : null,
+      leadOrganizationId: orgRecord ? orgRecord.leadOrganizationId : null,
       contactPerson,
       organization,
       title,
