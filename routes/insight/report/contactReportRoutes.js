@@ -13,10 +13,5 @@ router.post("/get-summarypersonreport", verifyToken, contactReportController.get
 
 router.post("/save-personreport", verifyToken, contactReportController.savePersonReport);
 
-router.post("/create-organizationreport", verifyToken, contactReportController.createOrganizationReport);
-
-router.post("/get-summaryorganizationreport", verifyToken, contactReportController.getOrganizationReportSummary);
-
-router.post("/save-organizationreport", verifyToken, contactReportController.saveOrganizationReport);
 
 module.exports = router;
