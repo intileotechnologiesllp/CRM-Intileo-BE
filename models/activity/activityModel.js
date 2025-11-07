@@ -124,11 +124,16 @@ const Activity = sequelize.define(
   type: DataTypes.STRING,
   allowNull: true,
 },
-activityTypeFlag:{
-  type: DataTypes.STRING,
-  allowNull: true,
-  defaultValue: 'time', // 👈 default value added here
-}
+    activityTypeFlag:{
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: 'time', // 👈 default value added here
+    },
+    allContactPersons: {
+      type: DataTypes.TEXT, // JSON string to store multiple contact persons
+      allowNull: true,
+      comment: 'Stores JSON array of multiple contact persons associated with this activity'
+    }
   },
   {
     tableName: "Activities",
