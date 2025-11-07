@@ -4260,18 +4260,34 @@ exports.getAllLeadDetails = async (req, res) => {
   try {
     // Get the lead details
     const lead = await Lead.findByPk(leadId);
-    if (!lead || !lead.email) {
+    if (!lead) {
       await logAuditTrail(
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_DETAILS_FETCH",
         masterUserID,
-        "Lead details fetch failed: Lead or lead email not found.",
+        "Lead details fetch failed: Lead not found.",
         null
       );
-      return res.status(404).json({ message: "Lead or lead email not found." });
+      return res.status(404).json({ message: "Lead not found." });
     }
 
-    const clientEmail = lead.email;
+    // Allow leads without email: proceed but warn and skip email-specific data later
+    const clientEmail = lead.email || null;
+    if (!clientEmail) {
+      console.warn(`📌 [getAllLeadDetails] Lead ${leadId} exists but has no email; email-related data will be omitted.`);
+      // Log this as an informational audit entry so admins can trace missing emails
+      try {
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_DETAILS_FETCH",
+          masterUserID,
+          `Lead ${leadId} has no email; email-related data will be omitted.`,
+          null
+        );
+      } catch (auditErr) {
+        console.error('Error logging audit trail for missing lead email:', auditErr);
+      }
+    }
 
     // Get user credentials for email visibility filtering
     let currentUserEmail = null;
