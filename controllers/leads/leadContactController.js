@@ -8343,3 +8343,822 @@ exports.downloadOrganizationFile = async (req, res) => {
 exports.deleteOrganizationFile = async (req, res) => {
   return exports.deleteEntityFile(req, res);
 };
+
+// ===========================
+// PERSON SIDEBAR MANAGEMENT
+// ===========================
+
+/**
+ * Get person sidebar section preferences for the current user
+ */
+exports.getPersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+
+    // Find existing preferences for this user
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    // If no preferences exist, create default ones
+    if (!sidebarPrefs) {
+      const defaultSections = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'organization',
+          name: 'Organization',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 7,
+          draggable: true
+        }
+      ];
+
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences retrieved successfully",
+      sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections) 
+            : []),
+      totalSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections.length 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections).length 
+            : 0)
+    });
+
+  } catch (error) {
+    console.error("Error fetching person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update person sidebar section preferences (toggle visibility, reorder sections)
+ */
+exports.updatePersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+    const { sidebarSections } = req.body;
+
+    // Validate input
+    if (!Array.isArray(sidebarSections)) {
+      return res.status(400).json({
+        success: false,
+        message: "sidebarSections must be an array"
+      });
+    }
+
+    // Validate each section has required properties
+    for (const section of sidebarSections) {
+      if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        });
+      }
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences if none exist
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: sidebarSections
+      });
+    } else {
+      // Update existing preferences
+      sidebarPrefs.sidebarSections = sidebarSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences updated successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error updating person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Reset person sidebar preferences to default
+ */
+exports.resetPersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+
+    const defaultSections = [
+      {
+        id: 'summary',
+        name: 'Summary',
+        enabled: true,
+        order: 1,
+        draggable: false
+      },
+      {
+        id: 'details',
+        name: 'Details',
+        enabled: true,
+        order: 2,
+        draggable: true
+      },
+      {
+        id: 'organization',
+        name: 'Organization',
+        enabled: true,
+        order: 3,
+        draggable: true
+      },
+      {
+        id: 'deals',
+        name: 'Deals',
+        enabled: true,
+        order: 4,
+        draggable: true
+      },
+      {
+        id: 'overview',
+        name: 'Overview',
+        enabled: true,
+        order: 5,
+        draggable: true
+      },
+      {
+        id: 'smart_bcc',
+        name: 'Smart BCC',
+        enabled: true,
+        order: 6,
+        draggable: true
+      },
+      {
+        id: 'leads',
+        name: 'Leads',
+        enabled: true,
+        order: 7,
+        draggable: true
+      }
+    ];
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences with defaults
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    } else {
+      // Reset existing preferences to defaults
+      sidebarPrefs.sidebarSections = defaultSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences reset to defaults successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error resetting person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Toggle a specific sidebar section visibility
+ */
+exports.togglePersonSidebarSection = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+    const { sectionId, enabled } = req.body;
+
+    // Validate input
+    if (!sectionId || typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: "sectionId and enabled (boolean) are required"
+      });
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      return res.status(404).json({
+        success: false,
+        message: "Person sidebar preferences not found. Please initialize preferences first."
+      });
+    }
+
+    // Ensure sidebarSections is an array (handle both JSON string and object cases)
+    let sectionsArray = sidebarPrefs.sidebarSections;
+    
+    // If it's a string, try to parse it
+    if (typeof sectionsArray === 'string') {
+      try {
+        sectionsArray = JSON.parse(sectionsArray);
+      } catch (parseError) {
+        console.error("Error parsing sidebarSections JSON:", parseError);
+        return res.status(500).json({
+          success: false,
+          message: "Invalid sidebar sections data format"
+        });
+      }
+    }
+
+    // If it's still not an array, initialize with default sections
+    if (!Array.isArray(sectionsArray)) {
+      console.warn("sidebarSections is not an array, initializing with defaults");
+      sectionsArray = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'organization',
+          name: 'Organization',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 7,
+          draggable: true
+        }
+      ];
+    }
+
+    // Update the specific section
+    const sections = sectionsArray.map(section => {
+      if (section.id === sectionId) {
+        return { ...section, enabled };
+      }
+      return section;
+    });
+
+    // Check if the section was found
+    const sectionExists = sections.find(s => s.id === sectionId);
+    if (!sectionExists) {
+      return res.status(404).json({
+        success: false,
+        message: `Section '${sectionId}' not found in sidebar preferences`
+      });
+    }
+
+    // Save updated preferences
+    sidebarPrefs.sidebarSections = sections;
+    sidebarPrefs.updatedAt = new Date();
+    await sidebarPrefs.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+      sidebarSections: sidebarPrefs.sidebarSections,
+      updatedSection: sectionExists
+    });
+
+  } catch (error) {
+    console.error("Error toggling person sidebar section:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error toggling person sidebar section",
+      error: error.message
+    });
+  }
+};
+
+// ===========================
+// ORGANIZATION SIDEBAR MANAGEMENT
+// ===========================
+
+/**
+ * Get organization sidebar section preferences for the current user
+ */
+exports.getOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+
+    // Find existing preferences for this user
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    // If no preferences exist, create default ones
+    if (!sidebarPrefs) {
+      const defaultSections = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'related_organizations',
+          name: 'Related organizations',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'people',
+          name: 'People',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 7,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 8,
+          draggable: true
+        }
+      ];
+
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences retrieved successfully",
+      sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections) 
+            : []),
+      totalSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections.length 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections).length 
+            : 0)
+    });
+
+  } catch (error) {
+    console.error("Error fetching organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update organization sidebar section preferences (toggle visibility, reorder sections)
+ */
+exports.updateOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+    const { sidebarSections } = req.body;
+
+    // Validate input
+    if (!Array.isArray(sidebarSections)) {
+      return res.status(400).json({
+        success: false,
+        message: "sidebarSections must be an array"
+      });
+    }
+
+    // Validate each section has required properties
+    for (const section of sidebarSections) {
+      if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        });
+      }
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences if none exist
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: sidebarSections
+      });
+    } else {
+      // Update existing preferences
+      sidebarPrefs.sidebarSections = sidebarSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences updated successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error updating organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Reset organization sidebar preferences to default
+ */
+exports.resetOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+
+    const defaultSections = [
+      {
+        id: 'summary',
+        name: 'Summary',
+        enabled: true,
+        order: 1,
+        draggable: false
+      },
+      {
+        id: 'details',
+        name: 'Details',
+        enabled: true,
+        order: 2,
+        draggable: true
+      },
+      {
+        id: 'deals',
+        name: 'Deals',
+        enabled: true,
+        order: 3,
+        draggable: true
+      },
+      {
+        id: 'related_organizations',
+        name: 'Related organizations',
+        enabled: true,
+        order: 4,
+        draggable: true
+      },
+      {
+        id: 'people',
+        name: 'People',
+        enabled: true,
+        order: 5,
+        draggable: true
+      },
+      {
+        id: 'overview',
+        name: 'Overview',
+        enabled: true,
+        order: 6,
+        draggable: true
+      },
+      {
+        id: 'smart_bcc',
+        name: 'Smart BCC',
+        enabled: true,
+        order: 7,
+        draggable: true
+      },
+      {
+        id: 'leads',
+        name: 'Leads',
+        enabled: true,
+        order: 8,
+        draggable: true
+      }
+    ];
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences with defaults
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    } else {
+      // Reset existing preferences to defaults
+      sidebarPrefs.sidebarSections = defaultSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences reset to defaults successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error resetting organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Toggle a specific organization sidebar section visibility
+ */
+exports.toggleOrganizationSidebarSection = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+    const { sectionId, enabled } = req.body;
+
+    // Validate input
+    if (!sectionId || typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: "sectionId and enabled (boolean) are required"
+      });
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      return res.status(404).json({
+        success: false,
+        message: "Organization sidebar preferences not found. Please initialize preferences first."
+      });
+    }
+
+    // Ensure sidebarSections is an array (handle both JSON string and object cases)
+    let sectionsArray = sidebarPrefs.sidebarSections;
+    
+    // If it's a string, try to parse it
+    if (typeof sectionsArray === 'string') {
+      try {
+        sectionsArray = JSON.parse(sectionsArray);
+      } catch (parseError) {
+        console.error("Error parsing organization sidebarSections JSON:", parseError);
+        return res.status(500).json({
+          success: false,
+          message: "Invalid sidebar sections data format"
+        });
+      }
+    }
+
+    // If it's still not an array, initialize with default sections
+    if (!Array.isArray(sectionsArray)) {
+      console.warn("organization sidebarSections is not an array, initializing with defaults");
+      sectionsArray = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'related_organizations',
+          name: 'Related organizations',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'people',
+          name: 'People',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 7,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 8,
+          draggable: true
+        }
+      ];
+    }
+
+    // Update the specific section
+    const sections = sectionsArray.map(section => {
+      if (section.id === sectionId) {
+        return { ...section, enabled };
+      }
+      return section;
+    });
+
+    // Check if the section was found
+    const sectionExists = sections.find(s => s.id === sectionId);
+    if (!sectionExists) {
+      return res.status(404).json({
+        success: false,
+        message: `Section '${sectionId}' not found in organization sidebar preferences`
+      });
+    }
+
+    // Save updated preferences
+    sidebarPrefs.sidebarSections = sections;
+    sidebarPrefs.updatedAt = new Date();
+    await sidebarPrefs.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+      sidebarSections: sidebarPrefs.sidebarSections,
+      updatedSection: sectionExists
+    });
+
+  } catch (error) {
+    console.error("Error toggling organization sidebar section:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error toggling organization sidebar section",
+      error: error.message
+    });
+  }
+};

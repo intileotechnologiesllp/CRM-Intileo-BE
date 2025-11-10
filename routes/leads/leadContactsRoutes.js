@@ -182,5 +182,77 @@ router.delete(
   leadContactsController.deleteOrganizationFile
 );
 
+// ===========================
+// PERSON SIDEBAR MANAGEMENT ROUTES
+// ===========================
+
+// Get person sidebar preferences
+router.get(
+  "/person-sidebar-preferences",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getPersonSidebarPreferences
+);
+
+// Update person sidebar preferences
+router.post(
+  "/person-sidebar-preferences",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.updatePersonSidebarPreferences
+);
+
+// Reset person sidebar preferences to default
+router.post(
+  "/person-sidebar-preferences/reset",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.resetPersonSidebarPreferences
+);
+
+// Toggle specific sidebar section
+router.post(
+  "/person-sidebar-preferences/toggle",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.togglePersonSidebarSection
+);
+
+// ===========================
+// ORGANIZATION SIDEBAR MANAGEMENT ROUTES
+// ===========================
+
+// Get organization sidebar preferences
+router.get(
+  "/organization-sidebar-preferences",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getOrganizationSidebarPreferences
+);
+
+// Update organization sidebar preferences
+router.post(
+  "/organization-sidebar-preferences",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.updateOrganizationSidebarPreferences
+);
+
+// Reset organization sidebar preferences to default
+router.post(
+  "/organization-sidebar-preferences/reset",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.resetOrganizationSidebarPreferences
+);
+
+// Toggle specific organization sidebar section
+router.post(
+  "/organization-sidebar-preferences/toggle",
+  verifyToken,
+  validatePrivilege(5, "edit"),
+  leadContactsController.toggleOrganizationSidebarSection
+);
+
 
 module.exports = router
