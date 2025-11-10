@@ -5732,6 +5732,558 @@ const getQuarter = (date, granularity = 'quarterly') => {
   }
 };
 
+exports.getPersonsByIds = async (req, res) => {
+  try {
+    // Import required models
+    const { Lead, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Get personId(s) from query params or request body
+    let personIds = [];
+    
+    // Handle single personId
+    if (req.query.personId) {
+      personIds = [req.query.personId];
+    }
+    
+    // Handle multiple personIds from query (comma-separated)
+    if (req.query.personIds) {
+      const queryPersonIds = Array.isArray(req.query.personIds) 
+        ? req.query.personIds 
+        : req.query.personIds.split(',');
+      personIds = [...personIds, ...queryPersonIds];
+    }
+    
+    // Handle personIds from request body
+    if (req.body && req.body.personIds) {
+      const bodyPersonIds = Array.isArray(req.body.personIds) 
+        ? req.body.personIds 
+        : [req.body.personIds];
+      personIds = [...personIds, ...bodyPersonIds];
+    }
+    
+    // Handle single personId from request body
+    if (req.body && req.body.personId) {
+      personIds.push(req.body.personId);
+    }
+
+    // Remove duplicates and convert to integers
+    personIds = [...new Set(personIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
+
+    if (personIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "personId or personIds parameter is required"
+      });
+    }
+
+    console.log('[DEBUG] Fetching persons for IDs:', personIds);
+
+    // Build where clause for person filtering
+    let personWhere = {
+      personId: { [Op.in]: personIds }
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      personWhere.masterUserID = req.adminId;
+    }
+
+    // Fetch persons
+    const persons = await Person.findAll({
+      where: personWhere,
+      raw: true,
+    });
+
+    if (persons.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No persons found for the provided IDs"
+      });
+    }
+
+    console.log(`[DEBUG] Found ${persons.length} persons`);
+
+    // Get organization IDs from persons for organization data lookup
+    const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+    
+    // Fetch related organizations if any
+    let organizations = [];
+    if (orgIds.length > 0) {
+      let orgWhere = {
+        leadOrganizationId: { [Op.in]: orgIds }
+      };
+
+      if (req.role !== "admin") {
+        orgWhere.masterUserID = req.adminId;
+      }
+
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        raw: true,
+      });
+    }
+
+    // Build org map for quick lookup
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+
+    // Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Count leads for each person
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [
+          { personId: { [Op.in]: personIds } }, 
+          { leadOrganizationId: { [Op.in]: orgIds } }
+        ],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Enrich persons with computed fields
+    let enrichedPersons = persons.map((p) => {
+      let ownerName = null;
+      let organizationName = p.organization; // Keep existing organization name if present
+      
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        // Set organization name from the related organization
+        organizationName = org.organization || p.organization;
+        
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+        }
+      }
+      
+      // Add person's own owner name if available
+      if (p.ownerId && ownerMap[p.ownerId]) {
+        ownerName = ownerMap[p.ownerId];
+      }
+
+      return {
+        ...p,
+        organization: organizationName,
+        ownerName,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all persons
+    let customFieldValues = [];
+    if (personIds.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: { [Op.in]: personIds.map(id => id.toString()) },
+          entityType: "person",
+          masterUserID: req.adminId
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for person entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map personId to their custom field values as { fieldName: value }
+    const personCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!personCustomFieldsMap[cfv.entityId])
+        personCustomFieldsMap[cfv.entityId] = {};
+      personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each person
+    enrichedPersons = enrichedPersons.map((p) => {
+      const customFields = personCustomFieldsMap[p.personId.toString()] || {};
+      return { ...p, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const personColumnPref = await PersonColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = ['personId', 'leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter persons based on person column preferences
+    const filteredPersons = filterDataByColumnPreference(enrichedPersons, personColumnPref, 'person');
+
+    // Prepare response with detailed information
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched ${filteredPersons.length} person(s)`,
+      data: {
+        persons: filteredPersons,
+        totalCount: filteredPersons.length,
+        requestedIds: personIds,
+        foundIds: filteredPersons.map(p => p.personId),
+        missingIds: personIds.filter(id => !filteredPersons.some(p => p.personId === id)),
+        columnFiltering: {
+          enabled: !!(personColumnPref && personColumnPref.columns),
+          totalAvailableFields: Object.keys(Person.rawAttributes).length + allCustomFields.length,
+          displayedFields: personColumnPref && personColumnPref.columns ? 
+            (typeof personColumnPref.columns === "string" ? JSON.parse(personColumnPref.columns) : personColumnPref.columns)
+              .filter(col => col.check === true).length + 5 : // +5 for essential fields
+            Object.keys(Person.rawAttributes).length + allCustomFields.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching persons by IDs:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+exports.getOrganizationsByIds = async (req, res) => {
+  try {
+    // Import required models
+    const { Lead, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Get organizationId(s) from query params or request body
+    let organizationIds = [];
+    
+    // Handle single organizationId
+    if (req.query.organizationId) {
+      organizationIds = [req.query.organizationId];
+    }
+    
+    // Handle single leadOrganizationId (alias)
+    if (req.query.leadOrganizationId) {
+      organizationIds = [req.query.leadOrganizationId];
+    }
+    
+    // Handle multiple organizationIds from query (comma-separated)
+    if (req.query.organizationIds) {
+      const queryOrgIds = Array.isArray(req.query.organizationIds) 
+        ? req.query.organizationIds 
+        : req.query.organizationIds.split(',');
+      organizationIds = [...organizationIds, ...queryOrgIds];
+    }
+    
+    // Handle multiple leadOrganizationIds from query (comma-separated)
+    if (req.query.leadOrganizationIds) {
+      const queryOrgIds = Array.isArray(req.query.leadOrganizationIds) 
+        ? req.query.leadOrganizationIds 
+        : req.query.leadOrganizationIds.split(',');
+      organizationIds = [...organizationIds, ...queryOrgIds];
+    }
+    
+    // Handle organizationIds from request body
+    if (req.body && req.body.organizationIds) {
+      const bodyOrgIds = Array.isArray(req.body.organizationIds) 
+        ? req.body.organizationIds 
+        : [req.body.organizationIds];
+      organizationIds = [...organizationIds, ...bodyOrgIds];
+    }
+    
+    // Handle leadOrganizationIds from request body
+    if (req.body && req.body.leadOrganizationIds) {
+      const bodyOrgIds = Array.isArray(req.body.leadOrganizationIds) 
+        ? req.body.leadOrganizationIds 
+        : [req.body.leadOrganizationIds];
+      organizationIds = [...organizationIds, ...bodyOrgIds];
+    }
+    
+    // Handle single organizationId from request body
+    if (req.body && req.body.organizationId) {
+      organizationIds.push(req.body.organizationId);
+    }
+    
+    // Handle single leadOrganizationId from request body
+    if (req.body && req.body.leadOrganizationId) {
+      organizationIds.push(req.body.leadOrganizationId);
+    }
+
+    // Remove duplicates and convert to integers
+    organizationIds = [...new Set(organizationIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
+
+    if (organizationIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "organizationId/leadOrganizationId or organizationIds/leadOrganizationIds parameter is required"
+      });
+    }
+
+    console.log('[DEBUG] Fetching organizations for IDs:', organizationIds);
+
+    // Build where clause for organization filtering
+    let orgWhere = {
+      leadOrganizationId: { [Op.in]: organizationIds }
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      orgWhere.masterUserID = req.adminId;
+    }
+
+    // Fetch organizations
+    const organizations = await Organization.findAll({
+      where: orgWhere,
+      raw: true,
+    });
+
+    if (organizations.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No organizations found for the provided IDs"
+      });
+    }
+
+    console.log(`[DEBUG] Found ${organizations.length} organizations`);
+
+    // Get organization IDs for related data lookup
+    const orgIds = organizations.map(org => org.leadOrganizationId);
+
+    // Get all unique ownerIds from organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: orgOwnerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Count leads for each organization
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        leadOrganizationId: { [Op.in]: orgIds }
+      },
+      group: ["leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build map for quick lookup
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Enrich organizations with computed fields
+    let enrichedOrganizations = organizations.map((org) => {
+      return {
+        ...org,
+        ownerName: ownerMap[org.ownerId] || null,
+        leadCount: orgLeadCountMap[org.leadOrganizationId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all organizations
+    let customFieldValues = [];
+    if (organizationIds.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: { [Op.in]: organizationIds.map(id => id.toString()) },
+          entityType: "organization",
+          masterUserID: req.adminId
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for organization entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map organizationId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization
+    enrichedOrganizations = enrichedOrganizations.map((org) => {
+      const customFields = orgCustomFieldsMap[org.leadOrganizationId.toString()] || {};
+      return { ...org, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const orgColumnPref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = ['leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter organizations based on organization column preferences
+    const filteredOrganizations = filterDataByColumnPreference(enrichedOrganizations, orgColumnPref, 'organization');
+
+    // Prepare response with detailed information
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched ${filteredOrganizations.length} organization(s)`,
+      data: {
+        organizations: filteredOrganizations,
+        totalCount: filteredOrganizations.length,
+        requestedIds: organizationIds,
+        foundIds: filteredOrganizations.map(org => org.leadOrganizationId),
+        missingIds: organizationIds.filter(id => !filteredOrganizations.some(org => org.leadOrganizationId === id)),
+        columnFiltering: {
+          enabled: !!(orgColumnPref && orgColumnPref.columns),
+          totalAvailableFields: Object.keys(Organization.rawAttributes).length + allCustomFields.length,
+          displayedFields: orgColumnPref && orgColumnPref.columns ? 
+            (typeof orgColumnPref.columns === "string" ? JSON.parse(orgColumnPref.columns) : orgColumnPref.columns)
+              .filter(col => col.check === true).length + 4 : // +4 for essential fields
+            Object.keys(Organization.rawAttributes).length + allCustomFields.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching organizations by IDs:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
 exports.getPersonsAndOrganizations = async (req, res) => {
   try {
     // Import required models at the beginning of the function
