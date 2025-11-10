@@ -23,7 +23,6 @@ const {
 const LeadPerson = require("../../../models/leads/leadPersonModel");
 const { Goal, Dashboard } = require("../../../models");
 
-
 exports.createActivityReport = async (req, res) => {
   try {
     const {
@@ -51,27 +50,31 @@ exports.createActivityReport = async (req, res) => {
       { label: "Organization", value: "organization", type: "Activity" },
       { label: "Type", value: "type", type: "Activity" },
       { label: "Owner", value: "Owner", type: "Activity" },
-      { label: "Start Date", value: "startDateTime", type: "Date"},
-      { label: "End Date", value: "endDateTime", type: "Date"},
-      { label: "Due Date", value: "dueDate", type: "Date"},
-      { label: "Add On", value: "createdAt", type: "Date"},
-      { label: "Marked as Done Time", value: "markedAsDoneTime", type: "Date"},
+      { label: "Start Date", value: "startDateTime", type: "Date" },
+      { label: "End Date", value: "endDateTime", type: "Date" },
+      { label: "Due Date", value: "dueDate", type: "Date" },
+      { label: "Add On", value: "createdAt", type: "Date" },
+      { label: "Marked as Done Time", value: "markedAsDoneTime", type: "Date" },
     ];
 
     const segmentedByOptions = [
       { label: "None", value: "none" },
       { label: "Subject", value: "subject" },
-      { label: "Priority", value: "priority"},
-      { label: "Status", value: "status"},
-      { label: "Location", value: "location"},
-      { label: "Contact Person", value: "contactPerson"},
-      { label: "Organization", value: "organization"},
-      { label: "Type", value: "type"},
-      { label: "Owner", value: "Owner"},
+      { label: "Priority", value: "priority" },
+      { label: "Status", value: "status" },
+      { label: "Location", value: "location" },
+      { label: "Contact Person", value: "contactPerson" },
+      { label: "Organization", value: "organization" },
+      { label: "Type", value: "type" },
+      { label: "Owner", value: "Owner" },
     ];
 
     const yaxisArray = [
-      { label: "No of Activities", value: "no of activities", type: "Activity" },
+      {
+        label: "No of Activities",
+        value: "no of activities",
+        type: "Activity",
+      },
       { label: "Duration", value: "duration", type: "Activity" },
     ];
 
@@ -638,14 +641,15 @@ async function generateActivityPerformanceData(
 
   // Check if xaxis is a date field and durationUnit is provided
   const isDateField = [
-    'startDateTime', 
-    'endDateTime', 
-    'createdAt', 
-    'dueDate',
-    'markedAsDoneTime'
+    "startDateTime",
+    "endDateTime",
+    "createdAt",
+    "dueDate",
+    "markedAsDoneTime",
   ].includes(xaxis);
-  
-  const shouldGroupByDuration = isDateField && durationUnit && durationUnit !== "none";
+
+  const shouldGroupByDuration =
+    isDateField && durationUnit && durationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -709,17 +713,21 @@ async function generateActivityPerformanceData(
 
     // Check if segmentedBy is also a date field
     const isSegmentedByDate = [
-      'startDateTime', 
-      'endDateTime', 
-      'createdAt', 
-      'dueDate',
-      'markedAsDoneTime'
+      "startDateTime",
+      "endDateTime",
+      "createdAt",
+      "dueDate",
+      "markedAsDoneTime",
     ].includes(segmentedBy);
-    
-    const shouldSegmentByDuration = isSegmentedByDate && durationUnit && durationUnit !== "none";
+
+    const shouldSegmentByDuration =
+      isSegmentedByDate && durationUnit && durationUnit !== "none";
 
     if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(segmentedBy, durationUnit);
+      const segmentDateExpression = getDateGroupExpression(
+        segmentedBy,
+        durationUnit
+      );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
     } else if (segmentedBy === "contactPerson") {
@@ -807,7 +815,13 @@ async function generateActivityPerformanceData(
       where: baseWhere,
       attributes: [
         [
-          Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", getDateGroupExpression(xaxis, durationUnit))),
+          Sequelize.fn(
+            "COUNT",
+            Sequelize.fn(
+              "DISTINCT",
+              getDateGroupExpression(xaxis, durationUnit)
+            )
+          ),
           "total",
         ],
       ],
@@ -829,10 +843,7 @@ async function generateActivityPerformanceData(
     totalCountResult = await Activity.findAll({
       where: baseWhere,
       attributes: [
-        [
-          Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)),
-          "total",
-        ],
+        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
       ],
       include: includeModels,
       raw: true,
@@ -847,7 +858,7 @@ async function generateActivityPerformanceData(
   if (segmentedBy && segmentedBy !== "none") {
     // For segmented queries, we need a different approach
     const paginationAttributes = [];
-    
+
     // Determine the correct group column for pagination
     let groupColumn;
     if (shouldGroupByDuration) {
@@ -887,17 +898,19 @@ async function generateActivityPerformanceData(
       results = [];
     } else {
       const finalWhere = { ...baseWhere };
-      
+
       // Build condition for the specific group keys - FIXED for related tables
       let groupCondition;
-      
+
       if (shouldGroupByDuration) {
         // For date grouping
         const groupExpression = getDateGroupExpression(xaxis, durationUnit);
-        groupCondition = Sequelize.where(groupExpression, { [Op.in]: groupKeys });
+        groupCondition = Sequelize.where(groupExpression, {
+          [Op.in]: groupKeys,
+        });
       } else if (xaxis === "Owner" || xaxis === "assignedTo") {
         // For Owner/assignedTo - use proper Sequelize syntax for related table
-        groupCondition = { '$assignedUser.name$': { [Op.in]: groupKeys } };
+        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
       } else if (xaxis === "contactPerson") {
         // For contactPerson - use proper column reference
         groupCondition = { personId: { [Op.in]: groupKeys } };
@@ -909,8 +922,8 @@ async function generateActivityPerformanceData(
         groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
       }
 
-      finalWhere[Op.and] = finalWhere[Op.and] 
-        ? [...finalWhere[Op.and], groupCondition] 
+      finalWhere[Op.and] = finalWhere[Op.and]
+        ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
       results = await Activity.findAll({
@@ -945,7 +958,8 @@ async function generateActivityPerformanceData(
     results.forEach((item) => {
       let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
-      const segmentValue = formatDateValue(item.segmentValue, durationUnit) || "Unknown";
+      const segmentValue =
+        formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
@@ -1094,19 +1108,23 @@ async function generateExistingActivityPerformanceData(
 
   // Check if xaxis is a date field and durationUnit is provided
   const isDateField = [
-    'startDateTime', 
-    'endDateTime', 
-    'createdAt',
-    'dueDate', 
-    'markedAsDoneTime'
+    "startDateTime",
+    "endDateTime",
+    "createdAt",
+    "dueDate",
+    "markedAsDoneTime",
   ].includes(existingxaxis);
-  
-  const shouldGroupByDuration = isDateField && existingDurationUnit && existingDurationUnit !== "none";
+
+  const shouldGroupByDuration =
+    isDateField && existingDurationUnit && existingDurationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
-    const dateGroupExpression = getDateGroupExpression(existingxaxis, existingDurationUnit);
+    const dateGroupExpression = getDateGroupExpression(
+      existingxaxis,
+      existingDurationUnit
+    );
     attributes.push([dateGroupExpression, "xValue"]);
     groupBy.push(dateGroupExpression);
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
@@ -1164,17 +1182,23 @@ async function generateExistingActivityPerformanceData(
 
     // Check if segmentedBy is also a date field
     const isSegmentedByDate = [
-      'startDateTime', 
-      'endDateTime', 
-      'createdAt', 
-      'dueDate',
-      'markedAsDoneTime'
+      "startDateTime",
+      "endDateTime",
+      "createdAt",
+      "dueDate",
+      "markedAsDoneTime",
     ].includes(existingSegmentedBy);
-    
-    const shouldSegmentByDuration = isSegmentedByDate && existingDurationUnit && existingDurationUnit !== "none";
+
+    const shouldSegmentByDuration =
+      isSegmentedByDate &&
+      existingDurationUnit &&
+      existingDurationUnit !== "none";
 
     if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(existingSegmentedBy, existingDurationUnit);
+      const segmentDateExpression = getDateGroupExpression(
+        existingSegmentedBy,
+        existingDurationUnit
+      );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
     } else if (existingSegmentedBy === "contactPerson") {
@@ -1202,7 +1226,8 @@ async function generateExistingActivityPerformanceData(
         "segmentValue",
       ]);
     } else if (
-      (existingSegmentedBy === "Owner" || existingSegmentedBy === "assignedTo") &&
+      (existingSegmentedBy === "Owner" ||
+        existingSegmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
       includeModels.push({
@@ -1261,7 +1286,13 @@ async function generateExistingActivityPerformanceData(
       where: baseWhere,
       attributes: [
         [
-          Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", getDateGroupExpression(existingxaxis, existingDurationUnit))),
+          Sequelize.fn(
+            "COUNT",
+            Sequelize.fn(
+              "DISTINCT",
+              getDateGroupExpression(existingxaxis, existingDurationUnit)
+            )
+          ),
           "total",
         ],
       ],
@@ -1283,10 +1314,7 @@ async function generateExistingActivityPerformanceData(
     totalCountResult = await Activity.findAll({
       where: baseWhere,
       attributes: [
-        [
-          Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)),
-          "total",
-        ],
+        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
       ],
       include: includeModels,
       raw: true,
@@ -1338,13 +1366,18 @@ async function generateExistingActivityPerformanceData(
       results = [];
     } else {
       const finalWhere = { ...baseWhere };
-      
+
       let groupCondition;
       if (shouldGroupByDuration) {
-        const groupExpression = getDateGroupExpression(existingxaxis, existingDurationUnit);
-        groupCondition = Sequelize.where(groupExpression, { [Op.in]: groupKeys });
+        const groupExpression = getDateGroupExpression(
+          existingxaxis,
+          existingDurationUnit
+        );
+        groupCondition = Sequelize.where(groupExpression, {
+          [Op.in]: groupKeys,
+        });
       } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-        groupCondition = { '$assignedUser.name$': { [Op.in]: groupKeys } };
+        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
       } else if (existingxaxis === "contactPerson") {
         groupCondition = { personId: { [Op.in]: groupKeys } };
       } else if (existingxaxis === "organization") {
@@ -1386,9 +1419,11 @@ async function generateExistingActivityPerformanceData(
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     const groupedData = {};
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let xValue =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
-      const segmentValue = formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
+      const segmentValue =
+        formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
@@ -1398,7 +1433,10 @@ async function generateExistingActivityPerformanceData(
           id = item.personId || null;
         } else if (existingxaxis === "organization") {
           id = item.leadOrganizationId || null;
-        } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+        } else if (
+          existingxaxis === "Owner" ||
+          existingxaxis === "assignedTo"
+        ) {
           id = item.assignedUserId || null;
         }
 
@@ -1435,7 +1473,8 @@ async function generateExistingActivityPerformanceData(
   } else {
     // Logic for non-segmented data
     formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let label =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
       // Set proper ID based on xaxis type
       let id = null;
@@ -1476,36 +1515,40 @@ async function generateExistingActivityPerformanceData(
 // Helper function to get date group expression based on durationUnit
 function getDateGroupExpression(dateField, durationUnit) {
   const field = `Activity.${dateField}`;
-  
+
   if (!durationUnit || durationUnit === "none") {
     return Sequelize.col(field);
   }
-  
+
   switch (durationUnit.toLowerCase()) {
     case "daily":
-      return Sequelize.fn('DATE_FORMAT', Sequelize.col(field), '%d/%m/%Y');
-    
+      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%d/%m/%Y");
+
     case "weekly":
-      return Sequelize.literal(`CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`);
-    
+      return Sequelize.literal(
+        `CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`
+      );
+
     case "monthly":
-      return Sequelize.fn('DATE_FORMAT', Sequelize.col(field), '%m/%Y');
-    
+      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%m/%Y");
+
     case "quarterly":
-      return Sequelize.literal(`CONCAT('Q', QUARTER(${field}), ' ', YEAR(${field}))`);
-    
+      return Sequelize.literal(
+        `CONCAT('Q', QUARTER(${field}), ' ', YEAR(${field}))`
+      );
+
     case "yearly":
-      return Sequelize.fn('YEAR', Sequelize.col(field));
-    
+      return Sequelize.fn("YEAR", Sequelize.col(field));
+
     default:
-      return Sequelize.fn('DATE_FORMAT', Sequelize.col(field), '%d/%m/%Y');
+      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%d/%m/%Y");
   }
 }
 
 // Helper function to format date values for display
 function formatDateValue(value, durationUnit) {
   if (!value) return value;
-  
+
   if (!durationUnit || durationUnit === "none") return value;
 
   // For yearly, just return the year as string
@@ -4067,8 +4110,8 @@ async function generateActivityPerformanceDataForDrillDown(
     4: Organization,
     5: Deal,
     6: Lead,
-    7: Goal
-  }
+    7: Goal,
+  };
 
   const tableName = entityData[entity];
   const columnNames = Object.keys(tableName.rawAttributes);
@@ -4077,32 +4120,37 @@ async function generateActivityPerformanceDataForDrillDown(
   let results;
 
   let addIncludeModel = includeModels;
-  if(entity != 4 && entity != 3){
-    if(entity == 1 || entity == 6){
-      addIncludeModel = [...includeModels,
-       {
-        model: MasterUser,
-        as: 'Owner', // For masterUserID
-        attributes: ['masterUserID', 'name'],
-      }]
-    }else if(entity == 2 || entity == 5){
-      addIncludeModel = [...includeModels,
-       {
-        model: MasterUser,
-        as: 'Owner', // For masterUserID
-        attributes: ['masterUserID', 'name'],
-      }]
-    }else if(entity == 7){
-      addIncludeModel = [...includeModels,
+  if (entity != 4 && entity != 3) {
+    if (entity == 1 || entity == 6) {
+      addIncludeModel = [
+        ...includeModels,
+        {
+          model: MasterUser,
+          as: "Owner", // For masterUserID
+          attributes: ["masterUserID", "name"],
+        },
+      ];
+    } else if (entity == 2 || entity == 5) {
+      addIncludeModel = [
+        ...includeModels,
+        {
+          model: MasterUser,
+          as: "Owner", // For masterUserID
+          attributes: ["masterUserID", "name"],
+        },
+      ];
+    } else if (entity == 7) {
+      addIncludeModel = [
+        ...includeModels,
         {
           model: Dashboard,
-          as: 'Dashboard', // For masterUserID
-          attributes: ['dashboard', 'name','folder', 'type',],
+          as: "Dashboard", // For masterUserID
+          attributes: ["dashboard", "name", "folder", "type"],
         },
-      ]
-    }
-    else{
-      addIncludeModel = [...includeModels,
+      ];
+    } else {
+      addIncludeModel = [
+        ...includeModels,
         {
           model: MasterUser,
           as: "assignedUser", // For masterUserID
@@ -4744,6 +4792,7 @@ async function generateExistingActivityPerformanceDataForSave(
   role,
   existingxaxis,
   existingyaxis,
+  existingDurationUnit,
   existingSegmentedBy,
   existingfilters
 ) {
@@ -4754,7 +4803,7 @@ async function generateExistingActivityPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
-  // --- Filter handling code ---
+  // Filter handling code
   if (existingfilters && existingfilters.conditions) {
     const validConditions = existingfilters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -4798,8 +4847,28 @@ async function generateExistingActivityPerformanceDataForSave(
   let groupBy = [];
   let attributes = [];
 
-  // --- Attribute and GroupBy setup ---
-  if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateField = [
+    "startDateTime",
+    "endDateTime",
+    "createdAt",
+    "dueDate",
+    "markedAsDoneTime",
+  ].includes(existingxaxis);
+
+  const shouldGroupByDuration =
+    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+
+  // Attribute and GroupBy setup with durationUnit support
+  if (shouldGroupByDuration) {
+    // Handle date grouping based on durationUnit
+    const dateGroupExpression = getDateGroupExpression(
+      existingxaxis,
+      existingDurationUnit
+    );
+    attributes.push([dateGroupExpression, "xValue"]);
+    groupBy.push(dateGroupExpression);
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser",
@@ -4807,6 +4876,7 @@ async function generateExistingActivityPerformanceDataForSave(
     });
     groupBy.push("assignedUser.name");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([Sequelize.col("Activity.masterUserID"), "assignedUserId"]);
   } else if (existingxaxis === "Team") {
     includeModels.push({
       model: MasterUser,
@@ -4815,6 +4885,32 @@ async function generateExistingActivityPerformanceDataForSave(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+  } else if (existingxaxis === "contactPerson") {
+    includeModels.push({
+      model: Person,
+      as: "ActivityPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.personId");
+    attributes.push([Sequelize.col("Activity.personId"), "personId"]);
+    attributes.push([Sequelize.col("ActivityPerson.contactPerson"), "xValue"]);
+  } else if (existingxaxis === "organization") {
+    includeModels.push({
+      model: Organization,
+      as: "ActivityOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Activity.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("ActivityOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     groupBy.push(`Activity.${existingxaxis}`);
     attributes.push([Sequelize.col(`Activity.${existingxaxis}`), "xValue"]);
@@ -4824,10 +4920,55 @@ async function generateExistingActivityPerformanceDataForSave(
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-    if (
+
+    // Check if segmentedBy is also a date field
+    const isSegmentedByDate = [
+      "startDateTime",
+      "endDateTime",
+      "createdAt",
+      "dueDate",
+      "markedAsDoneTime",
+    ].includes(existingSegmentedBy);
+
+    const shouldSegmentByDuration =
+      isSegmentedByDate &&
+      existingDurationUnit &&
+      existingDurationUnit !== "none";
+
+    if (shouldSegmentByDuration) {
+      const segmentDateExpression = getDateGroupExpression(
+        existingSegmentedBy,
+        existingDurationUnit
+      );
+      attributes.push([segmentDateExpression, "segmentValue"]);
+      groupBy.push(segmentDateExpression);
+    } else if (existingSegmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "ActivityPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.personId");
+      attributes.push([
+        Sequelize.col("ActivityPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (existingSegmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "ActivityOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("ActivityOrganization.organization"),
+        "segmentValue",
+      ]);
+    } else if (
       (existingSegmentedBy === "Owner" ||
-        existingSegmentedBy === "assignedTo" ||
-        existingSegmentedBy === "Team") &&
+        existingSegmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
       includeModels.push({
@@ -4835,15 +4976,14 @@ async function generateExistingActivityPerformanceDataForSave(
         as: "assignedUser",
         attributes: [],
       });
-    }
-
-    if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
-    ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team") {
+    } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
@@ -4883,75 +5023,17 @@ async function generateExistingActivityPerformanceDataForSave(
   let results;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Get all groups without pagination
-    const allGroups = await Activity.findAll({
-      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+    // Simplified segmented query - get all data at once without pagination
+    results = await Activity.findAll({
       where: baseWhere,
+      attributes: attributes,
       include: includeModels,
-      group: groupBy[0],
-      order: [
-        existingyaxis === "no of activities"
-          ? [Sequelize.fn("COUNT", Sequelize.col("activityId")), "DESC"]
-          : existingyaxis === "duration"
-          ? [
-              Sequelize.fn(
-                "AVG",
-                Sequelize.fn(
-                  "TIMESTAMPDIFF",
-                  Sequelize.literal("HOUR"),
-                  Sequelize.col("startDateTime"),
-                  Sequelize.col("endDateTime")
-                )
-              ),
-              "DESC",
-            ]
-          : [
-              Sequelize.fn("SUM", Sequelize.col(`Activity.${existingyaxis}`)),
-              "DESC",
-            ],
-      ],
+      group: groupBy,
       raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
     });
-
-    const groupKeys = allGroups.map((g) => g.groupKey);
-
-    if (groupKeys.length === 0) {
-      results = [];
-    } else {
-      const finalWhere = { ...baseWhere };
-      const whereColumn = groupBy[0].includes(".")
-        ? `$${groupBy[0]}$`
-        : groupBy[0];
-
-      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
-      const hasNullGroupKey = groupKeys.some((key) => key === null);
-
-      const orConditions = [];
-      if (nonNullGroupKeys.length > 0) {
-        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
-      }
-      if (hasNullGroupKey) {
-        orConditions.push({ [whereColumn]: { [Op.is]: null } });
-      }
-
-      if (orConditions.length > 0) {
-        const groupKeyCondition = { [Op.or]: orConditions };
-        finalWhere[Op.and] = finalWhere[Op.and]
-          ? [...finalWhere[Op.and], groupKeyCondition]
-          : [groupKeyCondition];
-      }
-
-      results = await Activity.findAll({
-        where: finalWhere,
-        attributes: attributes,
-        include: includeModels,
-        group: groupBy,
-        raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
-      });
-    }
   } else {
-    // Simple query without segmentation
+    // Simple query without segmentation - get all data at once
     results = await Activity.findAll({
       where: baseWhere,
       attributes: attributes,
@@ -4962,19 +5044,39 @@ async function generateExistingActivityPerformanceDataForSave(
     });
   }
 
-  // --- FORMATTING AND TOTALING LOGIC ---
+  // Formatting and totaling logic with durationUnit support
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     const groupedData = {};
     results.forEach((item) => {
-      const xValue = item.xValue || "Unknown";
-      const segmentValue = item.segmentValue || "Unknown";
+      let xValue =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+
+      const segmentValue =
+        formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set proper ID based on xaxis type
+        let id = null;
+        if (existingxaxis === "contactPerson") {
+          id = item.personId || null;
+        } else if (existingxaxis === "organization") {
+          id = item.leadOrganizationId || null;
+        } else if (
+          existingxaxis === "Owner" ||
+          existingxaxis === "assignedTo"
+        ) {
+          id = item.assignedUserId || null;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -5002,10 +5104,26 @@ async function generateExistingActivityPerformanceDataForSave(
     );
   } else {
     // Logic for non-segmented data
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+
+      // Set proper ID based on xaxis type
+      let id = null;
+      if (existingxaxis === "contactPerson") {
+        id = item.personId || null;
+      } else if (existingxaxis === "organization") {
+        id = item.leadOrganizationId || null;
+      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+        id = item.assignedUserId || null;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -5024,6 +5142,7 @@ async function generateActivityPerformanceDataForSave(
   role,
   xaxis,
   yaxis,
+  durationUnit,
   segmentedBy,
   filters
 ) {
@@ -5034,6 +5153,7 @@ async function generateActivityPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+  // Filter handling
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -5077,7 +5197,25 @@ async function generateActivityPerformanceDataForSave(
   let groupBy = [];
   let attributes = [];
 
-  if (xaxis === "Owner" || xaxis === "assignedTo") {
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateField = [
+    "startDateTime",
+    "endDateTime",
+    "createdAt",
+    "dueDate",
+    "markedAsDoneTime",
+  ].includes(xaxis);
+
+  const shouldGroupByDuration =
+    isDateField && durationUnit && durationUnit !== "none";
+
+  // Attribute and GroupBy setup with durationUnit support
+  if (shouldGroupByDuration) {
+    // Handle date grouping based on durationUnit
+    const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
+    attributes.push([dateGroupExpression, "xValue"]);
+    groupBy.push(dateGroupExpression);
+  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser",
@@ -5085,6 +5223,7 @@ async function generateActivityPerformanceDataForSave(
     });
     groupBy.push("assignedUser.name");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([Sequelize.col("Activity.masterUserID"), "assignedUserId"]);
   } else if (xaxis === "Team") {
     includeModels.push({
       model: MasterUser,
@@ -5093,19 +5232,88 @@ async function generateActivityPerformanceDataForSave(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
+  } else if (xaxis === "contactPerson") {
+    includeModels.push({
+      model: Person,
+      as: "ActivityPerson",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.personId");
+    attributes.push([Sequelize.col("Activity.personId"), "personId"]);
+    attributes.push([Sequelize.col("ActivityPerson.contactPerson"), "xValue"]);
+  } else if (xaxis === "organization") {
+    includeModels.push({
+      model: Organization,
+      as: "ActivityOrganization",
+      attributes: [],
+      required: false,
+    });
+    groupBy.push("Activity.leadOrganizationId");
+    attributes.push([
+      Sequelize.col("Activity.leadOrganizationId"),
+      "leadOrganizationId",
+    ]);
+    attributes.push([
+      Sequelize.col("ActivityOrganization.organization"),
+      "xValue",
+    ]);
   } else {
     groupBy.push(`Activity.${xaxis}`);
     attributes.push([Sequelize.col(`Activity.${xaxis}`), "xValue"]);
   }
 
+  // Handle segmentedBy with durationUnit consideration
   if (segmentedBy && segmentedBy !== "none") {
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-    if (
-      (segmentedBy === "Owner" ||
-        segmentedBy === "assignedTo" ||
-        segmentedBy === "Team") &&
+
+    // Check if segmentedBy is also a date field
+    const isSegmentedByDate = [
+      "startDateTime",
+      "endDateTime",
+      "createdAt",
+      "dueDate",
+      "markedAsDoneTime",
+    ].includes(segmentedBy);
+
+    const shouldSegmentByDuration =
+      isSegmentedByDate && durationUnit && durationUnit !== "none";
+
+    if (shouldSegmentByDuration) {
+      const segmentDateExpression = getDateGroupExpression(
+        segmentedBy,
+        durationUnit
+      );
+      attributes.push([segmentDateExpression, "segmentValue"]);
+      groupBy.push(segmentDateExpression);
+    } else if (segmentedBy === "contactPerson") {
+      includeModels.push({
+        model: Person,
+        as: "ActivityPerson",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.personId");
+      attributes.push([
+        Sequelize.col("ActivityPerson.contactPerson"),
+        "segmentValue",
+      ]);
+    } else if (segmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "ActivityOrganization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Activity.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("ActivityOrganization.organization"),
+        "segmentValue",
+      ]);
+    } else if (
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
       includeModels.push({
@@ -5113,12 +5321,14 @@ async function generateActivityPerformanceDataForSave(
         as: "assignedUser",
         attributes: [],
       });
-    }
-
-    if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
+    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
@@ -5130,6 +5340,7 @@ async function generateActivityPerformanceDataForSave(
     }
   }
 
+  // Y-axis calculation
   if (yaxis === "no of activities") {
     attributes.push([
       Sequelize.fn("COUNT", Sequelize.col("activityId")),
@@ -5158,72 +5369,17 @@ async function generateActivityPerformanceDataForSave(
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // Get all groups without pagination
-    const allGroups = await Activity.findAll({
-      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+    // For segmented queries, get all data without pagination
+    results = await Activity.findAll({
       where: baseWhere,
+      attributes: attributes,
       include: includeModels,
-      group: groupBy[0],
-      order: [
-        yaxis === "no of activities"
-          ? [Sequelize.fn("COUNT", Sequelize.col("activityId")), "DESC"]
-          : yaxis === "duration"
-          ? [
-              Sequelize.fn(
-                "AVG",
-                Sequelize.fn(
-                  "TIMESTAMPDIFF",
-                  Sequelize.literal("HOUR"),
-                  Sequelize.col("startDateTime"),
-                  Sequelize.col("endDateTime")
-                )
-              ),
-              "DESC",
-            ]
-          : [Sequelize.fn("SUM", Sequelize.col(`Activity.${yaxis}`)), "DESC"],
-      ],
+      group: groupBy,
       raw: true,
+      order: [[Sequelize.literal("yValue"), "DESC"]],
     });
-
-    const groupKeys = allGroups.map((g) => g.groupKey);
-
-    if (groupKeys.length === 0) {
-      results = [];
-    } else {
-      const finalWhere = { ...baseWhere };
-      const whereColumn = groupBy[0].includes(".")
-        ? `$${groupBy[0]}$`
-        : groupBy[0];
-
-      const nonNullGroupKeys = groupKeys.filter((key) => key !== null);
-      const hasNullGroupKey = groupKeys.some((key) => key === null);
-
-      const orConditions = [];
-      if (nonNullGroupKeys.length > 0) {
-        orConditions.push({ [whereColumn]: { [Op.in]: nonNullGroupKeys } });
-      }
-      if (hasNullGroupKey) {
-        orConditions.push({ [whereColumn]: { [Op.is]: null } });
-      }
-
-      if (orConditions.length > 0) {
-        const groupKeyCondition = { [Op.or]: orConditions };
-        finalWhere[Op.and] = finalWhere[Op.and]
-          ? [...finalWhere[Op.and], groupKeyCondition]
-          : [groupKeyCondition];
-      }
-
-      results = await Activity.findAll({
-        where: finalWhere,
-        attributes: attributes,
-        include: includeModels,
-        group: groupBy,
-        raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
-      });
-    }
   } else {
-    // Simple query without segmentation
+    // Non-segmented query - get all data without pagination
     results = await Activity.findAll({
       where: baseWhere,
       attributes: attributes,
@@ -5234,18 +5390,35 @@ async function generateActivityPerformanceDataForSave(
     });
   }
 
+  // Format results with durationUnit consideration
   let formattedResults = [];
   let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
     const groupedData = {};
     results.forEach((item) => {
-      const xValue = item.xValue === null ? "Unknown" : item.xValue;
-      const segmentValue = item.segmentValue || "Unknown";
+      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
+
+      const segmentValue =
+        formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        groupedData[xValue] = { label: xValue, segments: [] };
+        // Set proper ID based on xaxis type
+        let id = null;
+        if (xaxis === "contactPerson") {
+          id = item.personId || null;
+        } else if (xaxis === "organization") {
+          id = item.leadOrganizationId || null;
+        } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+          id = item.assignedUserId || null;
+        }
+
+        groupedData[xValue] = {
+          label: xValue,
+          segments: [],
+          id: id,
+        };
       }
       groupedData[xValue].segments.push({
         labeltype: segmentValue,
@@ -5255,7 +5428,7 @@ async function generateActivityPerformanceDataForSave(
 
     formattedResults = Object.values(groupedData);
 
-    // Calculate total for each segment group
+    // Calculate and add total for each segment group
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
@@ -5272,10 +5445,25 @@ async function generateActivityPerformanceDataForSave(
       0
     );
   } else {
-    formattedResults = results.map((item) => ({
-      label: item.xValue || "Unknown",
-      value: Number(item.yValue) || 0,
-    }));
+    formattedResults = results.map((item) => {
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+
+      // Set proper ID based on xaxis type
+      let id = null;
+      if (xaxis === "contactPerson") {
+        id = item.personId || null;
+      } else if (xaxis === "organization") {
+        id = item.leadOrganizationId || null;
+      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        id = item.assignedUserId || null;
+      }
+
+      return {
+        label: label,
+        value: Number(item.yValue) || 0,
+        id: id,
+      };
+    });
 
     // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -5300,6 +5488,7 @@ exports.saveActivityReport = async (req, res) => {
       xaxis,
       yaxis,
       segmentedBy,
+      durationUnit,
       filters,
       graphtype,
       colors,
@@ -5330,6 +5519,7 @@ exports.saveActivityReport = async (req, res) => {
             role,
             xaxis,
             yaxis,
+            durationUnit,
             segmentedBy,
             filters
           );
@@ -5341,6 +5531,7 @@ exports.saveActivityReport = async (req, res) => {
             xaxis,
             yaxis,
             segmentedBy,
+            durationUnit,
             filters: filters || {},
             reportData,
             totalValue,
@@ -5374,6 +5565,7 @@ exports.saveActivityReport = async (req, res) => {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
         segmentedBy: existingSegmentedBy,
+        durationUnit: existingDurationUnit,
         filters: existingfilters,
         reportData: existingReportData,
       } = config;
@@ -5394,6 +5586,7 @@ exports.saveActivityReport = async (req, res) => {
             role,
             existingxaxis,
             existingyaxis,
+            existingDurationUnit,
             existingSegmentedBy,
             existingfilters
           );
@@ -5406,6 +5599,7 @@ exports.saveActivityReport = async (req, res) => {
             xaxis: existingxaxis,
             yaxis: existingyaxis,
             segmentedBy: existingSegmentedBy,
+            durationUnit: existingDurationUnit,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colorsParsed,
@@ -5467,6 +5661,8 @@ exports.saveActivityReport = async (req, res) => {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
+                durationUnit:
+                  durationUnit ?? existingReport.config?.durationUnit,
                 filters: filters ?? existingReport.config?.filters,
                 reportData: reportData ?? existingReport.config?.reportData,
                 totalValue: totalValue ?? existingReport.config?.totalValue,
@@ -5525,6 +5721,7 @@ exports.saveActivityReport = async (req, res) => {
       xaxis,
       yaxis,
       segmentedBy,
+      durationUnit,
       filters: filters || {},
       reportData,
       totalValue,
@@ -5744,6 +5941,7 @@ exports.getActivityReportSummary = async (req, res) => {
       type,
       xaxis,
       yaxis,
+      durationUnit = null,
       segmentedBy = "none",
       filters,
       page = 1,
@@ -5900,6 +6098,7 @@ exports.getActivityReportSummary = async (req, res) => {
         role,
         xaxis,
         yaxis,
+        durationUnit,
         segmentedBy,
         filters,
         page,
@@ -5963,6 +6162,7 @@ exports.getActivityReportSummary = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
+        durationUnit: existingDurationUnit,
         segmentedBy: existingSegmentedBy,
         filters: existingfilters,
       } = config;
@@ -5972,6 +6172,7 @@ exports.getActivityReportSummary = async (req, res) => {
         role,
         existingxaxis,
         existingyaxis,
+        existingDurationUnit,
         existingSegmentedBy,
         existingfilters,
         page,
