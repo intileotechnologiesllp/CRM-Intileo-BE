@@ -112,6 +112,30 @@ router.get(
   validatePrivilege(5, "view"),
   leadContactsController.getPersonsAndOrganizations
 );
+// router.get(
+//   "/get-persons-by-ids",
+//   verifyToken,
+//   validatePrivilege(5, "view"),
+//   leadContactsController.getPersonsByIds
+// );
+router.post(
+  "/get-persons-by-ids",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getPersonsByIds
+);
+router.get(
+  "/get-organizations-by-ids",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getOrganizationsByIds
+);
+router.post(
+  "/get-organizations-by-ids",
+  verifyToken,
+  validatePrivilege(5, "view"),
+  leadContactsController.getOrganizationsByIds
+);
 router.get("/get-organization",verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationsAndPersons)
 router.post("/bulk-edit-persons", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdatePersons);
 router.post("/bulk-edit-organizations", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdateOrganizations);
