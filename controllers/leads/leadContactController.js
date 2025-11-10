@@ -6351,6 +6351,36 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     // Overdue activities tracking flag
     const includeOverdueCount = req.query.includeOverdueCount === 'true' || req.query.includeOverdueCount === true || includeTimeline;
 
+    // Handle specific person IDs from request body or query parameters
+    let specificPersonIds = [];
+    
+    // Handle multiple personIds from query (comma-separated)
+    if (req.query.personIds) {
+      specificPersonIds = req.query.personIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    }
+    
+    // Handle personIds from request body
+    if (req.body && req.body.personIds) {
+      if (Array.isArray(req.body.personIds)) {
+        specificPersonIds = [...specificPersonIds, ...req.body.personIds.map(id => parseInt(id)).filter(id => !isNaN(id))];
+      } else if (typeof req.body.personIds === 'string') {
+        specificPersonIds = [...specificPersonIds, ...req.body.personIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))];
+      }
+    }
+    
+    // Handle single personId from request body
+    if (req.body && req.body.personId) {
+      const singlePersonId = parseInt(req.body.personId);
+      if (!isNaN(singlePersonId)) {
+        specificPersonIds.push(singlePersonId);
+      }
+    }
+    
+    // Remove duplicates
+    specificPersonIds = [...new Set(specificPersonIds)];
+    
+    console.log('[DEBUG] Specific person IDs requested:', specificPersonIds);
+
     // Dynamic filter config (from body or query) -- now supports filterId as number or object
     const LeadFilter = require("../../models/leads/leadFiltersModel");
     let filterConfig = null;
@@ -7321,13 +7351,34 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         ...dealFilteredPersonIds,
         ...orgFilteredPersonIds,
         ...personFilteredPersonIds,
+        ...specificPersonIds, // Include specific person IDs requested
       ]),
     ];
 
     // Merge personWhere from filters with filtered person IDs
     let finalPersonWhere = { ...personWhere };
 
-    if (allFilteredPersonIds.length > 0) {
+    // If specific person IDs are provided, prioritize them
+    if (specificPersonIds.length > 0) {
+      console.log(
+        "[DEBUG] Specific person IDs provided, restricting to:",
+        specificPersonIds.length,
+        "person IDs"
+      );
+      
+      if (Object.keys(finalPersonWhere).length > 0) {
+        // Combine specific IDs with existing filters using AND
+        finalPersonWhere = {
+          [Op.and]: [
+            finalPersonWhere,
+            { personId: { [Op.in]: specificPersonIds } },
+          ],
+        };
+      } else {
+        // Only specific person IDs apply
+        finalPersonWhere = { personId: { [Op.in]: specificPersonIds } };
+      }
+    } else if (allFilteredPersonIds.length > 0) {
       console.log(
         "[DEBUG] Applying combined filters: restricting to person IDs:",
         allFilteredPersonIds.length
@@ -7736,6 +7787,16 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       timelineGranularity: timelineGranularity, // weekly, monthly, quarterly
       dateRangeFilter: dateRangeFilter, // 1-month-back, 3-months-back, 6-months-back, 12-months-back
       overdueTrackingEnabled: includeOverdueCount, // Whether overdue activity counting is enabled
+      
+      // Specific person IDs information
+      personIdsFilter: specificPersonIds.length > 0 ? {
+        enabled: true,
+        requestedIds: specificPersonIds,
+        foundIds: personsWithTimeline.map(p => p.personId),
+        missingIds: specificPersonIds.filter(id => !personsWithTimeline.some(p => p.personId === id))
+      } : {
+        enabled: false
+      },
       
       // Summary with overdue statistics and database counts
       summary: {
