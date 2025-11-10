@@ -14,6 +14,7 @@ const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const CustomField = require("../../models/customFieldModel");
+const MasterUser = require("../../models/master/masterUserModel"); // Add MasterUser model
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
@@ -477,16 +478,16 @@ exports.getActivities = async (req, res) => {
     const alwaysInclude = [
       "dealId",
       "leadId",
-      // "assignedTo",
+      "assignedTo", // Always include assignedTo
       "leadOrganizationId",
       "personId",
       "activityId",
       "type",
       "startDateTime",
       "endDateTime",
-      "activityTypeFlag"
+      "status" // Always include status
+
       // "priority",
-      // "status"
     ];
     if (attributes) {
       alwaysInclude.forEach((field) => {
@@ -545,6 +546,12 @@ exports.getActivities = async (req, res) => {
             (filterWhere[Op.and] || filterWhere[Op.or])
               ? filterWhere
               : undefined,
+        },
+        {
+          model: MasterUser,
+          as: "assignedUser", // Include assigned user details - use correct alias
+          attributes: ["masterUserID", "name", "email"],
+          required: false, // Left join to handle cases where assignedTo might be null
         },
       ],
     });
@@ -829,9 +836,12 @@ exports.getActivities = async (req, res) => {
 
     const activitiesWithTitle = activities.map((activity) => {
       const data = activity.get ? activity.get({ plain: true }) : activity;
-      const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
+      const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, assignedUser, ...rest } =
         data;
       let result = { ...rest };
+      
+      // Always add assignedUserName from the assignedUser relationship
+      result.assignedUserName = assignedUser ? assignedUser.name : null;
       
       // Only add title if it's in the selected attributes or no preferences are set
       if (!attributes || attributes.includes('title')) {
