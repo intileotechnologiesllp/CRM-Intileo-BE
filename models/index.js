@@ -21,6 +21,7 @@ const GroupVisibility = require("../models/admin/groupVisibilityModel");
 const LeadOrganization = require("./leads/leadOrganizationModel");
 const DeviceActivity = require("./deviceActivity/deviceActivity");
 const permissionSet = require("./permissionsetModel");
+const Label = require("./admin/masters/labelModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -142,6 +143,10 @@ Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
 Email.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
 Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
 
+// Email-Label associations
+Email.belongsTo(Label, { foreignKey: "labelId", as: "Label" });
+Label.hasMany(Email, { foreignKey: "labelId", as: "Emails" });
+
 // Ensure Deal has the inverse belongsTo associations so includes work correctly
 // (some associations were defined only on the hasMany side previously)
 Deal.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
@@ -236,4 +241,5 @@ module.exports = {
   Goal,
   DeviceActivity,
   permissionSet,
+  Label,
 };
