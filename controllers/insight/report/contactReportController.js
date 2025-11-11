@@ -376,10 +376,9 @@ async function generateExistingPersonPerformanceData(
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(existingxaxis);
-
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -441,9 +440,7 @@ async function generateExistingPersonPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt", ,].includes(
-      existingSegmentedBy
-    );
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -571,7 +568,9 @@ async function generateExistingPersonPerformanceData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: getOrderClause(existingyaxis, existingxaxis),
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
       raw: true,
@@ -611,7 +610,9 @@ async function generateExistingPersonPerformanceData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       });
     }
   } else {
@@ -621,7 +622,9 @@ async function generateExistingPersonPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
     });
@@ -677,8 +680,10 @@ async function generateExistingPersonPerformanceData(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+   // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -810,10 +815,9 @@ async function generatePersonPerformanceData(
   // let attributes = ["personId", "leadOrganizationId"];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -872,7 +876,7 @@ async function generatePersonPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -1058,7 +1062,9 @@ async function generatePersonPerformanceData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+          ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]] 
+          : [[Sequelize.literal("yValue"), "DESC"]],
       });
     }
   } else {
@@ -1069,7 +1075,9 @@ async function generatePersonPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+          ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]] 
+          : [[Sequelize.literal("yValue"), "DESC"]],
       limit: limit,
       offset: offset,
     });
@@ -1120,9 +1128,12 @@ async function generatePersonPerformanceData(
         (sum, seg) => sum + seg.value,
         0
       );
-    }); // Sort groups based on their total value
+    }); 
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+   // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -1167,147 +1178,14 @@ async function generatePersonPerformanceData(
   };
 }
 
-// Enhanced helper function to handle related table conditions and date filtering
-// function getConditionObject(column, operator, value, includeModels = []) {
-//   let conditionValue = value;
-
-//   // Check if column contains a dot (indicating a related table field)
-//   const hasRelation = column.includes(".");
-//   let tableAlias = "LeadPerson";
-//   let fieldName = column;
-
-//   if (hasRelation) {
-//     [tableAlias, fieldName] = column.split(".");
-//   }
-
-//   // Handle date filtering for specific date columns
-//   const isDateColumn =
-//     fieldName.includes("Date") ||
-//     fieldName.includes("Time") ||
-//     fieldName === "createdAt" ||
-//     fieldName === "updatedAt";
-
-//   // Handle date range filtering for "Add on" (daterange type)
-//   const isDateRangeFilter = fieldName === "daterange";
-
-//   if (isDateRangeFilter && Array.isArray(value)) {
-//     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
-//     const [fromDate, toDate] = value;
-
-//     if (operator === "between" || operator === "=" || operator === "is") {
-//       // Include records within the date range
-//       return {
-//         [Op.and]: [
-//           { createdAt: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-//           { createdAt: { [Op.lte]: new Date(toDate + " 23:59:59") } },
-//         ],
-//       };
-//     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
-//       // Exclude records within the date range (records NOT between the dates)
-//       return {
-//         [Op.or]: [
-//           { createdAt: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-//           { createdAt: { [Op.gt]: new Date(toDate + " 23:59:59") } },
-//         ],
-//       };
-//     }
-//   } else if (isDateColumn) {
-//     // Handle single date filtering (e.g., "2025-06-23")
-//     if (operator === "=" || operator === "is") {
-//       // For exact date match, create a range for the entire day
-//       const startOfDay = new Date(value + " 00:00:00");
-//       const endOfDay = new Date(value + " 23:59:59");
-
-//       return {
-//         [column]: {
-//           [Op.between]: [startOfDay, endOfDay],
-//         },
-//       };
-//     } else if (operator === ">") {
-//       conditionValue = new Date(value + " 23:59:59");
-//     } else if (operator === "<") {
-//       conditionValue = new Date(value + " 00:00:00");
-//     } else if (operator === "≠" || operator === "is not") {
-//       // For not equal, exclude the entire day
-//       const startOfDay = new Date(value + " 00:00:00");
-//       const endOfDay = new Date(value + " 23:59:59");
-
-//       return {
-//         [column]: {
-//           [Op.notBetween]: [startOfDay, endOfDay],
-//         },
-//       };
-//     } else {
-//       conditionValue = new Date(value);
-//     }
-//   }
-//   // Handle other data types
-//   else if (fieldName === "isDone") {
-//     conditionValue = value === "true" || value === true;
-//   } else if (!isNaN(value) && value !== "" && typeof value === "string") {
-//     conditionValue = parseFloat(value);
-//   }
-
-//   // Handle related table joins
-//   if (hasRelation) {
-//     let modelConfig;
-
-//     switch (tableAlias) {
-//       case "LeadOrganization":
-//         modelConfig = {
-//           model: Organization,
-//           as: "LeadOrganization",
-//           required: false,
-//           attributes: [],
-//         };
-//         break;
-//       default:
-//         // If it's not a recognized table, treat it as Activity column
-//         return getOperatorCondition(column, operator, conditionValue);
-//     }
-
-//     // Check if this include already exists to avoid duplicates
-//     const existingInclude = includeModels.find(
-//       (inc) => inc.as === modelConfig.as
-//     );
-//     if (!existingInclude) {
-//       includeModels.push(modelConfig);
-//     }
-
-//     // FIX: Return a plain object instead of Sequelize.where()
-//     // This creates a condition object that can be properly combined
-//     const op = getSequelizeOperator(operator);
-
-//     // Handle special operators for related tables
-//     switch (operator) {
-//       case "contains":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
-//       case "startsWith":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
-//       case "endsWith":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
-//       case "isEmpty":
-//         return {
-//           [Op.or]: [
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.is]: null } },
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.eq]: "" } },
-//           ],
-//         };
-//       case "isNotEmpty":
-//         return {
-//           [Op.and]: [
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.not]: null } },
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.ne]: "" } },
-//           ],
-//         };
-//       default:
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: conditionValue } };
-//     }
-//   } else {
-//     // Regular activity table column
-//     return getOperatorCondition(column, operator, conditionValue);
-//   }
-// }
+// Helper function to check if xaxis is a date field
+function isDateField(xaxis) {
+  const dateFields = [
+    "createdAt",
+    "dueDate"
+  ];
+  return dateFields.includes(xaxis);
+}
 
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
@@ -1563,6 +1441,7 @@ function getOperatorCondition(column, operator, value) {
       return { [column]: { [op]: value } };
   }
 }
+
 // Helper function to convert operator strings to Sequelize operators
 function getSequelizeOperator(operator) {
   switch (operator) {
@@ -1647,6 +1526,11 @@ function formatDateValue(value, durationUnit) {
 
 // Helper function for order clause
 function getOrderClause(yaxis, xaxis) {
+  // If xaxis is a date field, return natural order (no sorting by value)
+  if (isDateField(xaxis)) {
+    // For date fields, order by the date field itself to maintain chronological order
+    return [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]];
+  }
   if (yaxis === "no of people") {
     return [[Sequelize.fn("COUNT", Sequelize.col("personId")), "DESC"]];
   } else {
@@ -1655,39 +1539,6 @@ function getOrderClause(yaxis, xaxis) {
     ];
   }
 }
-// Helper function for operator conditions
-// function getOperatorCondition(column, operator, value) {
-//   const op = getSequelizeOperator(operator);
-
-//   switch (operator) {
-//     case "contains":
-//       return { [column]: { [op]: `%${value}%` } };
-//     case "startsWith":
-//       return { [column]: { [op]: `${value}%` } };
-//     case "endsWith":
-//       return { [column]: { [op]: `%${value}` } };
-//     case "isEmpty":
-//       return {
-//         [Op.or]: [
-//           { [column]: { [Op.is]: null } },
-//           { [column]: { [Op.eq]: "" } },
-//         ],
-//       };
-//     case "isNotEmpty":
-//       return {
-//         [Op.and]: [
-//           { [column]: { [Op.not]: null } },
-//           { [column]: { [Op.ne]: "" } },
-//         ],
-//       };
-//     case "between":
-//     case "notBetween":
-//       // These cases are handled in the main function above
-//       return value; // Return the pre-built condition
-//     default:
-//       return { [column]: { [op]: value } };
-//   }
-// }
 
 async function generateExistingPersonPerformanceDataForSave(
   ownerId,
@@ -1699,8 +1550,6 @@ async function generateExistingPersonPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -1758,16 +1607,13 @@ async function generateExistingPersonPerformanceDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(existingxaxis);
-
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -1829,9 +1675,7 @@ async function generateExistingPersonPerformanceDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(
-      existingSegmentedBy
-    );
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -1889,17 +1733,35 @@ async function generateExistingPersonPerformanceDataForSave(
     ]);
   }
 
-  // Execute query without pagination
-  let results = await LeadPerson.findAll({
-    where: baseWhere,
-    attributes: attributes,
-    include: includeModels,
-    group: groupBy,
-    raw: true,
-    order: [[Sequelize.literal("yValue"), "DESC"]],
-  });
+  let results;
 
-  // --- FORMATTING AND TOTALING LOGIC ---
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // For segmented queries - get all results without pagination
+    results = await LeadPerson.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
+    });
+  } else {
+    // Get all results without pagination
+    results = await LeadPerson.findAll({
+      where: baseWhere,
+      attributes: attributes,
+      include: includeModels,
+      group: groupBy,
+      raw: true,
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
+    });
+  }
+
+  // Formatting and totaling logic
   let formattedResults = [];
   let totalValue = 0;
 
@@ -1915,7 +1777,8 @@ async function generateExistingPersonPerformanceDataForSave(
       if (!groupedData[xValue]) {
         // Set proper ID based on xaxis type
         let id = null;
-        if (xaxis === "contactPerson") {
+
+        if (existingxaxis === "contactPerson") {
           id = item.personId || null;
         } else if (existingxaxis === "organization") {
           id = item.leadOrganizationId || null;
@@ -1948,8 +1811,10 @@ async function generateExistingPersonPerformanceDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -2001,8 +1866,6 @@ async function generatePersonPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -2060,15 +1923,13 @@ async function generatePersonPerformanceDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -2127,7 +1988,7 @@ async function generatePersonPerformanceDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -2197,26 +2058,31 @@ async function generatePersonPerformanceDataForSave(
     ]);
   }
 
-  // Get all results without pagination
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
+    // For segmented queries - get all results without pagination
     results = await LeadPerson.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]] 
+        : [[Sequelize.literal("yValue"), "DESC"]],
     });
   } else {
+    // Non-segmented query - get all results without pagination
     results = await LeadPerson.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]] 
+        : [[Sequelize.literal("yValue"), "DESC"]],
     });
   }
 
@@ -2268,10 +2134,11 @@ async function generatePersonPerformanceDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
-    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0

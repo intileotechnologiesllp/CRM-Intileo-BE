@@ -586,15 +586,9 @@ async function generateExistingLeadPerformanceData(
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(existingxaxis);
-
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -663,12 +657,7 @@ async function generateExistingLeadPerformanceData(
       (inc) => inc.as === "assignedUser"
     );
      // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(existingSegmentedBy);
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -684,13 +673,13 @@ async function generateExistingLeadPerformanceData(
       groupBy.push(segmentDateExpression);
     }
     else if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
+      (existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo")  && !assignedUserIncludeExists
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team") {
-      groupBy.push("assignedUser.team");
+      groupBy.push("assignedUser.team" && !assignedUserIncludeExists);
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
@@ -818,7 +807,9 @@ let totalCountResult;
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: getOrderClause(existingyaxis, existingxaxis),
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
       raw: true,
@@ -860,7 +851,9 @@ let totalCountResult;
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+          ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+          : getOrderClause(existingyaxis, existingxaxis),
       });
     }
   } else {
@@ -870,7 +863,9 @@ let totalCountResult;
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
     });
@@ -932,8 +927,10 @@ let totalCountResult;
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -1072,15 +1069,9 @@ async function generateLeadPerformanceData(
   let attributes = ["personId", "leadOrganizationId"];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -1144,12 +1135,7 @@ async function generateLeadPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -1161,10 +1147,10 @@ async function generateLeadPerformanceData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    } else if ((segmentedBy === "Owner" || segmentedBy === "assignedTo") && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
+    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
@@ -1292,7 +1278,9 @@ async function generateLeadPerformanceData(
           where: baseWhere,
           include: includeModels,
           group: [groupColumn],
-          order: getOrderClause(yaxis, xaxis),
+          order: isDateFieldX 
+            ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+            : getOrderClause(yaxis, xaxis),
           limit: limit,
           offset: offset,
           raw: true,
@@ -1338,7 +1326,9 @@ async function generateLeadPerformanceData(
         // group: [...groupBy],
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+          : getOrderClause(yaxis, xaxis),
       });
     }
   } else {
@@ -1348,7 +1338,9 @@ async function generateLeadPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
     });
@@ -1409,7 +1401,10 @@ async function generateLeadPerformanceData(
       );
     }); // Sort groups based on their total value
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -1463,6 +1458,16 @@ async function generateLeadPerformanceData(
       hasPrevPage: page > 1,
     },
   };
+}
+
+function isDateField(xaxis) {
+  const dateFields = [
+    "proposalSentDate",
+    "conversionDate",
+    "createdAt",
+    "updatedAt",
+  ];
+  return dateFields.includes(xaxis);
 }
 
 // function getConditionObject(column, operator, value, includeModels = []) {
@@ -1674,6 +1679,12 @@ function formatDateValue(value, durationUnit) {
 
 // Helper function for order clause
 function getOrderClause(yaxis, xaxis) {
+  // If xaxis is a date field, return natural order (no sorting by value)
+  if (isDateField(xaxis)) {
+    // For date fields, order by the date field itself to maintain chronological order
+    return [[Sequelize.col(`Lead.${xaxis}`), "ASC"]];
+  }
+  
   if (yaxis === "no of leads") {
     return [[Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]];
   } else {
@@ -1980,40 +1991,6 @@ function getSequelizeOperator(operator) {
   }
 }
 
-// Helper function for operator conditions
-// function getOperatorCondition(column, operator, value) {
-//   const op = getSequelizeOperator(operator);
-
-//   switch (operator) {
-//     case "contains":
-//       return { [column]: { [op]: `%${value}%` } };
-//     case "startsWith":
-//       return { [column]: { [op]: `${value}%` } };
-//     case "endsWith":
-//       return { [column]: { [op]: `%${value}` } };
-//     case "isEmpty":
-//       return {
-//         [Op.or]: [
-//           { [column]: { [Op.is]: null } },
-//           { [column]: { [Op.eq]: "" } },
-//         ],
-//       };
-//     case "isNotEmpty":
-//       return {
-//         [Op.and]: [
-//           { [column]: { [Op.not]: null } },
-//           { [column]: { [Op.ne]: "" } },
-//         ],
-//       };
-//     case "between":
-//     case "notBetween":
-//       // These cases are handled in the main function above
-//       return value; // Return the pre-built condition
-//     default:
-//       return { [column]: { [op]: value } };
-//   }
-// }
-
 async function generateExistingLeadPerformanceDataForSave(
   ownerId,
   role,
@@ -2024,8 +2001,6 @@ async function generateExistingLeadPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -2034,7 +2009,6 @@ async function generateExistingLeadPerformanceDataForSave(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -2084,21 +2058,13 @@ async function generateExistingLeadPerformanceDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(existingxaxis);
-
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -2167,12 +2133,7 @@ async function generateExistingLeadPerformanceDataForSave(
       (inc) => inc.as === "assignedUser"
     );
      // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(existingSegmentedBy);
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -2188,13 +2149,13 @@ async function generateExistingLeadPerformanceDataForSave(
       groupBy.push(segmentDateExpression);
     }
     else if (
-      existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo"
+      (existingSegmentedBy === "Owner" ||
+      existingSegmentedBy === "assignedTo")  && !assignedUserIncludeExists
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team") {
-      groupBy.push("assignedUser.team");
+      groupBy.push("assignedUser.team" && !assignedUserIncludeExists);
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
@@ -2250,23 +2211,28 @@ async function generateExistingLeadPerformanceDataForSave(
   let results;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // For segmented queries
+    // For segmented queries - get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   } else {
+    // Get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
@@ -2326,8 +2292,10 @@ async function generateExistingLeadPerformanceDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -2387,8 +2355,6 @@ async function generateLeadPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -2397,7 +2363,6 @@ async function generateLeadPerformanceDataForSave(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -2447,21 +2412,13 @@ async function generateLeadPerformanceDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -2525,12 +2482,7 @@ async function generateLeadPerformanceDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -2542,10 +2494,10 @@ async function generateLeadPerformanceDataForSave(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if (segmentedBy === "Owner" || segmentedBy === "assignedTo") {
+    } else if ((segmentedBy === "Owner" || segmentedBy === "assignedTo") && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team") {
+    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
@@ -2578,7 +2530,7 @@ async function generateLeadPerformanceDataForSave(
     }
   }
 
-  // Handle existingyaxis
+  // Handle yaxis
   if (yaxis === "no of leads") {
     attributes.push([Sequelize.fn("COUNT", Sequelize.col("leadId")), "yValue"]);
   } else if (yaxis === "proposalValue") {
@@ -2597,23 +2549,28 @@ async function generateLeadPerformanceDataForSave(
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // For segmented queries
+    // For segmented queries - get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   } else {
+    // Get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   }
 
@@ -2663,16 +2620,20 @@ async function generateLeadPerformanceDataForSave(
       });
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+    formattedResults = Object.values(groupedData);
 
+    // Calculate and add total for each segment group
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
         (sum, seg) => sum + seg.value,
         0
       );
-    }); // Sort groups based on their total value
+    });
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -4002,15 +3963,9 @@ async function generateExistingLeadConversionData(
   let attributes = [];
 
     // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
     // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -4079,12 +4034,7 @@ async function generateExistingLeadConversionData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-       "proposalSentDate",
-       "conversionDate",
-       "createdAt",
-       "updatedAt",
-    ].includes(existingSegmentedBy);
+   const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -4259,7 +4209,8 @@ async function generateExistingLeadConversionData(
       where: baseWhere,
       include: includeModels,
       group: groupBy[0],
-      order: [
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]] : [
         existingyaxis === "no of leads"
           ? [
               Sequelize.literal(`(
@@ -4323,13 +4274,15 @@ async function generateExistingLeadConversionData(
         ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
-      results = await Activity.findAll({
+      results = await Lead.findAll({
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+         order: isDateFieldX 
+          ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+          : getOrderClause(existingyaxis, existingxaxis),
       });
     }
   } else {
@@ -4339,7 +4292,9 @@ async function generateExistingLeadConversionData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+       order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
     });
@@ -4404,8 +4359,10 @@ async function generateExistingLeadConversionData(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+   // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -4544,15 +4501,9 @@ async function generateLeadConversionData(
   let attributes = ["personId", "leadOrganizationId"];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   
    // Attribute and GroupBy setup with durationUnit support
@@ -4619,12 +4570,7 @@ async function generateLeadConversionData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy); 
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -4797,7 +4743,9 @@ async function generateLeadConversionData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: getOrderClause(yaxis, xaxis),
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
       raw: true,
@@ -4843,7 +4791,9 @@ async function generateLeadConversionData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+          : getOrderClause(yaxis, xaxis),
       });
     }
   } else {
@@ -4853,7 +4803,9 @@ async function generateLeadConversionData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
     });
@@ -4915,7 +4867,10 @@ async function generateLeadConversionData(
       );
     }); // Sort groups based on their total value
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -4979,8 +4934,6 @@ async function generateExistingLeadConversionDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -4989,7 +4942,6 @@ async function generateExistingLeadConversionDataForSave(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -5039,23 +4991,15 @@ async function generateExistingLeadConversionDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
 
-    // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
-    // Attribute and GroupBy setup with durationUnit support
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(
@@ -5064,8 +5008,7 @@ async function generateExistingLeadConversionDataForSave(
     );
     attributes.push([dateGroupExpression, "xValue"]);
     groupBy.push(dateGroupExpression);
-  }
-  else if (existingxaxis === "creator") {
+  } else if (existingxaxis === "creator") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -5122,12 +5065,7 @@ async function generateExistingLeadConversionDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-       "proposalSentDate",
-       "conversionDate",
-       "createdAt",
-       "updatedAt",
-    ].includes(existingSegmentedBy);
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -5141,8 +5079,7 @@ async function generateExistingLeadConversionDataForSave(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } 
-    else if (
+    } else if (
       (existingSegmentedBy === "Owner" ||
       existingSegmentedBy === "assignedTo") && !assignedUserIncludeExists
     ) {
@@ -5230,23 +5167,28 @@ async function generateExistingLeadConversionDataForSave(
   let results;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // For segmented queries
+    // For segmented queries - get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   } else {
+    // Get all results without pagination
     results = await Lead.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
@@ -5276,7 +5218,6 @@ async function generateExistingLeadConversionDataForSave(
       ) {
         xValue = "Unknown Organization";
       }
-
 
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
@@ -5309,8 +5250,10 @@ async function generateExistingLeadConversionDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -5320,7 +5263,7 @@ async function generateExistingLeadConversionDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label = item.xValue || "Unknown";
+      let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
       // Handle null values for special cases
       if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
@@ -5380,7 +5323,6 @@ async function generateLeadConversionDataForSave(
   }
 
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -5436,15 +5378,9 @@ async function generateLeadConversionDataForSave(
   let attributes = ["personId", "leadOrganizationId"];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = [
-    "proposalSentDate",
-    "conversionDate",
-    "createdAt",
-    "updatedAt",
-  ].includes(xaxis);
-
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   
    // Attribute and GroupBy setup with durationUnit support
@@ -5511,12 +5447,7 @@ async function generateLeadConversionDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = [
-      "proposalSentDate",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-    ].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy); 
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -5614,15 +5545,87 @@ async function generateLeadConversionDataForSave(
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // For segmented queries
-    results = await Lead.findAll({
+    // For segmented queries, we need a different approach
+    const paginationAttributes = [];
+
+    // Determine the correct group column for pagination
+    let groupColumn;
+    if (shouldGroupByDuration) {
+      groupColumn = getDateGroupExpression(xaxis, durationUnit);
+      paginationAttributes.push([groupColumn, "groupKey"]);
+    } else {
+      // Handle special cases for Owner, contactPerson, organization
+      if (xaxis === "Owner" || xaxis === "assignedTo") {
+        groupColumn = Sequelize.col("assignedUser.name");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (xaxis === "contactPerson") {
+        groupColumn = Sequelize.col("Lead.personId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (xaxis === "organization") {
+        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else {
+        groupColumn = Sequelize.col(`Lead.${xaxis}`);
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      }
+    }
+
+    const paginatedGroups = await Lead.findAll({
+      attributes: paginationAttributes,
       where: baseWhere,
-      attributes: attributes,
       include: includeModels,
-      group: groupBy,
+      group: [groupColumn],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
     });
+
+    const groupKeys = paginatedGroups.map((g) => g.groupKey);
+
+    if (groupKeys.length === 0) {
+      results = [];
+    } else {
+      const finalWhere = { ...baseWhere };
+
+      // Build condition for the specific group keys - FIXED for related tables
+      let groupCondition;
+
+      if (shouldGroupByDuration) {
+        // For date grouping
+        const groupExpression = getDateGroupExpression(xaxis, durationUnit);
+        groupCondition = Sequelize.where(groupExpression, {
+          [Op.in]: groupKeys,
+        });
+      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        // For Owner/assignedTo - use proper Sequelize syntax for related table
+        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
+      } else if (xaxis === "contactPerson") {
+        // For contactPerson - use proper column reference
+        groupCondition = { personId: { [Op.in]: groupKeys } };
+      } else if (xaxis === "organization") {
+        // For organization - use proper column reference
+        groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
+      } else {
+        // For regular Activity columns
+        groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
+      }
+
+      finalWhere[Op.and] = finalWhere[Op.and]
+        ? [...finalWhere[Op.and], groupCondition]
+        : [groupCondition];
+
+      results = await Lead.findAll({
+        where: finalWhere,
+        attributes: attributes,
+        include: includeModels,
+        group: groupBy,
+        raw: true,
+        order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
+      });
+    }
   } else {
     results = await Lead.findAll({
       where: baseWhere,
@@ -5630,7 +5633,9 @@ async function generateLeadConversionDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   }
 
@@ -5690,7 +5695,10 @@ async function generateLeadConversionDataForSave(
       );
     }); // Sort groups based on their total value
 
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue); // Calculate the grand total
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
@@ -5732,7 +5740,7 @@ async function generateLeadConversionDataForSave(
   // Return data without pagination info
   return {
     data: formattedResults,
-    totalValue: totalValue,
+    totalValue: totalValue
   };
 }
 
