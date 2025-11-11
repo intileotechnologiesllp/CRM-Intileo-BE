@@ -66,11 +66,10 @@ const fs = require("fs");
 const UserCredential = require("../../models/email/userCredentialModel");
 const DefaultEmail = require("../../models/email/defaultEmailModel");
 const MasterUser = require("../../models/master/masterUserModel");
-const { Lead, Deal, Person, Organization } = require("../../models/index");
+const { Lead, Deal, Person, Organization, Label } = require("../../models/index");
 const Activity = require("../../models/activity/activityModel");
 const CustomField = require("../../models/customFieldModel");
 const CustomFieldValue = require("../../models/customFieldValueModel");
-const Label = require("../../models/admin/masters/labelModel");
 const { publishToQueue } = require("../../services/rabbitmqService");
 const { syncImapFlags } = require("../../services/imapSyncService");
 const flagSyncQueue = require("../../services/flagSyncQueueService");
@@ -3543,6 +3542,7 @@ async function getEmailsInternal(req, res, masterUserID) {
     direction = "next", // 'next' or 'prev'
     dealLinkFilter, // New filter: "linked_with_deal", "linked_with_open_deal", "not_linked_with_deal"
     contactFilter, // New filter: "from_existing_contact", "not_from_existing_contact"
+    labelFilter, // New filter: label ID(s) to filter by
     includeFullBody = "false", // New parameter to control body inclusion
     visibility = "all", // New parameter: "all", "shared", "private"
   } = req.query;
@@ -3655,7 +3655,7 @@ async function getEmailsInternal(req, res, masterUserID) {
       ];
     }
 
-    // Search by subject, sender, or recipient
+    // Search by subject, sender, recipient, and labels
     if (search) {
       filters[Sequelize.Op.or] = [
         { subject: { [Sequelize.Op.like]: `%${search}%` } },
@@ -3737,6 +3737,33 @@ async function getEmailsInternal(req, res, masterUserID) {
             };
           }
           break;
+      }
+    }
+
+    // Label filter
+    let includeLabel = [];
+    if (labelFilter) {
+      // labelFilter can be a single labelId or comma-separated labelIds
+      const labelIds = labelFilter.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      
+      if (labelIds.length > 0) {
+        if (labelIds.length === 1) {
+          // Single label filter
+          filters.labelId = labelIds[0];
+        } else {
+          // Multiple labels filter
+          filters.labelId = { [Sequelize.Op.in]: labelIds };
+        }
+        
+        // Include Label model for additional label information in response
+        includeLabel = [
+          {
+            model: Label,
+            as: "Label",
+            required: false,
+            attributes: ['labelId', 'labelName', 'labelColor', 'entityType', 'description']
+          }
+        ];
       }
     }
 
@@ -3828,6 +3855,19 @@ async function getEmailsInternal(req, res, masterUserID) {
             };
           }
           break;
+      }
+    }
+
+    // Add label filter to baseFilters
+    if (labelFilter) {
+      const labelIds = labelFilter.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+      
+      if (labelIds.length > 0) {
+        if (labelIds.length === 1) {
+          baseFilters.labelId = labelIds[0];
+        } else {
+          baseFilters.labelId = { [Sequelize.Op.in]: labelIds };
+        }
       }
     }
 
@@ -3974,11 +4014,12 @@ async function getEmailsInternal(req, res, masterUserID) {
       },
     ];
 
-    // Combine includes (attachments + deals + leads)
+    // Combine includes (attachments + deals + leads + labels)
     const includeModels = [
       ...includeAttachments,
       ...includeDeal,
       ...includeLeadDeal,
+      ...includeLabel,
     ];
 
     // Declare totalCount variable
@@ -4168,6 +4209,83 @@ async function getEmailsInternal(req, res, masterUserID) {
     res.status(500).json({ message: "Internal server error." });
   }
 } // End of getEmailsInternal function
+
+// Get available labels for email filtering
+exports.getEmailLabels = async (req, res) => {
+  const masterUserID = req.adminId;
+
+  try {
+    // Get all unique labels used in emails for this user
+    const emailLabels = await Email.findAll({
+      where: {
+        masterUserID,
+        labelId: { [Sequelize.Op.ne]: null }
+      },
+      attributes: ['labelId'],
+      group: ['labelId'],
+      include: [
+        {
+          model: Label,
+          as: "Label",
+          required: true,
+          attributes: ['labelId', 'labelName', 'labelColor', 'entityType', 'description']
+        }
+      ]
+    });
+
+    // Get all available labels (not just ones used in emails)
+    const allLabels = await Label.findAll({
+      where: {
+        entityType: 'email' // Assuming labels have entityType to categorize them
+      },
+      attributes: ['labelId', 'labelName', 'labelColor', 'entityType', 'description'],
+      order: [['labelName', 'ASC']]
+    });
+
+    // Count emails per label for this user
+    const labelCountsRaw = await Email.findAll({
+      where: {
+        masterUserID,
+        labelId: { [Sequelize.Op.ne]: null }
+      },
+      attributes: [
+        'labelId',
+        [Sequelize.fn('COUNT', Sequelize.col('emailID')), 'emailCount']
+      ],
+      group: ['labelId'],
+      raw: true
+    });
+
+    // Create a map of labelId to count
+    const labelCountsMap = {};
+    labelCountsRaw.forEach(item => {
+      labelCountsMap[item.labelId] = parseInt(item.emailCount);
+    });
+
+    // Create label usage statistics
+    const labelStats = emailLabels.map(email => {
+      const label = email.Label;
+      const count = labelCountsMap[label.labelId] || 0;
+      return {
+        ...label.toJSON(),
+        emailCount: count
+      };
+    });
+
+    res.status(200).json({
+      message: "Email labels fetched successfully.",
+      usedLabels: labelStats, // Labels currently used in user's emails
+      availableLabels: allLabels, // All available labels for email categorization
+      totalUsedLabels: labelStats.length,
+      totalAvailableLabels: allLabels.length
+    });
+
+  } catch (error) {
+    console.error("Error fetching email labels:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 // // Get emails with pagination, filtering, and searching
 // exports.getEmails = async (req, res) => {
 //   let {

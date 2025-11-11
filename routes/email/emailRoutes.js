@@ -16,6 +16,7 @@ router.get(
 router.get("/fetch-drafts", verifyToken, emailController.fetchDraftEmails);
 router.get("/fetch-archive", verifyToken, emailController.fetchArchiveEmails);
 router.get("/get-emails", verifyToken, emailController.getEmails);
+router.get("/get-email-labels", verifyToken, emailController.getEmailLabels);
 router.get("/fetch-sent", verifyToken, emailController.fetchSentEmails);
 router.get("/getoneEmail/:emailId", verifyToken, emailController.getOneEmail);
 router.post("/compose", verifyToken, emailController.composeEmail);
