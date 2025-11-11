@@ -337,11 +337,10 @@ async function generateExistingOrganizationPerformanceData(
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(existingxaxis);
+  const isDateFieldX = isDateField(existingxaxis);
 
-  // Handle existingxaxis special cases
-  const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+   const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -390,9 +389,7 @@ async function generateExistingOrganizationPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(
-      existingSegmentedBy
-    );
+     const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -503,7 +500,9 @@ async function generateExistingOrganizationPerformanceData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: getOrderClause(existingyaxis, existingxaxis),
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
       raw: true,
@@ -541,7 +540,9 @@ async function generateExistingOrganizationPerformanceData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       });
     }
   } else {
@@ -551,7 +552,9 @@ async function generateExistingOrganizationPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
     });
@@ -601,8 +604,10 @@ async function generateExistingOrganizationPerformanceData(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -727,9 +732,9 @@ async function generateOrganizationPerformanceData(
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(xaxis);
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -770,7 +775,7 @@ async function generateOrganizationPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
 
@@ -907,7 +912,9 @@ async function generateOrganizationPerformanceData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: getOrderClause(yaxis, xaxis),
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
       raw: true,
@@ -953,7 +960,9 @@ async function generateOrganizationPerformanceData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       });
     }
   } else {
@@ -963,7 +972,9 @@ async function generateOrganizationPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
     });
@@ -1012,8 +1023,10 @@ async function generateOrganizationPerformanceData(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -1055,6 +1068,15 @@ async function generateOrganizationPerformanceData(
       hasPrevPage: page > 1,
     },
   };
+}
+
+// Helper function to check if xaxis is a date field
+function isDateField(xaxis) {
+  const dateFields = [
+    "createdAt",
+    "dueDate"
+  ];
+  return dateFields.includes(xaxis);
 }
 
 // Helper function to convert operator strings to Sequelize operators
@@ -1354,8 +1376,13 @@ function formatDateValue(value, durationUnit) {
 
 // Helper function for order clause
 function getOrderClause(yaxis, xaxis) {
-  if (yaxis === "no of organization") {
-    return [[Sequelize.fn("COUNT", Sequelize.col("organizationId")), "DESC"]];
+  // If xaxis is a date field, return natural order (no sorting by value)
+  if (isDateField(xaxis)) {
+      // For date fields, order by the date field itself to maintain chronological order
+      return [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]];
+  }
+  if (yaxis === "no of organizations") {
+    return [[Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")), "DESC"]];
   } else {
     return [
       [Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)), "DESC"],
@@ -1373,8 +1400,6 @@ async function generateExistingOrganizationPerformanceDataForSave(
   existingfilters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -1432,16 +1457,15 @@ async function generateExistingOrganizationPerformanceDataForSave(
     }
   }
 
-  // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(existingxaxis);
+  const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
-    isDateField && existingDurationUnit && existingDurationUnit !== "none";
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
-  // Handle existingxaxis special cases with durationUnit support
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(
@@ -1466,14 +1490,14 @@ async function generateExistingOrganizationPerformanceDataForSave(
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser",
+      as: "assignedUser", // Use the correct alias
       attributes: ["masterUserID", "team"],
       required: true,
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the Organization table
+    // For regular columns, explicitly specify the Activity table
     groupBy.push(`LeadOrganization.${existingxaxis}`);
     attributes.push([
       Sequelize.col(`LeadOrganization.${existingxaxis}`),
@@ -1488,9 +1512,8 @@ async function generateExistingOrganizationPerformanceDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(
-      existingSegmentedBy
-    );
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
+
     const shouldSegmentByDuration =
       isSegmentedByDate &&
       existingDurationUnit &&
@@ -1504,23 +1527,12 @@ async function generateExistingOrganizationPerformanceDataForSave(
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
     } else if (
-      (existingSegmentedBy === "Owner" ||
-        existingSegmentedBy === "assignedTo") &&
-      !assignedUserIncludeExists
+      existingSegmentedBy === "Owner" ||
+      (existingSegmentedBy === "assignedTo" && !assignedUserIncludeExists)
     ) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: [],
-      });
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: [],
-      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
@@ -1539,34 +1551,38 @@ async function generateExistingOrganizationPerformanceDataForSave(
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the Organization table
+    // For other yaxis values, explicitly specify the Activity table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${existingyaxis}`)),
       "yValue",
     ]);
   }
 
-  // Get all results without pagination
   let results;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // For segmented queries without pagination, get all data directly
+    // For segmented queries - get all results without pagination
     results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   } else {
+    // Get all results without pagination
     results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
@@ -1614,8 +1630,10 @@ async function generateExistingOrganizationPerformanceDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -1645,11 +1663,10 @@ async function generateExistingOrganizationPerformanceDataForSave(
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
-  // Return all data without pagination info
+  // Return data without pagination info
   return {
     data: formattedResults,
     totalValue: totalValue,
-    totalCount: formattedResults.length,
   };
 }
 
@@ -1664,8 +1681,6 @@ async function generateOrganizationPerformanceDataForSave(
   filters
 ) {
   let includeModels = [];
-
-  // Base where condition - only show activities owned by the user if not admin
   const baseWhere = {};
 
   // If user is not admin, filter by ownerId
@@ -1728,11 +1743,12 @@ async function generateOrganizationPerformanceDataForSave(
   let attributes = [];
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateField = ["createdAt", "updatedAt"].includes(xaxis);
+  const isDateFieldX = isDateField(xaxis);
   const shouldGroupByDuration =
-    isDateField && durationUnit && durationUnit !== "none";
+    isDateFieldX && durationUnit && durationUnit !== "none";
 
-  // Handle xaxis special cases with durationUnit support
+  // Handle xaxis special cases
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
@@ -1741,16 +1757,17 @@ async function generateOrganizationPerformanceDataForSave(
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser",
+      as: "assignedUser", // Use the correct alias
       attributes: ["masterUserID", "name"],
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
   } else if (xaxis === "Team") {
+    // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser",
+      as: "assignedUser", // Use the correct alias
       attributes: ["masterUserID", "team"],
       required: true,
     });
@@ -1769,7 +1786,7 @@ async function generateOrganizationPerformanceDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = ["createdAt", "updatedAt"].includes(segmentedBy);
+    const isSegmentedByDate = isDateField(segmentedBy);
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
 
@@ -1836,27 +1853,31 @@ async function generateOrganizationPerformanceDataForSave(
     ]);
   }
 
-  // Get all results without pagination
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // For segmented queries without pagination, get all data directly
+    // For segmented queries - get all results without pagination
     results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   } else {
+    // Get all results without pagination
     results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   }
 
@@ -1903,8 +1924,10 @@ async function generateOrganizationPerformanceDataForSave(
       );
     });
 
-    // Sort groups based on their total value
-    formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    // Only sort for non-date fields
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+    }
 
     // Calculate the grand total
     totalValue = formattedResults.reduce(
@@ -1933,11 +1956,10 @@ async function generateOrganizationPerformanceDataForSave(
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
-  // Return all data without pagination info
+  // Return data without pagination info
   return {
     data: formattedResults,
     totalValue: totalValue,
-    totalCount: formattedResults.length,
   };
 }
 
