@@ -6443,7 +6443,11 @@ async function calculateGoalProgress(goal, ownerId) {
     whereClause.masterUserID = assignee;
   } else if (ownerId && !assignId && !assignee) {
     // Fallback to owner ID if no specific assignment
-    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+    if (entity === "Activity") {
+      whereClause[Op.or] = [{ masterUserID: ownerId }, { assignedTo: ownerId }];
+    } else {
+      whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+    }
   }
   // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
 
