@@ -151,6 +151,34 @@ exports.createActivity = async (req, res) => {
     }
     console.log(organization, "Organization fetched");
 
+    // Validate leadId if provided
+    let validatedLeadId = null;
+    if (leadId) {
+      const lead = await Lead.findByPk(leadId);
+      if (!lead) {
+        return res.status(400).json({ 
+          message: "Invalid leadId. Lead not found.",
+          error: "LEAD_NOT_FOUND",
+          leadId: leadId
+        });
+      }
+      validatedLeadId = leadId;
+    }
+
+    // Validate dealId if provided
+    let validatedDealId = null;
+    if (dealId) {
+      const deal = await Deal.findByPk(dealId);
+      if (!deal) {
+        return res.status(400).json({ 
+          message: "Invalid dealId. Deal not found.",
+          error: "DEAL_NOT_FOUND",
+          dealId: dealId
+        });
+      }
+      validatedDealId = dealId;
+    }
+
     // If guests is an array, convert to string for storage
     const guestsValue = Array.isArray(guests) ? JSON.stringify(guests) : guests;
     
@@ -170,8 +198,8 @@ exports.createActivity = async (req, res) => {
       status,
       notes,
       assignedTo,
-      dealId,
-      leadId,
+      dealId: validatedDealId,
+      leadId: validatedLeadId,
       personId: finalPersonId,
       leadOrganizationId,
       isDone,
@@ -185,13 +213,13 @@ exports.createActivity = async (req, res) => {
     });
 
     // Update nextActivity in Lead if leadId is present
-    if (leadId) {
-      await updateNextActivityForLead(leadId);
+    if (validatedLeadId) {
+      await updateNextActivityForLead(validatedLeadId);
     }
 
     // Update nextActivity in Deal if dealId is present
-    if (dealId) {
-      await updateNextActivityForDeal(dealId);
+    if (validatedDealId) {
+      await updateNextActivityForDeal(validatedDealId);
     }
 
     // Prepare response with contact persons information
@@ -1850,6 +1878,34 @@ exports.updateActivity = async (req, res) => {
     if (updateFields.organization && typeof updateFields.organization !== 'string') {
       console.warn('Warning: organization is not a string, setting to null:', updateFields.organization);
       updateFields.organization = null;
+    }
+
+    // Validate leadId if being changed
+    if (updateFields.leadId !== undefined && updateFields.leadId !== activity.leadId) {
+      if (updateFields.leadId !== null) {
+        const lead = await Lead.findByPk(updateFields.leadId);
+        if (!lead) {
+          return res.status(400).json({ 
+            message: "Invalid leadId. Lead not found.",
+            error: "LEAD_NOT_FOUND",
+            leadId: updateFields.leadId
+          });
+        }
+      }
+    }
+
+    // Validate dealId if being changed
+    if (updateFields.dealId !== undefined && updateFields.dealId !== activity.dealId) {
+      if (updateFields.dealId !== null) {
+        const deal = await Deal.findByPk(updateFields.dealId);
+        if (!deal) {
+          return res.status(400).json({ 
+            message: "Invalid dealId. Deal not found.",
+            error: "DEAL_NOT_FOUND",
+            dealId: updateFields.dealId
+          });
+        }
+      }
     }
 
     await activity.update(updateFields);
