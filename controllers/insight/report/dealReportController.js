@@ -337,7 +337,97 @@ exports.createDealPerformReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } else if ((entity && type && reportId)) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Performance") {
+        // Validate required fields for performance reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Performance reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateExistingDealPerformanceData(
+            ownerId,
+            role,
+            xaxis || existingxaxis,
+            yaxis || existingyaxis,
+            durationUnit || existingDurationUnit,
+            segmentedBy || existingSegmentedBy,
+            filters || existingfilters,
+            page,
+            limit
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: xaxis || existingxaxis,
+            yaxis: yaxis || existingyaxis,
+            durationUnit: durationUnit || existingDurationUnit,
+            segmentedBy: segmentedBy || existingSegmentedBy,
+            filters: filters || existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors,
+            reportData,
+          };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
+    else if ((!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
