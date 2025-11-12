@@ -68,22 +68,31 @@ exports.getLeadFilters = async (req, res) => {
   const masterUserID = req.adminId; // or req.user.id
   const { entityType, filterEntityType } = req.query; // Added filterEntityType parameter
   try {
-    let filters;
+    
 
-    if (req.role === "admin") {
-      // Admin can see all filters
-      filters = await LeadFilter.findAll();
-    } else {
-      // Non-admin users: public filters for everyone, private only for this user
-      filters = await LeadFilter.findAll({
-        where: {
-          [Op.or]: [
-            { visibility: "Public" },
-            { visibility: "Private", masterUserID },
-          ],
-        },
-      });
-    }
+    // if (req.role === "admin") {
+    //   // Admin can see all filters
+    //   filters = await LeadFilter.findAll();
+    // } else {
+    //   // Non-admin users: public filters for everyone, private only for this user
+    //   filters = await LeadFilter.findAll({
+    //     where: {
+    //       [Op.or]: [
+    //         { visibility: "Public" },
+    //         { visibility: "Private", masterUserID },
+    //       ],
+    //     },
+    //   });
+    // }
+        // Fetch filters visible to everyone or private filters belonging to this user
+    let filters = await LeadFilter.findAll({
+      where: {
+        [Op.or]: [
+          { visibility: "Public" },
+          { visibility: "Private", masterUserID },
+        ],
+      },
+    });
 
     // Filter by filterEntityType if provided (new filtering option)
     if (filterEntityType) {
@@ -328,11 +337,11 @@ exports.updateLeadFilter = async (req, res) => {
     }
 
     // Allow admin to edit any filter, non-admin can only edit their own filters
-    if (req.role !== "admin" && filter.masterUserID !== masterUserID) {
-      return res
-        .status(403)
-        .json({ message: "You are not allowed to edit this filter." });
-    }
+    // if (req.role !== "admin" && filter.masterUserID !== masterUserID) {
+    //   return res
+    //     .status(403)
+    //     .json({ message: "You are not allowed to edit this filter." });
+    // }
 
     // Validate filterEntityType if provided
     if (filterEntityType) {
