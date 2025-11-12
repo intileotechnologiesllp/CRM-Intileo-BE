@@ -390,7 +390,7 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } else if ((entity && type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -424,7 +424,87 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
 
-        try {
+          // Generate data with pagination
+          const result = await generateExistingLeadPerformanceData(
+            ownerId,
+            role,
+            xaxis || existingxaxis,
+            yaxis || existingyaxis,
+            durationUnit || existingDurationUnit,
+            segmentedBy || existingSegmentedBy,
+            filters || existingfilters,
+            page,
+            limit
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: xaxis || existingxaxis,
+            yaxis: yaxis || existingyaxis,
+            durationUnit: durationUnit || existingDurationUnit,
+            segmentedBy: segmentedBy || existingSegmentedBy,
+            filters: filters || existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors,
+            reportData,
+          };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
+      }
+    }
+     else if ((!entity && !type && reportId)) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Lead" && existingtype === "Performance") {
+        // Validate required fields for performance reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Lead Performance reports",
+          });
+        }
+
           // Generate data with pagination
           const result = await generateExistingLeadPerformanceData(
             ownerId,
@@ -470,17 +550,8 @@ exports.createLeadPerformReport = async (req, res) => {
               minValue: minValue,
             };
           }
-        } catch (error) {
-          console.error("Error generating lead performance data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate lead performance data",
-            error: error.message,
-          });
-        }
       }
     }
-
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
@@ -3517,7 +3588,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 exports.createLeadConversionReport = async (req, res) => {
   try {
     const {
-      reportId,
+      reportId, 
       entity,
       type,
       xaxis,
@@ -3766,7 +3837,98 @@ exports.createLeadConversionReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } else if ((entity && type && reportId)) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Lead" && existingtype === "Conversion") {
+        // Validate required fields for Conversion reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Lead Conversion reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateExistingLeadConversionData(
+            ownerId,
+            role,
+            xaxis || existingxaxis,
+            yaxis || existingyaxis,
+            durationUnit || existingDurationUnit,
+            segmentedBy || existingSegmentedBy,
+            filters || existingfilters,
+            page,
+            limit,
+            type
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: xaxis || existingxaxis,
+            yaxis: yaxis || existingyaxis,
+            durationUnit: durationUnit || existingDurationUnit,
+            segmentedBy: segmentedBy || existingSegmentedBy,
+            filters: filters || existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors || {},
+            reportData,
+          };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
+        } catch (error) {
+          console.error("Error generating lead Conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate lead Conversion data",
+            error: error.message,
+          });
+        }
+      }
+    }
+    else if ((!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });

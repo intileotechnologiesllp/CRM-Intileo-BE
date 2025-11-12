@@ -411,7 +411,7 @@ exports.createActivityReport = async (req, res) => {
           filters,
           page,
           limit
-        );
+        ); 
         reportData = result.data;
         paginationInfo = result.pagination;
         totalValue = result.totalValue;
@@ -508,7 +508,7 @@ exports.createActivityReport = async (req, res) => {
           xaxis: xaxis || existingXaxis,
           yaxis: yaxis || existingYaxis,
           durationUnit: durationUnit || existingDurationUnit,
-          segmentedBy: segmentedBy || existingSegmentedBy,
+          segmentedBy: segmentedBy === 'none'? existingSegmentedBy : segmentedBy,
           filters: filters || existingFilters || {},
           graphtype: existingGraphType,
           colors: colors,
