@@ -485,7 +485,7 @@ exports.createActivityReport = async (req, res) => {
 
       if (existingEntity === "Activity" && existingType === "Performance") {
         // Generate data with pagination using new parameters
-        const result = await generateExistingActivityPerformanceData(
+        const result = await generateActivityPerformanceData(
           ownerId,
           role,
           xaxis,
