@@ -452,96 +452,96 @@ exports.createActivityReport = async (req, res) => {
       }
     } 
     // Handle existing report with updates
-    // else if (entity && type && reportId) {
-    //   const existingReports = await Report.findOne({
-    //     where: { reportId },
-    //   });
+    else if (entity && type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
 
-    //   if (!existingReports) {
-    //     return res.status(404).json({
-    //       success: false,
-    //       message: "Report not found",
-    //     });
-    //   }
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
 
-    //   const {
-    //     entity: existingEntity,
-    //     type: existingType,
-    //     config: configString,
-    //     graphtype: existingGraphType,
-    //     colors: existingColors,
-    //   } = existingReports.dataValues;
+      const {
+        entity: existingEntity,
+        type: existingType,
+        config: configString,
+        graphtype: existingGraphType,
+        colors: existingColors,
+      } = existingReports.dataValues;
 
-    //   const colors = JSON.parse(existingColors);
-    //   const config = JSON.parse(configString);
+      const colors = JSON.parse(existingColors);
+      const config = JSON.parse(configString);
       
-    //   const {
-    //     xaxis: existingXaxis,
-    //     yaxis: existingYaxis,
-    //     durationUnit: existingDurationUnit,
-    //     segmentedBy: existingSegmentedBy,
-    //     filters: existingFilters,
-    //   } = config;
+      const {
+        xaxis: existingXaxis,
+        yaxis: existingYaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingFilters,
+      } = config;
 
-    //   if (existingEntity === "Activity" && existingType === "Performance") {
-    //     // Generate data with pagination using new parameters
-    //     const result = await generateExistingActivityPerformanceData(
-    //       ownerId,
-    //       role,
-    //       xaxis || existingXaxis,
-    //       yaxis || existingYaxis,
-    //       durationUnit || existingDurationUnit,
-    //       segmentedBy || existingSegmentedBy,
-    //       filters || existingFilters,
-    //       page,
-    //       limit
-    //     );
+      if (existingEntity === "Activity" && existingType === "Performance") {
+        // Generate data with pagination using new parameters
+        const result = await generateExistingActivityPerformanceData(
+          ownerId,
+          role,
+          xaxis || existingXaxis,
+          yaxis || existingYaxis,
+          durationUnit || existingDurationUnit,
+          segmentedBy || existingSegmentedBy,
+          filters || existingFilters,
+          page,
+          limit
+        );
         
-    //     reportData = result.data;
-    //     paginationInfo = result.pagination;
-    //     totalValue = result.totalValue;
+        reportData = result.data;
+        paginationInfo = result.pagination;
+        totalValue = result.totalValue;
         
-    //     reportConfig = {
-    //       reportId,
-    //       entity: existingEntity,
-    //       type: existingType,
-    //       xaxis: xaxis || existingXaxis,
-    //       yaxis: yaxis || existingYaxis,
-    //       durationUnit: durationUnit || existingDurationUnit,
-    //       // segmentedBy: segmentedBy === 'none'? existingSegmentedBy : segmentedBy,
-    //       segmentedBy: segmentedBy || existingSegmentedBy,
-    //       filters: filters || existingFilters || {},
-    //       graphtype: existingGraphType,
-    //       colors: colors,
-    //       reportData,
-    //     };
+        reportConfig = {
+          reportId,
+          entity: existingEntity,
+          type: existingType,
+          xaxis: xaxis || existingXaxis,
+          yaxis: yaxis || existingYaxis,
+          durationUnit: durationUnit || existingDurationUnit,
+          // segmentedBy: segmentedBy === 'none'? existingSegmentedBy : segmentedBy,
+          segmentedBy: segmentedBy || existingSegmentedBy,
+          filters: filters || existingFilters || {},
+          graphtype: existingGraphType,
+          colors: colors,
+          reportData,
+        };
         
-    //     // Calculate summary if data exists
-    //     if (reportData.length > 0) {
-    //       const avgValue = totalValue / reportData.length;
-    //       const maxValue = Math.max(
-    //         ...reportData.map(
-    //           (item) => item.value || item.totalSegmentValue || 0
-    //         )
-    //       );
-    //       const minValue = Math.min(
-    //         ...reportData.map(
-    //           (item) => item.value || item.totalSegmentValue || 0
-    //         )
-    //       );
+        // Calculate summary if data exists
+        if (reportData.length > 0) {
+          const avgValue = totalValue / reportData.length;
+          const maxValue = Math.max(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
+          const minValue = Math.min(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
 
-    //       summary = {
-    //         totalCategories: reportData.length,
-    //         totalValue: totalValue,
-    //         avgValue: parseFloat(avgValue.toFixed(2)),
-    //         maxValue: maxValue,
-    //         minValue: minValue,
-    //       };
-    //     }
-    //   }
-    // }
+          summary = {
+            totalCategories: reportData.length,
+            totalValue: totalValue,
+            avgValue: parseFloat(avgValue.toFixed(2)),
+            maxValue: maxValue,
+            minValue: minValue,
+          };
+        }
+      }
+    }
     // Handle existing report without updates
-    else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    else if (!entity && !type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -577,8 +577,8 @@ exports.createActivityReport = async (req, res) => {
         const result = await generateExistingActivityPerformanceData(
           ownerId,
           role,
-          xaxis,
-          yaxis,
+          existingXaxis,
+          existingYaxis,
           existingDurationUnit,
           existingSegmentedBy,
           existingFilters,
@@ -594,8 +594,8 @@ exports.createActivityReport = async (req, res) => {
           reportId,
           entity: existingEntity,
           type: existingType,
-          xaxis: xaxis,
-          yaxis: yaxis,
+          xaxis: existingXaxis,
+          yaxis: existingYaxis,
           durationUnit: existingDurationUnit,
           segmentedBy: existingSegmentedBy,
           filters: existingFilters || {},
