@@ -483,7 +483,7 @@ exports.createActivityReport = async (req, res) => {
         filters: existingFilters,
       } = config;
 
-      if (existingEntity === "Activity" && existingType === "Performance") {
+      if (entity === "Activity" && type === "Performance") {
         // Generate data with pagination using new parameters
         const result = await generateActivityPerformanceData(
           ownerId,
@@ -503,15 +503,15 @@ exports.createActivityReport = async (req, res) => {
         
         reportConfig = {
           reportId,
-          entity: existingEntity,
-          type: existingType,
+          entity: entity,
+          type: type,
           xaxis: xaxis,
           yaxis: yaxis,
           durationUnit: durationUnit,
           // segmentedBy: segmentedBy === 'none'? existingSegmentedBy : segmentedBy,
           segmentedBy: segmentedBy,
           filters: filters || {},
-          graphtype: existingGraphType,
+          // graphtype: existingGraphType,
           colors: colors,
           reportData,
         };
