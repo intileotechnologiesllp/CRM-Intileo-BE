@@ -78,7 +78,7 @@ exports.createActivityReport = async (req, res) => {
       { label: "Duration", value: "duration", type: "Activity" },
     ];
 
-    // Add this to your createActivityReport function or make it available globally
+    // Available filter columns
     const availableFilterColumns = {
       Activity: [
         { label: "Subject", value: "subject", type: "text" },
@@ -381,13 +381,14 @@ exports.createActivityReport = async (req, res) => {
       ],
     };
 
-    // For Activity Performance reports, generate the data
+    // Initialize variables
     let reportData = null;
     let paginationInfo = null;
     let totalValue = 0;
     let summary = null;
     let reportConfig = null;
 
+    // Handle new report creation
     if (entity && type && !reportId) {
       if (entity === "Activity" && type === "Performance") {
         // Validate required fields for performance reports
@@ -399,153 +400,230 @@ exports.createActivityReport = async (req, res) => {
           });
         }
 
-        try {
-          // Generate data with pagination
-          const result = await generateActivityPerformanceData(
-            ownerId,
-            role,
-            xaxis,
-            yaxis,
-            durationUnit,
-            segmentedBy,
-            filters,
-            page,
-            limit
+        // Generate data with pagination
+        const result = await generateActivityPerformanceData(
+          ownerId,
+          role,
+          xaxis,
+          yaxis,
+          durationUnit,
+          segmentedBy,
+          filters,
+          page,
+          limit
+        );
+        reportData = result.data;
+        paginationInfo = result.pagination;
+        totalValue = result.totalValue;
+        
+        // Calculate summary if data exists
+        if (reportData.length > 0) {
+          const avgValue = totalValue / reportData.length;
+          const maxValue = Math.max(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
           );
-          reportData = result.data;
-          paginationInfo = result.pagination;
-          totalValue = result.totalValue;
-          if (reportData.length > 0) {
-            const avgValue = totalValue / reportData.length;
-            const maxValue = Math.max(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
-            );
-            const minValue = Math.min(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
-            );
+          const minValue = Math.min(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
 
-            summary = {
-              totalCategories: reportData.length,
-              totalValue: totalValue,
-              avgValue: parseFloat(avgValue.toFixed(2)),
-              maxValue: maxValue,
-              minValue: minValue,
-            };
-          }
-          reportConfig = {
-            entity,
-            type,
-            xaxis,
-            yaxis,
-            durationUnit,
-            segmentedBy,
-            filters: filters || {},
-            reportData,
+          summary = {
+            totalCategories: reportData.length,
+            totalValue: totalValue,
+            avgValue: parseFloat(avgValue.toFixed(2)),
+            maxValue: maxValue,
+            minValue: minValue,
           };
-        } catch (error) {
-          console.error("Error generating activity performance data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate activity performance data",
-            error: error.message,
-          });
         }
+        
+        reportConfig = {
+          entity,
+          type,
+          xaxis,
+          yaxis,
+          durationUnit,
+          segmentedBy,
+          filters: filters || {},
+          reportData,
+        };
       }
-    } else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+    } 
+    // Handle existing report with updates
+    else if (entity && type && reportId) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
 
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
       const {
-        entity: existingentity,
-        type: existingtype,
+        entity: existingEntity,
+        type: existingType,
         config: configString,
-        graphtype: existinggraphtype,
-        colors: existingcolors,
+        graphtype: existingGraphType,
+        colors: existingColors,
       } = existingReports.dataValues;
 
-      const colors = JSON.parse(existingcolors);
-      // Parse the config JSON string
+      const colors = JSON.parse(existingColors);
       const config = JSON.parse(configString);
+      
       const {
-        xaxis: existingxaxis,
-        yaxis: existingyaxis,
+        xaxis: existingXaxis,
+        yaxis: existingYaxis,
         durationUnit: existingDurationUnit,
         segmentedBy: existingSegmentedBy,
-        filters: existingfilters,
+        filters: existingFilters,
       } = config;
 
-      if (existingentity === "Activity" && existingtype === "Performance") {
-        // Validate required fields for performance reports
-        if (!existingxaxis || !existingyaxis) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "X-axis and Y-axis are required for Activity Performance reports",
-          });
-        }
-
-        try {
-          // Generate data with pagination
-          const result = await generateExistingActivityPerformanceData(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingDurationUnit,
-            existingSegmentedBy,
-            existingfilters,
-            page,
-            limit
+      if (existingEntity === "Activity" && existingType === "Performance") {
+        // Generate data with pagination using new parameters
+        const result = await generateExistingActivityPerformanceData(
+          ownerId,
+          role,
+          xaxis || existingXaxis,
+          yaxis || existingYaxis,
+          durationUnit || existingDurationUnit,
+          segmentedBy || existingSegmentedBy,
+          filters || existingFilters,
+          page,
+          limit
+        );
+        
+        reportData = result.data;
+        paginationInfo = result.pagination;
+        totalValue = result.totalValue;
+        
+        reportConfig = {
+          reportId,
+          entity: existingEntity,
+          type: existingType,
+          xaxis: xaxis || existingXaxis,
+          yaxis: yaxis || existingYaxis,
+          durationUnit: durationUnit || existingDurationUnit,
+          segmentedBy: segmentedBy || existingSegmentedBy,
+          filters: filters || existingFilters || {},
+          graphtype: existingGraphType,
+          colors: colors,
+          reportData,
+        };
+        
+        // Calculate summary if data exists
+        if (reportData.length > 0) {
+          const avgValue = totalValue / reportData.length;
+          const maxValue = Math.max(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
           );
-          reportData = result.data;
-          paginationInfo = result.pagination;
-          totalValue = result.totalValue;
-          reportConfig = {
-            reportId,
-            entity: existingentity,
-            type: existingtype,
-            xaxis: existingxaxis,
-            yaxis: existingyaxis,
-            durationUnit: existingDurationUnit,
-            segmentedBy: existingSegmentedBy,
-            filters: existingfilters || {},
-            graphtype: existinggraphtype,
-            colors: colors,
-            reportData,
-          };
-          if (reportData.length > 0) {
-            const avgValue = totalValue / reportData.length;
-            const maxValue = Math.max(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
-            );
-            const minValue = Math.min(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
-            );
+          const minValue = Math.min(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
 
-            summary = {
-              totalCategories: reportData.length,
-              totalValue: totalValue,
-              avgValue: parseFloat(avgValue.toFixed(2)),
-              maxValue: maxValue,
-              minValue: minValue,
-            };
-          }
-        } catch (error) {
-          console.error("Error generating activity performance data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate activity performance data",
-            error: error.message,
-          });
+          summary = {
+            totalCategories: reportData.length,
+            totalValue: totalValue,
+            avgValue: parseFloat(avgValue.toFixed(2)),
+            maxValue: maxValue,
+            minValue: minValue,
+          };
+        }
+      }
+    }
+    // Handle existing report without updates
+    else if (!entity && !type && reportId) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
+
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
+      const {
+        entity: existingEntity,
+        type: existingType,
+        config: configString,
+        graphtype: existingGraphType,
+        colors: existingColors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingColors);
+      const config = JSON.parse(configString);
+      
+      const {
+        xaxis: existingXaxis,
+        yaxis: existingYaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingFilters,
+      } = config;
+
+      if (existingEntity === "Activity" && existingType === "Performance") {
+        // Generate data with pagination using existing parameters
+        const result = await generateExistingActivityPerformanceData(
+          ownerId,
+          role,
+          existingXaxis,
+          existingYaxis,
+          existingDurationUnit,
+          existingSegmentedBy,
+          existingFilters,
+          page,
+          limit
+        );
+        
+        reportData = result.data;
+        paginationInfo = result.pagination;
+        totalValue = result.totalValue;
+        
+        reportConfig = {
+          reportId,
+          entity: existingEntity,
+          type: existingType,
+          xaxis: existingXaxis,
+          yaxis: existingYaxis,
+          durationUnit: existingDurationUnit,
+          segmentedBy: existingSegmentedBy,
+          filters: existingFilters || {},
+          graphtype: existingGraphType,
+          colors: colors,
+          reportData,
+        };
+        
+        // Calculate summary if data exists
+        if (reportData.length > 0) {
+          const avgValue = totalValue / reportData.length;
+          const maxValue = Math.max(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
+          const minValue = Math.min(
+            ...reportData.map(
+              (item) => item.value || item.totalSegmentValue || 0
+            )
+          );
+
+          summary = {
+            totalCategories: reportData.length,
+            totalValue: totalValue,
+            avgValue: parseFloat(avgValue.toFixed(2)),
+            maxValue: maxValue,
+            minValue: minValue,
+          };
         }
       }
     }
@@ -871,7 +949,7 @@ async function generateActivityPerformanceData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
@@ -920,8 +998,8 @@ async function generateActivityPerformanceData(
         group: groupBy,
         raw: true,
         // Only apply value-based sorting for non-date fields
-        order: isDateFieldX 
-          ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]] 
+        order: isDateFieldX
+          ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]]
           : [[Sequelize.literal("yValue"), "DESC"]],
       });
     }
@@ -934,8 +1012,8 @@ async function generateActivityPerformanceData(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
       limit: limit,
       offset: offset,
@@ -990,7 +1068,9 @@ async function generateActivityPerformanceData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
@@ -1335,7 +1415,7 @@ async function generateExistingActivityPerformanceData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
@@ -1380,8 +1460,8 @@ async function generateExistingActivityPerformanceData(
         group: groupBy,
         raw: true,
         // Only apply value-based sorting for non-date fields
-        order: isDateFieldX 
-          ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]] 
+        order: isDateFieldX
+          ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]]
           : [[Sequelize.literal("yValue"), "DESC"]],
       });
     }
@@ -1393,8 +1473,8 @@ async function generateExistingActivityPerformanceData(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
       limit: limit,
       offset: offset,
@@ -1453,7 +1533,9 @@ async function generateExistingActivityPerformanceData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
@@ -2487,8 +2569,8 @@ async function generateExistingActivityPerformanceDataForSave(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
     });
   } else {
@@ -2500,8 +2582,8 @@ async function generateExistingActivityPerformanceDataForSave(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${existingxaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
     });
   }
@@ -2558,7 +2640,9 @@ async function generateExistingActivityPerformanceDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
@@ -2827,8 +2911,8 @@ async function generateActivityPerformanceDataForSave(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
     });
   } else {
@@ -2840,8 +2924,8 @@ async function generateActivityPerformanceDataForSave(
       group: groupBy,
       raw: true,
       // Only apply value-based sorting for non-date fields
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]] 
+      order: isDateFieldX
+        ? [[Sequelize.col(`Activity.${xaxis}`), "ASC"]]
         : [[Sequelize.literal("yValue"), "DESC"]],
     });
   }
@@ -2894,7 +2978,9 @@ async function generateActivityPerformanceDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
