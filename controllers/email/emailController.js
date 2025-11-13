@@ -3505,6 +3505,12 @@ exports.fetchArchiveEmails = async (req, res) => {
 exports.getEmails = async (req, res) => {
   const masterUserID = req.adminId;
   
+  console.log(`🚀 [API ENTRY] getEmails called for user ${masterUserID}`, {
+    userID: masterUserID,
+    queryParams: Object.keys(req.query),
+    timestamp: new Date().toISOString()
+  });
+  
   // 🚀 PERFORMANCE: Check if user already has an active session
   if (!trackUserSession(masterUserID, 'getEmails')) {
     return res.status(429).json({
@@ -3947,6 +3953,7 @@ async function getEmailsInternal(req, res, masterUserID) {
           "status",
           "personId",
           "leadOrganizationId",
+          "dealId", // Add dealId to check if lead is converted
         ],
         include: [
           {
@@ -4052,7 +4059,7 @@ async function getEmailsInternal(req, res, masterUserID) {
     }
 
     // Handle attachment metadata and file paths appropriately
-    const emailsWithAttachments = emails.map((email) => {
+    const emailsWithAttachments = await Promise.all(emails.map(async (email) => {
       const attachments = (email.attachments || []).map((attachment) => {
         const baseAttachment = { ...attachment.toJSON() };
 
@@ -4069,6 +4076,139 @@ async function getEmailsInternal(req, res, masterUserID) {
       // Create email object with body preview, attachments, leads, and deals
       const emailObj = { ...email.toJSON(), attachments };
 
+      // � DEBUG: Log initial email object state
+      console.log(`🔍 [DEBUG] Email ${emailObj.emailID} Initial State:`, {
+        emailID: emailObj.emailID,
+        leadId: emailObj.leadId,
+        dealId: emailObj.dealId,
+        hasLead: !!emailObj.Lead,
+        hasDeal: !!emailObj.Deal,
+        leadDealId: emailObj.Lead ? emailObj.Lead.dealId : 'N/A'
+      });
+
+      // �🔄 LEAD-TO-DEAL CONVERSION LOGIC: Handle converted leads properly
+      // If email is linked to a lead and that lead has been converted to a deal (has dealId),
+      // then show the deal data instead of lead data
+      if (emailObj.Lead && emailObj.Lead.dealId) {
+        console.log(`📧 [CONVERSION] Email ${emailObj.emailID}: Lead ${emailObj.Lead.leadId} converted to deal ${emailObj.Lead.dealId} - fetching deal data`);
+        
+        try {
+          // Fetch the converted deal data with full relations
+          const convertedDeal = await Deal.findByPk(emailObj.Lead.dealId, {
+            attributes: [
+              "dealId",
+              "title", 
+              "value",
+              "status",
+              "personId",
+              "leadOrganizationId",
+            ],
+            include: [
+              {
+                model: Person,
+                as: "Person",
+                required: false,
+                attributes: [
+                  "personId",
+                  "contactPerson", 
+                  "email",
+                  "phone",
+                  "jobTitle",
+                ],
+              },
+              {
+                model: Organization,
+                as: "Organization",
+                required: false,
+                attributes: [
+                  "leadOrganizationId",
+                  "organization",
+                  "address", 
+                  "organizationLabels",
+                ],
+              },
+            ],
+          });
+
+          if (convertedDeal) {
+            console.log(`✅ [CONVERSION] Email ${emailObj.emailID}: Found converted deal ${convertedDeal.dealId}`, {
+              dealTitle: convertedDeal.title,
+              dealValue: convertedDeal.value,
+              dealStatus: convertedDeal.status
+            });
+
+            // Replace lead data with converted deal data and update email IDs
+            emailObj.Deal = convertedDeal.toJSON();
+            emailObj.Deal.isConvertedFromLead = true;
+            emailObj.Deal.originalLeadId = emailObj.Lead.leadId;
+            
+            // Update email's lead/deal IDs to reflect the conversion
+            console.log(`🔄 [CONVERSION] Email ${emailObj.emailID}: Updating IDs - leadId: ${emailObj.leadId} → null, dealId: ${emailObj.dealId} → ${emailObj.Lead.dealId}`);
+            emailObj.dealId = emailObj.Lead.dealId;
+            emailObj.leadId = null;
+            
+            // Remove lead data since it's now a deal
+            emailObj.Lead = null;
+            
+            console.log(`📧 [CONVERSION] Email ${emailObj.emailID}: Successfully replaced lead data with converted deal ${convertedDeal.dealId}`);
+            console.log(`🔍 [DEBUG] Email ${emailObj.emailID} After Conversion:`, {
+              emailID: emailObj.emailID,
+              leadId: emailObj.leadId,
+              dealId: emailObj.dealId,
+              hasLead: !!emailObj.Lead,
+              hasDeal: !!emailObj.Deal,
+              dealTitle: emailObj.Deal ? emailObj.Deal.title : 'N/A'
+            });
+          } else {
+            console.log(`❌ [CONVERSION] Email ${emailObj.emailID}: Deal ${emailObj.Lead.dealId} not found in database`);
+            // Deal not found, mark lead as converted but keep lead data
+            emailObj.Lead.isConverted = true;
+            emailObj.Lead.convertedToDealId = emailObj.Lead.dealId;
+            console.log(`📧 Email ${emailObj.emailID}: Lead converted but deal ${emailObj.Lead.dealId} not found`);
+          }
+        } catch (dealFetchError) {
+          console.error(`❌ [CONVERSION ERROR] Email ${emailObj.emailID}: Error fetching converted deal ${emailObj.Lead.dealId}:`, dealFetchError.message);
+          console.error(`🔍 [DEBUG] Deal fetch error details:`, {
+            emailID: emailObj.emailID,
+            leadId: emailObj.Lead.leadId,
+            dealIdToFetch: emailObj.Lead.dealId,
+            errorType: dealFetchError.name,
+            errorMessage: dealFetchError.message
+          });
+          // Keep lead data but mark as converted
+          emailObj.Lead.isConverted = true;
+          emailObj.Lead.convertedToDealId = emailObj.Lead.dealId;
+        }
+      } else if (emailObj.Lead && !emailObj.Lead.dealId) {
+        console.log(`📋 [NO CONVERSION] Email ${emailObj.emailID}: Lead ${emailObj.Lead.leadId} is not converted (no dealId)`);
+        // Lead exists and is not converted - show lead data normally
+        emailObj.Lead.isConverted = false;
+      } else if (!emailObj.Lead) {
+        console.log(`📭 [NO LEAD] Email ${emailObj.emailID}: No lead data attached`);
+      } else {
+        console.log(`🔍 [EDGE CASE] Email ${emailObj.emailID}: Unexpected lead state`, {
+          hasLead: !!emailObj.Lead,
+          leadDealId: emailObj.Lead ? emailObj.Lead.dealId : 'N/A'
+        });
+      }
+
+      // Ensure Deal object has conversion tracking
+      if (emailObj.Deal && !emailObj.Deal.hasOwnProperty('isConvertedFromLead')) {
+        emailObj.Deal.isConvertedFromLead = false;
+        emailObj.Deal.originalLeadId = null;
+      }
+
+      // 🔍 DEBUG: Log final email object state before return
+      console.log(`🔍 [FINAL DEBUG] Email ${emailObj.emailID} Final State:`, {
+        emailID: emailObj.emailID,
+        leadId: emailObj.leadId,
+        dealId: emailObj.dealId,
+        hasLead: !!emailObj.Lead,
+        hasDeal: !!emailObj.Deal,
+        dealIsConverted: emailObj.Deal ? emailObj.Deal.isConvertedFromLead : false,
+        leadIsConverted: emailObj.Lead ? emailObj.Lead.isConverted : false
+      });
+
       // Replace body with preview content (but keep the 'body' key name)
       if (includeFullBody === "true" || folder === "drafts") {
         // Keep full body if explicitly requested or for drafts folder
@@ -4079,13 +4219,14 @@ async function getEmailsInternal(req, res, masterUserID) {
       }
 
       // The emailObj now includes:
-      // - Lead information (if linkedId exists) with Person and Organization details
-      // - Deal information (if dealId exists) with Person and Organization details
+      // - Lead information (only if not converted to deal) with conversion status
+      // - Deal information (including converted leads) with Person and Organization details
+      // - Conversion tracking metadata (isConvertedFromLead, originalLeadId)
       // - Attachments information
       // - All email fields
 
       return emailObj;
-    });
+    }));
 
     // � PRODUCTION ARCHITECTURE: Queue flag sync instead of direct IMAP sync
     try {
