@@ -389,7 +389,7 @@ exports.createActivityReport = async (req, res) => {
     let reportConfig = null;
 
     // Handle new report creation
-    if (entity && type && !reportId) {
+    if ((entity && type && !reportId)) {
       if (entity === "Activity" && type === "Performance") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
@@ -451,95 +451,7 @@ exports.createActivityReport = async (req, res) => {
         };
       }
     } 
-    // Handle existing report with updates
-    // else if (entity && type && reportId) {
-    //   const existingReports = await Report.findOne({
-    //     where: { reportId },
-    //   });
 
-    //   if (!existingReports) {
-    //     return res.status(404).json({
-    //       success: false,
-    //       message: "Report not found",
-    //     });
-    //   }
-
-    //   const {
-    //     entity: existingEntity,
-    //     type: existingType,
-    //     config: configString,
-    //     graphtype: existingGraphType,
-    //     colors: existingColors,
-    //   } = existingReports.dataValues;
-
-    //   const colors = JSON.parse(existingColors);
-    //   const config = JSON.parse(configString);
-      
-    //   const {
-    //     xaxis: existingXaxis,
-    //     yaxis: existingYaxis,
-    //     durationUnit: existingDurationUnit,
-    //     segmentedBy: existingSegmentedBy,
-    //     filters: existingFilters,
-    //   } = config;
-
-    //   if (existingEntity === "Activity" && existingType === "Performance") {
-    //     // Generate data with pagination using new parameters
-    //     const result = await generateExistingActivityPerformanceData(
-    //       ownerId,
-    //       role,
-    //       xaxis || existingXaxis,
-    //       yaxis || existingYaxis,
-    //       durationUnit || existingDurationUnit,
-    //       segmentedBy || existingSegmentedBy,
-    //       filters || existingFilters,
-    //       page,
-    //       limit
-    //     );
-        
-    //     reportData = result.data;
-    //     paginationInfo = result.pagination;
-    //     totalValue = result.totalValue;
-        
-    //     reportConfig = {
-    //       reportId,
-    //       entity: existingEntity,
-    //       type: existingType,
-    //       xaxis: xaxis || existingXaxis,
-    //       yaxis: yaxis || existingYaxis,
-    //       durationUnit: durationUnit || existingDurationUnit,
-    //       // segmentedBy: segmentedBy === 'none'? existingSegmentedBy : segmentedBy,
-    //       segmentedBy: segmentedBy || existingSegmentedBy,
-    //       filters: filters || existingFilters || {},
-    //       graphtype: existingGraphType,
-    //       colors: colors,
-    //       reportData,
-    //     };
-        
-    //     // Calculate summary if data exists
-    //     if (reportData.length > 0) {
-    //       const avgValue = totalValue / reportData.length;
-    //       const maxValue = Math.max(
-    //         ...reportData.map(
-    //           (item) => item.value || item.totalSegmentValue || 0
-    //         )
-    //       );
-    //       const minValue = Math.min(
-    //         ...reportData.map(
-    //           (item) => item.value || item.totalSegmentValue || 0
-    //         )
-    //       );
-
-    //       summary = {
-    //         totalCategories: reportData.length,
-    //         totalValue: totalValue,
-    //         avgValue: parseFloat(avgValue.toFixed(2)),
-    //         maxValue: maxValue,
-    //         minValue: minValue,
-    //       };
-    //     }
-    //   }
-    // }
     // Handle existing report without updates
     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
@@ -572,7 +484,6 @@ exports.createActivityReport = async (req, res) => {
         filters: existingFilters,
       } = config;
 
-      if (existingEntity === "Activity" && existingType === "Performance") {
         // Generate data with pagination using existing parameters
         const result = await generateExistingActivityPerformanceData(
           ownerId,
@@ -625,7 +536,6 @@ exports.createActivityReport = async (req, res) => {
             maxValue: maxValue,
             minValue: minValue,
           };
-        }
       }
     }
 
