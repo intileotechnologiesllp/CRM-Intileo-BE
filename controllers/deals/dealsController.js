@@ -6931,7 +6931,7 @@ exports.checkDealQuestionSharedStatus = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
       },
       include: [
         {
