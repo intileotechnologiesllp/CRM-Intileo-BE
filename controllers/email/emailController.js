@@ -9684,9 +9684,18 @@ const imapIdleManager = require('../../services/imapIdleManager');
  */
 exports.getEmailsRealtime = async (req, res) => {
   try {
-    const userID = req.adminId || 38; // Fallback to user 38 for testing (has valid Gmail credentials)
+    const userID = req.adminId; // Only use authenticated user ID from token
     
-    console.log(`📧 [REALTIME-EMAILS] Request for user ${userID} with smart IMAP management...`);
+    // Check if user is authenticated
+    if (!userID) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required. Please provide a valid access token.",
+        error: "Missing adminId from token"
+      });
+    }
+    
+    console.log(`📧 [REALTIME-EMAILS] Request for authenticated user ${userID} with smart IMAP management...`);
     
     // 🧠 SMART CONNECTION MANAGEMENT: Check existing connection first
     const connectionStatus = imapIdleManager.getConnectionStatus(userID);
