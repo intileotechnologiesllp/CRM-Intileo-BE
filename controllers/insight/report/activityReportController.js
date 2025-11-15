@@ -1918,6 +1918,9 @@ exports.createActivityReportDrillDown = async (req, res) => {
       fieldValue,
       id,
       moduleId,
+      isDate,
+      dateType,
+      weekName
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -1929,16 +1932,24 @@ exports.createActivityReportDrillDown = async (req, res) => {
       fieldName,
       fieldValue,
       id,
-      moduleId
+      moduleId,
+      isDate
     );
-    const weeklyData = groupActivitiesWithStats(result?.data, 'weekly');
-    // console.log(JSON.stringify(weeklyData, null, 2));
+
+    let dateData = null
+    if(isDate){
+      const resp = groupActivitiesWithStats(result?.data, dateType);
+      const filterDate = resp.filter((idx)=>{
+        return idx.period == weekName
+      })
+      dateData = filterDate[0]?.activities || []
+    }
 
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
-      data: result?.data,
-      // week: result?.format,
+      data: dateData ? dateData : result?.data,
+      // week: dateData,
       pagination: result?.data?.length,
     });
   } catch (error) {
@@ -2029,7 +2040,8 @@ async function generateActivityPerformanceDataForDrillDown(
   name,
   value,
   id,
-  entity
+  entity,
+  isDate
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -2193,18 +2205,10 @@ async function generateActivityPerformanceDataForDrillDown(
   );
 
  const formattedResults = flattened.filter((item) => {
-  if (name === "startDateTime") {
-    return (
-      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
-    );
+  if (isDate) {
+    return item;
   }
 
-  if (name === "endDateTime") {
-    return (
-      new Date(value).getTime() === new Date(item?.endDateTime).getTime()
-    );
-  }
-  
   if (name === "Owner") {
     return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
   }
@@ -2226,7 +2230,7 @@ async function generateActivityPerformanceDataForDrillDown(
   if (typeof item[name] === "string" && typeof value === "string") {
     if (item[name].toLowerCase() !== value.toLowerCase()) return false;
   } else {
-    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+    if (item[name] !== value) return false;
   }
 
   return true;

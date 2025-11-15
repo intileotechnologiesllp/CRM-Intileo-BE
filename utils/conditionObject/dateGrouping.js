@@ -28,14 +28,14 @@ class ActivityGrouper {
   static getWeekKey(date) {
     const year = date.getFullYear();
     const week = this.getWeekNumber(date);
-    return `${year}-W${String(week).padStart(2, '0')}`;
+    return `w${String(week).padStart(2, '0')} ${year}`;
   }
 
   // Get quarter key (YYYY-Q)
   static getQuarterKey(date) {
     const year = date.getFullYear();
     const quarter = this.getQuarter(date);
-    return `${year}-Q${quarter}`;
+    return `Q${quarter} ${year}`;
   }
 
   // Get year key (YYYY)
