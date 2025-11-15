@@ -13,19 +13,17 @@ const Card = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    uniqueId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
     type: {
       type: DataTypes.STRING,
       allowNull: false,
     },
-    position: {
-      type: DataTypes.INTEGER,
+    coordinates: {
+      type: DataTypes.JSON,
       allowNull: true,
-      defaultValue: 0,
-    },
-    size: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      defaultValue: 0,
     },
     ownerId: {
       type: DataTypes.INTEGER,
@@ -35,6 +33,12 @@ const Card = sequelize.define(
   {
     tableName: "Cards",
     timestamps: true,
+    indexes: [
+      {
+        unique: true,
+        fields: ['uniqueId', 'type', 'dashboardId']
+      }
+    ]
   }
 );
 

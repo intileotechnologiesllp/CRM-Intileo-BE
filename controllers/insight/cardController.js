@@ -1,39 +1,51 @@
 const Card  = require("../../models/insight/cardModel"); // Adjust path as needed
+const { Op, Sequelize } = require("sequelize");
+const sequelize = require("../../config/db");
 
 exports.createCard = async (req, res) => {
   try {
-    const { dashboardId, type, position, size } = req.body;
+    const { dashboardId, type, uniqueId } = req.body;
     const ownerId = req.adminId;
 
     // Validate required fields
-    if (!type) {
+    if (!type || !uniqueId) {
       return res.status(400).json({
         success: false,
-        message: "Type is required",
+        message: "Type and uniqueId are required",
       });
     }
 
-    let cardPosition = position;
+    // Check if card with same uniqueId, type, and dashboardId already exists
+    const existingCard = await Card.findOne({
+      where: {
+        uniqueId,
+        type,
+        dashboardId: dashboardId || null
+      }
+    });
+
+    if (existingCard) {
+      return res.status(409).json({
+        success: false,
+        message: "Card with this uniqueId, type, and dashboardId already exists",
+      });
+    }
+
+    let cardPosition;
     
-    // If position is not provided, calculate the next position
-    if (position === undefined || position === null) {
-      // Find the highest position for this dashboard
-      const lastCard = await Card.findOne({
-        where: { dashboardId },
-        order: [['position', 'DESC']]
-      });
-      
-      cardPosition = lastCard ? lastCard.position + 1 : 0;
-    }
-
-    // Default size if not provided
-    const cardSize = size !== undefined ? size : 1;
+    // Find the highest position for this dashboard
+    const lastCard = await Card.findOne({
+      where: { dashboardId: dashboardId || null },
+      order: [['position', 'DESC']]
+    });
+    
+    cardPosition = lastCard ? lastCard.position + 1 : 1;
 
     const newCard = await Card.create({
       dashboardId,
       type,
       position: cardPosition,
-      size: cardSize,
+      uniqueId,
       ownerId,
     });
 
@@ -46,6 +58,15 @@ exports.createCard = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating card:", error);
+    
+    // Handle unique constraint violation from database level
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        success: false,
+        message: "Card with this uniqueId, type, and dashboardId already exists",
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: "Failed to create card",
@@ -105,33 +126,53 @@ exports.updateCard = async (req, res) => {
 exports.getAllCards = async (req, res) => {
   try {
     const ownerId = req.adminId;
-    const { dashboardId } = req.query; // Optional filter by dashboard
+    const { dashboardId } = req.query; // Get dashboardId from query params
 
-    // Build where condition
-    const whereCondition = { ownerId };
-    if (dashboardId) {
-      whereCondition.dashboardId = dashboardId;
+    // Validate dashboardId
+    if (!dashboardId) {
+      return res.status(400).json({
+        success: false,
+        message: "Dashboard ID is required as query parameter",
+      });
     }
 
     const cards = await Card.findAll({
-      where: whereCondition,
-      attributes: ['cardId', 'dashboardId', 'type', 'position', 'size', 'createdAt', 'updatedAt'],
-      order: [['position', 'ASC']], // Order by position
+      where: {
+        ownerId,
+        dashboardId: dashboardId
+      },
+      attributes: [
+        'cardId', 
+        'dashboardId', 
+        'uniqueId',
+        'type', 
+        'position', 
+        'width', 
+        'height', 
+        'ownerId',
+        'createdAt', 
+        'updatedAt'
+      ],
+      order: [['position', 'ASC']],
     });
 
     res.status(200).json({
       success: true,
-      message: "Cards retrieved successfully",
+      message: cards.length > 0 
+        ? "Cards retrieved successfully" 
+        : "No cards found for this dashboard",
       data: cards,
+      count: cards.length
     });
   } catch (error) {
-    console.error("Error retrieving cards:", error);
+    console.error("Error retrieving cards by dashboard:", error);
     res.status(500).json({
       success: false,
       message: "Failed to retrieve cards",
       error: error.message,
     });
   }
+
 };
 
 exports.getCardById = async (req, res) => {
@@ -169,7 +210,7 @@ exports.getCardById = async (req, res) => {
   }
 };
 
-exports.deleteCard = async (req, res) => {
+exports.deleteCardFromDashboard = async (req, res) => {
   try {
     const { cardId } = req.params;
     const ownerId = req.adminId;
@@ -188,7 +229,82 @@ exports.deleteCard = async (req, res) => {
       });
     }
 
+    const deletedPosition = card.position;
+    const cardDashboardId = card.dashboardId;
+
     await card.destroy();
+
+    // Reorder remaining cards in the same dashboard
+    await Card.update(
+      { position: sequelize.literal('position - 1') },
+      {
+        where: {
+          dashboardId: cardDashboardId,
+          position: { [Op.gt]: deletedPosition } // Use Op.gt instead of sequelize.Op.gt
+        }
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Card deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting card:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete card",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteCard = async (req, res) => {
+  try {
+    const { dashboardId, uniqueId, type } = req.body;
+    const ownerId = req.adminId;
+
+    // Validate required fields
+    if (uniqueId === undefined || !type) {
+      return res.status(400).json({
+        success: false,
+        message: "uniqueId and type are required",
+      });
+    }
+
+    // Find the card by the composite key
+    const card = await Card.findOne({
+      where: {
+        dashboardId: dashboardId || null,
+        uniqueId,
+        type,
+        ownerId,
+      },
+    });
+
+    if (!card) {
+      return res.status(404).json({
+        success: false,
+        message: "Card not found",
+      });
+    }
+
+    // Store card position before deletion for reordering
+    const deletedPosition = card.position;
+    const cardDashboardId = card.dashboardId;
+
+    await card.destroy();
+
+    // Reorder remaining cards in the same dashboard
+    await Card.update(
+      { position: sequelize.literal('position - 1') },
+      {
+        where: {
+          dashboardId: cardDashboardId,
+          position: { [Op.gt]: deletedPosition } // Use Op.gt instead of sequelize.Op.gt
+        }
+      }
+    );
 
     res.status(200).json({
       success: true,
