@@ -5813,6 +5813,68 @@ exports.getOneEmail = async (req, res) => {
     // Mark as read if not already
     if (!mainEmail.isRead) {
       await mainEmail.update({ isRead: true });
+      
+      // 🔄 IMAP SYNC: Update read status on Gmail/Yandex server
+      if (mainEmail.uid) {
+        try {
+          const userCredential = await UserCredential.findOne({
+            where: { masterUserID }
+          });
+
+          if (userCredential && userCredential.email && userCredential.appPassword) {
+            // Detect provider from email
+            const emailDomain = userCredential.email.split('@')[1].toLowerCase();
+            let provider = 'gmail'; // default
+            if (emailDomain.includes('yandex')) {
+              provider = 'yandex';
+            }
+
+            const providerConfig = PROVIDER_CONFIG[provider];
+
+            const imapConfig = {
+              imap: {
+                user: userCredential.email,
+                password: userCredential.appPassword,
+                host: providerConfig.host,
+                port: providerConfig.port,
+                tls: providerConfig.tls,
+                authTimeout: 10000,
+                connTimeout: 10000,
+                tlsOptions: {
+                  rejectUnauthorized: false,
+                  servername: providerConfig.host
+                }
+              },
+            };
+
+            const connection = await Imap.connect(imapConfig);
+            
+            // Determine folder name based on provider and folder type
+            let folderName = 'INBOX';
+            if (mainEmail.folder === 'sent') {
+              folderName = provider === 'gmail' ? '[Gmail]/Sent Mail' : 'Sent';
+            } else if (mainEmail.folder === 'drafts') {
+              folderName = provider === 'gmail' ? '[Gmail]/Drafts' : 'Drafts';
+            } else if (mainEmail.folder === 'trash') {
+              folderName = provider === 'gmail' ? '[Gmail]/Trash' : 'Trash';
+            } else if (mainEmail.folder === 'archive') {
+              folderName = provider === 'gmail' ? '[Gmail]/All Mail' : 'Archive';
+            }
+
+            await connection.openBox(folderName);
+            
+            // Add the \Seen flag to mark as read
+            await connection.addFlags(mainEmail.uid, ['\\Seen']);
+            
+            await connection.end();
+            
+            console.log(`✅ [IMAP SYNC] Marked email ${mainEmail.emailID} (UID: ${mainEmail.uid}) as read on ${provider} via getOneEmail API`);
+          }
+        } catch (imapError) {
+          console.error(`❌ [IMAP SYNC] Failed to sync email ${mainEmail.emailID} read status with IMAP:`, imapError.message);
+          // Don't fail the request if IMAP sync fails
+        }
+      }
     }
 
     // 🚀 PHASE 2: Hybrid body fetching - On-demand for when user opens email
