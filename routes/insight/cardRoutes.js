@@ -16,7 +16,9 @@ router.get("/get-card/:cardId", verifyToken, cardController.getCardById);
 router.put("/update-card/:cardId", verifyToken, cardController.updateCard);
 
 // Delete card
-router.delete("/delete-card/:cardId", verifyToken, cardController.deleteCard);
+router.delete("/deletecardfromdashboard/:cardId", verifyToken, cardController.deleteCardFromDashboard);
+
+router.delete("/delete-card", verifyToken, cardController.deleteCard);
 
 // Bulk update card positions
 router.put("/update-card-positions", verifyToken, cardController.updateCardPositions);
