@@ -38,12 +38,18 @@ const PERMISSION_MAPPING = {
 };
 
 const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) => async (req, res, next) => {
-  console.log(req.adminId);
+  console.log("🚀 ========== VALIDATE PRIVILEGE STARTED ==========");
+  console.log(`📌 Permission ID/Program ID: ${permissionIdOrProgramId}`);
+  console.log(`📌 Request Type: ${requestType}`);
+  console.log(`📌 User ID (req.adminId): ${req.adminId}`);
+  console.log(`📌 Options:`, options);
+  
   try {
     const masterUserID = req.adminId;
     const { checkOwnership = false, ownershipModel = null } = options;
 
     if (!masterUserID) {
+      console.log("❌ FAILED: User ID not found in request");
       return res.status(401).json({ 
         message: "User ID not found in request" 
       });
@@ -75,33 +81,50 @@ const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) =
     }
 
     // Fetch user to get permissionSetId and globalPermissionSetId
+    console.log(`🔎 Fetching user ${masterUserID} from MasterUser table...`);
     const user = await MasterUser.findByPk(masterUserID, {
       attributes: ['masterUserID', 'permissionSetId', 'globalPermissionSetId']
     });
 
     if (!user) {
+      console.log(`❌ FAILED: User ${masterUserID} not found in database`);
       return res.status(401).json({ 
         message: "User not found" 
       });
     }
 
+    console.log(`✅ User found:`, {
+      masterUserID: user.masterUserID,
+      permissionSetId: user.permissionSetId,
+      globalPermissionSetId: user.globalPermissionSetId
+    });
+
     // Prioritize globalPermissionSetId over permissionSetId
     const permissionSetId = user.globalPermissionSetId || user.permissionSetId;
+    console.log(`📊 Using permission set ID: ${permissionSetId} (${user.globalPermissionSetId ? 'global' : 'regular'})`);
 
     if (!permissionSetId) {
+      console.log(`❌ FAILED: No permission set assigned to user ${masterUserID}`);
       return res.status(403).json({ 
         message: "No permission set assigned to user" 
       });
     }
 
     // Fetch the user's permission set
+    console.log(`🔎 Fetching permission set ${permissionSetId}...`);
     const userPermissionSet = await permissionSet.findByPk(permissionSetId);
 
     if (!userPermissionSet || !userPermissionSet.permissions) {
+      console.log(`❌ FAILED: Permission set ${permissionSetId} not found or has no permissions`);
       return res.status(403).json({ 
         message: "Permission set not found or has no permissions" 
       });
     }
+
+    console.log(`✅ Permission set found:`, {
+      permissionSetId: userPermissionSet.permissionSetId,
+      name: userPermissionSet.name || 'N/A'
+    });
 
     // Get permissions object (handle both string and object storage)
     const permissions = typeof userPermissionSet.permissions === 'string' 
@@ -114,6 +137,14 @@ const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) =
     // Strategy 1: Try direct numeric permission ID lookup first
     // Check if the first parameter is a numeric permission ID that exists in the mapping
     const directPermissionId = String(permissionIdOrProgramId);
+    console.log(`🔍 Strategy 1: Checking direct permission ID "${directPermissionId}"...`);
+    console.log(`   - Permission mapping exists: ${!!PERMISSION_MAPPING[directPermissionId]}`);
+    if (PERMISSION_MAPPING[directPermissionId]) {
+      console.log(`   - Mapped requestType: ${PERMISSION_MAPPING[directPermissionId].requestType}`);
+      console.log(`   - Expected requestType: ${requestType}`);
+      console.log(`   - Match: ${PERMISSION_MAPPING[directPermissionId].requestType === requestType}`);
+    }
+    
     if (PERMISSION_MAPPING[directPermissionId] && 
         PERMISSION_MAPPING[directPermissionId].requestType === requestType) {
       // Direct match found - check if user has this specific permission
@@ -122,41 +153,48 @@ const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) =
       console.log(`🔑 Direct permission check: permission[${directPermissionId}] = ${permissions[directPermissionId]}, hasDirectPermission = ${hasDirectPermission}`);
       
       if (hasDirectPermission) {
-        console.log(`✅ Permission granted: Direct match for permission ${directPermissionId}`);
+        console.log(`✅ ========== PERMISSION GRANTED: Direct match for permission ${directPermissionId} ==========`);
         return next();
       } else {
         // Permission explicitly set to false or missing
-        console.log(`❌ Permission denied: Permission ${directPermissionId} is ${permissions[directPermissionId]} (expected true)`);
+        console.log(`❌ ========== PERMISSION DENIED: Permission ${directPermissionId} is ${permissions[directPermissionId]} (expected true) ==========`);
         return res.status(403).json({ 
           message: `Insufficient permissions for ${requestType} operation. You need permission ${directPermissionId} to perform this action.` 
         });
       }
     }
+    
+    console.log(`⚠️ Strategy 1 did not match, falling back to Strategy 2 (programId search)...`);
 
     // Strategy 2: Treat first parameter as programId and search by programId + requestType
     let hasPermission = false;
     const programId = parseInt(permissionIdOrProgramId);
+    console.log(`🔍 Strategy 2: Searching for programId ${programId} + requestType "${requestType}"...`);
     
     for (const [permissionId, isAllowed] of Object.entries(permissions)) {
       if (isAllowed === true) {
         const mapping = PERMISSION_MAPPING[permissionId];
+        if (mapping) {
+          console.log(`   - Checking permission ${permissionId}: programId=${mapping.programId}, requestType="${mapping.requestType}"`);
+        }
         if (mapping && 
             mapping.programId === programId && 
             mapping.requestType === requestType) {
           hasPermission = true;
-          console.log(`✅ Permission granted: Found via programId ${programId} + ${requestType}`);
+          console.log(`✅ ========== PERMISSION GRANTED: Found via programId ${programId} + ${requestType} (permission ${permissionId}) ==========`);
           break;
         }
       }
     }
 
     if (!hasPermission) {
-      console.log(`❌ Permission denied: No matching permission for programId ${programId} + ${requestType}`);
+      console.log(`❌ ========== PERMISSION DENIED: No matching permission for programId ${programId} + ${requestType} ==========`);
       return res.status(403).json({ 
         message: `Insufficient permissions for ${requestType} operation (ID: ${permissionIdOrProgramId})` 
       });
     }
 
+    console.log(`✅ ========== CALLING next() - PERMISSION CHECK PASSED ==========`);
     next();
   } catch (error) {
     console.error("Error occurred in checking privileges:", error);
