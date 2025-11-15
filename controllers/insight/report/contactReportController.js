@@ -176,7 +176,8 @@ exports.createPersonReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    }
+     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -209,8 +210,6 @@ exports.createPersonReport = async (req, res) => {
               "X-axis and Y-axis are required for Contact Person reports",
           });
         }
-
-        try {
           // Generate data with pagination
           const result = await generateExistingPersonPerformanceData(
             ownerId,
@@ -260,14 +259,6 @@ exports.createPersonReport = async (req, res) => {
               minValue: minValue,
             };
           }
-        } catch (error) {
-          console.error("Error generating Contact Person data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate Contact Person data",
-            error: error.message,
-          });
-        }
       }
     }
 

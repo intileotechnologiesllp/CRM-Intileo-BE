@@ -7743,6 +7743,11 @@ exports.GetReportsDataReportWise = async (req, res) => {
         yaxis: config.yaxis || [],
       },
       filters: config.filters || [],
+      segmentedBy: config.segmentedBy,
+      durationUnit: config.durationUnit,
+      duration: config.duration,
+      xaxis: config.xaxis,
+      yaxis: config.yaxis
     });
   } catch (error) {
     console.error("Error fetching report data:", error);

@@ -337,7 +337,8 @@ exports.createDealPerformReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } 
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -3633,7 +3634,8 @@ exports.createDealConversionReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } 
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -3723,7 +3725,6 @@ exports.createDealConversionReport = async (req, res) => {
         }
       }
     }
-
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
@@ -7880,7 +7881,8 @@ exports.createDealDurationReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } 
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -7961,7 +7963,6 @@ exports.createDealDurationReport = async (req, res) => {
         }
       }
     }
-
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
