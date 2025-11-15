@@ -3084,34 +3084,7 @@ exports.createPerson = async (req, res) => {
       }
     }
 
-    // Check for duplicate primary email (primary email must be unique across all persons)
-    const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
-    if (existingEmailPerson) {
-      return res.status(409).json({
-        message: "A person with this email address already exists.",
-        person: {
-          personId: existingEmailPerson.personId,
-          contactPerson: existingEmailPerson.contactPerson,
-          email: existingEmailPerson.email,
-          organization: existingEmailPerson.organization,
-        },
-      });
-    }
-
-    // Check for duplicate person in the same organization (or globally if no org)
-    const whereClause = organization
-      ? { contactPerson, organization }
-      : { contactPerson, organization: null };
-
-    const existingPerson = await Person.findOne({ where: whereClause });
-    if (existingPerson) {
-      return res.status(409).json({
-        message:
-          "Person already exists" +
-          (organization ? " in this organization." : "."),
-        person: existingPerson,
-      });
-    }
+    // ✅ DUPLICATE VALIDATION REMOVED - Same contact person can now be added multiple times
 
     let org = null;
     if (organization) {
