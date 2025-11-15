@@ -44,6 +44,7 @@ const customFieldRoutes = require("./routes/customFieldRoutes.js"); // Import cu
 const pipelineRoutes = require("./routes/pipelineRoutes.js"); // Import pipeline routes
 const globalSearchRoutes = require("./routes/globalSearchRoutes.js"); // Import global search routes
 const reportFolderRoutes = require("./routes/insight/reportFolderRoutes.js")
+const dashboardCardRoutes = require("./routes/insight/cardRoutes.js")
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
@@ -55,6 +56,7 @@ const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js")
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
 const { loadPrograms } = require("./utils/programCache");
+const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js");
@@ -114,6 +116,7 @@ app.use("/api/dealreport", dealReportRoutes);
 app.use("/api/contactreport", contactReportRoutes);
 app.use("/api/organizationreport", organizationReportRoutes);
 app.use("/api/reportFolder", reportFolderRoutes); // Register report folder routes
+app.use("/api/dashboardcards", dashboardCardRoutes); // Register dashboardCard Routes
 app.use("/api/search", globalSearchRoutes); // Register global search routes
 app.use("/api/custom-fields", customFieldRoutes); // Register custom field routes
 app.use("/api/pipelines", pipelineRoutes); // Register pipeline routes
@@ -187,9 +190,34 @@ sequelize
 (async () => {
   try {
     await loadPrograms();
-    // Start server after loading programs
+    
+    // 🚀 Initialize IMAP IDLE Manager for real-time email sync
+    try {
+      await imapIdleManager.initialize();
+      console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
+      
+      // Set up event handlers for real-time updates
+      imapIdleManager.on('newMail', (data) => {
+        console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
+        // You can emit WebSocket events here for real-time UI updates
+      });
+      
+      imapIdleManager.on('flagChange', (data) => {
+        console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
+        // You can emit WebSocket events here for real-time UI updates
+      });
+      
+    } catch (idleError) {
+      console.warn('⚠️ IMAP IDLE Manager failed to initialize:', idleError.message);
+      console.log('📧 Email functionality will work without real-time sync');
+    }
+    
+    // Start server after loading programs and initializing IMAP IDLE
     const PORT = process.env.PORT || 3056 ;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
+    });
     console.log("Program cache loaded.");
   } catch (err) {
     console.error("Failed to load program cache:", err);

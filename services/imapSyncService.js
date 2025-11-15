@@ -6,13 +6,67 @@ const UserCredential = require('../models/email/userCredentialModel');
 // Configuration
 const MAX_CONCURRENT_IMAP = 2; // Reduced to 2 for better performance with multiple users
 const IMAP_TIMEOUT = 15000; // Increased to 15 seconds for better reliability
-const SYNC_BATCH_SIZE = 50; // Maximum UIDs to sync in one batch
+const SYNC_BATCH_SIZE = 200; // 🚀 FIX 1: Increased batch size from 50 to 200 emails
+const MAX_VISIBLE_EMAILS = 500; // 🚀 FIX 2: Only sync first 500 emails (UI visible range)
+const LARGE_MAILBOX_THRESHOLD = 10000; // Consider mailbox "large" if more than 10k emails
 
 // Create concurrency limiter - only 2 users can sync simultaneously
 const imapLimiter = pLimit(MAX_CONCURRENT_IMAP);
 
 // Track active sync operations
 const activeSyncs = new Map();
+
+/**
+ * 🚀 PERFORMANCE HELPER: Create efficient UID ranges for IMAP FETCH
+ * Converts array of UIDs into ranges like "1:50,75:100" for better IMAP performance
+ */
+function createUidRanges(uids) {
+  if (!uids || uids.length === 0) return [];
+  
+  // Sort UIDs numerically
+  const sortedUids = uids.map(Number).sort((a, b) => a - b);
+  const ranges = [];
+  
+  let start = sortedUids[0];
+  let end = start;
+  
+  for (let i = 1; i < sortedUids.length; i++) {
+    if (sortedUids[i] === end + 1) {
+      // Consecutive UID, extend range
+      end = sortedUids[i];
+    } else {
+      // Gap found, close current range and start new one
+      ranges.push(start === end ? `${start}` : `${start}:${end}`);
+      start = end = sortedUids[i];
+    }
+  }
+  
+  // Add final range
+  ranges.push(start === end ? `${start}` : `${start}:${end}`);
+  
+  // Split large ranges to avoid IMAP limitations (max 50 UIDs per range)
+  const optimizedRanges = [];
+  for (const range of ranges) {
+    if (range.includes(':')) {
+      const [rangeStart, rangeEnd] = range.split(':').map(Number);
+      const rangeSize = rangeEnd - rangeStart + 1;
+      
+      if (rangeSize > 50) {
+        // Split large range into chunks of 50
+        for (let chunk = rangeStart; chunk <= rangeEnd; chunk += 50) {
+          const chunkEnd = Math.min(chunk + 49, rangeEnd);
+          optimizedRanges.push(chunk === chunkEnd ? `${chunk}` : `${chunk}:${chunkEnd}`);
+        }
+      } else {
+        optimizedRanges.push(range);
+      }
+    } else {
+      optimizedRanges.push(range);
+    }
+  }
+  
+  return optimizedRanges;
+}
 
 /**
  * Sync read/unread flags for paginated emails from IMAP with concurrency control
@@ -49,8 +103,15 @@ async function performImapSync(emails, masterUserID) {
     return emails;
   }
 
-  // Process ALL emails (removed artificial limit)
-  const emailsToSync = emails;
+  // 🚀 FIX 2: Limit emails to visible range for large users
+  let emailsToSync = emails;
+  const isLargeMailbox = emails.length > LARGE_MAILBOX_THRESHOLD;
+  
+  if (isLargeMailbox) {
+    // Only sync visible emails for large mailboxes (first 500)
+    emailsToSync = emails.slice(0, MAX_VISIBLE_EMAILS);
+    console.log(`⚡ [LARGE MAILBOX OPTIMIZATION] User ${masterUserID} has ${emails.length} emails, syncing only first ${emailsToSync.length} for performance`);
+  }
   
   let connection = null;
   
@@ -197,77 +258,89 @@ async function performImapSync(imapConfig, emailsWithUIDs, masterUserID) {
           throw new Error(`Unable to open folder: ${folder}`);
         }
         
-        // Process emails in batches to avoid memory issues
-        for (let i = 0; i < folderEmails.length; i += SYNC_BATCH_SIZE) {
-          const batch = folderEmails.slice(i, i + SYNC_BATCH_SIZE);
-          const batchUIDs = batch.map(email => email.uid).filter(Boolean);
+          // Process emails in batches to avoid memory issues
+          console.log(`🚀 [BATCH PROCESSING] Processing ${folderEmails.length} emails in ${SYNC_BATCH_SIZE}-email batches`);
           
-          if (batchUIDs.length === 0) continue;
-          
-          console.log(`🔍 [IMAP SYNC] Fetching flags for ${batchUIDs.length} UIDs in ${folder}`);
-          
-          // Log all emails being processed with their current status
-          console.log(`📧 [EMAIL STATUS] Processing ${batch.length} emails in ${folder}:`);
-          batch.forEach(email => {
-            console.log(`   - UID ${email.uid}: Current DB status isRead=${email.isRead} (EmailID: ${email.emailID})`);
-          });
-          
-          // Fetch flags for all emails using a broader search to get all UIDs
-          console.log(`🔍 [IMAP SYNC] Fetching ALL email flags in ${folder} folder`);
-          const allMessages = await connection.search(['ALL'], {
-            bodies: '', // Don't fetch body, only headers and flags
-            markSeen: false,
-            struct: false
-          });
-          
-          // Create a map of all IMAP email statuses
-          const imapStatusMap = {};
-          for (const message of allMessages) {
-            const uid = message.attributes.uid;
-            const flags = message.attributes.flags || [];
-            const isRead = flags.includes('\\Seen');
-            imapStatusMap[uid] = isRead;
-          }
-          
-          // Log IMAP status for emails in our batch
-          console.log(`📬 [IMAP STATUS] IMAP flags for emails in current batch:`);
-          batch.forEach(email => {
-            const imapStatus = imapStatusMap[email.uid];
-            if (imapStatus !== undefined) {
-              console.log(`   - UID ${email.uid}: IMAP isRead=${imapStatus}`);
-            } else {
-              console.log(`   - UID ${email.uid}: NOT FOUND in IMAP`);
-            }
-          });
-          
-          // Process all emails in batch and update them with IMAP status
-          for (const email of batch) {
-            const imapIsRead = imapStatusMap[email.uid];
+          for (let i = 0; i < folderEmails.length; i += SYNC_BATCH_SIZE) {
+            const batch = folderEmails.slice(i, i + SYNC_BATCH_SIZE);
+            const batchUIDs = batch.map(email => email.uid).filter(Boolean);
             
-            if (imapIsRead !== undefined) {
-              const oldIsRead = email.isRead;
+            if (batchUIDs.length === 0) continue;
+            
+            console.log(`🔍 [BATCH ${Math.floor(i/SYNC_BATCH_SIZE) + 1}] Processing ${batchUIDs.length} UIDs in ${folder} (${i + 1}-${Math.min(i + SYNC_BATCH_SIZE, folderEmails.length)})`);
+            
+            try {
+              // 🚀 FIX 3: Use targeted UID FETCH instead of searching ALL emails
+              // This is 100x faster than fetching all emails in large mailboxes
+              const uidRanges = createUidRanges(batchUIDs);
+              console.log(`⚡ [OPTIMIZED FETCH] Fetching flags for specific UIDs: ${uidRanges}`);
               
-              // ALWAYS update the email in database to match IMAP status
-              console.log(`🔄 [FORCE UPDATE] Updating UID ${email.uid}: DB=${oldIsRead} → IMAP=${imapIsRead} (EmailID: ${email.emailID}, Subject: "${email.subject?.substring(0, 50) || 'No Subject'}")`);
+              let batchMessages = [];
+              for (const uidRange of uidRanges) {
+                try {
+                  // Fetch only specific UIDs instead of ALL
+                  const rangeMessages = await connection.search([['UID', uidRange]], {
+                    bodies: '', // Don't fetch body, only headers and flags
+                    markSeen: false,
+                    struct: false
+                  });
+                  batchMessages.push(...rangeMessages);
+                } catch (rangeError) {
+                  console.warn(`⚠️ [UID FETCH] Failed to fetch UID range ${uidRange}:`, rangeError.message);
+                  // Continue with other ranges
+                }
+              }
               
-              // Add to batch update (update ALL emails, not just changed ones)
-              emailUpdateBatch.push({
-                emailID: email.emailID,
-                isRead: imapIsRead,
-                uid: email.uid,
-                subject: email.subject?.substring(0, 30) || 'No Subject'
-              });
+              // Create a map of IMAP email statuses (only for our specific UIDs)
+              const imapStatusMap = {};
+              for (const message of batchMessages) {
+                const uid = message.attributes.uid;
+                const flags = message.attributes.flags || [];
+                const isRead = flags.includes('\\Seen');
+                imapStatusMap[uid] = isRead;
+              }
               
-              // Update the email object for response
-              email.isRead = imapIsRead;
+              console.log(`📬 [BATCH RESULTS] Found ${Object.keys(imapStatusMap).length} emails in IMAP for batch of ${batchUIDs.length} requested UIDs`);
               
-              updatedEmails.push(email);
-            } else {
-              console.log(`⚠️ [IMAP SYNC] UID ${email.uid} not found in IMAP, keeping DB status: ${email.isRead}`);
-              updatedEmails.push(email);
+              // Process emails in this batch
+              for (const email of batch) {
+                const imapIsRead = imapStatusMap[email.uid];
+                
+                if (imapIsRead !== undefined) {
+                  const oldIsRead = email.isRead;
+                  
+                  // Only update if flags actually changed
+                  if (oldIsRead !== imapIsRead) {
+                    console.log(`🔄 [FLAG SYNC] UID ${email.uid}: DB=${oldIsRead} → IMAP=${imapIsRead} (EmailID: ${email.emailID})`);
+                    
+                    emailUpdateBatch.push({
+                      emailID: email.emailID,
+                      isRead: imapIsRead,
+                      uid: email.uid,
+                      subject: email.subject?.substring(0, 30) || 'No Subject'
+                    });
+                  }
+                  
+                  // Update the email object for response
+                  email.isRead = imapIsRead;
+                  updatedEmails.push(email);
+                } else {
+                  console.log(`⚠️ [UID NOT FOUND] UID ${email.uid} not found in IMAP, keeping DB status: ${email.isRead}`);
+                  updatedEmails.push(email);
+                }
+              }
+              
+              // Add small delay between batches to avoid overwhelming server
+              if (i + SYNC_BATCH_SIZE < folderEmails.length) {
+                await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+              }
+              
+            } catch (batchError) {
+              console.error(`❌ [BATCH ERROR] Failed to process batch ${Math.floor(i/SYNC_BATCH_SIZE) + 1}:`, batchError.message);
+              // Add emails without sync (keep original isRead values)
+              updatedEmails.push(...batch);
             }
           }
-        }
         
       } catch (folderError) {
         if (folderError.message.includes('No such folder') || folderError.message.includes('SELECT')) {

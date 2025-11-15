@@ -7118,7 +7118,7 @@ exports.checkDealQuestionSharedStatus = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
       },
       include: [
         {
@@ -7481,7 +7481,7 @@ exports.updateQuestionShared = async (req, res) => {
       where: {
         fieldName: "questionShared",
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
         isActive: true
       }
     });
@@ -7500,7 +7500,7 @@ exports.updateQuestionShared = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
         fieldId: questionSharedField.fieldId
       }
     });

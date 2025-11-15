@@ -390,7 +390,8 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    } 
+     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -424,7 +425,6 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
 
-        try {
           // Generate data with pagination
           const result = await generateExistingLeadPerformanceData(
             ownerId,
@@ -470,17 +470,8 @@ exports.createLeadPerformReport = async (req, res) => {
               minValue: minValue,
             };
           }
-        } catch (error) {
-          console.error("Error generating lead performance data:", error);
-          return res.status(500).json({
-            success: false,
-            message: "Failed to generate lead performance data",
-            error: error.message,
-          });
-        }
       }
     }
-
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
@@ -3517,7 +3508,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 exports.createLeadConversionReport = async (req, res) => {
   try {
     const {
-      reportId,
+      reportId, 
       entity,
       type,
       xaxis,
@@ -3766,7 +3757,8 @@ exports.createLeadConversionReport = async (req, res) => {
           });
         }
       }
-    } else if ((!entity && !type && reportId) || (entity && type && reportId)) {
+    }
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
