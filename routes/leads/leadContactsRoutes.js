@@ -130,7 +130,7 @@ router.delete('/deleteorganization/:leadOrganizationId', verifyToken, validatePr
 router.delete('/deleteperson/:personId', verifyToken, validatePrivilege(25, "delete"), leadContactsController.deletePerson);
 router.post("/save-organization-fields", verifyToken, validatePrivilege(26, "create_org"), leadContactsController.saveAllOrganizationFieldsWithCheck);
 router.get("/organization-check-columns", verifyToken,leadContactsController.getOrganizationColumnPreference);
-router.post("/update-organization-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationColumnChecks);
+router.post("/update-organization-columns", verifyToken,leadContactsController.updateOrganizationColumnChecks);
 router.post("/save-person-fields", verifyToken, validatePrivilege(23, "create"), leadContactsController.saveAllPersonFieldsWithCheck);
 router.get("/person-check-columns", verifyToken,leadContactsController.getBothColumnPreferences);
 router.post("/update-person-columns", verifyToken,leadContactsController.updatePersonColumnChecks);
