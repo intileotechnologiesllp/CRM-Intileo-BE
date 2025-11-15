@@ -1936,7 +1936,7 @@ exports.createActivityReportDrillDown = async (req, res) => {
       isDate
     );
 
-    let dateData = [] 
+    let dateData = null
     if(isDate){
       const resp = groupActivitiesWithStats(result?.data, dateType);
       const filterDate = resp.filter((idx)=>{
@@ -2230,7 +2230,7 @@ async function generateActivityPerformanceDataForDrillDown(
   if (typeof item[name] === "string" && typeof value === "string") {
     if (item[name].toLowerCase() !== value.toLowerCase()) return false;
   } else {
-    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+    if (item[name] !== value) return false;
   }
 
   return true;
