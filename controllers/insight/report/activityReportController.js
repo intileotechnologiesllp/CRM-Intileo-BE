@@ -22,6 +22,7 @@ const {
 } = require("../../../utils/conditionObject/createPerson");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
 const { Goal, Dashboard } = require("../../../models");
+const { groupActivitiesWithStats } = require("../../../utils/conditionObject/dateGrouping");
 
 exports.createActivityReport = async (req, res) => {
   try {
@@ -1930,11 +1931,14 @@ exports.createActivityReportDrillDown = async (req, res) => {
       id,
       moduleId
     );
+    const weeklyData = groupActivitiesWithStats(result?.data, 'weekly');
+    // console.log(JSON.stringify(weeklyData, null, 2));
 
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
       data: result?.data,
+      // week: result?.format,
       pagination: result?.data?.length,
     });
   } catch (error) {
@@ -2188,46 +2192,45 @@ async function generateActivityPerformanceDataForDrillDown(
     flattenObject(item)
   );
 
-  const formattedResults = flattened.filter((item) => {
-    if (name === "startDateTime") {
-      /* for date only comparison */
-      // const dateTimeString = value;
-      // const dateOnly = dateTimeString.split('T')[0];
+ const formattedResults = flattened.filter((item) => {
+  if (name === "startDateTime") {
+    return (
+      new Date(value).getTime() === new Date(item?.startDateTime).getTime()
+    );
+  }
 
-      // const dateTimeString2 = item?.startDateTime;
-      // const dateOnly2 = dateTimeString2.split('T')[0];
-      return (
-        new Date(value).getTime() === new Date(item?.startDateTime).getTime()
-      );
+  if (name === "endDateTime") {
+    return (
+      new Date(value).getTime() === new Date(item?.endDateTime).getTime()
+    );
+  }
+  
+  if (name === "Owner") {
+    return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
+  }
+  
+  // Handle contactPerson - compare with personId
+  if (name === "contactPerson") {
+    return item.personId === id; // Compare personId with the provided id
+  }
+  
+  // Handle organization - compare with leadOrganizationId
+  if (name === "organization") {
+    if (entity != 4) {
+      return item.leadOrganizationId === id; // Compare leadOrganizationId with the provided id
     }
+    // If entity is 4, use the string comparison below
+  }
 
-    if (name === "endDateTime") {
-      return (
-        new Date(value).getTime() === new Date(item?.endDateTime).getTime()
-      );
-    }
-    if (name === "Owner") {
-      return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
-    }
+  // Handle string fields safely
+  if (typeof item[name] === "string" && typeof value === "string") {
+    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+  } else {
+    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+  }
 
-    // Handle string fields safely
-    if (typeof item[name] === "string" && typeof value === "string") {
-      // console.log(item[name], value)
-      if (item[name].toLowerCase() !== value.toLowerCase()) return false;
-    } else {
-      if (item[name] !== value) return false;
-    }
-
-    /**
-     * id based matching of person and organization
-     * maybe uncommented in future
-     */
-    // Extra checks
-    // if (name === "contactPerson" && item.personId !== id) return false;
-    // if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
-
-    return true;
-  });
+  return true;
+});
 
   let dealConvertion = formattedResults;
   if (entity == 5 || entity == 6) {
@@ -2245,6 +2248,7 @@ async function generateActivityPerformanceDataForDrillDown(
   }
 
   return {
+    // format: flattened,
     data: dealConvertion,
     totalValue: formattedResults?.length,
   };
