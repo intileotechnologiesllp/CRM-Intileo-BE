@@ -3,14 +3,13 @@ const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
 const imapTestController = require("../../controllers/email/imapTestController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
-const validatePrivilege = require("../../middlewares/validatePrivilege");
+// const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 // Fetch inbox emails
 router.post("/fetch-inbox", verifyToken, emailController.queueFetchInboxEmails);
 router.get(
   "/fetch-recent-email",
   verifyToken,
-  validatePrivilege(4, "view"),
   emailController.fetchRecentEmail
 );
 router.get("/fetch-drafts", verifyToken, emailController.fetchDraftEmails);
@@ -30,13 +29,11 @@ router.get(
 router.delete(
   "/template/:templateID",
   verifyToken,
-  validatePrivilege(4, "delete"),
   emailController.deleteTemplate
 );
 router.delete(
   "/templates/bulk",
   verifyToken,
-  validatePrivilege(4, "delete"),
   emailController.deleteBulkTemplates
 );
 router.get("/unread-counts", verifyToken, emailController.getUnreadCounts);

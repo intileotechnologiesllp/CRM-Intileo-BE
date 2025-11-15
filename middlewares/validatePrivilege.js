@@ -29,6 +29,8 @@ const PERMISSION_MAPPING = {
   // People/Organization permissions (programId: 5)
   "23": { programId: 5, requestType: "create" },      // Add people
   "25": { programId: 5, requestType: "delete" },      // Delete people
+  "26": { programId: 5, requestType: "create_org" },  // Add organizations
+  "28": { programId: 5, requestType: "delete_org" },  // Delete organizations
   
   // Filter permissions (programId: 6)
   "18": { programId: 6, requestType: "share_filters" },      // Share filters with other users

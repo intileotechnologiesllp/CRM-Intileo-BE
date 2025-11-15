@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 const activityController = require("../../controllers/activity/activityController");
 const activitySettingsMiddleware = require("../../middlewares/activitySettingsMiddleware");
@@ -8,7 +9,7 @@ const activitySettingsMiddleware = require("../../middlewares/activitySettingsMi
 router.post("/create-activity", verifyToken, activityController.createActivity);
 router.get("/get-activities", verifyToken,activityController.getActivities);
 router.get("/get-activity/:activityId", verifyToken, activityController.getActivityById);
-router.delete("/delete-activity/:activityId", verifyToken, activityController.deleteActivity);
+router.delete("/delete-activity/:activityId", verifyToken, validatePrivilege(22, "delete"), activityController.deleteActivity);
 router.get(
   "/mark-as-done/:activityId",
   verifyToken,activitySettingsMiddleware,
@@ -59,12 +60,14 @@ router.post("/bulk-edit", verifyToken, activityController.bulkEditActivities);
 router.post(
   "/bulk-delete",
   verifyToken,
+  validatePrivilege(22, "delete"),
   activityController.bulkDeleteActivities
 );
 router.post("/bulk-mark", verifyToken, activityController.bulkMarkActivities);
 router.post(
   "/bulk-reassign",
   verifyToken,
+  validatePrivilege(21, "edit_owner"),
   activityController.bulkReassignActivities
 );
 
