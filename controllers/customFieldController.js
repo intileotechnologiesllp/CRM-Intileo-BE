@@ -315,19 +315,19 @@ const getDefaultFieldsFromModels = async (entityType, masterUserID = null) => {
         leadView: false,
         dealView: true,
       },
-        {
-        fieldName: "labels",
-        fieldLabel: "Label",
-        fieldType: "singleselect",
-        dbColumn: "labels",
-        isRequired: false,
-        entityType: "leads",
-        isActive: true,
-        isDefault: true,
-        leadView: false,
-        dealView: true,
-        options: dealsLabels
-      },
+      //   {
+      //   fieldName: "labels",
+      //   fieldLabel: "Label",
+      //   fieldType: "singleselect",
+      //   dbColumn: "labels",
+      //   isRequired: false,
+      //   entityType: "leads",
+      //   isActive: true,
+      //   isDefault: true,
+      //   leadView: false,
+      //   dealView: true,
+      //   options: dealsLabels
+      // },
 
       {
         fieldName: "productName",
