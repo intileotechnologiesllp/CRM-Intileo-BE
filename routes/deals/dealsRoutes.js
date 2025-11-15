@@ -2,6 +2,8 @@
 const express = require("express");
 const router = express.Router();
 const { verifyToken } = require("../../middlewares/authMiddleware");
+const dealsController = require("../../controllers/deals/dealsController");
+
 const Deal = require("../../models/deals/dealsModels");
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
@@ -124,8 +126,6 @@ router.get(
   verifyToken,
   dealsController.downloadDealFile
 );
-const dealsController = require("../../controllers/deals/dealsController");
-c
 
 router.put(
   "/:dealId/files/:fileId",

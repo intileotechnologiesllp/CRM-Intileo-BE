@@ -8,10 +8,9 @@ const validatePrivilege = require("../middlewares/validatePrivilege");
 // router.use(verifyToken);
 
 // Organization CRUD Routes
-router.post("/", verifyToken, validatePrivilege(5, "create"), organizationController.createOrganization);
-router.get("/", verifyToken, validatePrivilege(5, "view"), organizationController.getAllOrganizations);
-router.get("/:organizationId", verifyToken, validatePrivilege(5, "view"), organizationController.getOrganizationById);
-router.put("/:organizationId", verifyToken, validatePrivilege(5, "edit"), organizationController.updateOrganization);
-router.delete("/:organizationId", verifyToken, validatePrivilege(5, "delete"), organizationController.deleteOrganization);
-
+router.post("/", verifyToken,organizationController.createOrganization);
+router.get("/", verifyToken, organizationController.getAllOrganizations);
+router.get("/:organizationId", verifyToken, organizationController.getOrganizationById);
+router.put("/:organizationId", verifyToken, organizationController.updateOrganization);
+router.delete("/:organizationId", verifyToken, organizationController.deleteOrganization);
 module.exports = router;
