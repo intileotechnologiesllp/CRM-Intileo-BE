@@ -7008,7 +7008,7 @@ exports.getLeadLabels = async (req, res) => {
     
     if (entityType) {
       // Validate entity type
-      const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact', 'organization', 'all'];
+      const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact',"person","organization", 'all'];
       if (!validEntityTypes.includes(entityType)) {
         return res.status(400).json({
           message: `Invalid entity type. Valid types are: ${validEntityTypes.join(', ')}`
@@ -7075,7 +7075,7 @@ exports.createLeadLabel = async (req, res) => {
     }
 
     // Validate and set entityType - default to 'lead' if not provided
-    const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact', 'organization', 'all'];
+    const validEntityTypes = ['lead', 'deal', 'sale-inbox', 'email', 'contact',"person","organization", 'all'];
     const targetEntityType = entityType && validEntityTypes.includes(entityType) ? entityType : 'lead';
 
     // Check if label already exists for the same entity type

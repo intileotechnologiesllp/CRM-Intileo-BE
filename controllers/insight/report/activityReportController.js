@@ -22,6 +22,7 @@ const {
 } = require("../../../utils/conditionObject/createPerson");
 const LeadPerson = require("../../../models/leads/leadPersonModel");
 const { Goal, Dashboard } = require("../../../models");
+const { groupActivitiesWithStats } = require("../../../utils/conditionObject/dateGrouping");
 
 exports.createActivityReport = async (req, res) => {
   try {
@@ -1917,6 +1918,9 @@ exports.createActivityReportDrillDown = async (req, res) => {
       fieldValue,
       id,
       moduleId,
+      isDate,
+      dateType,
+      weekName
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
@@ -1928,13 +1932,24 @@ exports.createActivityReportDrillDown = async (req, res) => {
       fieldName,
       fieldValue,
       id,
-      moduleId
+      moduleId,
+      isDate
     );
+
+    let dateData = null
+    if(isDate){
+      const resp = groupActivitiesWithStats(result?.data, dateType);
+      const filterDate = resp.filter((idx)=>{
+        return idx.period == weekName
+      })
+      dateData = filterDate[0]?.activities || []
+    }
 
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
-      data: result?.data,
+      data: dateData ? dateData : result?.data,
+      // week: dateData,
       pagination: result?.data?.length,
     });
   } catch (error) {
@@ -2025,7 +2040,8 @@ async function generateActivityPerformanceDataForDrillDown(
   name,
   value,
   id,
-  entity
+  entity,
+  isDate
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -2188,46 +2204,37 @@ async function generateActivityPerformanceDataForDrillDown(
     flattenObject(item)
   );
 
-  const formattedResults = flattened.filter((item) => {
-    if (name === "startDateTime") {
-      /* for date only comparison */
-      // const dateTimeString = value;
-      // const dateOnly = dateTimeString.split('T')[0];
+ const formattedResults = flattened.filter((item) => {
+  if (isDate) {
+    return item;
+  }
 
-      // const dateTimeString2 = item?.startDateTime;
-      // const dateOnly2 = dateTimeString2.split('T')[0];
-      return (
-        new Date(value).getTime() === new Date(item?.startDateTime).getTime()
-      );
+  if (name === "Owner") {
+    return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
+  }
+  
+  // Handle contactPerson - compare with personId
+  if (name === "contactPerson") {
+    return item.personId === id; // Compare personId with the provided id
+  }
+  
+  // Handle organization - compare with leadOrganizationId
+  if (name === "organization") {
+    if (entity != 4) {
+      return item.leadOrganizationId === id; // Compare leadOrganizationId with the provided id
     }
+    // If entity is 4, use the string comparison below
+  }
 
-    if (name === "endDateTime") {
-      return (
-        new Date(value).getTime() === new Date(item?.endDateTime).getTime()
-      );
-    }
-    if (name === "Owner") {
-      return item["assignedUser_name"]?.toLowerCase() == value?.toLowerCase();
-    }
+  // Handle string fields safely
+  if (typeof item[name] === "string" && typeof value === "string") {
+    if (item[name].toLowerCase() !== value.toLowerCase()) return false;
+  } else {
+    if (item[name] !== value) return false;
+  }
 
-    // Handle string fields safely
-    if (typeof item[name] === "string" && typeof value === "string") {
-      // console.log(item[name], value)
-      if (item[name].toLowerCase() !== value.toLowerCase()) return false;
-    } else {
-      if (item[name] !== value) return false;
-    }
-
-    /**
-     * id based matching of person and organization
-     * maybe uncommented in future
-     */
-    // Extra checks
-    // if (name === "contactPerson" && item.personId !== id) return false;
-    // if (entity != 4 && name === "organization" && item.leadOrganizationId !== id) return false;
-
-    return true;
-  });
+  return true;
+});
 
   let dealConvertion = formattedResults;
   if (entity == 5 || entity == 6) {
@@ -2245,6 +2252,7 @@ async function generateActivityPerformanceDataForDrillDown(
   }
 
   return {
+    // format: flattened,
     data: dealConvertion,
     totalValue: formattedResults?.length,
   };

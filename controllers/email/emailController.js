@@ -4428,6 +4428,38 @@ async function getEmailsInternal(req, res, masterUserID) {
         ? emailsWithAttachments[0].createdAt
         : null;
 
+    // 🔥 ASYNC FLAG SYNC for visible emails (Perfect Architecture!)
+    // This happens AFTER response is sent - no blocking!
+    const visibleEmailsWithFolders = emailsWithAttachments
+      .filter(email => email.uid) // Only emails with UIDs
+      .map(email => ({
+        uid: email.uid,
+        folder: email.folder || 'INBOX', // Default to INBOX if no folder
+        emailID: email.emailID
+      }));
+
+    if (visibleEmailsWithFolders.length > 0) {
+      // Trigger async flag update for ONLY visible emails
+      console.log(`🔄 [ASYNC-FLAG-SYNC] Triggering flag sync for ${visibleEmailsWithFolders.length} visible emails from multiple folders`);
+      console.log(`📂 [ASYNC-FLAG-SYNC] Folder distribution: ${JSON.stringify(
+        visibleEmailsWithFolders.reduce((acc, email) => {
+          acc[email.folder] = (acc[email.folder] || 0) + 1;
+          return acc;
+        }, {})
+      )}`);
+      
+      // Use setTimeout to make it truly async (non-blocking)
+      setTimeout(async () => {
+        try {
+          await updateVisibleEmailFlagsMultiFolder(masterUserID, visibleEmailsWithFolders, userCredential);
+        } catch (flagError) {
+          console.warn(`⚠️ [ASYNC-FLAG-SYNC] Failed for user ${masterUserID}:`, flagError.message);
+        }
+      }, 0);
+    } else {
+      console.log(`ℹ️ [ASYNC-FLAG-SYNC] No emails with UIDs to sync for user ${masterUserID}`);
+    }
+
     // Return the paginated response with threads and enhanced read/unread data
     res.status(200).json({
       message: "Emails fetched successfully.",
@@ -4453,6 +4485,11 @@ async function getEmailsInternal(req, res, masterUserID) {
       threads: responseThreads, // Return grouped threads
       nextCursor,
       prevCursor,
+      flagSync: {
+        triggered: visibleEmailsWithFolders.length > 0,
+        emailCount: visibleEmailsWithFolders.length,
+        status: "background_processing_multi_folder"
+      }
     });
   } catch (error) {
     console.error("Error fetching emails:", error);
