@@ -477,6 +477,33 @@ async function generateExistingDealPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
+
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
@@ -532,11 +559,6 @@ async function generateExistingDealPerformanceData(
 
   let groupBy = [];
   let attributes = [];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
    if (shouldGroupByDuration) {
@@ -960,6 +982,38 @@ async function generateDealPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
@@ -1015,11 +1069,6 @@ async function generateDealPerformanceData(
 
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -1834,6 +1883,32 @@ async function generateExistingDealPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$ActivityPerson.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$ActivityOrganization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -1889,10 +1964,6 @@ async function generateExistingDealPerformanceDataForSave(
   let groupBy = [];
   let attributes = [];
 
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle existingxaxis special cases
    if (shouldGroupByDuration) {
@@ -2254,6 +2325,38 @@ async function generateDealPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -2309,10 +2412,6 @@ async function generateDealPerformanceDataForSave(
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
 
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -3784,6 +3883,39 @@ async function generateDealConversionData(
     });
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -4200,6 +4332,34 @@ async function generateExistingDealConversionData(
     });
   }
 
+  
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -4612,6 +4772,39 @@ async function generateDealConversionDataForSave(
     });
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -4965,6 +5158,33 @@ async function generateExistingDealConversionDataForSave(
       masterUserID: ownerId,
     });
   }
+
+  
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -8011,6 +8231,33 @@ async function generateExistingDealDurationData(
     baseWhere.masterUserID = ownerId;
   }
 
+  
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -8060,11 +8307,6 @@ async function generateExistingDealDurationData(
       });
     }
   }
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle special cases for xaxis (like Owner which needs join) and date fields
   let groupBy = [];
@@ -8521,6 +8763,39 @@ async function generateDealDurationData(
     baseWhere.masterUserID = ownerId;
   }
 
+   let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -8570,11 +8845,6 @@ async function generateDealDurationData(
       });
     }
   }
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle special cases for xaxis (like Owner which needs join) and date fields
   let groupBy = [];
@@ -9058,6 +9328,34 @@ async function generateExistingDealDurationDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+  
+   let xaxisNullExcludeCondition = {};
+  
+    // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(existingxaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "Team") {
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "contactPerson") {
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (existingxaxis === "organization") {
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -9108,10 +9406,6 @@ async function generateExistingDealDurationDataForSave(
     }
   }
 
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Handle special cases for xaxis (like Owner which needs join) and date fields
   let groupBy = [];
@@ -9505,6 +9799,39 @@ async function generateDealDurationDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+   let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else if (xaxis === "contactPerson") {
+      // For contactPerson, exclude where ActivityPerson.contactPerson is null
+      xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    } else if (xaxis === "organization") {
+      // For organization, exclude where ActivityOrganization.organization is null
+      xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+    
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -9554,11 +9881,6 @@ async function generateDealDurationDataForSave(
       });
     }
   }
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle special cases for xaxis (like Owner which needs join) and date fields
   let groupBy = [];

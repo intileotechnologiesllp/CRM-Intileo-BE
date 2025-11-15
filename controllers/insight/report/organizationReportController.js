@@ -272,6 +272,28 @@ async function generateExistingOrganizationPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
+ let xaxisNullExcludeCondition = {};
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
+  
   // Handle existingfilters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
   if (existingfilters && existingfilters.conditions) {
@@ -327,12 +349,6 @@ async function generateExistingOrganizationPerformanceData(
 
   let groupBy = [];
   let attributes = [];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-
-   const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -669,6 +685,32 @@ async function generateOrganizationPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else {
+      // For regular columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+  
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -722,11 +764,6 @@ async function generateOrganizationPerformanceData(
   // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
   let attributes = [];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -1399,6 +1436,29 @@ async function generateExistingOrganizationPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+  let xaxisNullExcludeCondition = {};
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  
   // Handle existingfilters if provided
   if (existingfilters && existingfilters.conditions) {
     const validConditions = existingfilters.conditions.filter(
@@ -1451,11 +1511,6 @@ async function generateExistingOrganizationPerformanceDataForSave(
 
   let groupBy = [];
   let attributes = [];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
@@ -1680,6 +1735,32 @@ async function generateOrganizationPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
+  let xaxisNullExcludeCondition = {};
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+    
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -1733,11 +1814,6 @@ async function generateOrganizationPerformanceDataForSave(
   // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
   let attributes = [];
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
