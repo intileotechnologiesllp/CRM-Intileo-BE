@@ -5,15 +5,15 @@ const { verifyToken } = require("../../middlewares/authMiddleware");
 const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 // Add a user to favorites
-router.post("/add", verifyToken, validatePrivilege(2, "create"), userFavoritesController.addUserToFavorites);
+router.post("/add", verifyToken,userFavoritesController.addUserToFavorites);
 
 // Remove a user from favorites
-router.delete("/:favoriteUserId", verifyToken, validatePrivilege(2, "delete"), userFavoritesController.removeUserFromFavorites);
+router.delete("/:favoriteUserId", verifyToken, userFavoritesController.removeUserFromFavorites);
 
 // Get all favorite users
-router.get("/", verifyToken, validatePrivilege(2, "view"), userFavoritesController.getFavoriteUsers);
+router.get("/", verifyToken, userFavoritesController.getFavoriteUsers);
 
 // Update favorite user nickname
-router.put("/:favoriteId/nickname", verifyToken, validatePrivilege(2, "edit"), userFavoritesController.updateFavoriteNickname);
+router.put("/:favoriteId/nickname", verifyToken, userFavoritesController.updateFavoriteNickname);
 
 module.exports = router;

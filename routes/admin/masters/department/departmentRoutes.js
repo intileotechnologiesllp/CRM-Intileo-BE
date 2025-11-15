@@ -4,9 +4,9 @@ const verifyToken = require("../../../../middlewares/authMiddleware").verifyToke
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const router = express.Router();
 
-router.post("/create", verifyToken, validatePrivilege(8, "create"), departmentController.createdepartment); // Add department
-router.post("/edit/:departmentId",verifyToken, validatePrivilege(8, "create"), departmentController.editdepartment); // Edit department
-router.post("/delete/:departmentId", verifyToken, validatePrivilege(8, "create"), departmentController.deletedepartment); // Delete department
-router.get("/get", verifyToken, validatePrivilege(8, "create"), departmentController.getdepartments); // Get departments
+router.post("/create", verifyToken,departmentController.createdepartment); // Add department
+router.post("/edit/:departmentId",verifyToken, departmentController.editdepartment); // Edit department
+router.post("/delete/:departmentId", verifyToken, departmentController.deletedepartment); // Delete department
+router.get("/get", verifyToken, departmentController.getdepartments); // Get departments
 
 module.exports = router;

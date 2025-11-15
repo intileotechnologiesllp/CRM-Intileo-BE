@@ -7,6 +7,6 @@ const activityTypeController = require("../../controllers/activity/activityTypeC
 router.post("/create-activity-type", verifyToken, activityTypeController.createActivityType);
 router.get("/get-activity-types", verifyToken, activityTypeController.getActivityTypes);
 router.post("/update-activity-type/:id", verifyToken, activityTypeController.updateActivityType);
-router.delete("/delete-activity-type/:id", verifyToken, activityTypeController.deleteActivityType); 
+router.delete("/delete-activity-type/:id", verifyToken, activityTypeController.deleteActivityType);
 
 module.exports = router;

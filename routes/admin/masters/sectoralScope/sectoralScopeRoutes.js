@@ -5,9 +5,9 @@ const verifyToken = require("../../../../middlewares/authMiddleware").verifyToke
 const validatePrivilege = require("../../../../middlewares/validatePrivilege");
 const router = express.Router();
 
-router.post("/create",verifyToken, validatePrivilege(13, "create"), sectoralscopeController.createsectoralscope); // Add sectoralscope
-router.post("/edit/:sectoralscopeId",verifyToken, validatePrivilege(13, "create"), sectoralscopeController.editsectoralscope); // Edit sectoralscope
-router.post("/delete/:sectoralscopeId", verifyToken, validatePrivilege(13, "create"), sectoralscopeController.deletesectoralscope); // Delete sectoralscope
-router.get("/get",verifyToken, validatePrivilege(13, "create"), sectoralscopeController.getsectoralscopes); // Get sectoralscopes
+router.post("/create",verifyToken,sectoralscopeController.createsectoralscope); // Add sectoralscope
+router.post("/edit/:sectoralscopeId",verifyToken, sectoralscopeController.editsectoralscope); // Edit sectoralscope
+router.post("/delete/:sectoralscopeId", verifyToken, sectoralscopeController.deletesectoralscope); // Delete sectoralscope
+router.get("/get",verifyToken, sectoralscopeController.getsectoralscopes); // Get sectoralscopes
 
 module.exports = router;

@@ -13,6 +13,7 @@ const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const DealParticipant = require("../../models/deals/dealPartcipentsModel");
 const MasterUser = require("../../models/master/masterUserModel");
+const permissionSet = require("../../models/permissionsetModel");
 const DealNote = require("../../models/deals/delasNoteModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
 const Email = require("../../models/email/emailModel");
@@ -3180,15 +3181,103 @@ exports.changeDealOwner = async (req, res) => {
       });
     }
 
-    // Check permissions - only admin or current owner can change ownership
-    const isAdmin = req.role === 'admin';
-    const isCurrentOwner = deal.ownerId === req.adminId;
+    // ===== OWNERSHIP VALIDATION =====
+    // Check if user is the creator of the deal (masterUserID)
+    const isCreator = deal.masterUserID === req.adminId;
     
-    if (!isAdmin && !isCurrentOwner) {
-      return res.status(403).json({
-        message: "You don't have permission to change ownership of this deal",
+    if (!isCreator) {
+      // User is not the creator - check if they have permission "2" (edit_owner)
+      console.log("🔒 User is NOT the creator of this deal. Checking 'edit_owner' permission...");
+      
+      // Fetch user's permission set
+      const user = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'permissionSetId', 'globalPermissionSetId']
       });
+      
+      if (!user) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: User not found.`,
+          req.adminId
+        );
+        return res.status(401).json({ message: "User not found." });
+      }
+      
+      // Prioritize globalPermissionSetId over permissionSetId
+      const permissionSetId = user.globalPermissionSetId || user.permissionSetId;
+      
+      console.log(`🔍 User ${req.adminId} info:`, {
+        permissionSetId: user.permissionSetId,
+        globalPermissionSetId: user.globalPermissionSetId,
+        usingPermissionSet: permissionSetId
+      });
+      
+      if (!permissionSetId) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: No permission set assigned. User ${req.adminId} tried to change owner of deal ${dealId} created by ${deal.masterUserID}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to change the owner of deals you didn't create." 
+        });
+      }
+      
+      // Fetch permission set
+      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      
+      console.log(`🔍 Permission Set ${permissionSetId} details:`, {
+        permissionSetId: userPermissionSet?.permissionSetId,
+        permissionName: userPermissionSet?.permissionName,
+        permissions: userPermissionSet?.permissions
+      });
+      
+      if (!userPermissionSet || !userPermissionSet.permissions) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: Permission set not found. User ${req.adminId} tried to change owner of deal ${dealId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "Permission set not found." 
+        });
+      }
+      
+      // Parse permissions
+      const permissions = typeof userPermissionSet.permissions === 'string' 
+        ? JSON.parse(userPermissionSet.permissions) 
+        : userPermissionSet.permissions;
+      
+      // Check if permission "2" (Edit deal owner) is granted
+      const hasEditOwnerPermission = permissions["2"] === true;
+      
+      console.log("📋 User permissions:", permissions);
+      console.log(`🔑 Permission "2" (edit_owner): ${hasEditOwnerPermission}`);
+      
+      if (!hasEditOwnerPermission) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: User ${req.adminId} tried to change owner of deal ${dealId} created by user ${deal.masterUserID} without 'edit_owner' permission.`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to change the owner of deals you didn't create. Only the deal creator can change ownership." 
+        });
+      }
+      
+      console.log("✅ User has 'edit_owner' permission - allowing ownership change");
+    } else {
+      console.log("✅ User is the creator of this deal - allowing ownership change");
     }
+    // ===== END OWNERSHIP VALIDATION =====
 
     // Store old owner ID for logging
     const oldOwnerId = deal.ownerId;
@@ -3282,6 +3371,104 @@ exports.updateDeal = async (req, res) => {
       );
       return res.status(404).json({ message: "Deal not found." });
     }
+
+    // ===== OWNERSHIP VALIDATION =====
+    // Check if user owns the deal or has permission to edit others' deals
+    const isOwner = (deal.masterUserID === req.adminId || deal.ownerId === req.adminId);
+    
+    if (!isOwner) {
+      // User doesn't own the deal - check if they have permission "1" (edit_others)
+      console.log("🔒 User is NOT owner of this deal. Checking 'edit_others' permission...");
+      
+      // Fetch user's permission set
+      const user = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'permissionSetId', 'globalPermissionSetId']
+      });
+      
+      if (!user) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: User not found.`,
+          req.adminId
+        );
+        return res.status(401).json({ message: "User not found." });
+      }
+      
+      // Prioritize globalPermissionSetId over permissionSetId
+      const permissionSetId = user.globalPermissionSetId || user.permissionSetId;
+      
+      console.log(`🔍 User ${req.adminId} info:`, {
+        permissionSetId: user.permissionSetId,
+        globalPermissionSetId: user.globalPermissionSetId,
+        usingPermissionSet: permissionSetId
+      });
+      
+      if (!permissionSetId) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: No permission set assigned. User ${req.adminId} tried to edit deal ${dealId} owned by ${deal.ownerId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to edit deals owned by other users." 
+        });
+      }
+      
+      // Fetch permission set
+      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      
+      console.log(`🔍 Permission Set ${permissionSetId} details:`, {
+        permissionSetId: userPermissionSet?.permissionSetId,
+        permissionName: userPermissionSet?.permissionName,
+        permissions: userPermissionSet?.permissions
+      });
+      
+      if (!userPermissionSet || !userPermissionSet.permissions) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: Permission set not found. User ${req.adminId} tried to edit deal ${dealId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "Permission set not found." 
+        });
+      }
+      
+      // Parse permissions
+      const permissions = typeof userPermissionSet.permissions === 'string' 
+        ? JSON.parse(userPermissionSet.permissions) 
+        : userPermissionSet.permissions;
+      
+      // Check if permission "1" (Edit deals owned by other users) is granted
+      const hasEditOthersPermission = permissions["1"] === true;
+      
+      console.log("📋 User permissions:", permissions);
+      console.log(`🔑 Permission "1" (edit_others): ${hasEditOthersPermission}`);
+      
+      if (!hasEditOthersPermission) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: User ${req.adminId} tried to edit deal ${dealId} owned by user ${deal.ownerId} without 'edit_others' permission.`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to edit deals owned by other users. Only the deal owner can edit this deal." 
+        });
+      }
+      
+      console.log("✅ User has 'edit_others' permission - allowing edit of other user's deal");
+    } else {
+      console.log("✅ User is owner of this deal - allowing edit");
+    }
+    // ===== END OWNERSHIP VALIDATION =====
 
     // Phone number validation (only numerical values allowed) - if phone is being updated
     if (updateFields.phone && updateFields.phone.trim() !== "") {
