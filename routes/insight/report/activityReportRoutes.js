@@ -11,6 +11,8 @@ router.post("/create-activityreport", verifyToken, activityReportController.crea
 
 router.post("/get-activity-data", verifyToken,  activityReportController.createActivityReportDrillDown);
 
+router.post("/save-coordinates", verifyToken,  activityReportController.saveCoordinates);
+
 router.post("/get-summaryactivityreport", verifyToken, activityReportController.getActivityReportSummary);
 
 router.post("/save-activityreport", verifyToken, activityReportController.saveActivityReport);
