@@ -1962,6 +1962,31 @@ exports.createActivityReportDrillDown = async (req, res) => {
   }
 };
 
+exports.saveCoordinates = async (req, res) =>{
+   try {
+    const {dashboardId, coordinates} = req.body;
+
+    const [updated] = await Dashboard.update({coordinates:coordinates }, {
+      where: { dashboardId }
+    });
+
+    if (updated === 0) {
+      return { success: false, message: "No record found or nothing to update" };
+    }
+
+    const updatedRecord = await Dashboard.findByPk(dashboardId);
+
+    res.status(200).json({
+      success: true,
+      message: "Updated successfully",
+      data: updatedRecord
+    });
+  } catch (error) {
+    console.error("Update error:", error);
+    return { success: false, message: error.message };
+  }
+}
+
 exports.getInsightReportsData = async (req, res) => {
   try {
     // your Activity model
