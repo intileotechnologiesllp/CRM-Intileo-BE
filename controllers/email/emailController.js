@@ -9830,13 +9830,18 @@ exports.getEmailsRealtime = async (req, res) => {
     
     // 🚀 PERFORMANCE OPTIMIZATION: Use lightweight version for realtime API
     // Check if user has many emails (>1,000) and use optimized version - lowered for testing
+    console.log(`🔢 [REALTIME-EMAILS] Counting emails for user ${userID}...`);
+    
     const quickEmailCount = await Email.count({
       where: { masterUserID: userID },
       limit: 1001 // Just check if more than 1k for testing
     });
     
+    console.log(`🔢 [REALTIME-EMAILS] User ${userID} has ${quickEmailCount} emails`);
+    
     if (quickEmailCount > 1000) {
-      console.log(`⚡ [REALTIME-EMAILS] User ${userID} has ${quickEmailCount}+ emails, using optimized lightweight API`);
+      console.log(`⚡ [REALTIME-EMAILS] ➡️ ROUTING TO LIGHTWEIGHT API (>1000 emails)`);
+      console.log(`⚡ [REALTIME-EMAILS] This will include Lead/Deal relationships`);
       
       // 🔧 FIX: Set the userID in req.adminId for proper processing
       req.adminId = userID;
@@ -9844,7 +9849,7 @@ exports.getEmailsRealtime = async (req, res) => {
       // Call optimized lightweight version
       await getEmailsRealtimeLightweight(req, res);
     } else {
-      console.log(`📧 [REALTIME-EMAILS] User ${userID} has ${quickEmailCount} emails, using full API`);
+      console.log(`📧 [REALTIME-EMAILS] ➡️ ROUTING TO FULL API (≤1000 emails)`);
       
       // 🔧 FIX: Set the userID in req.adminId for proper getEmails processing
       req.adminId = userID;
@@ -9886,6 +9891,7 @@ async function getEmailsRealtimeLightweight(req, res) {
   pageSize = Math.min(Number(pageSize) || 20, MAX_SAFE_PAGE_SIZE);
 
   console.log(`⚡ [LIGHTWEIGHT-REALTIME] Processing optimized request for user ${masterUserID}`);
+  console.log(`⚡ [LIGHTWEIGHT-REALTIME] Query parameters:`, { page, pageSize, folder, search, isRead, cursor, direction, includeFullBody });
 
   try {
     // Check if user has credentials
@@ -9893,7 +9899,10 @@ async function getEmailsRealtimeLightweight(req, res) {
       where: { masterUserID },
     });
 
+    console.log(`🔐 [LIGHTWEIGHT-REALTIME] User ${masterUserID} credentials found:`, !!userCredential);
+
     if (!userCredential) {
+      console.log(`❌ [LIGHTWEIGHT-REALTIME] User ${masterUserID} has no credentials - returning empty response`);
       return res.status(200).json({
         message: "No email credentials found for this user.",
         currentPage: parseInt(page),
@@ -9978,13 +9987,244 @@ async function getEmailsRealtimeLightweight(req, res) {
       "labelId"
     ];
 
-    // Fetch emails with minimal includes
-    const emails = await Email.findAll({
-      where: filters,
-      limit: pageSize,
-      order,
-      attributes: essentialFields,
+    // 🔗 Add Lead and Deal includes for relationship data
+    console.log(`🔗 [LIGHTWEIGHT-INCLUDES] Setting up Lead and Deal includes for user ${masterUserID}`);
+    console.log(`🔗 [LIGHTWEIGHT-INCLUDES] Model availability check:`, {
+      Lead: typeof Lead,
+      Deal: typeof Deal,
+      Person: typeof Person,
+      Organization: typeof Organization,
+      LeadName: Lead?.name,
+      DealName: Deal?.name
     });
+    
+    const includeLeadDeal = [
+      {
+        model: Lead,
+        as: "Lead",
+        required: false,
+        attributes: [
+          "leadId",
+          "title",
+          "value",
+          "status",
+          "personId",
+          "leadOrganizationId",
+          "dealId",
+        ],
+        include: [
+          {
+            model: Person,
+            as: "LeadPerson",
+            required: false,
+            attributes: [
+              "personId",
+              "contactPerson",
+              "email",
+              "phone",
+              "jobTitle",
+            ],
+          },
+          {
+            model: Organization,
+            as: "LeadOrganization",
+            required: false,
+            attributes: [
+              "leadOrganizationId",
+              "organization",
+              "address",
+              "organizationLabels",
+            ],
+          },
+        ],
+      },
+      {
+        model: Deal,
+        as: "Deal",
+        required: false,
+        attributes: [
+          "dealId",
+          "title",
+          "value",
+          "status",
+          "personId",
+          "leadOrganizationId",
+        ],
+        include: [
+          {
+            model: Person,
+            as: "Person",
+            required: false,
+            attributes: [
+              "personId",
+              "contactPerson",
+              "email",
+              "phone",
+              "jobTitle",
+            ],
+          },
+          {
+            model: Organization,
+            as: "Organization",
+            required: false,
+            attributes: [
+              "leadOrganizationId",
+              "organization",
+              "address",
+              "organizationLabels",
+            ],
+          },
+        ],
+      },
+    ];
+
+    console.log(`📧 [LIGHTWEIGHT-QUERY] Fetching emails with filters:`, JSON.stringify(filters, null, 2));
+    console.log(`📧 [LIGHTWEIGHT-QUERY] Include Lead/Deal: ${includeLeadDeal.length} models`);
+
+    // Fetch emails with Lead and Deal includes
+    let emails;
+    try {
+      emails = await Email.findAll({
+        where: filters,
+        limit: pageSize,
+        order,
+        attributes: essentialFields,
+        include: includeLeadDeal, // ✅ Now includes Lead/Deal relationships
+      });
+      console.log(`✅ [LIGHTWEIGHT-QUERY] Query executed successfully for user ${masterUserID}`);
+    } catch (queryError) {
+      console.error(`❌ [LIGHTWEIGHT-QUERY] Query failed for user ${masterUserID}:`, queryError.message);
+      console.error(`❌ [LIGHTWEIGHT-QUERY] Error details:`, queryError);
+      throw queryError;
+    }
+    
+    console.log(`✅ [LIGHTWEIGHT-QUERY] Fetched ${emails.length} emails`);
+    
+    // Log which emails have Lead/Deal IDs in database
+    const emailsWithLeadIds = emails.filter(e => e.leadId).length;
+    const emailsWithDealIds = emails.filter(e => e.dealId).length;
+    console.log(`🔢 [LIGHTWEIGHT-DATABASE-IDS] Emails with leadId: ${emailsWithLeadIds}, with dealId: ${emailsWithDealIds}`);
+    
+    // Log which emails have Lead/Deal relationships loaded
+    const emailsWithLeads = emails.filter(e => e.Lead).length;
+    const emailsWithDeals = emails.filter(e => e.Deal).length;
+    console.log(`🔗 [LIGHTWEIGHT-RELATIONSHIPS] Emails with Lead object: ${emailsWithLeads}, with Deal object: ${emailsWithDeals}`);
+    
+    // Log ALL emails with leadId or dealId to see what's in database
+    console.log(`🔍 [USER-${masterUserID}-ANALYSIS] Starting detailed analysis of ${emails.length} emails`);
+    
+    let emailsWithLeadIdCount = 0;
+    let emailsWithDealIdCount = 0;
+    let emailsWithLeadObjectCount = 0;
+    let emailsWithDealObjectCount = 0;
+    
+    emails.forEach((email, index) => {
+      if (email.leadId) emailsWithLeadIdCount++;
+      if (email.dealId) emailsWithDealIdCount++;
+      if (email.Lead) emailsWithLeadObjectCount++;
+      if (email.Deal) emailsWithDealObjectCount++;
+      
+      if (email.leadId || email.dealId) {
+        console.log(`📧 [USER-${masterUserID}-EMAIL-${index}] ID: ${email.emailID}, Subject: "${email.subject?.substring(0, 30)}...", leadId: ${email.leadId}, dealId: ${email.dealId}, hasLeadObj: ${!!email.Lead}, hasDealObj: ${!!email.Deal}`);
+        
+        // If ID exists but object doesn't, log more details
+        if (email.leadId && !email.Lead) {
+          console.log(`⚠️ [USER-${masterUserID}-MISSING-LEAD] Email ${email.emailID} has leadId ${email.leadId} but NO Lead object!`);
+        }
+        if (email.dealId && !email.Deal) {
+          console.log(`⚠️ [USER-${masterUserID}-MISSING-DEAL] Email ${email.emailID} has dealId ${email.dealId} but NO Deal object!`);
+        }
+      }
+    });
+    
+    console.log(`📊 [USER-${masterUserID}-SUMMARY]`, {
+      totalEmails: emails.length,
+      emailsWithLeadId: emailsWithLeadIdCount,
+      emailsWithDealId: emailsWithDealIdCount,
+      emailsWithLeadObject: emailsWithLeadObjectCount,
+      emailsWithDealObject: emailsWithDealObjectCount,
+      missingLeadObjects: emailsWithLeadIdCount - emailsWithLeadObjectCount,
+      missingDealObjects: emailsWithDealIdCount - emailsWithDealObjectCount
+    });
+    
+    // 🔍 DEEP DIVE: Check if missing leads/deals exist in database
+    if (emailsWithLeadIdCount > emailsWithLeadObjectCount) {
+      console.log(`🔍 [USER-${masterUserID}-LEAD-CHECK] Checking if leads exist in database...`);
+      const leadIds = emails.filter(e => e.leadId && !e.Lead).map(e => e.leadId);
+      if (leadIds.length > 0) {
+        try {
+          const existingLeads = await Lead.findAll({
+            where: { leadId: { [Sequelize.Op.in]: leadIds } },
+            attributes: ['leadId', 'title', 'masterUserID']
+          });
+          console.log(`🔍 [USER-${masterUserID}-LEAD-CHECK] Found ${existingLeads.length} of ${leadIds.length} leads in database`);
+          existingLeads.forEach(lead => {
+            console.log(`   Lead ${lead.leadId}: "${lead.title}" (masterUserID: ${lead.masterUserID})`);
+          });
+          
+          // Check for missing leads
+          const foundLeadIds = existingLeads.map(l => l.leadId);
+          const missingLeadIds = leadIds.filter(id => !foundLeadIds.includes(id));
+          if (missingLeadIds.length > 0) {
+            console.log(`⚠️ [USER-${masterUserID}-LEAD-CHECK] Leads NOT found in database:`, missingLeadIds);
+          }
+        } catch (leadCheckError) {
+          console.error(`❌ [USER-${masterUserID}-LEAD-CHECK] Error checking leads:`, leadCheckError.message);
+        }
+      }
+    }
+    
+    if (emailsWithDealIdCount > emailsWithDealObjectCount) {
+      console.log(`🔍 [USER-${masterUserID}-DEAL-CHECK] Checking if deals exist in database...`);
+      const dealIds = emails.filter(e => e.dealId && !e.Deal).map(e => e.dealId);
+      if (dealIds.length > 0) {
+        try {
+          const existingDeals = await Deal.findAll({
+            where: { dealId: { [Sequelize.Op.in]: dealIds } },
+            attributes: ['dealId', 'title', 'masterUserID']
+          });
+          console.log(`🔍 [USER-${masterUserID}-DEAL-CHECK] Found ${existingDeals.length} of ${dealIds.length} deals in database`);
+          existingDeals.forEach(deal => {
+            console.log(`   Deal ${deal.dealId}: "${deal.title}" (masterUserID: ${deal.masterUserID})`);
+          });
+          
+          // Check for missing deals
+          const foundDealIds = existingDeals.map(d => d.dealId);
+          const missingDealIds = dealIds.filter(id => !foundDealIds.includes(id));
+          if (missingDealIds.length > 0) {
+            console.log(`⚠️ [USER-${masterUserID}-DEAL-CHECK] Deals NOT found in database:`, missingDealIds);
+          }
+        } catch (dealCheckError) {
+          console.error(`❌ [USER-${masterUserID}-DEAL-CHECK] Error checking deals:`, dealCheckError.message);
+        }
+      }
+    }
+    
+    // Log first email's structure for debugging
+    if (emails.length > 0) {
+      const firstEmail = emails[0].toJSON();
+      console.log(`🔍 [LIGHTWEIGHT-DEBUG] First email structure:`, {
+        emailID: firstEmail.emailID,
+        subject: firstEmail.subject?.substring(0, 50),
+        hasLead: !!firstEmail.Lead,
+        hasDeal: !!firstEmail.Deal,
+        leadId: firstEmail.leadId,
+        dealId: firstEmail.dealId,
+        allKeys: Object.keys(firstEmail),
+        leadData: firstEmail.Lead ? {
+          leadId: firstEmail.Lead.leadId,
+          title: firstEmail.Lead.title,
+          hasPerson: !!firstEmail.Lead.LeadPerson,
+          hasOrg: !!firstEmail.Lead.LeadOrganization
+        } : null,
+        dealData: firstEmail.Deal ? {
+          dealId: firstEmail.Deal.dealId,
+          title: firstEmail.Deal.title,
+          hasPerson: !!firstEmail.Deal.Person,
+          hasOrg: !!firstEmail.Deal.Organization
+        } : null
+      });
+    }
 
     if (direction === "prev") emails.reverse();
 
@@ -10045,9 +10285,25 @@ async function getEmailsRealtimeLightweight(req, res) {
       unreadInCurrentPage: emails.filter(email => email.isRead === false).length,
     };
 
+    console.log(`🔄 [LIGHTWEIGHT-PROCESSING] Starting to process ${emails.length} emails`);
+
     // Process emails with minimal overhead
-    const emailsWithMinimalProcessing = emails.map((email) => {
+    const emailsWithMinimalProcessing = emails.map((email, index) => {
       const emailObj = { ...email.toJSON() };
+
+      // Log first email to check if Lead/Deal data exists
+      if (index === 0) {
+        console.log(`🔍 [LIGHTWEIGHT-FIRST-EMAIL] After toJSON():`, {
+          emailID: emailObj.emailID,
+          subject: emailObj.subject,
+          hasLead: !!emailObj.Lead,
+          hasDeal: !!emailObj.Deal,
+          leadId: emailObj.leadId,
+          dealId: emailObj.dealId,
+          leadKeys: emailObj.Lead ? Object.keys(emailObj.Lead) : [],
+          dealKeys: emailObj.Deal ? Object.keys(emailObj.Deal) : []
+        });
+      }
 
       // Replace body with preview if needed
       if (includeFullBody !== "true" && folder !== "drafts") {
@@ -10057,7 +10313,16 @@ async function getEmailsRealtimeLightweight(req, res) {
       return emailObj;
     });
 
+    console.log(`✅ [LIGHTWEIGHT-PROCESSING] Processed ${emailsWithMinimalProcessing.length} emails`);
+    
+    // Check if Lead/Deal data survived processing
+    const processedWithLeads = emailsWithMinimalProcessing.filter(e => e.Lead).length;
+    const processedWithDeals = emailsWithMinimalProcessing.filter(e => e.Deal).length;
+    console.log(`🔗 [LIGHTWEIGHT-AFTER-PROCESSING] Emails with Lead: ${processedWithLeads}, with Deal: ${processedWithDeals}`);
+
     // Simple threading (no complex grouping for performance)
+    console.log(`🧵 [LIGHTWEIGHT-THREADING] Starting threading for folder: ${folder}`);
+    
     let responseThreads;
     if (folder === "drafts" || folder === "trash") {
       const threads = {};
@@ -10069,6 +10334,21 @@ async function getEmailsRealtimeLightweight(req, res) {
       responseThreads = Object.values(threads);
     } else {
       responseThreads = emailsWithMinimalProcessing.map(email => [email]);
+    }
+
+    console.log(`🧵 [LIGHTWEIGHT-THREADING] Created ${responseThreads.length} threads`);
+    
+    // Check if Lead/Deal data survived threading
+    if (responseThreads.length > 0 && responseThreads[0].length > 0) {
+      const firstThreadEmail = responseThreads[0][0];
+      console.log(`🔍 [LIGHTWEIGHT-AFTER-THREADING] First thread email:`, {
+        emailID: firstThreadEmail.emailID,
+        subject: firstThreadEmail.subject,
+        hasLead: !!firstThreadEmail.Lead,
+        hasDeal: !!firstThreadEmail.Deal,
+        leadId: firstThreadEmail.leadId,
+        dealId: firstThreadEmail.dealId
+      });
     }
 
     // Buffer pagination cursors
@@ -10111,6 +10391,28 @@ async function getEmailsRealtimeLightweight(req, res) {
       }, 0);
     }
 
+    // Final validation before sending response
+    console.log(`📤 [LIGHTWEIGHT-RESPONSE] Preparing response with ${responseThreads.length} threads`);
+    
+    if (responseThreads.length > 0) {
+      const threadsWithLeads = responseThreads.filter(thread => thread.some(e => e.Lead)).length;
+      const threadsWithDeals = responseThreads.filter(thread => thread.some(e => e.Deal)).length;
+      console.log(`🔗 [LIGHTWEIGHT-RESPONSE-CHECK] Threads with Lead: ${threadsWithLeads}, with Deal: ${threadsWithDeals}`);
+      
+      // Log first thread's first email structure
+      if (responseThreads[0] && responseThreads[0][0]) {
+        const firstEmail = responseThreads[0][0];
+        console.log(`🔍 [LIGHTWEIGHT-FINAL-CHECK] First email in response:`, {
+          emailID: firstEmail.emailID,
+          subject: firstEmail.subject,
+          hasLead: !!firstEmail.Lead,
+          hasDeal: !!firstEmail.Deal,
+          leadTitle: firstEmail.Lead?.title,
+          dealTitle: firstEmail.Deal?.title
+        });
+      }
+    }
+
     // Return optimized response IMMEDIATELY (no waiting for flag sync)
     res.status(200).json({
       message: "Emails fetched successfully (lightweight mode for large dataset).",
@@ -10148,10 +10450,26 @@ async function getEmailsRealtimeLightweight(req, res) {
         status: "background_processing_multi_folder"
       }
     });
+    
+    console.log(`✅ [LIGHTWEIGHT-RESPONSE] Response sent successfully`);
 
   } catch (error) {
-    console.error("⚡ [LIGHTWEIGHT-REALTIME] Error:", error);
-    res.status(500).json({ message: "Internal server error in lightweight mode." });
+    console.error("❌ [LIGHTWEIGHT-REALTIME] Error:", error);
+    console.error("❌ [LIGHTWEIGHT-REALTIME] Error stack:", error.stack);
+    console.error("❌ [LIGHTWEIGHT-REALTIME] Error name:", error.name);
+    console.error("❌ [LIGHTWEIGHT-REALTIME] Error message:", error.message);
+    
+    // Check if it's a Sequelize error
+    if (error.name === 'SequelizeEagerLoadingError' || error.name === 'SequelizeDatabaseError') {
+      console.error("❌ [LIGHTWEIGHT-REALTIME] Sequelize Include Error - Check model associations!");
+      console.error("❌ [LIGHTWEIGHT-REALTIME] Error details:", error.message);
+    }
+    
+    res.status(500).json({ 
+      message: "Internal server error in lightweight mode.",
+      error: error.message,
+      errorType: error.name
+    });
   }
 }
 
