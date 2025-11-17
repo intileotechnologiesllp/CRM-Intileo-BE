@@ -21,6 +21,10 @@ const Dashboard = sequelize.define(
     }, // folder or dashboard
     parentId: { type: DataTypes.INTEGER, allowNull: true }, // reference to parent folder
     ownerId: { type: DataTypes.INTEGER, allowNull: false }, // userId
+    coordinates: {
+      type: DataTypes.JSON,
+      allowNull: true
+    }
   },
   {
     tableName: "Dashboards",
@@ -28,4 +32,5 @@ const Dashboard = sequelize.define(
   }
 );
 
+Dashboard.sync({alter: true});
 module.exports = Dashboard;
