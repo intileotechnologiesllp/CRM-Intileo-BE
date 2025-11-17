@@ -7467,20 +7467,20 @@ exports.updateQuestionShared = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
-    // Check permissions (non-admin users can only update their own deals)
-    if (req.role !== 'admin' && deal.masterUserID !== adminId) {
-      return res.status(403).json({ 
-        message: "Access denied. You can only update deals you own." 
-      });
-    }
+    // // Check permissions (non-admin users can only update their own deals)
+    // if (req.role !== 'admin' && deal.masterUserID !== adminId) {
+    //   return res.status(403).json({ 
+    //     message: "Access denied. You can only update deals you own." 
+    //   });
+    // }
 
     console.log(`[UPDATE_QUESTION] Deal found: ${deal.title}`);
 
     // Find the questionShared custom field definition
     const questionSharedField = await CustomField.findOne({
       where: {
-        fieldName: "questionShared",
-        entityType: "deal",
+        fieldName: "questioner_shared?",
+        entityType: "lead",
         // masterUserID: adminId,
         isActive: true
       }
