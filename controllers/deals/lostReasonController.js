@@ -73,7 +73,7 @@ exports.getLostReasons = async (req, res) => {
     let whereClause = {
       [Op.or]: [
         // { masterUserID: masterUserID },
-        { isSystemDefault: true } // Include system defaults
+        { isSystemDefault: false } // Include system defaults
       ]
     };
 
@@ -134,7 +134,7 @@ exports.getLostReason = async (req, res) => {
         lostReasonId: id,
         [Op.or]: [
           // { masterUserID: masterUserID },
-          { isSystemDefault: true }
+          { isSystemDefault: false }
         ]
       }
     });
