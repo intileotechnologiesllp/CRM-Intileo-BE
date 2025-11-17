@@ -7182,7 +7182,7 @@ exports.markDealAsLost = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
       },
       include: [
         {
@@ -7227,7 +7227,7 @@ exports.markDealAsLost = async (req, res) => {
         where: {
           fieldName: "questioner_shared?",
           entityType: "deal",
-          masterUserID: adminId,
+          // masterUserID: adminId,
           isActive: true
         }
       });
@@ -7303,7 +7303,7 @@ exports.markDealAsLost = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId, // Removed to allow global custom field access
       },
       include: [
         {
