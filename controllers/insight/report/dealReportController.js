@@ -13144,7 +13144,7 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
           }));
 
           // Generate data with pagination
-          const result = await generateDealConversionFunnelData(
+          const result = await generateDealConversionFunnelDataForSave(
             ownerId,
             role,
             xaxis,
@@ -13245,7 +13245,7 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
             stageOrder: stage.stageOrder,
           }));
 
-          const result = await generateExistingDealConversionFunnelData(
+          const result = await generateExistingDealConversionFunnelDataForSave(
             ownerId,
             role,
             existingXaxis,
@@ -13420,6 +13420,242 @@ exports.saveFunnelDealConversionReport = async (req, res) => {
     });
   }
 };
+
+async function generateDealConversionFunnelDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  pipelineId,
+  pipelineStages,
+  filters
+) {
+  // Create stage name to ID mapping
+  const stageNameToId = {};
+  pipelineStages.forEach((stage) => {
+    stageNameToId[stage.stageName] = stage.stageId;
+  });
+
+  // Base where condition with pipelineId
+  const baseWhereConditions = [
+    {
+      pipelineId: pipelineId,
+      [Op.or]: [
+        {
+          stageId: {
+            [Op.in]: xaxis
+              .filter((stage) => stage !== "won")
+              .map((stage) => stageNameToId[stage])
+              .filter((id) => id !== undefined),
+          },
+        },
+        { status: { [Op.in]: xaxis.includes("won") ? ["won"] : [] } },
+      ],
+    },
+  ];
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhereConditions.push({
+      masterUserID: ownerId,
+    });
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const filterIncludeModels = [];
+      const conditions = validConditions.map((cond) => {
+        return getConditionObjectFunnel(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      baseWhereConditions.push(combinedCondition);
+    }
+  }
+
+  // Create the final where condition
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
+
+  // Get data for each selected pipeline stage
+  const stageData = {};
+  const conversionRates = {};
+
+  // Include PipelineStage for better querying
+  const includeOptions = [
+    {
+      model: PipelineStage,
+      as: "stageData",
+      attributes: ["stageId", "stageName", "stageOrder"],
+      required: false,
+    },
+  ];
+
+  for (const stage of xaxis) {
+    let whereCondition;
+
+    if (stage === "won") {
+      whereCondition = {
+        ...baseWhere,
+        status: "won",
+      };
+    } else {
+      const stageId = stageNameToId[stage];
+      whereCondition = {
+        ...baseWhere,
+        stageId: stageId,
+      };
+    }
+
+    // Select appropriate attributes based on yaxis
+    let attributes;
+    if (yaxis === "no of deals") {
+      attributes = [[Sequelize.fn("COUNT", Sequelize.col("dealId")), "count"]];
+    } else if (yaxis === "proposalValue") {
+      attributes = [
+        [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "total"],
+      ];
+    } else if (yaxis === "value") {
+      attributes = [[Sequelize.fn("SUM", Sequelize.col("value")), "total"]];
+    }
+
+    const queryOptions = {
+      where: whereCondition,
+      attributes: attributes,
+      raw: true,
+    };
+
+    // Only include stageData for non-won stages
+    if (stage !== "won") {
+      queryOptions.include = includeOptions;
+    }
+
+    const result = await Deal.findAll(queryOptions);
+
+    const data = result[0] || { count: 0, total: 0 };
+
+    if (yaxis === "no of deals") {
+      stageData[stage] = parseInt(data.count) || 0;
+    } else {
+      stageData[stage] = parseFloat(data.total) || 0;
+    }
+  }
+
+  // Calculate conversion rates between selected stages
+  const allStageNames = [
+    ...pipelineStages.map((stage) => stage.stageName),
+    "won",
+  ];
+  const orderedSelectedStages = allStageNames.filter((stage) =>
+    xaxis.includes(stage)
+  );
+
+  for (let i = 0; i < orderedSelectedStages.length - 1; i++) {
+    const currentStage = orderedSelectedStages[i];
+    const nextStage = orderedSelectedStages[i + 1];
+
+    const currentValue = stageData[currentStage];
+    const nextValue = stageData[nextStage];
+
+    // Calculate conversion rate based on the selected yaxis
+    if (yaxis === "no of deals") {
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
+    } else {
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
+    }
+  }
+
+  // Format the response based on yaxis selection
+  let formattedData = [];
+
+  for (const stage of orderedSelectedStages) {
+    if (stageData[stage] !== undefined) {
+      const stageObj = {
+        stage: stage,
+        stageId: stage === "won" ? null : stageNameToId[stage],
+        stageOrder:
+          stage === "won"
+            ? pipelineStages.length + 1
+            : pipelineStages.find((s) => s.stageName === stage)?.stageOrder,
+      };
+
+      if (yaxis === "no of deals") {
+        stageObj.noOfDeals = stageData[stage];
+      } else if (yaxis === "proposalValue") {
+        stageObj.proposalValue = stageData[stage];
+      } else if (yaxis === "value") {
+        stageObj.value = stageData[stage];
+      }
+
+      formattedData.push(stageObj);
+    }
+  }
+
+  // Sort by stage order
+  formattedData.sort((a, b) => a.stageOrder - b.stageOrder);
+
+  return {
+    data: {
+      stages: formattedData, // Return all data without pagination
+      conversionRates: conversionRates,
+      pipelineId: pipelineId,
+      totalDeals: Object.values(stageData).reduce(
+        (sum, value) => sum + value,
+        0
+      ),
+    }
+  };
+}
+
+async function generateExistingDealConversionFunnelDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  pipelineId,
+  pipelineStages,
+  filters,
+  page = 1,
+  limit = 8
+) {
+  // Reuse the same logic as generateDealConversionFunnelData since the data generation is the same
+  return await generateDealConversionFunnelDataForSave(
+    ownerId,
+    role,
+    xaxis,
+    yaxis,
+    pipelineId,
+    pipelineStages,
+    filters,
+    page,
+    limit
+  );
+}
 
 exports.summaryFunnelDealConversionReport = async (req, res) => {
   try {
