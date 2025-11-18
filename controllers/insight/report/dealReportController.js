@@ -6225,52 +6225,78 @@ exports.createDealProgressReport = async (req, res) => {
     const role = req.role;
 
     // Define available options for xaxis and yaxis - Update xaxisArray to include date fields
-    const xaxisArray = [
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "proposalSentDate",
-      "sbuClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "contactPerson",
-      "organization",
-      "conversionDate",
-      "createdAt",
-      "updatedAt",
-      "creator",
-      "creatorstatus",
-      "pipeline",
-      "pipelineStage",
-      "expectedCloseDate",
+  const xaxisArray = [
+      { label: "ESPL Proposal No", value: "esplProposalNo", type: "Deal" },
+      {
+        label: "No of reports prepared",
+        value: "numberOfReportsPrepared",
+        type: "Deal",
+      },
+      {
+        label: "Organization Country",
+        value: "organizationCountry",
+        type: "Deal",
+      },
+      { label: "Project Location", value: "projectLocation", type: "Deal" },
+      // { label: "Owner Name", value: "ownerName", type: "Deal" },
+      { label: "SBU Class", value: "sbuClass", type: "Deal" },
+      { label: "Status", value: "status", type: "Deal" },
+      {
+        label: "Scope of Service Type",
+        value: "scopeOfServiceType",
+        type: "Deal",
+      },
+      { label: "Service Type", value: "serviceType", type: "Deal" },
+      { label: "Source Channel", value: "sourceChannel", type: "Deal" },
+      { label: "Source Channel Id", value: "sourceChannelID", type: "Deal" },
+      { label: "Source Origin", value: "sourceOrigin", type: "Deal" },
+      // { label: "Source Origin Id", value: "sourceOriginID", type: "Deal" },
+      { label: "Contact Person", value: "contactPerson", type: "Deal" },
+      { label: "Organization", value: "organization", type: "Deal" },
+      // {
+      //   label: "Proposal Value Currency",
+      //   value: "proposalValueCurrency",
+      //   type: "Deal",
+      // },
+      { label: "Creator", value: "creator", type: "Deal" },
+      { label: "Creator Status", value: "creatorstatus", type: "Deal" },
+      { label: "Pipeline", value: "pipeline", type: "Deal" },
+      { label: "Pipeline Stage", value: "pipelineStage", type: "Deal" },
+      { label: "Proposal Sent Date", value: "proposalSentDate", type: "Date" },
+      { label: "Conversion Date", value: "conversionDate", type: "Date" },
+      { label: "Add on", value: "createdAt", type: "Date" },
+      { label: "Update on", value: "updatedAt", type: "Date" },
     ];
 
     const segmentedByOptions = [
-      "none",
-      "esplProposalNo",
-      "numberOfReportsPrepared",
-      "organizationCountry",
-      "projectLocation",
-      "sbuClass",
-      "status",
-      "scopeOfServiceType",
-      "serviceType",
-      "sourceChannel",
-      "sourceChannelID",
-      "sourceOrigin",
-      "contactPerson",
-      "organization",
-      "pipeline",
-      "pipelineStage",
-      "expectedCloseDate",
+      { label: "None", value: "none" },
+      { label: "ESPL Proposal No", value: "esplProposalNo" },
+      { label: "No of reports prepared", value: "numberOfReportsPrepared" },
+      { label: "Organization Country", value: "organizationCountry" },
+      { label: "Project Location", value: "projectLocation" },
+      // { label: "Owner Name", value: "ownerName" },
+      { label: "SBU Class", value: "sbuClass" },
+      { label: "Status", value: "status" },
+      { label: "Scope of Service Type", value: "scopeOfServiceType" },
+      { label: "Service Type", value: "serviceType" },
+      { label: "Source Channel", value: "sourceChannel" },
+      { label: "Source Channel Id", value: "sourceChannelID" },
+      { label: "Source Origin", value: "sourceOrigin" },
+      // { label: "Source Origin Id", value: "sourceOriginID" },
+      { label: "Contact Person", value: "contactPerson" },
+      { label: "Organization", value: "organization" },
+      // { label: "Proposal Value Currency", value: "proposalValueCurrency" },
+      // { label: "Creator", value: "creator" },
+      // { label: "Creator Status", value: "creatorstatus" },
+      { label: "Pipeline", value: "pipeline" },
+      { label: "Pipeline Stage", value: "pipelineStage" },
     ];
 
-    const yaxisArray = ["no of deals", "proposalValue", "value"];
+    const yaxisArray = [
+      { label: "No of Deals", value: "no of deals", type: "Deal" },
+      { label: "Proposal Value", value: "proposalValue", type: "Deal" },
+      { label: "Value", value: "value", type: "Deal" },
+    ];
 
     // Filter columns definition
     const availableFilterColumns = {
@@ -7097,29 +7123,29 @@ async function generateProgressExistingActivityPerformanceData(
       attributes.push([Sequelize.col("stageData.stageName"), "segmentValue"]);
       groupBy.push("stageData.stageName");
     } else if (existingSegmentedBy === "contactPerson") {
-    includeModels.push({
-      model: Person,
-      as: "Person",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Deal.personId");
-    attributes.push([Sequelize.col("Deal.personId"), "personId"]);
-    attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
-  } else if (existingSegmentedBy === "organization") {
-    includeModels.push({
-      model: Organization,
-      as: "Organization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Deal.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("Deal.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("Organization.organization"), "xValue"]);
-  } else {
+      includeModels.push({
+        model: Person,
+        as: "Person",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.personId");
+      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
+    } else if (existingSegmentedBy === "organization") {
+      includeModels.push({
+        model: Organization,
+        as: "Organization",
+        attributes: [],
+        required: false,
+      });
+      groupBy.push("Deal.leadOrganizationId");
+      attributes.push([
+        Sequelize.col("Deal.leadOrganizationId"),
+        "leadOrganizationId",
+      ]);
+      attributes.push([Sequelize.col("Organization.organization"), "xValue"]);
+    } else {
       groupBy.push(`Deal.${existingSegmentedBy}`);
       attributes.push([
         Sequelize.col(`Deal.${existingSegmentedBy}`),
@@ -7356,13 +7382,17 @@ async function generateProgressActivityPerformanceData(
     // For date fields with duration grouping, exclude null dates
     xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
   } else if (xaxis === "creator") {
-    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
   } else if (xaxis === "creatorstatus") {
-    xaxisNullExcludeCondition['$assignedUser.creatorstatus$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
+      [Op.ne]: null,
+    };
   } else if (xaxis === "contactPerson") {
-    xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
   } else if (xaxis === "organization") {
-    xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Organization.organization$"] = {
+      [Op.ne]: null,
+    };
   } else {
     // For regular Deal columns, exclude where the column value is null
     xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
@@ -7445,7 +7475,10 @@ async function generateProgressActivityPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("assignedUser.masterUserID"), "assignedUserId"]);
+    attributes.push([
+      Sequelize.col("assignedUser.masterUserID"),
+      "assignedUserId",
+    ]);
   } else if (xaxis === "creatorstatus") {
     includeModels.push({
       model: MasterUser,
@@ -7518,10 +7551,7 @@ async function generateProgressActivityPerformanceData(
         required: false,
       });
       groupBy.push("Deal.personId");
-      attributes.push([
-        Sequelize.col("Person.contactPerson"),
-        "segmentValue",
-      ]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
         model: Organization,
@@ -7558,10 +7588,7 @@ async function generateProgressActivityPerformanceData(
       groupBy.push("stageData.stageName");
     } else {
       groupBy.push(`Deal.${segmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Deal.${segmentedBy}`),
-        "segmentValue",
-      ]);
+      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
     }
   }
 
@@ -7701,9 +7728,13 @@ async function generateProgressActivityPerformanceData(
           [Op.in]: groupKeys,
         });
       } else if (xaxis === "creator") {
-        groupCondition = { "$assignedUser.masterUserID$": { [Op.in]: groupKeys } };
+        groupCondition = {
+          "$assignedUser.masterUserID$": { [Op.in]: groupKeys },
+        };
       } else if (xaxis === "creatorstatus") {
-        groupCondition = { "$assignedUser.creatorstatus$": { [Op.in]: groupKeys } };
+        groupCondition = {
+          "$assignedUser.creatorstatus$": { [Op.in]: groupKeys },
+        };
       } else if (xaxis === "contactPerson") {
         groupCondition = { personId: { [Op.in]: groupKeys } };
       } else if (xaxis === "organization") {
@@ -7940,15 +7971,16 @@ exports.saveDealProgressReport = async (req, res) => {
         }
 
         try {
-          const result = await generateProgressExistingActivityPerformanceDataForSave(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingDurationUnit,
-            existingSegmentedBy,
-            existingfilters
-          );
+          const result =
+            await generateProgressExistingActivityPerformanceDataForSave(
+              ownerId,
+              role,
+              existingxaxis,
+              existingyaxis,
+              existingDurationUnit,
+              existingSegmentedBy,
+              existingfilters
+            );
           reportData = result.data;
           totalValue = result.totalValue;
           reportConfig = {
@@ -8020,7 +8052,8 @@ exports.saveDealProgressReport = async (req, res) => {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
                 segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
-                durationUnit: durationUnit ?? existingReport.config?.durationUnit,
+                durationUnit:
+                  durationUnit ?? existingReport.config?.durationUnit,
                 filters: filters ?? existingReport.config?.filters,
                 reportData: reportData ?? existingReport.config?.reportData,
                 totalValue: totalValue ?? existingReport.config?.totalValue,
@@ -8157,13 +8190,17 @@ async function generateProgressActivityPerformanceDataForSave(
   if (shouldGroupByDuration) {
     xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
   } else if (xaxis === "creator") {
-    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
   } else if (xaxis === "creatorstatus") {
-    xaxisNullExcludeCondition['$assignedUser.creatorstatus$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
+      [Op.ne]: null,
+    };
   } else if (xaxis === "contactPerson") {
-    xaxisNullExcludeCondition['$Person.contactPerson$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
   } else if (xaxis === "organization") {
-    xaxisNullExcludeCondition['$Organization.organization$'] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Organization.organization$"] = {
+      [Op.ne]: null,
+    };
   } else {
     xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
   }
@@ -8244,7 +8281,10 @@ async function generateProgressActivityPerformanceDataForSave(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("assignedUser.masterUserID"), "assignedUserId"]);
+    attributes.push([
+      Sequelize.col("assignedUser.masterUserID"),
+      "assignedUserId",
+    ]);
   } else if (xaxis === "creatorstatus") {
     includeModels.push({
       model: MasterUser,
@@ -8316,10 +8356,7 @@ async function generateProgressActivityPerformanceDataForSave(
         required: false,
       });
       groupBy.push("Deal.personId");
-      attributes.push([
-        Sequelize.col("Person.contactPerson"),
-        "segmentValue",
-      ]);
+      attributes.push([Sequelize.col("Person.contactPerson"), "segmentValue"]);
     } else if (segmentedBy === "organization") {
       includeModels.push({
         model: Organization,
@@ -8356,10 +8393,7 @@ async function generateProgressActivityPerformanceDataForSave(
       groupBy.push("stageData.stageName");
     } else {
       groupBy.push(`Deal.${segmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Deal.${segmentedBy}`),
-        "segmentValue",
-      ]);
+      attributes.push([Sequelize.col(`Deal.${segmentedBy}`), "segmentValue"]);
     }
   }
 
@@ -12309,13 +12343,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       type,
       xaxis,
       yaxis,
-      pipelineStages = [
-        "qualified",
-        "contract made",
-        "proposal made",
-        "negotiation started",
-        "won",
-      ],
+      pipelineId, // Required field for pipeline selection
       filters,
       page = 1,
       limit = 8,
@@ -12324,39 +12352,87 @@ exports.createFunnelDealConversionReport = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Define available options
-    const xaxisArray = [
-      "qualified",
-      "contract made",
-      "proposal made",
-      "negotiation started",
+    // Validate required fields
+    if (!pipelineId) {
+      return res.status(400).json({
+        success: false,
+        message: "Pipeline ID is required",
+      });
+    }
+
+    if (!xaxis || !yaxis) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "X-axis and Y-axis are required for Deal Funnel Conversion reports",
+      });
+    }
+
+    // Get pipeline stages based on pipelineId using Pipeline model
+    const pipeline = await Pipeline.findByPk(pipelineId, {
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+    });
+
+    if (!pipeline) {
+      return res.status(404).json({
+        success: false,
+        message: "Pipeline not found",
+      });
+    }
+
+    // Extract stage names and IDs from pipeline stages
+    const pipelineStages = pipeline.stages.map((stage) => ({
+      stageId: stage.stageId,
+      stageName: stage.stageName,
+      stageOrder: stage.stageOrder,
+    }));
+
+    // Add 'won' stage at the end
+    const allStages = [
+      ...pipelineStages.map((stage) => stage.stageName),
       "won",
     ];
+
+    // Validate xaxis selections are within pipeline stages
+    const selectedXaxis = Array.isArray(xaxis) ? xaxis : [xaxis];
+    const invalidStages = selectedXaxis.filter(
+      (stage) => !allStages.includes(stage)
+    );
+
+    if (invalidStages.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid stages selected: ${invalidStages.join(", ")}`,
+      });
+    }
+
+    // Define available options based on pipeline
+    const xaxisArray = allStages;
     const yaxisArray = ["no of deals", "proposalValue", "value"];
 
-    // For Funnel Conversion reports, generate the data
     let reportData = null;
     let paginationInfo = null;
+    let reportConfig = null;
 
-    if ((entity && type && !reportId) || (entity && type && reportId)) {
+    if ((entity && type && !reportId)) {
       if (entity === "Deal" && type === "FunnelConversion") {
-        // Validate required fields
-        if (!xaxis || !yaxis) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "X-axis and Y-axis are required for Deal Funnel Conversion reports",
-          });
-        }
-
         try {
           // Generate data with pagination
           const result = await generateFunnelConversionData(
             ownerId,
             role,
-            xaxis,
+            selectedXaxis, // Pass selected xaxis stages
             yaxis,
-            pipelineStages,
+            pipelineId,
+            pipelineStages, // Pass pipeline stages with IDs
             filters,
             page,
             limit
@@ -12368,9 +12444,10 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           reportConfig = {
             entity,
             type,
-            xaxis,
+            xaxis: selectedXaxis,
             yaxis,
-            pipelineStages,
+            pipelineId,
+            pipelineName: pipeline.pipelineName,
             filters: filters || {},
           };
         } catch (error) {
@@ -12383,7 +12460,96 @@ exports.createFunnelDealConversionReport = async (req, res) => {
         }
       }
     }
+     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+      const existingReports = await Report.findOne({
+        where: { reportId },
+      });
 
+      const {
+        entity: existingentity,
+        type: existingtype,
+        config: configString,
+        graphtype: existinggraphtype,
+        colors: existingcolors,
+      } = existingReports.dataValues;
+
+      const colors = JSON.parse(existingcolors);
+      // Parse the config JSON string
+      const config = JSON.parse(configString);
+      const {
+        xaxis: existingxaxis,
+        yaxis: existingyaxis,
+        durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
+        filters: existingfilters,
+      } = config;
+
+      if (existingentity === "Deal" && existingtype === "Performance") {
+        // Validate required fields for performance reports
+        if (!existingxaxis || !existingyaxis) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "X-axis and Y-axis are required for Deal Performance reports",
+          });
+        }
+
+        try {
+          // Generate data with pagination
+          const result = await generateExistingDealPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingDurationUnit,
+            existingSegmentedBy,
+            existingfilters,
+            page,
+            limit
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            durationUnit: existingDurationUnit,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors,
+            reportData,
+          };
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
+        } catch (error) {
+          console.error("Error generating deal performance data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal performance data",
+            error: error.message,
+          });
+        }
+      }
+    }
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
@@ -12391,7 +12557,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
-        xaxis: xaxisArray,
+        xaxis: xaxisArray, // All stages for the selected pipeline
         yaxis: yaxisArray,
         pipelineStages: xaxisArray,
       },
@@ -12410,20 +12576,34 @@ exports.createFunnelDealConversionReport = async (req, res) => {
 async function generateFunnelConversionData(
   ownerId,
   role,
-  xaxis,
+  xaxis, // Selected xaxis stages (array)
   yaxis,
-  pipelineStages,
+  pipelineId,
+  pipelineStages, // Pipeline stages with IDs and names
   filters,
   page = 1,
   limit = 8
 ) {
-  // Base where condition
+  // Create stage name to ID mapping
+  const stageNameToId = {};
+  pipelineStages.forEach((stage) => {
+    stageNameToId[stage.stageName] = stage.stageId;
+  });
+
+  // Base where condition with pipelineId
   const baseWhereConditions = [
     {
-      pipeline: "climate change",
+      pipelineId: pipelineId,
       [Op.or]: [
-        { pipelineStage: { [Op.in]: pipelineStages } },
-        { status: { [Op.in]: pipelineStages.includes("won") ? ["won"] : [] } },
+        {
+          stageId: {
+            [Op.in]: xaxis
+              .filter((stage) => stage !== "won")
+              .map((stage) => stageNameToId[stage])
+              .filter((id) => id !== undefined),
+          },
+        },
+        { status: { [Op.in]: xaxis.includes("won") ? ["won"] : [] } },
       ],
     },
   ];
@@ -12474,11 +12654,21 @@ async function generateFunnelConversionData(
       ? { [Op.and]: baseWhereConditions }
       : baseWhereConditions[0];
 
-  // Get data for each pipeline stage
+  // Get data for each selected pipeline stage
   const stageData = {};
   const conversionRates = {};
 
-  for (const stage of pipelineStages) {
+  // Include PipelineStage for better querying
+  const includeOptions = [
+    {
+      model: PipelineStage,
+      as: "stageData",
+      attributes: ["stageId", "stageName", "stageOrder"],
+      required: false,
+    },
+  ];
+
+  for (const stage of xaxis) {
     let whereCondition;
 
     if (stage === "won") {
@@ -12487,9 +12677,10 @@ async function generateFunnelConversionData(
         status: "won",
       };
     } else {
+      const stageId = stageNameToId[stage];
       whereCondition = {
         ...baseWhere,
-        pipelineStage: stage,
+        stageId: stageId,
       };
     }
 
@@ -12505,11 +12696,18 @@ async function generateFunnelConversionData(
       attributes = [[Sequelize.fn("SUM", Sequelize.col("value")), "total"]];
     }
 
-    const result = await Deal.findAll({
+    const queryOptions = {
       where: whereCondition,
       attributes: attributes,
       raw: true,
-    });
+    };
+
+    // Only include stageData for non-won stages
+    if (stage !== "won") {
+      queryOptions.include = includeOptions;
+    }
+
+    const result = await Deal.findAll(queryOptions);
 
     const data = result[0] || { count: 0, total: 0 };
 
@@ -12520,45 +12718,48 @@ async function generateFunnelConversionData(
     }
   }
 
-  // Calculate conversion rates between stages based on selected yaxis
-  const stages = [
-    "qualified",
-    "contract made",
-    "proposal made",
-    "negotiation started",
+  // Calculate conversion rates between selected stages
+  // We need to maintain the order of stages as they appear in the pipeline
+  const allStageNames = [
+    ...pipelineStages.map((stage) => stage.stageName),
     "won",
   ];
+  const orderedSelectedStages = allStageNames.filter((stage) =>
+    xaxis.includes(stage)
+  );
 
-  for (let i = 0; i < stages.length - 1; i++) {
-    const currentStage = stages[i];
-    const nextStage = stages[i + 1];
+  for (let i = 0; i < orderedSelectedStages.length - 1; i++) {
+    const currentStage = orderedSelectedStages[i];
+    const nextStage = orderedSelectedStages[i + 1];
 
-    if (
-      pipelineStages.includes(currentStage) &&
-      pipelineStages.includes(nextStage)
-    ) {
-      const currentValue = stageData[currentStage];
-      const nextValue = stageData[nextStage];
+    const currentValue = stageData[currentStage];
+    const nextValue = stageData[nextStage];
 
-      // Calculate conversion rate based on the selected yaxis
-      if (yaxis === "no of deals") {
-        // For count-based conversion (next stage count / current stage count)
-        conversionRates[`${currentStage}_to_${nextStage}`] =
-          currentValue > 0 ? Math.round((nextValue / currentValue) * 100) : 0;
-      } else {
-        // For value-based conversion (next stage value / current stage value)
-        conversionRates[`${currentStage}_to_${nextStage}`] =
-          currentValue > 0 ? Math.round((nextValue / currentValue) * 100) : 0;
-      }
+    // Calculate conversion rate based on the selected yaxis
+    if (yaxis === "no of deals") {
+      // For count-based conversion (next stage count / current stage count)
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
+    } else {
+      // For value-based conversion (next stage value / current stage value)
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
     }
   }
 
   // Format the response based on yaxis selection
   let formattedData = [];
 
-  for (const stage of pipelineStages) {
+  for (const stage of orderedSelectedStages) {
     if (stageData[stage] !== undefined) {
-      const stageObj = { stage: stage };
+      const stageObj = {
+        stage: stage,
+        stageId: stage === "won" ? null : stageNameToId[stage],
+        stageOrder:
+          stage === "won"
+            ? pipelineStages.length + 1
+            : pipelineStages.find((s) => s.stageName === stage)?.stageOrder,
+      };
 
       if (yaxis === "no of deals") {
         stageObj.noOfDeals = stageData[stage];
@@ -12572,8 +12773,11 @@ async function generateFunnelConversionData(
     }
   }
 
+  // Sort by stage order
+  formattedData.sort((a, b) => a.stageOrder - b.stageOrder);
+
   // Get total count for pagination (total distinct stages)
-  const totalCount = pipelineStages.length;
+  const totalCount = formattedData.length;
   const totalPages = Math.ceil(totalCount / limit);
 
   // Apply pagination
@@ -12585,6 +12789,11 @@ async function generateFunnelConversionData(
     data: {
       stages: paginatedData,
       conversionRates: conversionRates,
+      pipelineId: pipelineId,
+      totalDeals: Object.values(stageData).reduce(
+        (sum, value) => sum + value,
+        0
+      ),
     },
     pagination: {
       currentPage: page,
@@ -12596,3 +12805,150 @@ async function generateFunnelConversionData(
     },
   };
 }
+
+// Helper function to get condition object
+function getConditionObject(column, operator, value, includeModels) {
+  // Implement your filter condition logic here
+  // This is a simplified version - adjust based on your actual filter system
+  switch (operator) {
+    case "equals":
+      return { [column]: value };
+    case "contains":
+      return { [column]: { [Op.like]: `%${value}%` } };
+    case "greaterThan":
+      return { [column]: { [Op.gt]: value } };
+    case "lessThan":
+      return { [column]: { [Op.lt]: value } };
+    case "in":
+      return { [column]: { [Op.in]: Array.isArray(value) ? value : [value] } };
+    default:
+      return { [column]: value };
+  }
+}
+
+// Additional helper function to get default pipeline
+exports.getDefaultPipeline = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Get the first pipeline as default
+    let whereCondition = { isActive: true };
+    if (role !== "admin") {
+      whereCondition.masterUserID = ownerId;
+    }
+
+    const defaultPipeline = await Pipeline.findOne({
+      where: whereCondition,
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+      order: [
+        ["isDefault", "DESC"],
+        ["createdAt", "ASC"],
+      ],
+    });
+
+    if (!defaultPipeline) {
+      return res.status(404).json({
+        success: false,
+        message: "No pipeline found",
+      });
+    }
+
+    const pipelineStages = defaultPipeline.stages.map(
+      (stage) => stage.stageName
+    );
+    const allStages = [...pipelineStages, "won"];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        pipelineId: defaultPipeline.pipelineId,
+        pipelineName: defaultPipeline.pipelineName,
+        availableStages: allStages,
+        stages: defaultPipeline.stages.map((stage) => ({
+          stageId: stage.stageId,
+          stageName: stage.stageName,
+          stageOrder: stage.stageOrder,
+          probability: stage.probability,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Error getting default pipeline:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get default pipeline",
+      error: error.message,
+    });
+  }
+};
+
+// Get all pipelines for dropdown selection
+exports.getAllPipelines = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    let whereCondition = { isActive: true };
+    if (role !== "admin") {
+      whereCondition.masterUserID = ownerId;
+    }
+
+    const pipelines = await Pipeline.findAll({
+      where: whereCondition,
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+      order: [
+        ["isDefault", "DESC"],
+        ["displayOrder", "ASC"],
+        ["pipelineName", "ASC"],
+      ],
+    });
+
+    const formattedPipelines = pipelines.map((pipeline) => ({
+      pipelineId: pipeline.pipelineId,
+      pipelineName: pipeline.pipelineName,
+      description: pipeline.description,
+      isDefault: pipeline.isDefault,
+      color: pipeline.color,
+      stages: pipeline.stages.map((stage) => ({
+        stageId: stage.stageId,
+        stageName: stage.stageName,
+        stageOrder: stage.stageOrder,
+        probability: stage.probability,
+        color: stage.color,
+      })),
+      availableStages: [
+        ...pipeline.stages.map((stage) => stage.stageName),
+        "won",
+      ],
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: formattedPipelines,
+    });
+  } catch (error) {
+    console.error("Error getting all pipelines:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get pipelines",
+      error: error.message,
+    });
+  }
+};
