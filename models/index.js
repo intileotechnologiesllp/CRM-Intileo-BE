@@ -22,6 +22,10 @@ const LeadOrganization = require("./leads/leadOrganizationModel");
 const DeviceActivity = require("./deviceActivity/deviceActivity");
 const permissionSet = require("./permissionsetModel");
 const Label = require("./admin/masters/labelModel");
+const ContactSyncConfig = require("./contact/contactSyncConfigModel");
+const ContactSyncHistory = require("./contact/contactSyncHistoryModel");
+const ContactChangeLog = require("./contact/contactChangeLogModel");
+const ContactSyncMapping = require("./contact/contactSyncMappingModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -220,6 +224,46 @@ MasterUser.belongsTo(permissionSet, {
   as: "globalPermissionSet",
 });
 
+// Contact Sync Associations
+ContactSyncConfig.hasMany(ContactSyncHistory, {
+  foreignKey: "syncConfigId",
+  as: "SyncHistory",
+  onDelete: "CASCADE",
+});
+ContactSyncHistory.belongsTo(ContactSyncConfig, {
+  foreignKey: "syncConfigId",
+  as: "SyncConfig",
+});
+
+ContactSyncHistory.hasMany(ContactChangeLog, {
+  foreignKey: "syncHistoryId",
+  as: "ChangeLogs",
+  onDelete: "CASCADE",
+});
+ContactChangeLog.belongsTo(ContactSyncHistory, {
+  foreignKey: "syncHistoryId",
+  as: "SyncHistory",
+});
+
+ContactSyncConfig.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  targetKey: "masterUserID",
+  as: "MasterUser",
+});
+MasterUser.hasMany(ContactSyncConfig, {
+  foreignKey: "masterUserID",
+  as: "ContactSyncConfigs",
+});
+
+ContactSyncMapping.belongsTo(Person, {
+  foreignKey: "personId",
+  as: "Person",
+});
+Person.hasOne(ContactSyncMapping, {
+  foreignKey: "personId",
+  as: "GoogleMapping",
+});
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -242,4 +286,8 @@ module.exports = {
   DeviceActivity,
   permissionSet,
   Label,
+  ContactSyncConfig,
+  ContactSyncHistory,
+  ContactChangeLog,
+  ContactSyncMapping,
 };
