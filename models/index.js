@@ -135,6 +135,8 @@ MasterUser.hasMany(CustomField, {
   as: "CreatedCustomFields",
 });
 
+Email.belongsTo(MasterUser, { foreignKey: "masterUserID", as: "MasterUser" });
+
 // Email-Deal associations
 Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
 Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
