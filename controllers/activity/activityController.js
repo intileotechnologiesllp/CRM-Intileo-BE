@@ -3361,3 +3361,304 @@ exports.getActivityFilterFields = async (req, res) => {
   }
 };
 
+/**
+ * Get connected person and organization data by leadId or dealId
+ * GET /api/activities/connected-data
+ * Query params: leadId OR dealId
+ * 
+ * Returns:
+ * - Lead/Deal title and details
+ * - All connected persons
+ * - All connected organizations
+ */
+exports.getConnectedData = async (req, res) => {
+  try {
+    const { leadId, dealId } = req.query;
+    const masterUserID = req.adminId;
+
+    console.log(`🔍 [CONNECTED-DATA] Request for user ${masterUserID}:`, { leadId, dealId });
+
+    // Validate that at least one ID is provided
+    if (!leadId && !dealId) {
+      return res.status(400).json({
+        message: "Either leadId or dealId must be provided"
+      });
+    }
+
+    let responseData = {
+      type: null,
+      entityId: null,
+      title: null,
+      value: null,
+      status: null,
+      persons: [],
+      organizations: [],
+      entityDetails: null
+    };
+
+    // If leadId is provided, fetch lead data
+    if (leadId) {
+      console.log(`🔍 [CONNECTED-DATA] Fetching lead ${leadId} data...`);
+      
+      const lead = await Lead.findOne({
+        where: { 
+          leadId: leadId,
+          masterUserID: masterUserID 
+        },
+        attributes: [
+          'leadId', 
+          'title', 
+          'value', 
+          'status', 
+          'personId', 
+          'leadOrganizationId',
+          'contactPerson',
+          'organization',
+          'email',
+          'phone',
+          'sourceChannel',
+          'createdAt',
+          'updatedAt'
+        ],
+        include: [
+          {
+            model: Person,
+            as: "LeadPerson",
+            required: false,
+            attributes: [
+              'personId',
+              'contactPerson',
+              'email',
+              'phone',
+              'jobTitle',
+              'leadOrganizationId',
+              'createdAt'
+            ]
+          },
+          {
+            model: Organizations,
+            as: "LeadOrganization",
+            required: false,
+            attributes: [
+              'leadOrganizationId',
+              'organization',
+              'address',
+              'organizationLabels',
+              'createdAt'
+            ]
+          }
+        ]
+      });
+
+      if (!lead) {
+        return res.status(404).json({
+          message: "Lead not found or access denied"
+        });
+      }
+
+      console.log(`✅ [CONNECTED-DATA] Lead found:`, {
+        leadId: lead.leadId,
+        title: lead.title,
+        hasPerson: !!lead.LeadPerson,
+        hasOrg: !!lead.LeadOrganization
+      });
+
+      // Build response data
+      responseData.type = 'lead';
+      responseData.entityId = lead.leadId;
+      responseData.title = lead.title;
+      responseData.value = lead.value;
+      responseData.status = lead.status;
+      responseData.entityDetails = {
+        leadId: lead.leadId,
+        title: lead.title,
+        value: lead.value,
+        status: lead.status,
+        contactPerson: lead.contactPerson,
+        organization: lead.organization,
+        email: lead.email,
+        phone: lead.phone,
+        sourceChannel: lead.sourceChannel,
+        createdAt: lead.createdAt,
+        updatedAt: lead.updatedAt
+      };
+
+      // Add person data if exists
+      if (lead.LeadPerson) {
+        responseData.persons.push({
+          personId: lead.LeadPerson.personId,
+          contactPerson: lead.LeadPerson.contactPerson,
+          email: lead.LeadPerson.email,
+          phone: lead.LeadPerson.phone,
+          jobTitle: lead.LeadPerson.jobTitle,
+          leadOrganizationId: lead.LeadPerson.leadOrganizationId,
+          createdAt: lead.LeadPerson.createdAt,
+          isPrimary: true
+        });
+      }
+
+      // Add organization data if exists
+      if (lead.LeadOrganization) {
+        responseData.organizations.push({
+          leadOrganizationId: lead.LeadOrganization.leadOrganizationId,
+          organization: lead.LeadOrganization.organization,
+          address: lead.LeadOrganization.address,
+          organizationLabels: lead.LeadOrganization.organizationLabels,
+          createdAt: lead.LeadOrganization.createdAt,
+          isPrimary: true
+        });
+      }
+
+      console.log(`📊 [CONNECTED-DATA] Lead data compiled:`, {
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      });
+    }
+
+    // If dealId is provided, fetch deal data
+    if (dealId) {
+      console.log(`🔍 [CONNECTED-DATA] Fetching deal ${dealId} data...`);
+      
+      const deal = await Deal.findOne({
+        where: { 
+          dealId: dealId,
+          masterUserID: masterUserID 
+        },
+        attributes: [
+          'dealId',
+          'title',
+          'value',
+          'status',
+          'personId',
+          'leadOrganizationId',
+          'contactPerson',
+          'organization',
+          'email',
+          'phone',
+          'pipeline',
+          'pipelineStage',
+          'expectedCloseDate',
+          'createdAt',
+          'updatedAt'
+        ],
+        include: [
+          {
+            model: Person,
+            as: "Person",
+            required: false,
+            attributes: [
+              'personId',
+              'contactPerson',
+              'email',
+              'phone',
+              'jobTitle',
+              'leadOrganizationId',
+              'createdAt'
+            ]
+          },
+          {
+            model: Organizations,
+            as: "Organization",
+            required: false,
+            attributes: [
+              'leadOrganizationId',
+              'organization',
+              'address',
+              'organizationLabels',
+              'createdAt'
+            ]
+          }
+        ]
+      });
+
+      if (!deal) {
+        return res.status(404).json({
+          message: "Deal not found or access denied"
+        });
+      }
+
+      console.log(`✅ [CONNECTED-DATA] Deal found:`, {
+        dealId: deal.dealId,
+        title: deal.title,
+        hasPerson: !!deal.Person,
+        hasOrg: !!deal.Organization
+      });
+
+      // Build response data
+      responseData.type = 'deal';
+      responseData.entityId = deal.dealId;
+      responseData.title = deal.title;
+      responseData.value = deal.value;
+      responseData.status = deal.status;
+      responseData.entityDetails = {
+        dealId: deal.dealId,
+        title: deal.title,
+        value: deal.value,
+        status: deal.status,
+        contactPerson: deal.contactPerson,
+        organization: deal.organization,
+        email: deal.email,
+        phone: deal.phone,
+        pipeline: deal.pipeline,
+        pipelineStage: deal.pipelineStage,
+        expectedCloseDate: deal.expectedCloseDate,
+        createdAt: deal.createdAt,
+        updatedAt: deal.updatedAt
+      };
+
+      // Add person data if exists
+      if (deal.Person) {
+        responseData.persons.push({
+          personId: deal.Person.personId,
+          contactPerson: deal.Person.contactPerson,
+          email: deal.Person.email,
+          phone: deal.Person.phone,
+          jobTitle: deal.Person.jobTitle,
+          leadOrganizationId: deal.Person.leadOrganizationId,
+          createdAt: deal.Person.createdAt,
+          isPrimary: true
+        });
+      }
+
+      // Add organization data if exists
+      if (deal.Organization) {
+        responseData.organizations.push({
+          leadOrganizationId: deal.Organization.leadOrganizationId,
+          organization: deal.Organization.organization,
+          address: deal.Organization.address,
+          organizationLabels: deal.Organization.organizationLabels,
+          createdAt: deal.Organization.createdAt,
+          isPrimary: true
+        });
+      }
+
+      console.log(`📊 [CONNECTED-DATA] Deal data compiled:`, {
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      });
+    }
+
+    // Return the response
+    console.log(`✅ [CONNECTED-DATA] Sending response for ${responseData.type} ${responseData.entityId}`);
+    
+    res.status(200).json({
+      message: "Connected data fetched successfully",
+      data: responseData,
+      summary: {
+        type: responseData.type,
+        entityId: responseData.entityId,
+        title: responseData.title,
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ [CONNECTED-DATA] Error:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
