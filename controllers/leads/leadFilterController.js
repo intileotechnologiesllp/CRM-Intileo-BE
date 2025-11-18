@@ -8,6 +8,7 @@ const historyLogger = require("../../utils/historyLogger").logHistory; // Import
 const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
 const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import your LeadDetails model
 const { Person } = require("../../models");
+const Organization = require("../../models/leads/leadOrganizationModel");
 exports.saveLeadFilter = async (req, res) => {
   const {
     filterName,
@@ -527,7 +528,7 @@ exports.getAllLeadContactPersons = async (req, res) => {
 
     const { rows, count } = await Person.findAndCountAll({
       where,
-      attributes: ["contactPerson"],
+      attributes: ["contactPerson",],
       limit: parseInt(limit),
       offset,
       distinct: true,
