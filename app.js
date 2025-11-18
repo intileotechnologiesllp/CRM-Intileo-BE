@@ -55,6 +55,7 @@ const activityTypeRoutes = require('./routes/activity/activityTypeRoutes.js'); /
 const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js"); // Import user favorites routes
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
+const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
@@ -133,6 +134,7 @@ app.use("/api/favorites", userFavoritesRoutes); // Register user favorites route
 app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
+app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
