@@ -55,6 +55,13 @@ router.get(
   activityController.getActivityFilterFields
 );
 
+// Get connected person and organization data by leadId or dealId
+router.get(
+  "/connected-data",
+  verifyToken,
+  activityController.getConnectedData
+);
+
 // Bulk activity operations
 router.post("/bulk-edit", verifyToken, activityController.bulkEditActivities);
 router.post(
