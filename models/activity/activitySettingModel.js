@@ -44,6 +44,31 @@ const ActivitySetting = sequelize.define('ActivitySetting', {
     type: DataTypes.BOOLEAN,
     allowNull: false,
     defaultValue: true,
+  },
+  // Deal won popup settings
+  showDealWonPopup: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    allowNull: false,
+    comment: 'Show schedule activity popup after marking deal as won',
+  },
+  dealWonActivityType: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'Task',
+    comment: 'Default activity type for deal won popup',
+  },
+  dealWonFollowUpTime: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'in 3 months',
+    comment: 'Default follow-up time for deal won popup',
+  },
+  allowUserDisableDealWon: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+    comment: 'Allow users to disable deal won popup',
   }
 }, {
   tableName: 'activity_settings',
