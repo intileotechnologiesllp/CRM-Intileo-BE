@@ -218,6 +218,20 @@ class GoogleContactsService {
         addresses.find((a) => a.metadata?.primary) || addresses[0];
       const primaryOrg = organizations.find((o) => o.metadata?.primary) || organizations[0];
 
+      // Build emails array with all emails from Google contact
+      const emailsArray = emails.map(emailObj => ({
+        email: emailObj.value,
+        type: emailObj.type || 'Work',
+        isPrimary: emailObj.metadata?.primary || false
+      }));
+
+      // Build phones array with all phones from Google contact
+      const phonesArray = phones.map(phoneObj => ({
+        phone: phoneObj.value,
+        type: phoneObj.type || 'Work',
+        isPrimary: phoneObj.metadata?.primary || false
+      }));
+
       return {
         googleContactId:
           metadata.sources?.[0]?.id || googleContact.resourceName,
@@ -228,6 +242,8 @@ class GoogleContactsService {
         lastName: primaryName?.familyName || "",
         email: primaryEmail?.value || "",
         phone: primaryPhone?.value || "",
+        emails: emailsArray, // Array of all emails
+        phones: phonesArray, // Array of all phones
         postalAddress: primaryAddress
           ? `${primaryAddress.streetAddress || ""}, ${
               primaryAddress.city || ""

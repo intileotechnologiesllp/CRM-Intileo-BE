@@ -20,11 +20,23 @@ router.get("/config", verifyToken, contactSyncController.getSyncConfig);
 router.post(
   "/config",
   verifyToken,
+  (req, res, next) => {
+    console.log("🔵 [ROUTE] POST /api/contact-sync/config hit!");
+    console.log("🔵 [ROUTE] Request body:", req.body);
+    console.log("🔵 [ROUTE] Admin ID:", req.adminId);
+    next();
+  },
   contactSyncController.createOrUpdateSyncConfig
 );
 router.put(
   "/config",
   verifyToken,
+  (req, res, next) => {
+    console.log("🟣 [ROUTE] PUT /api/contact-sync/config hit!");
+    console.log("🟣 [ROUTE] Request body:", req.body);
+    console.log("🟣 [ROUTE] Admin ID:", req.adminId);
+    next();
+  },
   contactSyncController.createOrUpdateSyncConfig
 );
 router.delete(

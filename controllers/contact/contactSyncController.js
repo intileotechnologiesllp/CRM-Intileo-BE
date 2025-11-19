@@ -228,27 +228,48 @@ exports.createOrUpdateSyncConfig = async (req, res) => {
       fieldMapping,
     } = req.body;
 
+    console.log("📝 [UPDATE CONFIG] Received request body:", req.body);
+    console.log("👤 [UPDATE CONFIG] Master User ID:", masterUserID);
+
     // Find existing config
     let syncConfig = await ContactSyncConfig.findOne({
       where: { masterUserID, provider: "google" },
     });
 
     if (syncConfig) {
-      // Update existing
-      await syncConfig.update({
-        syncMode: syncMode || syncConfig.syncMode,
-        syncDirection: syncDirection || syncConfig.syncDirection,
-        autoSyncEnabled:
-          autoSyncEnabled !== undefined
-            ? autoSyncEnabled
-            : syncConfig.autoSyncEnabled,
-        syncFrequency: syncFrequency || syncConfig.syncFrequency,
-        conflictResolution:
-          conflictResolution || syncConfig.conflictResolution,
-        deletionHandling: deletionHandling || syncConfig.deletionHandling,
-        fieldMapping: fieldMapping || syncConfig.fieldMapping,
+      console.log("🔍 [UPDATE CONFIG] Current config BEFORE update:", {
+        syncMode: syncConfig.syncMode,
+        syncDirection: syncConfig.syncDirection,
+        updatedAt: syncConfig.updatedAt
+      });
+
+      // Prepare update data - only update fields that are provided
+      const updateData = {};
+      
+      if (syncMode !== undefined) updateData.syncMode = syncMode;
+      if (syncDirection !== undefined) updateData.syncDirection = syncDirection;
+      if (autoSyncEnabled !== undefined) updateData.autoSyncEnabled = autoSyncEnabled;
+      if (syncFrequency !== undefined) updateData.syncFrequency = syncFrequency;
+      if (conflictResolution !== undefined) updateData.conflictResolution = conflictResolution;
+      if (deletionHandling !== undefined) updateData.deletionHandling = deletionHandling;
+      if (fieldMapping !== undefined) updateData.fieldMapping = fieldMapping;
+
+      console.log("📦 [UPDATE CONFIG] Update data to apply:", updateData);
+
+      // Update existing config
+      const updateResult = await syncConfig.update(updateData);
+      console.log("✅ [UPDATE CONFIG] Update result:", updateResult ? "Success" : "Failed");
+
+      // Reload to get fresh data
+      await syncConfig.reload();
+      
+      console.log("🔄 [UPDATE CONFIG] Config AFTER reload:", {
+        syncMode: syncConfig.syncMode,
+        syncDirection: syncConfig.syncDirection,
+        updatedAt: syncConfig.updatedAt
       });
     } else {
+      console.log("❌ [UPDATE CONFIG] No config found for user:", masterUserID);
       return res.status(404).json({
         success: false,
         message:
@@ -256,13 +277,15 @@ exports.createOrUpdateSyncConfig = async (req, res) => {
       });
     }
 
+    console.log("📤 [UPDATE CONFIG] Sending response with syncConfig");
+
     res.status(200).json({
       success: true,
       message: "Sync configuration updated successfully",
       syncConfig,
     });
   } catch (error) {
-    console.error("Error updating sync config:", error);
+    console.error("❌ [UPDATE CONFIG] Error updating sync config:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update sync configuration",
