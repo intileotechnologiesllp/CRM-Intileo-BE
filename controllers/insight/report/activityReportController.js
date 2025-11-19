@@ -9,6 +9,8 @@ const Activity = require("../../../models/activity/activityModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
 const Email = require("../../../models/email/emailModel")
 const { Op, Sequelize } = require("sequelize");
+const { Pipeline } = require("../../../models");
+const { PipelineStage } = require("../../../models");
 const {
   getLeadConditionObject,
 } = require("../../../utils/conditionObject/lead");
@@ -1969,11 +1971,76 @@ exports.createActivityReportDrillDown = async (req, res) => {
       moduleId,
       isDate,
       dateType,
-      weekName
+      weekName,
+      pipelineId,
+      pipelineStage
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
 
+    // ==================================================================================
+    // NEW: Handle Deal Progress Drilldown (moduleId === 2) with stage breakdown
+    // ==================================================================================
+
+    // for Deal Progress use moduleId 8
+    if (moduleId == 8 || parseInt(moduleId) === 8) {
+      console.log('🎯 [createActivityReportDrillDown] Routing to Deal Progress Drilldown');
+      
+      const dealResult = await generateDealProgressDrillDownForActivity(
+        ownerId,
+        role,
+        filters,
+        fieldName,
+        fieldValue,
+        id,
+        pipelineId,
+        pipelineStage,
+        page,
+        limit
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Data generated successfully",
+        data: dealResult.data,
+        breakdown: dealResult.breakdown,
+        summary: dealResult.summary,
+        pagination: dealResult.pagination,
+      });
+    }
+
+    // ==================================================================================
+    // NEW: Handle Email Drilldown (moduleId === 8) with folder/user breakdown
+    // ==================================================================================
+// for Email Performance use moduleId 9
+
+    if (moduleId == 9 || parseInt(moduleId) === 9) {
+      console.log('📧 [createActivityReportDrillDown] Routing to Email Drilldown');
+      
+      const emailResult = await generateEmailDrillDownForActivity(
+        ownerId,
+        role,
+        filters,
+        fieldName,
+        fieldValue,
+        id,
+        page,
+        limit
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Email data generated successfully",
+        data: emailResult.data,
+        breakdown: emailResult.breakdown,
+        summary: emailResult.summary,
+        pagination: emailResult.pagination,
+      });
+    }
+
+    // ==================================================================================
+    // EXISTING: Handle all other module types (Activity, Lead, Person, etc.)
+    // ==================================================================================
     const result = await generateActivityPerformanceDataForDrillDown(
       ownerId,
       role,
@@ -2330,6 +2397,629 @@ async function generateActivityPerformanceDataForDrillDown(
     data: dealConvertion,
     totalValue: formattedResults?.length,
   };
+}
+
+// Helper function to generate deal progress drilldown data with stage breakdown for Activity Report API
+async function generateDealProgressDrillDownForActivity(
+  ownerId,
+  role,
+  filters,
+  fieldName,
+  fieldValue,
+  id,
+  pipelineId,
+  pipelineStage,
+  page = 1,
+  limit = 50
+) {
+  const baseWhere = {};
+
+  console.log('📊 [generateDealProgressDrillDownForActivity] Starting data generation');
+
+  // Role-based filtering
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Pipeline filtering
+  if (pipelineId) {
+    baseWhere.pipelineId = pipelineId;
+  } else {
+    baseWhere.pipelineId = { [Op.ne]: null };
+  }
+
+  // Ensure valid stage data
+  baseWhere.stageId = { [Op.ne]: null };
+
+  // Apply report filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const conditions = validConditions.map((cond) => {
+        return getDealConditionObject(cond.column, cond.operator, cond.value, []);
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (filters.logicalOperators[i - 1] || "AND").toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+      Object.assign(baseWhere, combinedCondition);
+    }
+  }
+
+  // Apply field-specific filtering based on clicked dimension
+  console.log('🎯 [generateDealProgressDrillDownForActivity] Applying field filter:', { fieldName, fieldValue, id });
+
+  let includeModels = [];
+
+  // Add PipelineStage join for stage names
+  includeModels.push({
+    model: PipelineStage,
+    as: "stageData",
+    attributes: ["stageName", "stageOrder"],
+    required: true,
+    where: {
+      stageName: { [Op.ne]: null }
+    }
+  });
+
+  // Apply field-specific WHERE conditions based on fieldName
+  if (fieldName === "creator") {
+    // Filter by creator (masterUserID)
+    if (id) {
+      baseWhere.masterUserID = id;
+    } else if (fieldValue) {
+      // Need to join with MasterUser to filter by name
+      includeModels.push({
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: true,
+        where: {
+          name: fieldValue
+        }
+      });
+    }
+  } else if (fieldName === "creatorstatus") {
+    // Filter by creator status
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email", "creatorstatus"],
+      required: true,
+      where: {
+        creatorstatus: fieldValue
+      }
+    });
+  } else if (fieldName === "contactPerson") {
+    // Filter by person ID
+    if (id) {
+      baseWhere.personId = id;
+    }
+    includeModels.push({
+      model: Person,
+      as: "Person",
+      attributes: ["personId", "contactPerson", "email", "phone"],
+      required: false
+    });
+  } else if (fieldName === "organization") {
+    // Filter by organization ID
+    if (id) {
+      baseWhere.leadOrganizationId = id;
+    }
+    includeModels.push({
+      model: Organization,
+      as: "Organization",
+      attributes: ["leadOrganizationId", "organization", "address"],
+      required: false
+    });
+  } else if (fieldName === "pipelineStage") {
+    // Filter by specific pipeline stage using stageData
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: fieldValue,
+            stageName: { [Op.ne]: null }
+          }
+        };
+      }
+      return inc;
+    });
+  } else {
+    // Regular Deal column filtering (serviceType, status, etc.)
+    if (fieldValue) {
+      baseWhere[fieldName] = fieldValue;
+    }
+  }
+
+  // If specific pipeline stage is provided for breakdown drilldown
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDownForActivity] Filtering by specific stage:', pipelineStage);
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: pipelineStage
+          }
+        };
+      }
+      return inc;
+    });
+  }
+
+  // Add Owner include if not already added
+  const hasOwnerInclude = includeModels.some(inc => inc.as === "Owner");
+  if (!hasOwnerInclude) {
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email"],
+      required: false
+    });
+  }
+
+  // Add Pipeline include for pipeline name
+  includeModels.push({
+    model: Pipeline,
+    as: "pipelineData",
+    attributes: ["pipelineId", "pipelineName"],
+    required: false
+  });
+
+  console.log('🔍 [generateDealProgressDrillDownForActivity] Final WHERE conditions:', JSON.stringify(baseWhere, null, 2));
+
+  // ==================================================================================
+  // STEP 1: Fetch ALL deals for accurate stage breakdown COUNT calculation
+  // ==================================================================================
+  // CRITICAL: Fetch ALL deals first to calculate accurate stage counts
+  // This is similar to how createDealProgressReport calculates the breakdown
+  const allDealsForBreakdown = await Deal.findAll({
+    where: baseWhere,
+    include: includeModels,
+    order: [
+      ["stageData", "stageOrder", "ASC"],
+      ["createdAt", "DESC"]
+    ]
+    // NO LIMIT/OFFSET here - we need ALL deals for accurate COUNT calculation
+  });
+
+  console.log('📦 [generateDealProgressDrillDownForActivity] Total matching deals for breakdown:', allDealsForBreakdown.length);
+
+  // ==================================================================================
+  // STEP 2: Calculate pipeline stage breakdown with COUNT - LIKE createDealProgressReport
+  // ==================================================================================
+  // This creates the breakdown object: {"Proposal Made": 1, "Contact Made": 1}
+  const stageBreakdown = {};
+  let totalValue = 0;
+  let totalProposalValue = 0;
+
+  allDealsForBreakdown.forEach(deal => {
+    const stageName = deal.stageData?.stageName || "Unknown";
+    
+    if (stageName !== "Unknown") {
+      if (!stageBreakdown[stageName]) {
+        stageBreakdown[stageName] = {
+          count: 0,           // This is the COUNT(dealId) for this stage
+          totalValue: 0,
+          totalProposalValue: 0
+        };
+      }
+      
+      // Increment COUNT for this stage - KEY COUNT CALCULATION
+      stageBreakdown[stageName].count += 1;
+      stageBreakdown[stageName].totalValue += parseFloat(deal.value || 0);
+      stageBreakdown[stageName].totalProposalValue += parseFloat(deal.proposalValue || 0);
+      
+      totalValue += parseFloat(deal.value || 0);
+      totalProposalValue += parseFloat(deal.proposalValue || 0);
+    }
+  });
+
+  console.log('📊 [generateDealProgressDrillDownForActivity] Stage breakdown calculated:', stageBreakdown);
+
+  // ==================================================================================
+  // STEP 3: Now paginate for display (if needed for specific stage drilldown)
+  // ==================================================================================
+  let paginatedDeals = allDealsForBreakdown;
+  
+  // If drilling into specific pipeline stage, filter to that stage only
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDownForActivity] Filtering to specific stage:', pipelineStage);
+    paginatedDeals = allDealsForBreakdown.filter(
+      deal => deal.stageData?.stageName === pipelineStage
+    );
+  }
+
+  // Apply pagination to display data
+  const totalCount = paginatedDeals.length;
+  const offset = (page - 1) * limit;
+  const deals = paginatedDeals.slice(offset, offset + limit);
+
+  console.log('📦 [generateDealProgressDrillDownForActivity] Paginated deals:', deals.length, 'of', totalCount);
+
+  // Format deals for response
+  const formattedDeals = deals.map(deal => ({
+    dealId: deal.dealId,
+    title: deal.title,
+    value: deal.value,
+    proposalValue: deal.proposalValue,
+    currency: deal.currency,
+    status: deal.status,
+    pipeline: deal.pipelineData?.pipelineName || deal.pipeline,
+    pipelineId: deal.pipelineId,
+    pipelineStage: deal.stageData?.stageName || deal.pipelineStage,
+    stageOrder: deal.stageData?.stageOrder || 0,
+    stageId: deal.stageId,
+    contactPerson: deal.contactPerson,
+    organization: deal.organization,
+    serviceType: deal.serviceType,
+    sourceChannel: deal.sourceChannel,
+    sourceOrigin: deal.sourceOrgin,
+    expectedCloseDate: deal.expectedCloseDate,
+    createdAt: deal.createdAt,
+    updatedAt: deal.updatedAt,
+    Owner: deal.Owner ? {
+      id: deal.Owner.masterUserID,
+      name: deal.Owner.name,
+      email: deal.Owner.email
+    } : null,
+    Person: deal.Person ? {
+      personId: deal.Person.personId,
+      contactPerson: deal.Person.contactPerson,
+      email: deal.Person.email,
+      phone: deal.Person.phone
+    } : null,
+    Organization: deal.Organization ? {
+      leadOrganizationId: deal.Organization.leadOrganizationId,
+      organization: deal.Organization.organization,
+      address: deal.Organization.address
+    } : null
+  }));
+
+  // ==================================================================================
+  // STEP 5: Format stage breakdown for response - LIKE createDealProgressReport output
+  // ==================================================================================
+  // This creates the breakdown array similar to the parent report
+  // Example: [{"stage": "Proposal Made", "count": 1}, {"stage": "Contact Made", "count": 1}]
+  const formattedBreakdown = Object.entries(stageBreakdown).map(([stageName, data]) => ({
+    stage: stageName,
+    count: data.count,              // COUNT(dealId) for this stage
+    totalValue: parseFloat(data.totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(data.totalProposalValue.toFixed(2)),
+    percentage: ((data.count / allDealsForBreakdown.length) * 100).toFixed(2)
+  })).sort((a, b) => b.count - a.count);
+
+  // ==================================================================================
+  // STEP 6: Calculate summary statistics
+  // ==================================================================================
+  const summary = {
+    totalDeals: allDealsForBreakdown.length,     // Total COUNT from ALL deals
+    displayedDeals: deals.length,                 // Paginated count
+    totalValue: parseFloat(totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(totalProposalValue.toFixed(2)),
+    averageValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    averageProposalValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalProposalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    stagesCount: Object.keys(stageBreakdown).length,
+    fieldName: fieldName,
+    fieldValue: fieldValue,
+    pipelineStage: pipelineStage || null
+  };
+
+  console.log('✅ [generateDealProgressDrillDownForActivity] Summary:', summary);
+  console.log('✅ [generateDealProgressDrillDownForActivity] Breakdown:', formattedBreakdown);
+
+  return {
+    data: formattedDeals,
+    breakdown: formattedBreakdown,
+    summary: summary,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalCount / limit),
+      totalItems: totalCount,
+      itemsPerPage: parseInt(limit),
+      hasNextPage: page < Math.ceil(totalCount / limit),
+      hasPrevPage: page > 1
+    }
+  };
+}
+
+// Helper function to generate email drilldown data for Activity Report API
+async function generateEmailDrillDownForActivity(
+  ownerId,
+  role,
+  filters,
+  fieldName,
+  fieldValue,
+  id,
+  page = 1,
+  limit = 50
+) {
+  const baseWhere = {};
+
+  console.log('📧 [generateEmailDrillDownForActivity] Starting email drilldown generation');
+  console.log('📧 Field:', { fieldName, fieldValue, id });
+
+  // Role-based filtering
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Apply report filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const conditions = validConditions.map((cond) => {
+        return getEmailConditionObject(cond.column, cond.operator, cond.value);
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (filters.logicalOperators[i - 1] || "AND").toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+      Object.assign(baseWhere, combinedCondition);
+    }
+  }
+
+  // Apply field-specific filtering based on clicked dimension
+  console.log('🎯 [generateEmailDrillDownForActivity] Applying field filter:', { fieldName, fieldValue, id });
+
+  let includeModels = [];
+
+  // Add MasterUser join for user names
+  includeModels.push({
+    model: MasterUser,
+    as: "MasterUser",
+    attributes: ["masterUserID", "name", "email"],
+    required: false
+  });
+
+  // Folder mapping for friendly names
+  const folderMap = {
+    "Incoming Mails": "inbox",
+    "Outgoing Mails": "sent",
+    "Drafts": "drafts",
+    "Outbox": "outbox",
+    "Archive": "archive",
+    "Trash": "trash",
+    "inbox": "inbox",
+    "sent": "sent",
+    "drafts": "drafts",
+    "outbox": "outbox",
+    "archive": "archive",
+    "trash": "trash"
+  };
+
+  // Apply field-specific WHERE conditions based on fieldName
+  // IMPORTANT: Changed from if-else to independent if statements to support MULTIPLE filters
+  
+  // Filter by USER (masterUserID)
+  if (fieldName === "masterUserID" || fieldName === "User") {
+    if (id) {
+      baseWhere.masterUserID = id;
+    } else if (fieldValue) {
+      // Need to join with MasterUser to filter by name
+      includeModels = includeModels.map(inc => {
+        if (inc.as === "MasterUser") {
+          return {
+            ...inc,
+            required: true,
+            where: {
+              name: fieldValue
+            }
+          };
+        }
+        return inc;
+      });
+    }
+  }
+
+  // Filter by FOLDER (can work TOGETHER with user filter)
+  // Check if fieldValue looks like a folder name (inbox, sent, etc.)
+  if (fieldValue && folderMap[fieldValue.toLowerCase()]) {
+    baseWhere.folder = folderMap[fieldValue.toLowerCase()];
+    console.log('🗂️ [generateEmailDrillDownForActivity] Added folder filter:', baseWhere.folder);
+  }
+  // Also handle when fieldName explicitly specifies folder
+  else if (fieldName === "folder" || fieldName === "Email Direction") {
+    if (fieldValue) {
+      baseWhere.folder = folderMap[fieldValue] || fieldValue;
+    }
+  }
+
+  // Filter by SUBJECT
+  if (fieldName === "subject" && fieldValue) {
+    baseWhere.subject = fieldValue;
+  }
+
+  // Handle any other field names (generic fallback)
+  if (fieldName && fieldValue && 
+      fieldName !== "masterUserID" && 
+      fieldName !== "User" && 
+      fieldName !== "folder" && 
+      fieldName !== "Email Direction" && 
+      fieldName !== "subject" &&
+      !folderMap[fieldValue.toLowerCase()]) {
+    baseWhere[fieldName] = fieldValue;
+  }
+
+  console.log('🔍 [generateEmailDrillDownForActivity] Final WHERE conditions:', JSON.stringify(baseWhere, null, 2));
+
+  // ==================================================================================
+  // STEP 1: Get total COUNT using SQL aggregation (memory efficient)
+  // ==================================================================================
+  const totalCountResult = await Email.count({
+    where: baseWhere,
+    include: includeModels,
+    distinct: true
+  });
+
+  const totalCount = parseInt(totalCountResult || 0);
+  console.log('📦 [generateEmailDrillDownForActivity] Total matching emails:', totalCount);
+
+  // ==================================================================================
+  // STEP 2: Calculate breakdown by folder using SQL GROUP BY (memory efficient)
+  // ==================================================================================
+  const breakdownResults = await Email.findAll({
+    where: baseWhere,
+    include: includeModels.map(inc => ({ ...inc, attributes: [] })), // Don't fetch user data for breakdown
+    attributes: [
+      'folder',
+      [Sequelize.fn('COUNT', Sequelize.col('emailID')), 'count']
+    ],
+    group: ['folder'],
+    raw: true
+  });
+
+  const breakdown = {};
+  breakdownResults.forEach(item => {
+    const folder = item.folder || "Unknown";
+    breakdown[folder] = {
+      count: parseInt(item.count || 0)
+    };
+  });
+
+  console.log('📊 [generateEmailDrillDownForActivity] Folder breakdown:', breakdown);
+
+  // ==================================================================================
+  // STEP 3: Fetch ONLY paginated emails (memory efficient)
+  // ==================================================================================
+  const offset = (page - 1) * limit;
+  
+  const paginatedEmails = await Email.findAll({
+    where: baseWhere,
+    include: includeModels,
+    order: [["createdAt", "DESC"]],
+    limit: parseInt(limit),
+    offset: offset
+  });
+
+  console.log('📦 [generateEmailDrillDownForActivity] Paginated emails:', paginatedEmails.length, 'of', totalCount);
+
+  // Format emails for response
+  const formattedEmails = paginatedEmails.map(email => ({
+    emailID: email.emailID,
+    subject: email.subject,
+    from: email.from,
+    to: email.to,
+    cc: email.cc,
+    bcc: email.bcc,
+    folder: email.folder,
+    folderLabel: getFolderLabel(email.folder),
+    // body: email.body ? email.body.substring(0, 200) + '...' : null, // Truncate body
+    snippet: email.snippet,
+    isRead: email.isRead,
+    isFlagged: email.isFlagged,
+    hasAttachments: email.hasAttachments,
+    createdAt: email.createdAt,
+    updatedAt: email.updatedAt,
+    User: email.MasterUser ? {
+      id: email.MasterUser.masterUserID,
+      name: email.MasterUser.name,
+      email: email.MasterUser.email
+    } : null
+  }));
+
+  // ==================================================================================
+  // STEP 4: Format folder breakdown for response
+  // ==================================================================================
+  const formattedBreakdown = Object.entries(breakdown).map(([folder, data]) => ({
+    folder: getFolderLabel(folder),
+    count: data.count,
+    percentage: totalCount > 0 ? ((data.count / totalCount) * 100).toFixed(2) : "0.00"
+  })).sort((a, b) => b.count - a.count);
+
+  // ==================================================================================
+  // STEP 5: Calculate summary statistics using SQL aggregation (memory efficient)
+  // ==================================================================================
+  // Get read/unread counts
+  const readCountResult = await Email.count({
+    where: { ...baseWhere, isRead: true },
+    include: includeModels,
+    distinct: true
+  });
+
+  const unreadCountResult = await Email.count({
+    where: { ...baseWhere, isRead: false },
+    include: includeModels,
+    distinct: true
+  });
+
+  const flaggedCountResult = await Email.count({
+    where: { ...baseWhere },
+    include: includeModels,
+    distinct: true
+  });
+
+  const attachmentsCountResult = await Email.count({
+    where: { ...baseWhere},
+    include: includeModels,
+    distinct: true
+  });
+
+  const summary = {
+    totalEmails: totalCount,
+    displayedEmails: paginatedEmails.length,
+    foldersCount: Object.keys(breakdown).length,
+    fieldName: fieldName,
+    fieldValue: fieldValue,
+    readCount: parseInt(readCountResult || 0),
+    unreadCount: parseInt(unreadCountResult || 0),
+    flaggedCount: parseInt(flaggedCountResult || 0),
+    withAttachmentsCount: parseInt(attachmentsCountResult || 0)
+  };
+
+  console.log('✅ [generateEmailDrillDownForActivity] Summary:', summary);
+  console.log('✅ [generateEmailDrillDownForActivity] Breakdown:', formattedBreakdown);
+
+  return {
+    data: formattedEmails,
+    breakdown: formattedBreakdown,
+    summary: summary,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalCount / limit),
+      totalItems: totalCount,
+      itemsPerPage: parseInt(limit),
+      hasNextPage: page < Math.ceil(totalCount / limit),
+      hasPrevPage: page > 1
+    }
+  };
+}
+
+// Helper function to convert folder codes to friendly labels
+function getFolderLabel(folder) {
+  const folderMap = {
+    "inbox": "Incoming Mails",
+    "sent": "Outgoing Mails",
+    "drafts": "Drafts",
+    "outbox": "Outbox",
+    "archive": "Archive",
+    "trash": "Trash"
+  };
+  return folderMap[folder] || folder;
 }
 
 async function generateExistingActivityPerformanceDataForSave(
