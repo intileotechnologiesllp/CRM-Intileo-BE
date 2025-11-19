@@ -3925,7 +3925,7 @@ exports.createEmailReport = async (req, res) => {
 
     // Handle new report creation
     if (entity && type && !reportId) {
-      if (entity === "Email" && type === "Performance") {
+      if (entity === "Activity" && type === "Emails") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
@@ -4016,7 +4016,7 @@ exports.createEmailReport = async (req, res) => {
         filters: existingFilters,
       } = config;
 
-      if (existingEntity === "Email" && existingType === "Performance") {
+      if (existingEntity === "Activity" && existingType === "Emails") {
         // Generate data with pagination using existing parameters
         const result = await generateEmailPerformanceData(
           ownerId,
@@ -4510,7 +4510,7 @@ exports.saveEmailReport = async (req, res) => {
     let reportConfig = null;
 
     if ((entity && type && !reportId) || (entity && type && reportId)) {
-      if (entity === "Email" && type === "Performance") {
+      if (entity === "Activity" && type === "Emails") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
@@ -4575,7 +4575,7 @@ exports.saveEmailReport = async (req, res) => {
         reportData: existingReportData,
       } = config;
 
-      if (existingentity === "Email" && existingtype === "Performance") {
+      if (existingentity === "Activity" && existingtype === "Emails") {
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
@@ -5115,7 +5115,7 @@ exports.getEmailReportSummary = async (req, res) => {
 
     // For report generation
     if (entity && type && xaxis && yaxis && !reportId) {
-      if (entity === "Email" && type === "Performance") {
+      if (entity === "Activity" && type === "Emails") {
         const reportResult = await generateEmailPerformanceData(
           ownerId,
           role,
@@ -5188,7 +5188,7 @@ exports.getEmailReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      if (existingEntity === "Email" && existingType === "Performance") {
+      if (existingEntity === "Activity" && existingType === "Emails") {
         const reportResult = await generateEmailPerformanceData(
           ownerId,
           role,
