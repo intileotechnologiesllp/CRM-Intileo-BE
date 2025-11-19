@@ -48,6 +48,7 @@ const dashboardCardRoutes = require("./routes/insight/cardRoutes.js")
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
+const companySettingsRoutes = require("./routes/companySettingsRoutes.js"); // Import company settings routes
 const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
 const activitySettingRoutes = require("./routes/activity/activitySettingRoutes.js"); // Import activity setting routes
 const importRoutes = require("./routes/import/importRoutes.js"); // Import data import routes
@@ -96,6 +97,7 @@ app.use("/api/currencies", currencyRoutes); // Register currency routes
 app.use("/api/countries", countryRoutes); // Register country routes
 app.use("/api/regions", regionRoutes); // Register region routes
 app.use("/api/labels", labelRoutes); // Register label routes
+app.use("/api/company-settings", companySettingsRoutes); // Register company settings routes
 app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes

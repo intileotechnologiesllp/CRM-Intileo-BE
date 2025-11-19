@@ -10,6 +10,7 @@ const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 const { Pipeline } = require("../../../models");
 const { PipelineStage } = require("../../../models");
+const { getDealConditionObject } = require("../../../utils/conditionObject/deal");
 
 exports.createDealPerformReport = async (req, res) => {
   try {
@@ -1072,7 +1073,7 @@ async function generateDealPerformanceData(
   // Handle special cases for xaxis (like Owner which needs join)
 
   let groupBy = [];
-  let attributes = ["personId", "leadOrganizationId"];
+  let attributes = [];
 
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -1165,7 +1166,6 @@ async function generateDealPerformanceData(
         required: false,
       });
       groupBy.push("Deal.personId");
-      attributes.push([Sequelize.col("Deal.personId"), "personId"]);
       attributes.push([Sequelize.col("Person.contactPerson"), "xValue"]);
     } else if (segmentedBy === "organization") {
       // Special handling for organization - join with Organization table
@@ -1176,10 +1176,6 @@ async function generateDealPerformanceData(
         required: false,
       });
       groupBy.push("Deal.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("Deal.leadOrganizationId"),
-        "leadOrganizationId",
-      ]);
       attributes.push([Sequelize.col("Organization.organization"), "xValue"]);
     } else {
       groupBy.push(`Deal.${segmentedBy}`);
@@ -1358,28 +1354,20 @@ async function generateDealPerformanceData(
     const groupedData = {};
     results.forEach((item) => {
       let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
+
       const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
-        // Set id based on xaxis type
+        // Set proper ID based on xaxis type
         let id = null;
         if (xaxis === "contactPerson") {
-          id = item.personId;
+          id = item.personId || null;
         } else if (xaxis === "organization") {
-          id = item.leadOrganizationId;
+          id = item.leadOrganizationId || null;
+        } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+          id = item.assignedUserId || null;
         }
 
         groupedData[xValue] = {
@@ -1394,7 +1382,7 @@ async function generateDealPerformanceData(
       });
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
+    formattedResults = Object.values(groupedData);
 
     formattedResults.forEach((group) => {
       group.totalSegmentValue = group.segments.reduce(
@@ -1419,23 +1407,14 @@ async function generateDealPerformanceData(
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
-
-      // Set id based on xaxis type
+      // Set proper ID based on xaxis type
       let id = null;
       if (xaxis === "contactPerson") {
-        id = item.personId;
+        id = item.personId || null;
       } else if (xaxis === "organization") {
-        id = item.leadOrganizationId;
+        id = item.leadOrganizationId || null;
+      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        id = item.assignedUserId || null;
       }
 
       return {
@@ -1444,6 +1423,8 @@ async function generateDealPerformanceData(
         id: id,
       };
     });
+
+    // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -12352,87 +12333,97 @@ exports.createFunnelDealConversionReport = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Validate required fields
-    if (!pipelineId) {
+    // Validate required fields for new report
+    if (!pipelineId && !reportId) {
       return res.status(400).json({
         success: false,
-        message: "Pipeline ID is required",
-      });
-    }
-
-    if (!xaxis || !yaxis) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "X-axis and Y-axis are required for Deal Funnel Conversion reports",
-      });
-    }
-
-    // Get pipeline stages based on pipelineId using Pipeline model
-    const pipeline = await Pipeline.findByPk(pipelineId, {
-      include: [
-        {
-          model: PipelineStage,
-          as: "stages",
-          where: { isActive: true },
-          required: false,
-          order: [["stageOrder", "ASC"]],
-        },
-      ],
-    });
-
-    if (!pipeline) {
-      return res.status(404).json({
-        success: false,
-        message: "Pipeline not found",
-      });
-    }
-
-    // Extract stage names and IDs from pipeline stages
-    const pipelineStages = pipeline.stages.map((stage) => ({
-      stageId: stage.stageId,
-      stageName: stage.stageName,
-      stageOrder: stage.stageOrder,
-    }));
-
-    // Add 'won' stage at the end
-    const allStages = [
-      ...pipelineStages.map((stage) => stage.stageName),
-      "won",
-    ];
-
-    // Validate xaxis selections are within pipeline stages
-    const selectedXaxis = Array.isArray(xaxis) ? xaxis : [xaxis];
-    const invalidStages = selectedXaxis.filter(
-      (stage) => !allStages.includes(stage)
-    );
-
-    if (invalidStages.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid stages selected: ${invalidStages.join(", ")}`,
+        message: "Pipeline ID is required for new reports",
       });
     }
 
     // Define available options based on pipeline
-    const xaxisArray = allStages;
+    const xaxisArray = []; // Will be populated based on pipeline
     const yaxisArray = ["no of deals", "proposalValue", "value"];
 
     let reportData = null;
     let paginationInfo = null;
     let reportConfig = null;
+    let summary = null;
+    let totalValue = 0;
 
-    if ((entity && type && !reportId)) {
+    // Case 1: Create new report or update existing with entity/type
+    if (entity && type && !reportId) {
       if (entity === "Deal" && type === "FunnelConversion") {
+        // Validate required fields
+        if (!pipelineId) {
+          return res.status(400).json({
+            success: false,
+            message: "Pipeline ID is required",
+          });
+        }
+
+        if (!xaxis || !yaxis) {
+          return res.status(400).json({
+            success: false,
+            message: "X-axis and Y-axis are required for Deal Funnel Conversion reports",
+          });
+        }
+
+        // Get pipeline stages
+        const pipeline = await Pipeline.findByPk(pipelineId, {
+          include: [
+            {
+              model: PipelineStage,
+              as: "stages",
+              where: { isActive: true },
+              required: false,
+              order: [["stageOrder", "ASC"]],
+            },
+          ],
+        });
+
+        if (!pipeline) {
+          return res.status(404).json({
+            success: false,
+            message: "Pipeline not found",
+          });
+        }
+
+        // Extract stage names and IDs
+        const pipelineStages = pipeline.stages.map((stage) => ({
+          stageId: stage.stageId,
+          stageName: stage.stageName,
+          stageOrder: stage.stageOrder,
+        }));
+
+        // Add 'won' stage at the end
+        const allStages = [
+          ...pipelineStages.map((stage) => stage.stageName),
+          "won",
+        ];
+
+        // Validate xaxis selections
+        const selectedXaxis = Array.isArray(xaxis) ? xaxis : [xaxis];
+        const invalidStages = selectedXaxis.filter(
+          (stage) => !allStages.includes(stage)
+        );
+
+        if (invalidStages.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid stages selected: ${invalidStages.join(", ")}`,
+          });
+        }
+
         try {
           // Generate data with pagination
-          const result = await generateFunnelConversionData(
+          const result = await generateDealConversionFunnelData(
             ownerId,
             role,
-            selectedXaxis, // Pass selected xaxis stages
+            selectedXaxis,
             yaxis,
             pipelineId,
-            pipelineStages, // Pass pipeline stages with IDs
+            pipelineStages,
             filters,
             page,
             limit
@@ -12440,6 +12431,41 @@ exports.createFunnelDealConversionReport = async (req, res) => {
 
           reportData = result.data;
           paginationInfo = result.pagination;
+
+          // Calculate summary for new report
+          if (reportData.stages && reportData.stages.length > 0) {
+            // Calculate total value based on yaxis
+            if (yaxis === "no of deals") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.noOfDeals || 0), 0);
+            } else if (yaxis === "proposalValue") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.proposalValue || 0), 0);
+            } else if (yaxis === "value") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.value || 0), 0);
+            }
+
+            const avgValue = totalValue / reportData.stages.length;
+            
+            // Calculate max and min based on yaxis
+            let maxValue, minValue;
+            if (yaxis === "no of deals") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.noOfDeals || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.noOfDeals || 0));
+            } else if (yaxis === "proposalValue") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.proposalValue || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.proposalValue || 0));
+            } else if (yaxis === "value") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.value || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.value || 0));
+            }
+
+            summary = {
+              totalCategories: reportData.stages.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
 
           reportConfig = {
             entity,
@@ -12450,6 +12476,9 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             pipelineName: pipeline.pipelineName,
             filters: filters || {},
           };
+
+          // Populate available options
+          xaxisArray.push(...allStages);
         } catch (error) {
           console.error("Error generating deal Funnel Conversion data:", error);
           return res.status(500).json({
@@ -12460,104 +12489,178 @@ exports.createFunnelDealConversionReport = async (req, res) => {
         }
       }
     }
-     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
-      const existingReports = await Report.findOne({
+    // Case 2: Load existing report by reportId only
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+      if (!reportId) {
+        return res.status(400).json({
+          success: false,
+          message: "Report ID is required",
+        });
+      }
+
+      const existingReport = await Report.findOne({
         where: { reportId },
       });
 
-      const {
-        entity: existingentity,
-        type: existingtype,
-        config: configString,
-        graphtype: existinggraphtype,
-        colors: existingcolors,
-      } = existingReports.dataValues;
+      if (!existingReport) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
 
-      const colors = JSON.parse(existingcolors);
+      const {
+        entity: existingEntity,
+        type: existingType,
+        config: configString,
+        graphtype: existingGraphType,
+        colors: existingColors,
+      } = existingReport.dataValues;
+
+      const colors = JSON.parse(existingColors);
       // Parse the config JSON string
       const config = JSON.parse(configString);
       const {
-        xaxis: existingxaxis,
-        yaxis: existingyaxis,
-        durationUnit: existingDurationUnit,
-        segmentedBy: existingSegmentedBy,
-        filters: existingfilters,
+        xaxis: existingXaxis,
+        yaxis: existingYaxis,
+        pipelineId: existingPipelineId,
+        pipelineName: existingPipelineName,
+        filters: existingFilters,
       } = config;
 
-      if (existingentity === "Deal" && existingtype === "Performance") {
+      if (existingEntity === "Deal" && existingType === "FunnelConversion") {
         // Validate required fields for performance reports
-        if (!existingxaxis || !existingyaxis) {
+        if (!existingXaxis || !existingYaxis) {
           return res.status(400).json({
             success: false,
-            message:
-              "X-axis and Y-axis are required for Deal Performance reports",
+            message: "X-axis and Y-axis are required for Deal Funnel Conversion reports",
           });
         }
 
         try {
-          // Generate data with pagination
-          const result = await generateExistingDealPerformanceData(
+          // Get pipeline stages for the existing pipeline
+          const pipeline = await Pipeline.findByPk(existingPipelineId, {
+            include: [
+              {
+                model: PipelineStage,
+                as: "stages",
+                where: { isActive: true },
+                required: false,
+                order: [["stageOrder", "ASC"]],
+              },
+            ],
+          });
+
+          if (!pipeline) {
+            return res.status(404).json({
+              success: false,
+              message: "Pipeline not found for the existing report",
+            });
+          }
+
+          // Extract stage names and IDs
+          const pipelineStages = pipeline.stages.map((stage) => ({
+            stageId: stage.stageId,
+            stageName: stage.stageName,
+            stageOrder: stage.stageOrder,
+          }));
+
+          // Generate data with existing report configuration
+          const result = await generateExistingDealConversionFunnelData(
             ownerId,
             role,
-            existingxaxis,
-            existingyaxis,
-            existingDurationUnit,
-            existingSegmentedBy,
-            existingfilters,
+            existingXaxis,
+            existingYaxis,
+            existingPipelineId,
+            pipelineStages,
+            existingFilters,
             page,
             limit
           );
+
           reportData = result.data;
           paginationInfo = result.pagination;
-          totalValue = result.totalValue;
-          reportConfig = {
-            reportId,
-            entity: existingentity,
-            type: existingtype,
-            xaxis: existingxaxis,
-            yaxis: existingyaxis,
-            durationUnit: existingDurationUnit,
-            segmentedBy: existingSegmentedBy,
-            filters: existingfilters || {},
-            graphtype: existinggraphtype,
-            colors: colors,
-            reportData,
-          };
-          if (reportData.length > 0) {
-            const avgValue = totalValue / reportData.length;
-            const maxValue = Math.max(
-              ...reportData.map((item) => item.value || 0)
-            );
-            const minValue = Math.min(
-              ...reportData.map((item) => item.value || 0)
-            );
+
+          // Calculate summary statistics for existing report
+          if (reportData.stages && reportData.stages.length > 0) {
+            // Calculate total value based on yaxis
+            if (existingYaxis === "no of deals") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.noOfDeals || 0), 0);
+            } else if (existingYaxis === "proposalValue") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.proposalValue || 0), 0);
+            } else if (existingYaxis === "value") {
+              totalValue = reportData.stages.reduce((sum, item) => sum + (item.value || 0), 0);
+            }
+
+            const avgValue = totalValue / reportData.stages.length;
+            
+            // Calculate max and min based on yaxis
+            let maxValue, minValue;
+            if (existingYaxis === "no of deals") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.noOfDeals || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.noOfDeals || 0));
+            } else if (existingYaxis === "proposalValue") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.proposalValue || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.proposalValue || 0));
+            } else if (existingYaxis === "value") {
+              maxValue = Math.max(...reportData.stages.map((item) => item.value || 0));
+              minValue = Math.min(...reportData.stages.map((item) => item.value || 0));
+            }
 
             summary = {
-              totalCategories: reportData.length,
+              totalCategories: reportData.stages.length,
               totalValue: totalValue,
               avgValue: parseFloat(avgValue.toFixed(2)),
               maxValue: maxValue,
               minValue: minValue,
             };
           }
+
+          reportConfig = {
+            reportId,
+            entity: existingEntity,
+            type: existingType,
+            xaxis: existingXaxis,
+            yaxis: existingYaxis,
+            pipelineId: existingPipelineId,
+            pipelineName: existingPipelineName,
+            filters: existingFilters || {},
+            graphtype: existingGraphType,
+            colors: colors,
+          };
+
+          // Populate available options
+          const allStages = [
+            ...pipelineStages.map((stage) => stage.stageName),
+            "won",
+          ];
+          xaxisArray.push(...allStages);
         } catch (error) {
-          console.error("Error generating deal performance data:", error);
+          console.error("Error generating deal Funnel Conversion data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate deal performance data",
+            message: "Failed to generate deal Funnel Conversion data",
             error: error.message,
           });
         }
       }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request parameters",
+      });
     }
+
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
-      data: reportData,
+      data: reportData, // This now contains the complete structure with stages, conversionRates, etc.
+      totalValue: totalValue,
+      summary: summary,
       pagination: paginationInfo,
       config: reportConfig,
       availableOptions: {
-        xaxis: xaxisArray, // All stages for the selected pipeline
+        xaxis: xaxisArray,
         yaxis: yaxisArray,
         pipelineStages: xaxisArray,
       },
@@ -12572,14 +12675,14 @@ exports.createFunnelDealConversionReport = async (req, res) => {
   }
 };
 
-// Helper function to generate funnel conversion data
-async function generateFunnelConversionData(
+// Helper function to generate funnel conversion data for new reports
+async function generateDealConversionFunnelData(
   ownerId,
   role,
-  xaxis, // Selected xaxis stages (array)
+  xaxis,
   yaxis,
   pipelineId,
-  pipelineStages, // Pipeline stages with IDs and names
+  pipelineStages,
   filters,
   page = 1,
   limit = 8
@@ -12624,7 +12727,7 @@ async function generateFunnelConversionData(
     if (validConditions.length > 0) {
       const filterIncludeModels = [];
       const conditions = validConditions.map((cond) => {
-        return getConditionObject(
+        return getConditionObjectFunnel(
           cond.column,
           cond.operator,
           cond.value,
@@ -12719,7 +12822,6 @@ async function generateFunnelConversionData(
   }
 
   // Calculate conversion rates between selected stages
-  // We need to maintain the order of stages as they appear in the pipeline
   const allStageNames = [
     ...pipelineStages.map((stage) => stage.stageName),
     "won",
@@ -12737,11 +12839,9 @@ async function generateFunnelConversionData(
 
     // Calculate conversion rate based on the selected yaxis
     if (yaxis === "no of deals") {
-      // For count-based conversion (next stage count / current stage count)
       conversionRates[`${currentStage}_to_${nextStage}`] =
         currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
     } else {
-      // For value-based conversion (next stage value / current stage value)
       conversionRates[`${currentStage}_to_${nextStage}`] =
         currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
     }
@@ -12806,8 +12906,34 @@ async function generateFunnelConversionData(
   };
 }
 
+// Helper function to generate funnel conversion data for existing reports
+async function generateExistingDealConversionFunnelData(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  pipelineId,
+  pipelineStages,
+  filters,
+  page = 1,
+  limit = 8
+) {
+  // Reuse the same logic as generateDealConversionFunnelData since the data generation is the same
+  return await generateDealConversionFunnelData(
+    ownerId,
+    role,
+    xaxis,
+    yaxis,
+    pipelineId,
+    pipelineStages,
+    filters,
+    page,
+    limit
+  );
+}
+
 // Helper function to get condition object
-function getConditionObject(column, operator, value, includeModels) {
+function getConditionObjectFunnel(column, operator, value, includeModels) {
   // Implement your filter condition logic here
   // This is a simplified version - adjust based on your actual filter system
   switch (operator) {
@@ -12952,3 +13078,1543 @@ exports.getAllPipelines = async (req, res) => {
     });
   }
 };
+
+exports.saveFunnelDealConversionReport = async (req, res) => {
+  try {
+    const {
+      reportId,
+      dashboardIds,
+      folderId,
+      name,
+      entity,
+      type,
+      description,
+      xaxis,
+      yaxis,
+      pipelineId,
+      filters,
+      graphtype,
+      colors,
+    } = req.body;
+
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    let reportData = null;
+    let paginationInfo = null;
+    let totalValue = null;
+    let reportConfig = null;
+
+    // Case 1: Create new report or update existing with entity/type
+    if ((entity && type && !reportId) || (entity && type && reportId)) {
+      if (entity === "Deal" && type === "FunnelConversion") {
+        // Validate required fields for funnel conversion reports
+        if (!xaxis || !yaxis || !pipelineId) {
+          return res.status(400).json({
+            success: false,
+            message: "X-axis, Y-axis, and Pipeline ID are required for Deal Funnel Conversion reports",
+          });
+        }
+
+        try {
+          // Get pipeline stages for data generation
+          const pipeline = await Pipeline.findByPk(pipelineId, {
+            include: [
+              {
+                model: PipelineStage,
+                as: "stages",
+                where: { isActive: true },
+                required: false,
+                order: [["stageOrder", "ASC"]],
+              },
+            ],
+          });
+
+          if (!pipeline) {
+            return res.status(404).json({
+              success: false,
+              message: "Pipeline not found",
+            });
+          }
+
+          // Extract stage names and IDs
+          const pipelineStages = pipeline.stages.map((stage) => ({
+            stageId: stage.stageId,
+            stageName: stage.stageName,
+            stageOrder: stage.stageOrder,
+          }));
+
+          // Generate data with pagination
+          const result = await generateDealConversionFunnelDataForSave(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            pipelineId,
+            pipelineStages,
+            filters
+          );
+          
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          reportConfig = {
+            entity,
+            type,
+            xaxis,
+            yaxis,
+            pipelineId,
+            pipelineName: pipeline.pipelineName,
+            filters: filters || {},
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal funnel conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal funnel conversion data",
+            error: error.message,
+          });
+        }
+      }
+    }
+    // Case 2: Load existing report by reportId only
+    else if (!entity && !type && reportId) {
+      const existingReport = await Report.findOne({
+        where: { reportId },
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
+      const {
+        entity: existingEntity,
+        type: existingType,
+        config: configString,
+        graphtype: existingGraphType,
+        colors: existingColors,
+      } = existingReport.dataValues;
+
+      const colorsParsed = JSON.parse(existingColors);
+      const config = JSON.parse(configString);
+
+      const {
+        xaxis: existingXaxis,
+        yaxis: existingYaxis,
+        pipelineId: existingPipelineId,
+        pipelineName: existingPipelineName,
+        filters: existingFilters,
+        reportData: existingReportData,
+      } = config;
+
+      if (existingEntity === "Deal" && existingType === "FunnelConversion") {
+        if (!existingXaxis || !existingYaxis || !existingPipelineId) {
+          return res.status(400).json({
+            success: false,
+            message: "X-axis, Y-axis, and Pipeline ID are required for Deal Funnel Conversion reports",
+          });
+        }
+
+        try {
+          // Get pipeline stages for the existing pipeline
+          const pipeline = await Pipeline.findByPk(existingPipelineId, {
+            include: [
+              {
+                model: PipelineStage,
+                as: "stages",
+                where: { isActive: true },
+                required: false,
+                order: [["stageOrder", "ASC"]],
+              },
+            ],
+          });
+
+          if (!pipeline) {
+            return res.status(404).json({
+              success: false,
+              message: "Pipeline not found for the existing report",
+            });
+          }
+
+          // Extract stage names and IDs
+          const pipelineStages = pipeline.stages.map((stage) => ({
+            stageId: stage.stageId,
+            stageName: stage.stageName,
+            stageOrder: stage.stageOrder,
+          }));
+
+          const result = await generateExistingDealConversionFunnelDataForSave(
+            ownerId,
+            role,
+            existingXaxis,
+            existingYaxis,
+            existingPipelineId,
+            pipelineStages,
+            existingFilters
+          );
+          
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          reportConfig = {
+            reportId,
+            entity: existingEntity,
+            type: existingType,
+            xaxis: existingXaxis,
+            yaxis: existingYaxis,
+            pipelineId: existingPipelineId,
+            pipelineName: existingPipelineName,
+            filters: existingFilters || {},
+            graphtype: existingGraphType,
+            colors: colorsParsed,
+            reportData,
+          };
+        } catch (error) {
+          console.error("Error generating deal funnel conversion data:", error);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to generate deal funnel conversion data",
+            error: error.message,
+          });
+        }
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request parameters",
+      });
+    }
+
+    // Validate required fields for creating new report
+    if (!reportId && (!entity || !type || !xaxis || !yaxis || !pipelineId || !dashboardIds || !folderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Entity, type, xaxis, yaxis, pipelineId, dashboardIds, and folderId are required for creating a new report",
+      });
+    }
+
+    let reports = [];
+
+    // If reportId is present → UPDATE
+    if (reportId) {
+      const existingReport = await Report.findOne({
+        where: { reportId, ownerId },
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found or access denied",
+        });
+      }
+
+      const updateData = {
+        ...(folderId !== undefined && { folderId }),
+        ...(name !== undefined && { name }),
+        ...(entity !== undefined && { entity }),
+        ...(type !== undefined && { type }),
+        ...(description !== undefined && { description }),
+        ...(xaxis !== undefined ||
+        yaxis !== undefined ||
+        pipelineId !== undefined ||
+        filters !== undefined ||
+        reportData !== undefined
+          ? {
+              config: JSON.stringify({
+                xaxis: xaxis ?? existingReport.config?.xaxis,
+                yaxis: yaxis ?? existingReport.config?.yaxis,
+                pipelineId: pipelineId ?? existingReport.config?.pipelineId,
+                pipelineName: pipelineId ? (await Pipeline.findByPk(pipelineId))?.pipelineName : existingReport.config?.pipelineName,
+                filters: filters ?? existingReport.config?.filters,
+                reportData: reportData ?? existingReport.config?.reportData,
+              }),
+            }
+          : {}),
+        ...(graphtype !== undefined && { graphtype }),
+        ...(colors !== undefined && { colors: JSON.stringify(colors) }),
+      };
+
+      // Handle dashboardIds update - store as comma-separated string
+      if (dashboardIds !== undefined) {
+        const dashboardIdsArray = Array.isArray(dashboardIds)
+          ? dashboardIds
+          : [dashboardIds];
+        updateData.dashboardIds = dashboardIdsArray.join(",");
+      }
+
+      await Report.update(updateData, { where: { reportId } });
+      const updatedReport = await Report.findByPk(reportId);
+      reports.push(updatedReport);
+
+      return res.status(200).json({
+        success: true,
+        message: "Report updated successfully",
+        data: { reports },
+      });
+    }
+
+    // Otherwise → CREATE
+    const dashboardIdsArray = Array.isArray(dashboardIds)
+      ? dashboardIds
+      : [dashboardIds];
+
+    // Verify dashboard ownership for all dashboards
+    for (const dashboardId of dashboardIdsArray) {
+      const dashboard = await DASHBOARD.findOne({
+        where: { dashboardId, ownerId },
+      });
+      if (!dashboard) {
+        return res.status(404).json({
+          success: false,
+          message: `Dashboard ${dashboardId} not found or access denied`,
+        });
+      }
+    }
+
+    // Find next position
+    const lastReport = await Report.findOne({
+      where: { ownerId },
+      order: [["position", "DESC"]],
+    });
+    const nextPosition = lastReport ? (lastReport.position || 0) + 1 : 0;
+
+    const configObj = {
+      xaxis,
+      yaxis,
+      pipelineId,
+      pipelineName: (await Pipeline.findByPk(pipelineId))?.pipelineName,
+      filters: filters || {},
+      reportData,
+    };
+
+    const reportName = name || description || `${entity} ${type} Funnel`;
+
+    const newReport = await Report.create({
+      dashboardIds: dashboardIdsArray.join(","),
+      folderId: folderId || null,
+      entity,
+      type,
+      description: description || reportName,
+      name: reportName,
+      position: nextPosition,
+      config: configObj,
+      ownerId,
+      graphtype: graphtype || "funnel",
+      colors: colors,
+    });
+
+    reports.push(newReport);
+
+    return res.status(201).json({
+      success: true,
+      message: "Report created successfully",
+      data: { reports },
+    });
+  } catch (error) {
+    console.error("Error saving report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save report",
+      error: error.message,
+    });
+  }
+};
+
+async function generateDealConversionFunnelDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  pipelineId,
+  pipelineStages,
+  filters
+) {
+  // Create stage name to ID mapping
+  const stageNameToId = {};
+  pipelineStages.forEach((stage) => {
+    stageNameToId[stage.stageName] = stage.stageId;
+  });
+
+  // Base where condition with pipelineId
+  const baseWhereConditions = [
+    {
+      pipelineId: pipelineId,
+      [Op.or]: [
+        {
+          stageId: {
+            [Op.in]: xaxis
+              .filter((stage) => stage !== "won")
+              .map((stage) => stageNameToId[stage])
+              .filter((id) => id !== undefined),
+          },
+        },
+        { status: { [Op.in]: xaxis.includes("won") ? ["won"] : [] } },
+      ],
+    },
+  ];
+
+  // If user is not admin, filter by ownerId
+  if (role !== "admin") {
+    baseWhereConditions.push({
+      masterUserID: ownerId,
+    });
+  }
+
+  // Handle filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const filterIncludeModels = [];
+      const conditions = validConditions.map((cond) => {
+        return getConditionObjectFunnel(
+          cond.column,
+          cond.operator,
+          cond.value,
+          filterIncludeModels
+        );
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (
+          filters.logicalOperators[i - 1] || "AND"
+        ).toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+
+      baseWhereConditions.push(combinedCondition);
+    }
+  }
+
+  // Create the final where condition
+  const baseWhere =
+    baseWhereConditions.length > 1
+      ? { [Op.and]: baseWhereConditions }
+      : baseWhereConditions[0];
+
+  // Get data for each selected pipeline stage
+  const stageData = {};
+  const conversionRates = {};
+
+  // Include PipelineStage for better querying
+  const includeOptions = [
+    {
+      model: PipelineStage,
+      as: "stageData",
+      attributes: ["stageId", "stageName", "stageOrder"],
+      required: false,
+    },
+  ];
+
+  for (const stage of xaxis) {
+    let whereCondition;
+
+    if (stage === "won") {
+      whereCondition = {
+        ...baseWhere,
+        status: "won",
+      };
+    } else {
+      const stageId = stageNameToId[stage];
+      whereCondition = {
+        ...baseWhere,
+        stageId: stageId,
+      };
+    }
+
+    // Select appropriate attributes based on yaxis
+    let attributes;
+    if (yaxis === "no of deals") {
+      attributes = [[Sequelize.fn("COUNT", Sequelize.col("dealId")), "count"]];
+    } else if (yaxis === "proposalValue") {
+      attributes = [
+        [Sequelize.fn("SUM", Sequelize.col("proposalValue")), "total"],
+      ];
+    } else if (yaxis === "value") {
+      attributes = [[Sequelize.fn("SUM", Sequelize.col("value")), "total"]];
+    }
+
+    const queryOptions = {
+      where: whereCondition,
+      attributes: attributes,
+      raw: true,
+    };
+
+    // Only include stageData for non-won stages
+    if (stage !== "won") {
+      queryOptions.include = includeOptions;
+    }
+
+    const result = await Deal.findAll(queryOptions);
+
+    const data = result[0] || { count: 0, total: 0 };
+
+    if (yaxis === "no of deals") {
+      stageData[stage] = parseInt(data.count) || 0;
+    } else {
+      stageData[stage] = parseFloat(data.total) || 0;
+    }
+  }
+
+  // Calculate conversion rates between selected stages
+  const allStageNames = [
+    ...pipelineStages.map((stage) => stage.stageName),
+    "won",
+  ];
+  const orderedSelectedStages = allStageNames.filter((stage) =>
+    xaxis.includes(stage)
+  );
+
+  for (let i = 0; i < orderedSelectedStages.length - 1; i++) {
+    const currentStage = orderedSelectedStages[i];
+    const nextStage = orderedSelectedStages[i + 1];
+
+    const currentValue = stageData[currentStage];
+    const nextValue = stageData[nextStage];
+
+    // Calculate conversion rate based on the selected yaxis
+    if (yaxis === "no of deals") {
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
+    } else {
+      conversionRates[`${currentStage}_to_${nextStage}`] =
+        currentValue > 0 ? Math.ceil((nextValue / currentValue) * 100) : 0;
+    }
+  }
+
+  // Format the response based on yaxis selection
+  let formattedData = [];
+
+  for (const stage of orderedSelectedStages) {
+    if (stageData[stage] !== undefined) {
+      const stageObj = {
+        stage: stage,
+        stageId: stage === "won" ? null : stageNameToId[stage],
+        stageOrder:
+          stage === "won"
+            ? pipelineStages.length + 1
+            : pipelineStages.find((s) => s.stageName === stage)?.stageOrder,
+      };
+
+      if (yaxis === "no of deals") {
+        stageObj.noOfDeals = stageData[stage];
+      } else if (yaxis === "proposalValue") {
+        stageObj.proposalValue = stageData[stage];
+      } else if (yaxis === "value") {
+        stageObj.value = stageData[stage];
+      }
+
+      formattedData.push(stageObj);
+    }
+  }
+
+  // Sort by stage order
+  formattedData.sort((a, b) => a.stageOrder - b.stageOrder);
+
+  return {
+    data: {
+      stages: formattedData, // Return all data without pagination
+      conversionRates: conversionRates,
+      pipelineId: pipelineId,
+      totalDeals: Object.values(stageData).reduce(
+        (sum, value) => sum + value,
+        0
+      ),
+    }
+  };
+}
+
+async function generateExistingDealConversionFunnelDataForSave(
+  ownerId,
+  role,
+  xaxis,
+  yaxis,
+  pipelineId,
+  pipelineStages,
+  filters,
+  page = 1,
+  limit = 8
+) {
+  // Reuse the same logic as generateDealConversionFunnelData since the data generation is the same
+  return await generateDealConversionFunnelDataForSave(
+    ownerId,
+    role,
+    xaxis,
+    yaxis,
+    pipelineId,
+    pipelineStages,
+    filters,
+    page,
+    limit
+  );
+}
+
+exports.summaryFunnelDealConversionReport = async (req, res) => {
+  try {
+    const {
+      reportId,
+      entity,
+      type,
+      xaxis,
+      yaxis,
+      pipelineId,
+      filters,
+      page = 1,
+      limit = 500,
+      search = "",
+      sortBy = "createdAt",
+      sortOrder = "DESC",
+    } = req.body;
+
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+
+    // Base where condition for deals
+    const baseWhere = {
+      ...(pipelineId && { pipelineId: pipelineId })
+    };
+
+    // If user is not admin, filter by ownerId
+    if (role !== "admin") {
+      baseWhere.masterUserID = ownerId;
+    }
+
+    // Handle search
+    if (search) {
+      baseWhere[Op.or] = [
+        { title: { [Op.like]: `%${search}%` } },
+        { contactPerson: { [Op.like]: `%${search}%` } },
+        { organization: { [Op.like]: `%${search}%` } },
+        { status: { [Op.like]: `%${search}%` } },
+        { pipelineStage: { [Op.like]: `%${search}%` } },
+        { email: { [Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // Initialize include array for main query
+    const include = [
+      {
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: false,
+      },
+      {
+        model: Pipeline,
+        as: "pipelineData",
+        attributes: ["pipelineId", "pipelineName"],
+        required: false,
+      },
+      {
+        model: PipelineStage,
+        as: "stageData",
+        attributes: ["stageId", "stageName", "stageOrder"],
+        required: false,
+      }
+    ];
+
+    // Handle filters if provided
+    if (filters && filters.conditions) {
+      const validConditions = filters.conditions.filter(
+        (cond) => cond.value !== undefined && cond.value !== ""
+      );
+
+      if (validConditions.length > 0) {
+        const filterIncludeModels = [];
+        const conditions = validConditions.map((cond) => {
+          return getConditionObject(
+            cond.column,
+            cond.operator,
+            cond.value,
+            filterIncludeModels
+          );
+        });
+
+        // Add filter includes to main includes
+        filterIncludeModels.forEach((newInclude) => {
+          const exists = include.some(
+            (existingInclude) => existingInclude.as === newInclude.as
+          );
+          if (!exists) {
+            include.push(newInclude);
+          }
+        });
+
+        // Start with the first condition
+        let combinedCondition = conditions[0];
+
+        // Add remaining conditions with their logical operators
+        for (let i = 1; i < conditions.length; i++) {
+          const logicalOp = (
+            filters.logicalOperators[i - 1] || "AND"
+          ).toUpperCase();
+
+          if (logicalOp === "AND") {
+            combinedCondition = {
+              [Op.and]: [combinedCondition, conditions[i]],
+            };
+          } else {
+            combinedCondition = {
+              [Op.or]: [combinedCondition, conditions[i]],
+            };
+          }
+        }
+
+        Object.assign(baseWhere, combinedCondition);
+      }
+    }
+
+    // Build order clause
+    const order = [];
+    if (sortBy === "owner") {
+      order.push([{ model: MasterUser, as: "Owner" }, "name", sortOrder]);
+    } else if (sortBy === "pipeline") {
+      order.push([{ model: Pipeline, as: "pipelineData" }, "pipelineName", sortOrder]);
+    } else if (sortBy === "pipelineStage") {
+      order.push([{ model: PipelineStage, as: "stageData" }, "stageOrder", sortOrder]);
+    } else if (sortBy === "expectedCloseDate") {
+      order.push(["expectedCloseDate", sortOrder]);
+    } else if (sortBy === "proposalSentDate") {
+      order.push(["proposalSentDate", sortOrder]);
+    } else {
+      order.push([sortBy, sortOrder]);
+    }
+
+    // Get total count
+    const totalCount = await Deal.count({
+      where: baseWhere,
+      include: include,
+    });
+
+    // Get paginated results
+    const deals = await Deal.findAll({
+      where: baseWhere,
+      include: include,
+      order: order,
+      limit: parseInt(limit),
+      offset: offset,
+      attributes: [
+        "dealId",
+        "title",
+        "value",
+        "proposalValue",
+        "status",
+        "pipelineStage",
+        "createdAt",
+        "updatedAt",
+        "contactPerson",
+        "organization",
+        "expectedCloseDate",
+        "sourceChannel",
+        "sourceChannelId",
+        "serviceType",
+        "phone",
+        "email",
+        "esplProposalNo",
+        "projectLocation",
+        "organizationCountry",
+        "proposalSentDate",
+        "sbuClass",
+        "sectorialSector",
+        "sourceOrgin",
+        "currency",
+        "pipelineId",
+        "stageId",
+        "label",
+        "sourceRequired",
+        "questionerShared",
+        "nextActivityDate",
+        "lastActivityDate",
+        "probability",
+        "weightedValue",
+      ],
+    });
+
+    // Generate funnel report data
+    let reportData = [];
+    let summary = {};
+    let conversionRates = {};
+    let totalDealsValue = 0;
+
+    // Determine if we're generating new report or loading existing
+    if (xaxis && yaxis && pipelineId && !reportId) {
+      // Case 1: Generate new funnel report
+      try {
+        // Get pipeline stages for data generation
+        const pipeline = await Pipeline.findByPk(pipelineId, {
+          include: [
+            {
+              model: PipelineStage,
+              as: "stages",
+              where: { isActive: true },
+              required: false,
+              order: [["stageOrder", "ASC"]],
+            },
+          ],
+        });
+
+        if (pipeline) {
+          const pipelineStages = pipeline.stages.map((stage) => ({
+            stageId: stage.stageId,
+            stageName: stage.stageName,
+            stageOrder: stage.stageOrder,
+          }));
+
+          const reportResult = await generateDealConversionFunnelData(
+            ownerId,
+            role,
+            xaxis,
+            yaxis,
+            pipelineId,
+            pipelineStages,
+            filters,
+            page,
+            limit
+          );
+          
+          reportData = reportResult.data.stages || [];
+          conversionRates = reportResult.data.conversionRates || {};
+          totalDealsValue = reportResult.data.totalDeals || 0;
+
+          // Calculate summary statistics for funnel data
+          if (reportData.length > 0) {
+            let totalValue = 0;
+            let maxValue = 0;
+            let minValue = Infinity;
+
+            // Calculate based on yaxis type
+            reportData.forEach((stage) => {
+              let stageValue = 0;
+              
+              if (yaxis === "no of deals") {
+                stageValue = stage.noOfDeals || 0;
+              } else if (yaxis === "proposalValue") {
+                stageValue = stage.proposalValue || 0;
+              } else if (yaxis === "value") {
+                stageValue = stage.value || 0;
+              }
+
+              totalValue += stageValue;
+              if (stageValue > maxValue) maxValue = stageValue;
+              if (stageValue < minValue && stageValue > 0) minValue = stageValue;
+            });
+
+            // If minValue is still Infinity (no positive values), set to 0
+            if (minValue === Infinity) minValue = 0;
+
+            const avgValue = reportData.length > 0 ? totalValue / reportData.length : 0;
+
+            summary = {
+              totalRecords: totalCount,
+              totalStages: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+              totalDeals: totalDealsValue,
+              conversionRates: conversionRates,
+            };
+          }
+        }
+      } catch (error) {
+        console.error("Error generating funnel data:", error);
+        // Continue without report data if generation fails
+      }
+    } else if (reportId) {
+      // Case 2: Load existing report
+      try {
+        const existingReport = await Report.findOne({
+          where: { reportId },
+        });
+
+        if (existingReport) {
+          const {
+            entity: existingEntity,
+            type: existingType,
+            config: configString,
+          } = existingReport.dataValues;
+
+          // Parse the config JSON string
+          const config = JSON.parse(configString);
+          const {
+            xaxis: existingXaxis,
+            yaxis: existingYaxis,
+            pipelineId: existingPipelineId,
+            filters: existingFilters,
+          } = config;
+
+          if (existingEntity === "Deal" && existingType === "FunnelConversion") {
+            // Get pipeline stages for the existing pipeline
+            const pipeline = await Pipeline.findByPk(existingPipelineId, {
+              include: [
+                {
+                  model: PipelineStage,
+                  as: "stages",
+                  where: { isActive: true },
+                  required: false,
+                  order: [["stageOrder", "ASC"]],
+                },
+              ],
+            });
+
+            if (pipeline) {
+              const pipelineStages = pipeline.stages.map((stage) => ({
+                stageId: stage.stageId,
+                stageName: stage.stageName,
+                stageOrder: stage.stageOrder,
+              }));
+
+              const reportResult = await generateExistingDealConversionFunnelData(
+                ownerId,
+                role,
+                existingXaxis,
+                existingYaxis,
+                existingPipelineId,
+                pipelineStages,
+                existingFilters,
+                page,
+                limit
+              );
+              
+              reportData = reportResult.data.stages || [];
+              conversionRates = reportResult.data.conversionRates || {};
+              totalDealsValue = reportResult.data.totalDeals || 0;
+
+              // Calculate summary statistics for existing report
+              if (reportData.length > 0) {
+                let totalValue = 0;
+                let maxValue = 0;
+                let minValue = Infinity;
+
+                // Calculate based on yaxis type
+                reportData.forEach((stage) => {
+                  let stageValue = 0;
+                  
+                  if (existingYaxis === "no of deals") {
+                    stageValue = stage.noOfDeals || 0;
+                  } else if (existingYaxis === "proposalValue") {
+                    stageValue = stage.proposalValue || 0;
+                  } else if (existingYaxis === "value") {
+                    stageValue = stage.value || 0;
+                  }
+
+                  totalValue += stageValue;
+                  if (stageValue > maxValue) maxValue = stageValue;
+                  if (stageValue < minValue && stageValue > 0) minValue = stageValue;
+                });
+
+                // If minValue is still Infinity (no positive values), set to 0
+                if (minValue === Infinity) minValue = 0;
+
+                const avgValue = reportData.length > 0 ? totalValue / reportData.length : 0;
+
+                summary = {
+                  totalRecords: totalCount,
+                  totalStages: reportData.length,
+                  totalValue: totalValue,
+                  avgValue: parseFloat(avgValue.toFixed(2)),
+                  maxValue: maxValue,
+                  minValue: minValue,
+                  totalDeals: totalDealsValue,
+                  conversionRates: conversionRates,
+                  reportId: reportId,
+                };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error loading existing report:", error);
+        // Continue without report data if loading fails
+      }
+    }
+
+    // Format deals for response
+    const formattedDeals = deals.map((deal) => ({
+      id: deal.dealId,
+      title: deal.title,
+      value: deal.value,
+      proposalValue: deal.proposalValue,
+      status: deal.status,
+      pipelineStage: deal.pipelineStage,
+      stageName: deal.stageData?.stageName || deal.pipelineStage,
+      stageOrder: deal.stageData?.stageOrder || 0,
+      createdAt: deal.createdAt,
+      updatedAt: deal.updatedAt,
+      contactPerson: deal.contactPerson,
+      organization: deal.organization,
+      expectedCloseDate: deal.expectedCloseDate,
+      sourceChannel: deal.sourceChannel,
+      sourceChannelId: deal.sourceChannelId,
+      serviceType: deal.serviceType,
+      phone: deal.phone,
+      email: deal.email,
+      esplProposalNo: deal.esplProposalNo,
+      projectLocation: deal.projectLocation,
+      organizationCountry: deal.organizationCountry,
+      proposalSentDate: deal.proposalSentDate,
+      sbuClass: deal.sbuClass,
+      sectorialSector: deal.sectorialSector,
+      sourceOrigin: deal.sourceOrgin,
+      currency: deal.currency,
+      pipelineId: deal.pipelineId,
+      pipelineName: deal.pipelineData?.pipelineName || deal.pipeline,
+      stageId: deal.stageId,
+      label: deal.label,
+      sourceRequired: deal.sourceRequired,
+      questionerShared: deal.questionerShared,
+      nextActivityDate: deal.nextActivityDate,
+      lastActivityDate: deal.lastActivityDate,
+      probability: deal.probability,
+      weightedValue: deal.weightedValue,
+      Owner: deal.Owner ? {
+        id: deal.Owner.masterUserID,
+        name: deal.Owner.name,
+        email: deal.Owner.email,
+      } : null,
+    }));
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.status(200).json({
+      success: true,
+      message: "Deals data retrieved successfully",
+      data: {
+        deals: formattedDeals,
+        funnelData: {
+          stages: reportData,
+          conversionRates: conversionRates,
+          summary: summary,
+        },
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: totalPages,
+        totalItems: totalCount,
+        itemsPerPage: parseInt(limit),
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error retrieving deals data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve deals data",
+      error: error.message,
+    });
+  }
+};
+
+// ==================================================================================
+// NEW API: Deal Progress Report Drilldown with Pipeline Stage Breakdown
+// ==================================================================================
+/**
+ * @api {post} /deal-progress-report-drilldown Create Deal Progress Report Drilldown
+ * @apiName createDealProgressReportDrillDown
+ * @apiGroup Deal Reports
+ * 
+ * @apiDescription
+ * This API provides detailed drilldown into Deal Progress Reports with pipeline stage breakdown.
+ * Unlike the Activity drilldown, this API shows HOW deals are distributed across pipeline stages
+ * within the clicked dimension, providing COUNT-based insights.
+ * 
+ * **Key Features:**
+ * - Drills down into specific dimension (creator, serviceType, etc.)
+ * - Shows pipeline stage breakdown with deal counts per stage
+ * - Calculates COUNT(Deal.dealId) grouped by stage
+ * - Provides detailed deal records for the clicked category
+ * - Supports drilling into specific pipeline stages
+ * 
+ * **How COUNT Works:**
+ * 1. SQL: COUNT(Deal.dealId) GROUP BY pipelineStage
+ * 2. Each stage shows number of deals in that stage
+ * 3. Total = Sum of all stage counts
+ * 
+ * **Example Use Case:**
+ * When user clicks on "bunn1" (creator) showing value: 2
+ * - API returns 2 deal records for creator "bunn1"
+ * - Breakdown shows: {"Contact Made": 1, "Proposal Made": 1}
+ * - This means: 1 deal in "Contact Made" stage + 1 deal in "Proposal Made" stage = 2 total
+ * 
+ * @apiParam {String} fieldName The dimension field clicked (e.g., "creator", "serviceType")
+ * @apiParam {String} fieldValue The value of that field (e.g., "John Doe", "IT Services")
+ * @apiParam {Number} [id] The actual ID for relation fields (masterUserID, personId, etc.)
+ * @apiParam {Number} [pipelineId] Pipeline context for filtering
+ * @apiParam {String} [pipelineStage] Specific stage to drill into (optional)
+ * @apiParam {Object} [filters] Additional filter conditions from parent report
+ * @apiParam {Number} [page=1] Page number for pagination
+ * @apiParam {Number} [limit=50] Items per page
+ * 
+ * @apiSuccess {Boolean} success Operation status
+ * @apiSuccess {String} message Success message
+ * @apiSuccess {Array} data Array of deal records with full details
+ * @apiSuccess {Array} breakdown Pipeline stage breakdown with counts
+ * @apiSuccess {Object} summary Summary statistics
+ * @apiSuccess {Object} pagination Pagination information
+ * 
+ * @apiSuccessExample {json} Success-Response:
+ * {
+ *   "success": true,
+ *   "message": "Drilldown data generated successfully",
+ *   "data": [
+ *     {
+ *       "dealId": 101,
+ *       "title": "Website Development",
+ *       "value": 50000,
+ *       "pipelineStage": "Contact Made",
+ *       "Owner": { "name": "bunn1", "id": 35 }
+ *     },
+ *     {
+ *       "dealId": 102,
+ *       "title": "Mobile App",
+ *       "value": 75000,
+ *       "pipelineStage": "Proposal Made",
+ *       "Owner": { "name": "bunn1", "id": 35 }
+ *     }
+ *   ],
+ *   "breakdown": [
+ *     {
+ *       "stage": "Proposal Made",
+ *       "count": 1,           // COUNT(dealId) for this stage
+ *       "totalValue": 75000,
+ *       "percentage": "50.00"
+ *     },
+ *     {
+ *       "stage": "Contact Made",
+ *       "count": 1,           // COUNT(dealId) for this stage
+ *       "totalValue": 50000,
+ *       "percentage": "50.00"
+ *     }
+ *   ],
+ *   "summary": {
+ *     "totalDeals": 2,        // Total COUNT = 1 + 1 = 2
+ *     "totalValue": 125000,
+ *     "stagesCount": 2,
+ *     "fieldName": "creator",
+ *     "fieldValue": "bunn1"
+ *   },
+ *   "pagination": {
+ *     "currentPage": 1,
+ *     "totalPages": 1,
+ *     "totalItems": 2
+ *   }
+ * }
+ */
+exports.createDealProgressReportDrillDown = async (req, res) => {
+  try {
+    const {
+      filters,
+      fieldName,        // The field that was clicked (e.g., "creator", "serviceType")
+      fieldValue,       // The value of that field (e.g., "John Doe", "IT Services")
+      id,               // The actual ID when drilling down on relations (masterUserID, personId, etc.)
+      pipelineId,       // Pipeline context
+      pipelineStage,    // Specific stage if drilling into a breakdown (optional)
+      page = 1,
+      limit = 50,
+    } = req.body;
+    
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    console.log('🔍 [DealProgressDrillDown] Request params:', {
+      fieldName,
+      fieldValue,
+      id,
+      pipelineId,
+      pipelineStage,
+      page,
+      limit
+    });
+
+    // Validate required parameters
+    if (!fieldName) {
+      return res.status(400).json({
+        success: false,
+        message: "fieldName is required for drilldown"
+      });
+    }
+
+    // Generate drilldown data with pipeline stage breakdown
+    const result = await generateDealProgressDrillDownData(
+      ownerId,
+      role,
+      filters,
+      fieldName,
+      fieldValue,
+      id,
+      pipelineId,
+      pipelineStage,
+      page,
+      limit
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Drilldown data generated successfully",
+      data: result.data,
+      breakdown: result.breakdown,
+      summary: result.summary,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    console.error("❌ [DealProgressDrillDown] Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate drilldown data",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to generate deal progress drilldown data with stage breakdown
+async function generateDealProgressDrillDownData(
+  ownerId,
+  role,
+  filters,
+  fieldName,
+  fieldValue,
+  id,
+  pipelineId,
+  pipelineStage,
+  page = 1,
+  limit = 50
+) {
+  // const offset = (page - 1) * limit;
+  const baseWhere = {};
+
+  console.log('📊 [generateDealProgressDrillDown] Starting data generation');
+
+  // Role-based filtering
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Pipeline filtering
+  if (pipelineId) {
+    baseWhere.pipelineId = pipelineId;
+  } else {
+    baseWhere.pipelineId = { [Op.ne]: null };
+  }
+
+  // Ensure valid stage data
+  baseWhere.stageId = { [Op.ne]: null };
+
+  // Apply report filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(cond.column, cond.operator, cond.value, []);
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (filters.logicalOperators[i - 1] || "AND").toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+      Object.assign(baseWhere, combinedCondition);
+    }
+  }
+
+  // Apply field-specific filtering based on clicked dimension
+  console.log('🎯 [generateDealProgressDrillDown] Applying field filter:', { fieldName, fieldValue, id });
+
+  let includeModels = [];
+
+  // Add PipelineStage join for stage names
+  includeModels.push({
+    model: PipelineStage,
+    as: "stageData",
+    attributes: ["stageName", "stageOrder"],
+    required: true,
+    where: {
+      stageName: { [Op.ne]: null }
+    }
+  });
+
+  // Apply field-specific WHERE conditions based on fieldName
+  if (fieldName === "creator") {
+    // Filter by creator (masterUserID)
+    if (id) {
+      baseWhere.masterUserID = id;
+    } else if (fieldValue) {
+      // Need to join with MasterUser to filter by name
+      includeModels.push({
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: true,
+        where: {
+          name: fieldValue
+        }
+      });
+    }
+  } else if (fieldName === "creatorstatus") {
+    // Filter by creator status
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email", "creatorstatus"],
+      required: true,
+      where: {
+        creatorstatus: fieldValue
+      }
+    });
+  } else if (fieldName === "contactPerson") {
+    // Filter by person ID
+    if (id) {
+      baseWhere.personId = id;
+    }
+    includeModels.push({
+      model: Person,
+      as: "Person",
+      attributes: ["personId", "contactPerson", "email", "phone"],
+      required: false
+    });
+  } else if (fieldName === "organization") {
+    // Filter by organization ID
+    if (id) {
+      baseWhere.leadOrganizationId = id;
+    }
+    includeModels.push({
+      model: Organization,
+      as: "Organization",
+      attributes: ["leadOrganizationId", "organization", "address"],
+      required: false
+    });
+  } else if (fieldName === "pipelineStage") {
+    // Filter by specific pipeline stage using stageData
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: fieldValue,
+            stageName: { [Op.ne]: null }
+          }
+        };
+      }
+      return inc;
+    });
+  } else {
+    // Regular Deal column filtering (serviceType, status, etc.)
+    if (fieldValue) {
+      baseWhere[fieldName] = fieldValue;
+    }
+  }
+
+  // If specific pipeline stage is provided for breakdown drilldown
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDown] Filtering by specific stage:', pipelineStage);
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: pipelineStage
+          }
+        };
+      }
+      return inc;
+    });
+  }
+
+  // Add Owner include if not already added
+  const hasOwnerInclude = includeModels.some(inc => inc.as === "Owner");
+  if (!hasOwnerInclude) {
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email"],
+      required: false
+    });
+  }
+
+  // Add Pipeline include for pipeline name
+  includeModels.push({
+    model: Pipeline,
+    as: "pipelineData",
+    attributes: ["pipelineId", "pipelineName"],
+    required: false
+  });
+
+  console.log('🔍 [generateDealProgressDrillDown] Final WHERE conditions:', JSON.stringify(baseWhere, null, 2));
+
+  // ==================================================================================
+  // STEP 1: Fetch ALL deals for accurate stage breakdown COUNT calculation
+  // ==================================================================================
+  // CRITICAL: Fetch ALL deals first to calculate accurate stage counts
+  // This is similar to how createDealProgressReport calculates the breakdown
+  const allDealsForBreakdown = await Deal.findAll({
+    where: baseWhere,
+    include: includeModels,
+    order: [
+      ["stageData", "stageOrder", "ASC"],
+      ["createdAt", "DESC"]
+    ]
+    // NO LIMIT/OFFSET here - we need ALL deals for accurate COUNT calculation
+  });
+
+  console.log('� [generateDealProgressDrillDown] Total matching deals for breakdown:', allDealsForBreakdown.length);
+
+  // ==================================================================================
+  // STEP 2: Calculate pipeline stage breakdown with COUNT - LIKE createDealProgressReport
+  // ==================================================================================
+  // This creates the breakdown object: {"Proposal Made": 1, "Contact Made": 1}
+  const stageBreakdown = {};
+  let totalValue = 0;
+  let totalProposalValue = 0;
+
+  allDealsForBreakdown.forEach(deal => {
+    const stageName = deal.stageData?.stageName || "Unknown";
+    
+    if (stageName !== "Unknown") {
+      if (!stageBreakdown[stageName]) {
+        stageBreakdown[stageName] = {
+          count: 0,           // This is the COUNT(dealId) for this stage
+          totalValue: 0,
+          totalProposalValue: 0
+        };
+      }
+      
+      // Increment COUNT for this stage - KEY COUNT CALCULATION
+      stageBreakdown[stageName].count += 1;
+      stageBreakdown[stageName].totalValue += parseFloat(deal.value || 0);
+      stageBreakdown[stageName].totalProposalValue += parseFloat(deal.proposalValue || 0);
+      
+      totalValue += parseFloat(deal.value || 0);
+      totalProposalValue += parseFloat(deal.proposalValue || 0);
+    }
+  });
+
+  console.log('📊 [generateDealProgressDrillDown] Stage breakdown calculated:', stageBreakdown);
+
+  // ==================================================================================
+  // STEP 3: Now paginate for display (if needed for specific stage drilldown)
+  // ==================================================================================
+  let paginatedDeals = allDealsForBreakdown;
+  
+  // If drilling into specific pipeline stage, filter to that stage only
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDown] Filtering to specific stage:', pipelineStage);
+    paginatedDeals = allDealsForBreakdown.filter(
+      deal => deal.stageData?.stageName === pipelineStage
+    );
+  }
+
+  // Apply pagination to display data
+  const totalCount = paginatedDeals.length;
+  const offset = (page - 1) * limit;
+  const deals = paginatedDeals.slice(offset, offset + limit);
+
+  console.log('📦 [generateDealProgressDrillDown] Paginated deals:', deals.length, 'of', totalCount);
+
+  // Format deals for response
+  const formattedDeals = deals.map(deal => ({
+    dealId: deal.dealId,
+    title: deal.title,
+    value: deal.value,
+    proposalValue: deal.proposalValue,
+    currency: deal.currency,
+    status: deal.status,
+    pipeline: deal.pipelineData?.pipelineName || deal.pipeline,
+    pipelineId: deal.pipelineId,
+    pipelineStage: deal.stageData?.stageName || deal.pipelineStage,
+    stageOrder: deal.stageData?.stageOrder || 0,
+    stageId: deal.stageId,
+    contactPerson: deal.contactPerson,
+    organization: deal.organization,
+    serviceType: deal.serviceType,
+    sourceChannel: deal.sourceChannel,
+    sourceOrigin: deal.sourceOrgin,
+    expectedCloseDate: deal.expectedCloseDate,
+    createdAt: deal.createdAt,
+    updatedAt: deal.updatedAt,
+    Owner: deal.Owner ? {
+      id: deal.Owner.masterUserID,
+      name: deal.Owner.name,
+      email: deal.Owner.email
+    } : null,
+    Person: deal.Person ? {
+      personId: deal.Person.personId,
+      contactPerson: deal.Person.contactPerson,
+      email: deal.Person.email,
+      phone: deal.Person.phone
+    } : null,
+    Organization: deal.Organization ? {
+      leadOrganizationId: deal.Organization.leadOrganizationId,
+      organization: deal.Organization.organization,
+      address: deal.Organization.address
+    } : null
+  }));
+
+  // ==================================================================================
+  // STEP 5: Format stage breakdown for response - LIKE createDealProgressReport output
+  // ==================================================================================
+  // This creates the breakdown array similar to the parent report
+  // Example: [{"stage": "Proposal Made", "count": 1}, {"stage": "Contact Made", "count": 1}]
+  const formattedBreakdown = Object.entries(stageBreakdown).map(([stageName, data]) => ({
+    stage: stageName,
+    count: data.count,              // COUNT(dealId) for this stage
+    totalValue: parseFloat(data.totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(data.totalProposalValue.toFixed(2)),
+    percentage: ((data.count / allDealsForBreakdown.length) * 100).toFixed(2)
+  })).sort((a, b) => b.count - a.count);
+
+  // ==================================================================================
+  // STEP 6: Calculate summary statistics
+  // ==================================================================================
+  const summary = {
+    totalDeals: allDealsForBreakdown.length,     // Total COUNT from ALL deals
+    displayedDeals: deals.length,                 // Paginated count
+    totalValue: parseFloat(totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(totalProposalValue.toFixed(2)),
+    averageValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    averageProposalValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalProposalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    stagesCount: Object.keys(stageBreakdown).length,
+    fieldName: fieldName,
+    fieldValue: fieldValue,
+    pipelineStage: pipelineStage || null
+  };
+
+  console.log('✅ [generateDealProgressDrillDown] Summary:', summary);
+  console.log('✅ [generateDealProgressDrillDown] Breakdown:', formattedBreakdown);
+
+  return {
+    data: formattedDeals,
+    breakdown: formattedBreakdown,
+    summary: summary,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalCount / limit),
+      totalItems: totalCount,
+      itemsPerPage: parseInt(limit),
+      hasNextPage: page < Math.ceil(totalCount / limit),
+      hasPrevPage: page > 1
+    }
+  };
+}
