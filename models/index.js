@@ -22,6 +22,7 @@ const LeadOrganization = require("./leads/leadOrganizationModel");
 const DeviceActivity = require("./deviceActivity/deviceActivity");
 const permissionSet = require("./permissionsetModel");
 const Label = require("./admin/masters/labelModel");
+const CompanySettings = require("./company/companySettingsModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -244,4 +245,5 @@ module.exports = {
   DeviceActivity,
   permissionSet,
   Label,
+  CompanySettings,
 };
