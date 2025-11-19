@@ -37,7 +37,7 @@ class ContactSyncService {
         syncConfigId,
         masterUserID,
         syncType: "manual",
-        syncDirection: syncConfig.syncMode,
+        syncDirection: syncConfig.syncDirection || syncConfig.syncMode,
         status: "in_progress",
         startedAt: new Date(),
       });
@@ -72,14 +72,52 @@ class ContactSyncService {
       const existingMappings = await this.getExistingMappings(masterUserID);
 
       // 7. Perform sync based on mode
-      const syncResult = await this.performTwoWaySync(
-        masterUserID,
-        syncHistory.syncHistoryId,
-        normalizedGoogle,
-        crmContacts,
-        existingMappings,
-        syncConfig
-      );
+      let syncResult;
+      const syncMode = syncConfig.syncMode || syncConfig.syncDirection;
+      const isGoogleToCRM = syncMode === "google_to_crm" || (syncConfig.syncDirection === "one_way" && syncMode === "google_to_crm");
+      const isCRMToGoogle = syncMode === "crm_to_google";
+      const isTwoWay = syncMode === "bidirectional" || syncConfig.syncDirection === "two_way";
+      
+      // Determine sync direction
+      let syncModeLabel = "TWO-WAY (Google ↔ CRM)";
+      if (isGoogleToCRM) syncModeLabel = "ONE-WAY (Google → CRM)";
+      if (isCRMToGoogle) syncModeLabel = "ONE-WAY (CRM → Google)";
+      
+      console.log(`🔄 [CONTACT SYNC] Sync Mode: ${syncModeLabel}`);
+      console.log(`📊 [CONTACT SYNC] Conflict Resolution: ${syncConfig.conflictResolution}`);
+      console.log(`🗑️ [CONTACT SYNC] Deletion Handling: ${syncConfig.deletionHandling}`);
+      
+      if (isGoogleToCRM) {
+        // One-way sync: Google → CRM only
+        syncResult = await this.performOneWaySyncGoogleToCRM(
+          masterUserID,
+          syncHistory.syncHistoryId,
+          normalizedGoogle,
+          crmContacts,
+          existingMappings,
+          syncConfig
+        );
+      } else if (isCRMToGoogle) {
+        // One-way sync: CRM → Google only
+        syncResult = await this.performOneWaySyncCRMToGoogle(
+          masterUserID,
+          syncHistory.syncHistoryId,
+          normalizedGoogle,
+          crmContacts,
+          existingMappings,
+          syncConfig
+        );
+      } else {
+        // Two-way sync: Google ↔ CRM
+        syncResult = await this.performTwoWaySync(
+          masterUserID,
+          syncHistory.syncHistoryId,
+          normalizedGoogle,
+          crmContacts,
+          existingMappings,
+          syncConfig
+        );
+      }
 
       // 8. Calculate duration
       const duration = Math.floor((Date.now() - startTime) / 1000);
@@ -165,6 +203,227 @@ class ContactSyncService {
 
       throw error;
     }
+  }
+
+  /**
+   * Perform one-way sync (Google → CRM only)
+   */
+  async performOneWaySyncGoogleToCRM(
+    masterUserID,
+    syncHistoryId,
+    googleContacts,
+    crmContacts,
+    existingMappings,
+    syncConfig
+  ) {
+    console.log(`➡️ [ONE-WAY SYNC] Starting one-way sync (Google → CRM)...`);
+
+    const result = {
+      createdInCRM: 0,
+      updatedInCRM: 0,
+      deletedInCRM: 0,
+      createdInGoogle: 0,
+      updatedInGoogle: 0,
+      deletedInGoogle: 0,
+      skipped: 0,
+      conflicts: 0,
+      errors: 0,
+      errorDetails: [],
+      hasErrors: false,
+    };
+
+    // Create lookup maps
+    const googleMap = new Map(
+      googleContacts.map((gc) => [gc.googleContactId, gc])
+    );
+    const crmMap = new Map(crmContacts.map((cc) => [cc.personId, cc]));
+    const mappingByGoogle = new Map(
+      existingMappings.map((m) => [m.googleContactId, m])
+    );
+
+    // Process ONLY Google contacts (Google → CRM)
+    console.log(`📱 [ONE-WAY SYNC] Processing ${googleContacts.length} Google contacts...`);
+    
+    for (const googleContact of googleContacts) {
+      try {
+        const mapping = mappingByGoogle.get(googleContact.googleContactId);
+
+        if (!mapping) {
+          // Contact only exists in Google → CREATE in CRM
+          console.log(`➕ Creating new contact in CRM: ${googleContact.contactPerson}`);
+          await this.createContactInCRM(
+            masterUserID,
+            syncHistoryId,
+            googleContact,
+            syncConfig
+          );
+          result.createdInCRM++;
+        } else {
+          // Contact exists in both → CHECK FOR UPDATES
+          const crmContact = crmMap.get(mapping.personId);
+
+          if (!crmContact) {
+            // Mapping exists but CRM contact was deleted
+            // In one-way sync (Google → CRM), we skip when CRM contact is missing
+            console.log(`⏭️ CRM contact was deleted, skipping: ${googleContact.contactPerson}`);
+            result.skipped++;
+            continue;
+          }
+
+          // Check if update needed (Google is source of truth in one-way)
+          const needsUpdate = this.detectChanges(googleContact, crmContact);
+
+          if (needsUpdate.hasChanges) {
+            console.log(`🔄 Updating CRM contact from Google: ${crmContact.contactPerson}`);
+            // Google wins in one-way sync → Update CRM
+            await this.updateContactInCRM(
+              masterUserID,
+              syncHistoryId,
+              googleContact,
+              crmContact,
+              mapping,
+              needsUpdate.changedFields,
+              { winner: "google", reason: "One-way sync: Google is source" }
+            );
+            result.updatedInCRM++;
+          } else {
+            result.skipped++;
+          }
+        }
+      } catch (error) {
+        console.error(
+          `❌ [ONE-WAY SYNC] Error processing Google contact:`,
+          error
+        );
+        result.errors++;
+        result.errorDetails.push({
+          contact: googleContact.contactPerson,
+          error: error.message,
+        });
+        result.hasErrors = true;
+      }
+    }
+
+    // In one-way sync, we DO NOT create Google contacts from CRM-only contacts
+    // CRM contacts that don't exist in Google are ignored
+    const crmOnlyCount = crmContacts.length - existingMappings.length;
+    if (crmOnlyCount > 0) {
+      console.log(`ℹ️ [ONE-WAY SYNC] Skipping ${crmOnlyCount} CRM-only contacts (one-way mode)`);
+    }
+
+    console.log(`✅ [ONE-WAY SYNC Google→CRM] Sync completed`, result);
+    return result;
+  }
+
+  /**
+   * Perform one-way sync (CRM → Google only)
+   */
+  async performOneWaySyncCRMToGoogle(
+    masterUserID,
+    syncHistoryId,
+    googleContacts,
+    crmContacts,
+    existingMappings,
+    syncConfig
+  ) {
+    console.log(`⬅️ [ONE-WAY SYNC] Starting one-way sync (CRM → Google)...`);
+
+    const result = {
+      createdInCRM: 0,
+      updatedInCRM: 0,
+      deletedInCRM: 0,
+      createdInGoogle: 0,
+      updatedInGoogle: 0,
+      deletedInGoogle: 0,
+      skipped: 0,
+      conflicts: 0,
+      errors: 0,
+      errorDetails: [],
+      hasErrors: false,
+    };
+
+    // Create lookup maps
+    const googleMap = new Map(
+      googleContacts.map((gc) => [gc.googleContactId, gc])
+    );
+    const crmMap = new Map(crmContacts.map((cc) => [cc.personId, cc]));
+    const mappingByCRM = new Map(
+      existingMappings.map((m) => [m.personId, m])
+    );
+    const mappingByGoogle = new Map(
+      existingMappings.map((m) => [m.googleContactId, m])
+    );
+
+    // Process ONLY CRM contacts (CRM → Google)
+    console.log(`💼 [ONE-WAY SYNC] Processing ${crmContacts.length} CRM contacts...`);
+    
+    for (const crmContact of crmContacts) {
+      try {
+        const mapping = mappingByCRM.get(crmContact.personId);
+
+        if (!mapping) {
+          // Contact only exists in CRM → CREATE in Google
+          console.log(`➕ Creating new contact in Google: ${crmContact.contactPerson}`);
+          await this.createContactInGoogle(
+            masterUserID,
+            syncHistoryId,
+            crmContact,
+            syncConfig
+          );
+          result.createdInGoogle++;
+        } else {
+          // Contact exists in both → CHECK FOR UPDATES
+          const googleContact = googleMap.get(mapping.googleContactId);
+
+          if (!googleContact) {
+            // Mapping exists but Google contact was deleted
+            console.log(`⏭️ Google contact was deleted, skipping: ${crmContact.contactPerson}`);
+            result.skipped++;
+            continue;
+          }
+
+          // Check if update needed (CRM is source of truth in one-way)
+          const needsUpdate = this.detectChanges(googleContact, crmContact);
+
+          if (needsUpdate.hasChanges) {
+            console.log(`🔄 Updating Google contact from CRM: ${crmContact.contactPerson}`);
+            // CRM wins in one-way sync → Update Google
+            await this.updateContactInGoogle(
+              masterUserID,
+              syncHistoryId,
+              crmContact,
+              googleContact,
+              mapping,
+              needsUpdate.changedFields,
+              { winner: "crm", reason: "One-way sync: CRM is source" }
+            );
+            result.updatedInGoogle++;
+          } else {
+            result.skipped++;
+          }
+        }
+      } catch (error) {
+        console.error(
+          `❌ [ONE-WAY SYNC] Error processing CRM contact:`,
+          error
+        );
+        result.errors++;
+        result.errorDetails.push({
+          contact: crmContact.contactPerson,
+          error: error.message,
+        });
+        result.hasErrors = true;
+      }
+    }
+
+    // In one-way sync, we DO NOT sync Google-only contacts to CRM
+    const googleOnlyCount = googleContacts.length - existingMappings.length;
+    if (googleOnlyCount > 0) {
+      console.log(`ℹ️ [ONE-WAY SYNC] Skipping ${googleOnlyCount} Google-only contacts (one-way CRM→Google mode)`);
+    }
+
+    console.log(`✅ [ONE-WAY SYNC CRM→Google] Sync completed`, result);
+    return result;
   }
 
   /**
@@ -465,16 +724,45 @@ class ContactSyncService {
     );
 
     try {
-      // Create person in CRM
+      // Handle organization if it exists
+      const Organization = require("../models/leads/leadOrganizationModel");
+      let leadOrganizationId = null;
+      
+      if (googleContact.organization && googleContact.organization.trim()) {
+        console.log(`🏢 [CREATE CRM] Creating/finding organization: ${googleContact.organization}`);
+        
+        // Find or create organization
+        const [org, created] = await Organization.findOrCreate({
+          where: { 
+            organization: googleContact.organization,
+            masterUserID 
+          },
+          defaults: {
+            organization: googleContact.organization,
+            masterUserID,
+            ownerId: masterUserID,
+            address: googleContact.postalAddress || null,
+          },
+        });
+        
+        leadOrganizationId = org.leadOrganizationId;
+        console.log(`${created ? '✅ Created' : '✓ Found'} organization: ${org.organization} (ID: ${leadOrganizationId})`);
+      }
+
+      // Create person in CRM with emails and phones arrays
       const newPerson = await Person.create({
         masterUserID,
         contactPerson: googleContact.contactPerson,
-        email: googleContact.email,
-        phone: googleContact.phone,
+        email: googleContact.email, // Primary email
+        phone: googleContact.phone, // Primary phone
+        emails: googleContact.emails || [], // All emails array
+        phones: googleContact.phones || [], // All phones array
         postalAddress: googleContact.postalAddress,
         organization: googleContact.organization,
+        leadOrganizationId: leadOrganizationId, // Link to organization
         jobTitle: googleContact.jobTitle,
         notes: googleContact.notes,
+        ownerId: masterUserID, // Set owner to the user
       });
 
       // Create mapping
@@ -533,12 +821,40 @@ class ContactSyncService {
     );
 
     try {
+      // Handle organization if it exists
+      const Organization = require("../models/leads/leadOrganizationModel");
+      let leadOrganizationId = crmContact.leadOrganizationId;
+      
+      if (googleContact.organization && googleContact.organization.trim()) {
+        console.log(`🏢 [UPDATE CRM] Updating organization: ${googleContact.organization}`);
+        
+        // Find or create organization
+        const [org, created] = await Organization.findOrCreate({
+          where: { 
+            organization: googleContact.organization,
+            masterUserID 
+          },
+          defaults: {
+            organization: googleContact.organization,
+            masterUserID,
+            ownerId: masterUserID,
+            address: googleContact.postalAddress || null,
+          },
+        });
+        
+        leadOrganizationId = org.leadOrganizationId;
+        console.log(`${created ? '✅ Created' : '✓ Updated'} organization: ${org.organization} (ID: ${leadOrganizationId})`);
+      }
+
       const updateData = {
         contactPerson: googleContact.contactPerson,
-        email: googleContact.email,
-        phone: googleContact.phone,
+        email: googleContact.email, // Primary email
+        phone: googleContact.phone, // Primary phone
+        emails: googleContact.emails || [], // All emails array
+        phones: googleContact.phones || [], // All phones array
         postalAddress: googleContact.postalAddress,
         organization: googleContact.organization,
+        leadOrganizationId: leadOrganizationId, // Link to organization
         jobTitle: googleContact.jobTitle,
         notes: googleContact.notes,
       };

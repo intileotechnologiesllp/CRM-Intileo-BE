@@ -23,7 +23,7 @@ const ContactSyncHistory = sequelize.define(
       defaultValue: "manual",
     },
     syncDirection: {
-      type: DataTypes.ENUM("google_to_crm", "crm_to_google", "bidirectional"),
+      type: DataTypes.ENUM("google_to_crm", "crm_to_google", "bidirectional", "one_way", "two_way"),
       allowNull: false,
     },
     status: {
