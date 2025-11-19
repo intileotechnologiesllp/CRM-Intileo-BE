@@ -81,12 +81,22 @@ exports.getActivitySettings = async (req, res) => {
         defaultActivityType: 'Task', // Default type
         followUpTime: 'in 3 months', // Default follow-up
         allowUserDisable: true, // Default allow
+        // Deal won popup defaults
+        showDealWonPopup: true,
+        dealWonActivityType: 'Task',
+        dealWonFollowUpTime: 'in 3 months',
+        allowUserDisableDealWon: true,
       };
     } else {
       // Ensure all new fields are present for backward compatibility
       if (settings.defaultActivityType === undefined) settings.defaultActivityType = 'Task';
       if (settings.followUpTime === undefined) settings.followUpTime = 'in 3 months';
       if (settings.allowUserDisable === undefined) settings.allowUserDisable = true;
+      // Deal won fields backward compatibility
+      if (settings.showDealWonPopup === undefined) settings.showDealWonPopup = true;
+      if (settings.dealWonActivityType === undefined) settings.dealWonActivityType = 'Task';
+      if (settings.dealWonFollowUpTime === undefined) settings.dealWonFollowUpTime = 'in 3 months';
+      if (settings.allowUserDisableDealWon === undefined) settings.allowUserDisableDealWon = true;
     }
     res.status(200).json({ success: true, settings });
   } catch (err) {
@@ -99,29 +109,56 @@ exports.getActivitySettings = async (req, res) => {
 exports.updateActivitySettings = async (req, res) => {
   try {
     const masterUserID = req.masterUserID || req.adminId; // Use masterUserID for scoping
-    let { showPopup, showType, pipelines, defaultActivityType, followUpTime, allowUserDisable } = req.body;
+    let { 
+      showPopup, 
+      showType, 
+      pipelines, 
+      defaultActivityType, 
+      followUpTime, 
+      allowUserDisable,
+      // Deal won popup fields
+      showDealWonPopup,
+      dealWonActivityType,
+      dealWonFollowUpTime,
+      allowUserDisableDealWon
+    } = req.body;
+    
     // If showType is 'always', pipelines should be empty
     if (showType === 'always') {
       pipelines = [];
     }
+    
     let settings = await ActivitySetting.findOne({ where: { masterUserID } });
     if (settings) {
-      settings.showPopup = showPopup;
-      settings.showType = showType;
-      settings.pipelines = pipelines;
-      settings.defaultActivityType = defaultActivityType;
-      settings.followUpTime = followUpTime;
-      settings.allowUserDisable = allowUserDisable;
+      // Update existing settings
+      settings.showPopup = showPopup !== undefined ? showPopup : settings.showPopup;
+      settings.showType = showType !== undefined ? showType : settings.showType;
+      settings.pipelines = pipelines !== undefined ? pipelines : settings.pipelines;
+      settings.defaultActivityType = defaultActivityType !== undefined ? defaultActivityType : settings.defaultActivityType;
+      settings.followUpTime = followUpTime !== undefined ? followUpTime : settings.followUpTime;
+      settings.allowUserDisable = allowUserDisable !== undefined ? allowUserDisable : settings.allowUserDisable;
+      // Deal won popup fields
+      settings.showDealWonPopup = showDealWonPopup !== undefined ? showDealWonPopup : settings.showDealWonPopup;
+      settings.dealWonActivityType = dealWonActivityType !== undefined ? dealWonActivityType : settings.dealWonActivityType;
+      settings.dealWonFollowUpTime = dealWonFollowUpTime !== undefined ? dealWonFollowUpTime : settings.dealWonFollowUpTime;
+      settings.allowUserDisableDealWon = allowUserDisableDealWon !== undefined ? allowUserDisableDealWon : settings.allowUserDisableDealWon;
+      
       await settings.save();
     } else {
+      // Create new settings
       settings = await ActivitySetting.create({
         masterUserID,
-        showPopup,
-        showType,
-        pipelines,
-        defaultActivityType,
-        followUpTime,
-        allowUserDisable,
+        showPopup: showPopup !== undefined ? showPopup : true,
+        showType: showType !== undefined ? showType : 'always',
+        pipelines: pipelines || [],
+        defaultActivityType: defaultActivityType || 'Task',
+        followUpTime: followUpTime || 'in 3 months',
+        allowUserDisable: allowUserDisable !== undefined ? allowUserDisable : true,
+        // Deal won popup fields
+        showDealWonPopup: showDealWonPopup !== undefined ? showDealWonPopup : true,
+        dealWonActivityType: dealWonActivityType || 'Task',
+        dealWonFollowUpTime: dealWonFollowUpTime || 'in 3 months',
+        allowUserDisableDealWon: allowUserDisableDealWon !== undefined ? allowUserDisableDealWon : true,
       });
     }
     res.status(200).json({ success: true, settings });
