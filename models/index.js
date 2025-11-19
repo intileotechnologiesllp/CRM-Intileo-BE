@@ -26,6 +26,7 @@ const ContactSyncConfig = require("./contact/contactSyncConfigModel");
 const ContactSyncHistory = require("./contact/contactSyncHistoryModel");
 const ContactChangeLog = require("./contact/contactChangeLogModel");
 const ContactSyncMapping = require("./contact/contactSyncMappingModel");
+const CompanySettings = require("./company/companySettingsModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -138,6 +139,8 @@ MasterUser.hasMany(CustomField, {
   foreignKey: "masterUserID",
   as: "CreatedCustomFields",
 });
+
+Email.belongsTo(MasterUser, { foreignKey: "masterUserID", as: "MasterUser" });
 
 // Email-Deal associations
 Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
@@ -290,4 +293,5 @@ module.exports = {
   ContactSyncHistory,
   ContactChangeLog,
   ContactSyncMapping,
+  CompanySettings,
 };

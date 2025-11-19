@@ -1312,6 +1312,7 @@ exports.getDeals = async (req, res) => {
           color: '#ff9800',
           tooltip: `Converted to lead on ${dealObj.convertedToLeadAt ? new Date(dealObj.convertedToLeadAt).toLocaleDateString() : 'Unknown date'}`
         };
+        
       }
 
       return dealObj;
@@ -7041,6 +7042,7 @@ exports.updateDealColumnChecks = async (req, res) => {
 exports.markDealAsWon = async (req, res) => {
   try {
     const { dealId } = req.params;
+    const masterUserID = req.masterUserID || req.adminId;
 
     const deal = await Deal.findByPk(dealId);
     if (!deal) {
@@ -7091,18 +7093,38 @@ exports.markDealAsWon = async (req, res) => {
       }
     }
 
-    // --- Activity popup settings logic (for frontend popup) ---
-    const popup = req.activityPopupSettings || {};
-    const activityPopupSettings = {
-      defaultActivityType: popup.defaultActivityType || 'Task',
-      followUpTime: popup.followUpTime || 'in 3 months',
-      allowUserDisable: typeof popup.allowUserDisable === 'boolean' ? popup.allowUserDisable : true,
+    // --- Fetch Deal Won Activity Settings ---
+    const ActivitySetting = require('../../models/activity/activitySettingModel');
+    let dealWonPopupSettings = {
+      showDealWonPopup: true,
+      dealWonActivityType: 'Task',
+      dealWonFollowUpTime: 'in 3 months',
+      allowUserDisableDealWon: true,
     };
+
+    try {
+      const settings = await ActivitySetting.findOne({ 
+        // where: { masterUserID } 
+      });
+      
+      if (settings) {
+        // Use saved settings
+        dealWonPopupSettings = {
+          showDealWonPopup: settings.showDealWonPopup !== undefined ? settings.showDealWonPopup : true,
+          dealWonActivityType: settings.dealWonActivityType || 'Task',
+          dealWonFollowUpTime: settings.dealWonFollowUpTime || 'in 3 months',
+          allowUserDisableDealWon: settings.allowUserDisableDealWon !== undefined ? settings.allowUserDisableDealWon : true,
+        };
+      }
+    } catch (settingsError) {
+      console.log('Error fetching deal won activity settings:', settingsError.message);
+      // Continue with default settings
+    }
 
     res.status(200).json({
       message: "Deal marked as won",
       deal,
-      activityPopupSettings,
+      dealWonPopupSettings,
     });
   } catch (error) {
     console.log(error);

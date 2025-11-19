@@ -21,5 +21,10 @@ router.patch("/update-activityreport/:reportId", verifyToken, activityReportCont
 
 router.delete("/delete-activityreport/:reportId", verifyToken, activityReportController.deleteActivityReport);
 
+router.post("/create-emailreport", verifyToken, activityReportController.createEmailReport);
+
+router.post("/save-emailreport", verifyToken, activityReportController.saveEmailReport);
+
+router.post("/get-summaryemailreport", verifyToken, activityReportController.getEmailReportSummary);
 
 module.exports = router;
