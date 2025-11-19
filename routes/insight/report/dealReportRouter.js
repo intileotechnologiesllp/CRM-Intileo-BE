@@ -36,5 +36,6 @@ router.post("/create-funneldealconversionreport", verifyToken, dealReportControl
 router.post("/save-funneldealconversionreport", verifyToken, dealReportController.saveFunnelDealConversionReport);
 
 router.post("/get-summaryfunneldealconversionreport", verifyToken, dealReportController.summaryFunnelDealConversionReport);
+router.post("/create-dealreport-drilldown", verifyToken, dealReportController.createDealProgressReportDrillDown);
 
 module.exports = router;

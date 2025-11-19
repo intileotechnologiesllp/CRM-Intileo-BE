@@ -10,6 +10,7 @@ const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 const { Pipeline } = require("../../../models");
 const { PipelineStage } = require("../../../models");
+const { getDealConditionObject } = require("../../../utils/conditionObject/deal");
 
 exports.createDealPerformReport = async (req, res) => {
   try {
@@ -14116,3 +14117,504 @@ exports.summaryFunnelDealConversionReport = async (req, res) => {
     });
   }
 };
+
+// ==================================================================================
+// NEW API: Deal Progress Report Drilldown with Pipeline Stage Breakdown
+// ==================================================================================
+/**
+ * @api {post} /deal-progress-report-drilldown Create Deal Progress Report Drilldown
+ * @apiName createDealProgressReportDrillDown
+ * @apiGroup Deal Reports
+ * 
+ * @apiDescription
+ * This API provides detailed drilldown into Deal Progress Reports with pipeline stage breakdown.
+ * Unlike the Activity drilldown, this API shows HOW deals are distributed across pipeline stages
+ * within the clicked dimension, providing COUNT-based insights.
+ * 
+ * **Key Features:**
+ * - Drills down into specific dimension (creator, serviceType, etc.)
+ * - Shows pipeline stage breakdown with deal counts per stage
+ * - Calculates COUNT(Deal.dealId) grouped by stage
+ * - Provides detailed deal records for the clicked category
+ * - Supports drilling into specific pipeline stages
+ * 
+ * **How COUNT Works:**
+ * 1. SQL: COUNT(Deal.dealId) GROUP BY pipelineStage
+ * 2. Each stage shows number of deals in that stage
+ * 3. Total = Sum of all stage counts
+ * 
+ * **Example Use Case:**
+ * When user clicks on "bunn1" (creator) showing value: 2
+ * - API returns 2 deal records for creator "bunn1"
+ * - Breakdown shows: {"Contact Made": 1, "Proposal Made": 1}
+ * - This means: 1 deal in "Contact Made" stage + 1 deal in "Proposal Made" stage = 2 total
+ * 
+ * @apiParam {String} fieldName The dimension field clicked (e.g., "creator", "serviceType")
+ * @apiParam {String} fieldValue The value of that field (e.g., "John Doe", "IT Services")
+ * @apiParam {Number} [id] The actual ID for relation fields (masterUserID, personId, etc.)
+ * @apiParam {Number} [pipelineId] Pipeline context for filtering
+ * @apiParam {String} [pipelineStage] Specific stage to drill into (optional)
+ * @apiParam {Object} [filters] Additional filter conditions from parent report
+ * @apiParam {Number} [page=1] Page number for pagination
+ * @apiParam {Number} [limit=50] Items per page
+ * 
+ * @apiSuccess {Boolean} success Operation status
+ * @apiSuccess {String} message Success message
+ * @apiSuccess {Array} data Array of deal records with full details
+ * @apiSuccess {Array} breakdown Pipeline stage breakdown with counts
+ * @apiSuccess {Object} summary Summary statistics
+ * @apiSuccess {Object} pagination Pagination information
+ * 
+ * @apiSuccessExample {json} Success-Response:
+ * {
+ *   "success": true,
+ *   "message": "Drilldown data generated successfully",
+ *   "data": [
+ *     {
+ *       "dealId": 101,
+ *       "title": "Website Development",
+ *       "value": 50000,
+ *       "pipelineStage": "Contact Made",
+ *       "Owner": { "name": "bunn1", "id": 35 }
+ *     },
+ *     {
+ *       "dealId": 102,
+ *       "title": "Mobile App",
+ *       "value": 75000,
+ *       "pipelineStage": "Proposal Made",
+ *       "Owner": { "name": "bunn1", "id": 35 }
+ *     }
+ *   ],
+ *   "breakdown": [
+ *     {
+ *       "stage": "Proposal Made",
+ *       "count": 1,           // COUNT(dealId) for this stage
+ *       "totalValue": 75000,
+ *       "percentage": "50.00"
+ *     },
+ *     {
+ *       "stage": "Contact Made",
+ *       "count": 1,           // COUNT(dealId) for this stage
+ *       "totalValue": 50000,
+ *       "percentage": "50.00"
+ *     }
+ *   ],
+ *   "summary": {
+ *     "totalDeals": 2,        // Total COUNT = 1 + 1 = 2
+ *     "totalValue": 125000,
+ *     "stagesCount": 2,
+ *     "fieldName": "creator",
+ *     "fieldValue": "bunn1"
+ *   },
+ *   "pagination": {
+ *     "currentPage": 1,
+ *     "totalPages": 1,
+ *     "totalItems": 2
+ *   }
+ * }
+ */
+exports.createDealProgressReportDrillDown = async (req, res) => {
+  try {
+    const {
+      filters,
+      fieldName,        // The field that was clicked (e.g., "creator", "serviceType")
+      fieldValue,       // The value of that field (e.g., "John Doe", "IT Services")
+      id,               // The actual ID when drilling down on relations (masterUserID, personId, etc.)
+      pipelineId,       // Pipeline context
+      pipelineStage,    // Specific stage if drilling into a breakdown (optional)
+      page = 1,
+      limit = 50,
+    } = req.body;
+    
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    console.log('🔍 [DealProgressDrillDown] Request params:', {
+      fieldName,
+      fieldValue,
+      id,
+      pipelineId,
+      pipelineStage,
+      page,
+      limit
+    });
+
+    // Validate required parameters
+    if (!fieldName) {
+      return res.status(400).json({
+        success: false,
+        message: "fieldName is required for drilldown"
+      });
+    }
+
+    // Generate drilldown data with pipeline stage breakdown
+    const result = await generateDealProgressDrillDownData(
+      ownerId,
+      role,
+      filters,
+      fieldName,
+      fieldValue,
+      id,
+      pipelineId,
+      pipelineStage,
+      page,
+      limit
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Drilldown data generated successfully",
+      data: result.data,
+      breakdown: result.breakdown,
+      summary: result.summary,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    console.error("❌ [DealProgressDrillDown] Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate drilldown data",
+      error: error.message,
+    });
+  }
+};
+
+// Helper function to generate deal progress drilldown data with stage breakdown
+async function generateDealProgressDrillDownData(
+  ownerId,
+  role,
+  filters,
+  fieldName,
+  fieldValue,
+  id,
+  pipelineId,
+  pipelineStage,
+  page = 1,
+  limit = 50
+) {
+  // const offset = (page - 1) * limit;
+  const baseWhere = {};
+
+  console.log('📊 [generateDealProgressDrillDown] Starting data generation');
+
+  // Role-based filtering
+  if (role !== "admin") {
+    baseWhere.masterUserID = ownerId;
+  }
+
+  // Pipeline filtering
+  if (pipelineId) {
+    baseWhere.pipelineId = pipelineId;
+  } else {
+    baseWhere.pipelineId = { [Op.ne]: null };
+  }
+
+  // Ensure valid stage data
+  baseWhere.stageId = { [Op.ne]: null };
+
+  // Apply report filters if provided
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    if (validConditions.length > 0) {
+      const conditions = validConditions.map((cond) => {
+        return getConditionObject(cond.column, cond.operator, cond.value, []);
+      });
+
+      let combinedCondition = conditions[0];
+      for (let i = 1; i < conditions.length; i++) {
+        const logicalOp = (filters.logicalOperators[i - 1] || "AND").toUpperCase();
+        if (logicalOp === "AND") {
+          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
+        } else {
+          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
+        }
+      }
+      Object.assign(baseWhere, combinedCondition);
+    }
+  }
+
+  // Apply field-specific filtering based on clicked dimension
+  console.log('🎯 [generateDealProgressDrillDown] Applying field filter:', { fieldName, fieldValue, id });
+
+  let includeModels = [];
+
+  // Add PipelineStage join for stage names
+  includeModels.push({
+    model: PipelineStage,
+    as: "stageData",
+    attributes: ["stageName", "stageOrder"],
+    required: true,
+    where: {
+      stageName: { [Op.ne]: null }
+    }
+  });
+
+  // Apply field-specific WHERE conditions based on fieldName
+  if (fieldName === "creator") {
+    // Filter by creator (masterUserID)
+    if (id) {
+      baseWhere.masterUserID = id;
+    } else if (fieldValue) {
+      // Need to join with MasterUser to filter by name
+      includeModels.push({
+        model: MasterUser,
+        as: "Owner",
+        attributes: ["masterUserID", "name", "email"],
+        required: true,
+        where: {
+          name: fieldValue
+        }
+      });
+    }
+  } else if (fieldName === "creatorstatus") {
+    // Filter by creator status
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email", "creatorstatus"],
+      required: true,
+      where: {
+        creatorstatus: fieldValue
+      }
+    });
+  } else if (fieldName === "contactPerson") {
+    // Filter by person ID
+    if (id) {
+      baseWhere.personId = id;
+    }
+    includeModels.push({
+      model: Person,
+      as: "Person",
+      attributes: ["personId", "contactPerson", "email", "phone"],
+      required: false
+    });
+  } else if (fieldName === "organization") {
+    // Filter by organization ID
+    if (id) {
+      baseWhere.leadOrganizationId = id;
+    }
+    includeModels.push({
+      model: Organization,
+      as: "Organization",
+      attributes: ["leadOrganizationId", "organization", "address"],
+      required: false
+    });
+  } else if (fieldName === "pipelineStage") {
+    // Filter by specific pipeline stage using stageData
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: fieldValue,
+            stageName: { [Op.ne]: null }
+          }
+        };
+      }
+      return inc;
+    });
+  } else {
+    // Regular Deal column filtering (serviceType, status, etc.)
+    if (fieldValue) {
+      baseWhere[fieldName] = fieldValue;
+    }
+  }
+
+  // If specific pipeline stage is provided for breakdown drilldown
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDown] Filtering by specific stage:', pipelineStage);
+    includeModels = includeModels.map(inc => {
+      if (inc.as === "stageData") {
+        return {
+          ...inc,
+          where: {
+            stageName: pipelineStage
+          }
+        };
+      }
+      return inc;
+    });
+  }
+
+  // Add Owner include if not already added
+  const hasOwnerInclude = includeModels.some(inc => inc.as === "Owner");
+  if (!hasOwnerInclude) {
+    includeModels.push({
+      model: MasterUser,
+      as: "Owner",
+      attributes: ["masterUserID", "name", "email"],
+      required: false
+    });
+  }
+
+  // Add Pipeline include for pipeline name
+  includeModels.push({
+    model: Pipeline,
+    as: "pipelineData",
+    attributes: ["pipelineId", "pipelineName"],
+    required: false
+  });
+
+  console.log('🔍 [generateDealProgressDrillDown] Final WHERE conditions:', JSON.stringify(baseWhere, null, 2));
+
+  // ==================================================================================
+  // STEP 1: Fetch ALL deals for accurate stage breakdown COUNT calculation
+  // ==================================================================================
+  // CRITICAL: Fetch ALL deals first to calculate accurate stage counts
+  // This is similar to how createDealProgressReport calculates the breakdown
+  const allDealsForBreakdown = await Deal.findAll({
+    where: baseWhere,
+    include: includeModels,
+    order: [
+      ["stageData", "stageOrder", "ASC"],
+      ["createdAt", "DESC"]
+    ]
+    // NO LIMIT/OFFSET here - we need ALL deals for accurate COUNT calculation
+  });
+
+  console.log('� [generateDealProgressDrillDown] Total matching deals for breakdown:', allDealsForBreakdown.length);
+
+  // ==================================================================================
+  // STEP 2: Calculate pipeline stage breakdown with COUNT - LIKE createDealProgressReport
+  // ==================================================================================
+  // This creates the breakdown object: {"Proposal Made": 1, "Contact Made": 1}
+  const stageBreakdown = {};
+  let totalValue = 0;
+  let totalProposalValue = 0;
+
+  allDealsForBreakdown.forEach(deal => {
+    const stageName = deal.stageData?.stageName || "Unknown";
+    
+    if (stageName !== "Unknown") {
+      if (!stageBreakdown[stageName]) {
+        stageBreakdown[stageName] = {
+          count: 0,           // This is the COUNT(dealId) for this stage
+          totalValue: 0,
+          totalProposalValue: 0
+        };
+      }
+      
+      // Increment COUNT for this stage - KEY COUNT CALCULATION
+      stageBreakdown[stageName].count += 1;
+      stageBreakdown[stageName].totalValue += parseFloat(deal.value || 0);
+      stageBreakdown[stageName].totalProposalValue += parseFloat(deal.proposalValue || 0);
+      
+      totalValue += parseFloat(deal.value || 0);
+      totalProposalValue += parseFloat(deal.proposalValue || 0);
+    }
+  });
+
+  console.log('📊 [generateDealProgressDrillDown] Stage breakdown calculated:', stageBreakdown);
+
+  // ==================================================================================
+  // STEP 3: Now paginate for display (if needed for specific stage drilldown)
+  // ==================================================================================
+  let paginatedDeals = allDealsForBreakdown;
+  
+  // If drilling into specific pipeline stage, filter to that stage only
+  if (pipelineStage) {
+    console.log('🔍 [generateDealProgressDrillDown] Filtering to specific stage:', pipelineStage);
+    paginatedDeals = allDealsForBreakdown.filter(
+      deal => deal.stageData?.stageName === pipelineStage
+    );
+  }
+
+  // Apply pagination to display data
+  const totalCount = paginatedDeals.length;
+  const offset = (page - 1) * limit;
+  const deals = paginatedDeals.slice(offset, offset + limit);
+
+  console.log('📦 [generateDealProgressDrillDown] Paginated deals:', deals.length, 'of', totalCount);
+
+  // Format deals for response
+  const formattedDeals = deals.map(deal => ({
+    dealId: deal.dealId,
+    title: deal.title,
+    value: deal.value,
+    proposalValue: deal.proposalValue,
+    currency: deal.currency,
+    status: deal.status,
+    pipeline: deal.pipelineData?.pipelineName || deal.pipeline,
+    pipelineId: deal.pipelineId,
+    pipelineStage: deal.stageData?.stageName || deal.pipelineStage,
+    stageOrder: deal.stageData?.stageOrder || 0,
+    stageId: deal.stageId,
+    contactPerson: deal.contactPerson,
+    organization: deal.organization,
+    serviceType: deal.serviceType,
+    sourceChannel: deal.sourceChannel,
+    sourceOrigin: deal.sourceOrgin,
+    expectedCloseDate: deal.expectedCloseDate,
+    createdAt: deal.createdAt,
+    updatedAt: deal.updatedAt,
+    Owner: deal.Owner ? {
+      id: deal.Owner.masterUserID,
+      name: deal.Owner.name,
+      email: deal.Owner.email
+    } : null,
+    Person: deal.Person ? {
+      personId: deal.Person.personId,
+      contactPerson: deal.Person.contactPerson,
+      email: deal.Person.email,
+      phone: deal.Person.phone
+    } : null,
+    Organization: deal.Organization ? {
+      leadOrganizationId: deal.Organization.leadOrganizationId,
+      organization: deal.Organization.organization,
+      address: deal.Organization.address
+    } : null
+  }));
+
+  // ==================================================================================
+  // STEP 5: Format stage breakdown for response - LIKE createDealProgressReport output
+  // ==================================================================================
+  // This creates the breakdown array similar to the parent report
+  // Example: [{"stage": "Proposal Made", "count": 1}, {"stage": "Contact Made", "count": 1}]
+  const formattedBreakdown = Object.entries(stageBreakdown).map(([stageName, data]) => ({
+    stage: stageName,
+    count: data.count,              // COUNT(dealId) for this stage
+    totalValue: parseFloat(data.totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(data.totalProposalValue.toFixed(2)),
+    percentage: ((data.count / allDealsForBreakdown.length) * 100).toFixed(2)
+  })).sort((a, b) => b.count - a.count);
+
+  // ==================================================================================
+  // STEP 6: Calculate summary statistics
+  // ==================================================================================
+  const summary = {
+    totalDeals: allDealsForBreakdown.length,     // Total COUNT from ALL deals
+    displayedDeals: deals.length,                 // Paginated count
+    totalValue: parseFloat(totalValue.toFixed(2)),
+    totalProposalValue: parseFloat(totalProposalValue.toFixed(2)),
+    averageValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    averageProposalValue: allDealsForBreakdown.length > 0 
+      ? parseFloat((totalProposalValue / allDealsForBreakdown.length).toFixed(2)) 
+      : 0,
+    stagesCount: Object.keys(stageBreakdown).length,
+    fieldName: fieldName,
+    fieldValue: fieldValue,
+    pipelineStage: pipelineStage || null
+  };
+
+  console.log('✅ [generateDealProgressDrillDown] Summary:', summary);
+  console.log('✅ [generateDealProgressDrillDown] Breakdown:', formattedBreakdown);
+
+  return {
+    data: formattedDeals,
+    breakdown: formattedBreakdown,
+    summary: summary,
+    pagination: {
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalCount / limit),
+      totalItems: totalCount,
+      itemsPerPage: parseInt(limit),
+      hasNextPage: page < Math.ceil(totalCount / limit),
+      hasPrevPage: page > 1
+    }
+  };
+}
