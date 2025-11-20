@@ -53,6 +53,7 @@ const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
 const activitySettingRoutes = require("./routes/activity/activitySettingRoutes.js"); // Import activity setting routes
 const importRoutes = require("./routes/import/importRoutes.js"); // Import data import routes
 const activityTypeRoutes = require('./routes/activity/activityTypeRoutes.js'); // Import activity type routes
+const userSessionRoutes = require("./routes/userSessionRoutes.js"); // Import user session/device management routes
 const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js"); // Import user favorites routes
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
@@ -137,6 +138,7 @@ app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
+app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
