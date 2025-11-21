@@ -10,7 +10,7 @@ const ReportFolder = require("../../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 const { Pipeline } = require("../../../models");
 const { PipelineStage } = require("../../../models");
-const { getDealConditionObject } = require("../../../utils/conditionObject/deal");
+
 
 exports.createDealPerformReport = async (req, res) => {
   try {
@@ -12322,9 +12322,9 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       reportId,
       entity,
       type,
-      xaxis,
+      xaxis, // Now array of objects: [{label: "Qualified", value: "qualified"}, ...]
       yaxis,
-      pipelineId, // Required field for pipeline selection
+      pipelineId,
       filters,
       page = 1,
       limit = 8,
@@ -12343,13 +12343,33 @@ exports.createFunnelDealConversionReport = async (req, res) => {
 
     // Define available options based on pipeline
     const xaxisArray = []; // Will be populated based on pipeline
-    const yaxisArray = ["no of deals", "proposalValue", "value"];
+    
+    const yaxisArray =  [{ label: "No of Deals", value: "no of deals", type: "Deal" }, { label: "Proposal Value", value: "proposalValue", type: "Deal" }, { label: "Value", value: "value", type: "Deal" },]
 
     let reportData = null;
     let paginationInfo = null;
     let reportConfig = null;
     let summary = null;
     let totalValue = 0;
+
+    // Helper function to extract stage values from xaxis objects
+    const getStageValues = (xaxisData) => {
+      if (!xaxisData) return [];
+      if (Array.isArray(xaxisData)) {
+        return xaxisData.map(item => 
+          typeof item === 'string' ? item : item.value
+        );
+      }
+      return [typeof xaxisData === 'string' ? xaxisData : xaxisData.value];
+    };
+
+    // Helper function to format stage names for labels
+    const formatStageLabel = (stageName) => {
+      return stageName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    };
 
     // Case 1: Create new report or update existing with entity/type
     if (entity && type && !reportId) {
@@ -12396,16 +12416,27 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           stageOrder: stage.stageOrder,
         }));
 
+        // Create formatted stages for xaxisArray with labels
+        const formattedStages = pipelineStages.map((stage) => ({
+          label: formatStageLabel(stage.stageName),
+          value: stage.stageName,
+        }));
+
         // Add 'won' stage at the end
         const allStages = [
-          ...pipelineStages.map((stage) => stage.stageName),
-          "won",
+          ...formattedStages,
+          { label: "Won", value: "won" }
         ];
+
+        // Extract just the stage values for validation
+        const allStageValues = allStages.map(stage => stage.value);
 
         // Validate xaxis selections
         const selectedXaxis = Array.isArray(xaxis) ? xaxis : [xaxis];
-        const invalidStages = selectedXaxis.filter(
-          (stage) => !allStages.includes(stage)
+        const selectedStageValues = getStageValues(selectedXaxis);
+        
+        const invalidStages = selectedStageValues.filter(
+          (stage) => !allStageValues.includes(stage)
         );
 
         if (invalidStages.length > 0) {
@@ -12420,7 +12451,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           const result = await generateDealConversionFunnelData(
             ownerId,
             role,
-            selectedXaxis,
+            selectedStageValues, // Pass the extracted stage values
             yaxis,
             pipelineId,
             pipelineStages,
@@ -12470,14 +12501,14 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           reportConfig = {
             entity,
             type,
-            xaxis: selectedXaxis,
+            xaxis: selectedXaxis, // Keep the original object format
             yaxis,
             pipelineId,
             pipelineName: pipeline.pipelineName,
             filters: filters || {},
           };
 
-          // Populate available options
+          // Populate available options with formatted stages
           xaxisArray.push(...allStages);
         } catch (error) {
           console.error("Error generating deal Funnel Conversion data:", error);
@@ -12529,8 +12560,11 @@ exports.createFunnelDealConversionReport = async (req, res) => {
       } = config;
 
       if (existingEntity === "Deal" && existingType === "FunnelConversion") {
+        // Extract stage values from existing xaxis (could be objects or strings)
+        const existingStageValues = getStageValues(existingXaxis);
+
         // Validate required fields for performance reports
-        if (!existingXaxis || !existingYaxis) {
+        if (!existingStageValues.length || !existingYaxis) {
           return res.status(400).json({
             success: false,
             message: "X-axis and Y-axis are required for Deal Funnel Conversion reports",
@@ -12569,7 +12603,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           const result = await generateExistingDealConversionFunnelData(
             ownerId,
             role,
-            existingXaxis,
+            existingStageValues, // Pass extracted stage values
             existingYaxis,
             existingPipelineId,
             pipelineStages,
@@ -12620,7 +12654,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             reportId,
             entity: existingEntity,
             type: existingType,
-            xaxis: existingXaxis,
+            xaxis: existingXaxis, // Keep original format
             yaxis: existingYaxis,
             pipelineId: existingPipelineId,
             pipelineName: existingPipelineName,
@@ -12629,10 +12663,14 @@ exports.createFunnelDealConversionReport = async (req, res) => {
             colors: colors,
           };
 
-          // Populate available options
+          // Populate available options with formatted stages
+          const formattedStages = pipelineStages.map((stage) => ({
+            label: formatStageLabel(stage.stageName),
+            value: stage.stageName,
+          }));
           const allStages = [
-            ...pipelineStages.map((stage) => stage.stageName),
-            "won",
+            ...formattedStages,
+            { label: "Won", value: "won" }
           ];
           xaxisArray.push(...allStages);
         } catch (error) {
@@ -12654,7 +12692,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Data generated successfully",
-      data: reportData, // This now contains the complete structure with stages, conversionRates, etc.
+      data: reportData,
       totalValue: totalValue,
       summary: summary,
       pagination: paginationInfo,
@@ -12670,6 +12708,163 @@ exports.createFunnelDealConversionReport = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to create funnel reports",
+      error: error.message,
+    });
+  }
+};
+
+// Update the helper functions to also return formatted data
+exports.getDefaultPipeline = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    // Get the first pipeline as default
+    let whereCondition = { isActive: true };
+    if (role !== "admin") {
+      whereCondition.masterUserID = ownerId;
+    }
+
+    const defaultPipeline = await Pipeline.findOne({
+      where: whereCondition,
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+      order: [
+        ["isDefault", "DESC"],
+        ["createdAt", "ASC"],
+      ],
+    });
+
+    if (!defaultPipeline) {
+      return res.status(404).json({
+        success: false,
+        message: "No pipeline found",
+      });
+    }
+
+    // Format stage names for labels
+    const formatStageLabel = (stageName) => {
+      return stageName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    };
+
+    const formattedStages = defaultPipeline.stages.map((stage) => ({
+      label: formatStageLabel(stage.stageName),
+      value: stage.stageName,
+    }));
+
+    const allStages = [
+      ...formattedStages,
+      { label: "Won", value: "won" }
+    ];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        pipelineId: defaultPipeline.pipelineId,
+        pipelineName: defaultPipeline.pipelineName,
+        availableStages: allStages,
+        stages: defaultPipeline.stages.map((stage) => ({
+          stageId: stage.stageId,
+          stageName: stage.stageName,
+          stageOrder: stage.stageOrder,
+          probability: stage.probability,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Error getting default pipeline:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get default pipeline",
+      error: error.message,
+    });
+  }
+};
+
+// Get all pipelines for dropdown selection
+exports.getAllPipelines = async (req, res) => {
+  try {
+    const ownerId = req.adminId;
+    const role = req.role;
+
+    let whereCondition = { isActive: true };
+    if (role !== "admin") {
+      whereCondition.masterUserID = ownerId;
+    }
+
+    const pipelines = await Pipeline.findAll({
+      where: whereCondition,
+      include: [
+        {
+          model: PipelineStage,
+          as: "stages",
+          where: { isActive: true },
+          required: false,
+          order: [["stageOrder", "ASC"]],
+        },
+      ],
+      order: [
+        ["isDefault", "DESC"],
+        ["displayOrder", "ASC"],
+        ["pipelineName", "ASC"],
+      ],
+    });
+
+    // Format stage names for labels
+    const formatStageLabel = (stageName) => {
+      return stageName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+    };
+
+    const formattedPipelines = pipelines.map((pipeline) => {
+      const formattedStages = pipeline.stages.map((stage) => ({
+        label: formatStageLabel(stage.stageName),
+        value: stage.stageName,
+      }));
+
+      const availableStages = [
+        ...formattedStages,
+        { label: "Won", value: "won" }
+      ];
+
+      return {
+        pipelineId: pipeline.pipelineId,
+        pipelineName: pipeline.pipelineName,
+        description: pipeline.description,
+        isDefault: pipeline.isDefault,
+        color: pipeline.color,
+        stages: pipeline.stages.map((stage) => ({
+          stageId: stage.stageId,
+          stageName: stage.stageName,
+          stageOrder: stage.stageOrder,
+          probability: stage.probability,
+          color: stage.color,
+        })),
+        availableStages: availableStages,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: formattedPipelines,
+    });
+  } catch (error) {
+    console.error("Error getting all pipelines:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get pipelines",
       error: error.message,
     });
   }
@@ -12951,133 +13146,6 @@ function getConditionObjectFunnel(column, operator, value, includeModels) {
       return { [column]: value };
   }
 }
-
-// Additional helper function to get default pipeline
-exports.getDefaultPipeline = async (req, res) => {
-  try {
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    // Get the first pipeline as default
-    let whereCondition = { isActive: true };
-    if (role !== "admin") {
-      whereCondition.masterUserID = ownerId;
-    }
-
-    const defaultPipeline = await Pipeline.findOne({
-      where: whereCondition,
-      include: [
-        {
-          model: PipelineStage,
-          as: "stages",
-          where: { isActive: true },
-          required: false,
-          order: [["stageOrder", "ASC"]],
-        },
-      ],
-      order: [
-        ["isDefault", "DESC"],
-        ["createdAt", "ASC"],
-      ],
-    });
-
-    if (!defaultPipeline) {
-      return res.status(404).json({
-        success: false,
-        message: "No pipeline found",
-      });
-    }
-
-    const pipelineStages = defaultPipeline.stages.map(
-      (stage) => stage.stageName
-    );
-    const allStages = [...pipelineStages, "won"];
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        pipelineId: defaultPipeline.pipelineId,
-        pipelineName: defaultPipeline.pipelineName,
-        availableStages: allStages,
-        stages: defaultPipeline.stages.map((stage) => ({
-          stageId: stage.stageId,
-          stageName: stage.stageName,
-          stageOrder: stage.stageOrder,
-          probability: stage.probability,
-        })),
-      },
-    });
-  } catch (error) {
-    console.error("Error getting default pipeline:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get default pipeline",
-      error: error.message,
-    });
-  }
-};
-
-// Get all pipelines for dropdown selection
-exports.getAllPipelines = async (req, res) => {
-  try {
-    const ownerId = req.adminId;
-    const role = req.role;
-
-    let whereCondition = { isActive: true };
-    if (role !== "admin") {
-      whereCondition.masterUserID = ownerId;
-    }
-
-    const pipelines = await Pipeline.findAll({
-      where: whereCondition,
-      include: [
-        {
-          model: PipelineStage,
-          as: "stages",
-          where: { isActive: true },
-          required: false,
-          order: [["stageOrder", "ASC"]],
-        },
-      ],
-      order: [
-        ["isDefault", "DESC"],
-        ["displayOrder", "ASC"],
-        ["pipelineName", "ASC"],
-      ],
-    });
-
-    const formattedPipelines = pipelines.map((pipeline) => ({
-      pipelineId: pipeline.pipelineId,
-      pipelineName: pipeline.pipelineName,
-      description: pipeline.description,
-      isDefault: pipeline.isDefault,
-      color: pipeline.color,
-      stages: pipeline.stages.map((stage) => ({
-        stageId: stage.stageId,
-        stageName: stage.stageName,
-        stageOrder: stage.stageOrder,
-        probability: stage.probability,
-        color: stage.color,
-      })),
-      availableStages: [
-        ...pipeline.stages.map((stage) => stage.stageName),
-        "won",
-      ],
-    }));
-
-    return res.status(200).json({
-      success: true,
-      data: formattedPipelines,
-    });
-  } catch (error) {
-    console.error("Error getting all pipelines:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to get pipelines",
-      error: error.message,
-    });
-  }
-};
 
 exports.saveFunnelDealConversionReport = async (req, res) => {
   try {

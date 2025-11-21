@@ -4589,20 +4589,9 @@ exports.createEmailReport = async (req, res) => {
         { label: "Subject", value: "subject", type: "text" },
         { label: "Email Direction", value: "folder", type: "text" },
         { label: "User", value: "masterUserID", type: "number" },
-        { label: "Today", value: "today", type: "date" },
-        { label: "Yesterday", value: "yesterday", type: "date" },
-        { label: "Tomorrow", value: "tomorrow", type: "date" },
-        { label: "This Week", value: "thisWeek", type: "date" },
-        { label: "This Month", value: "thisMonth", type: "date" },
-        { label: "This Quarter", value: "thisQuarter", type: "date" },
-        { label: "This Year", value: "thisYear", type: "date" },
-        { label: "Last Week", value: "lastWeek", type: "date" },
-        { label: "Last Month", value: "lastMonth", type: "date" },
-        { label: "Next Week", value: "nextWeek", type: "date" },
-        { label: "Next Month", value: "nextMonth", type: "date" },
-        { label: "Next Year", value: "nextYear", type: "date" },
-        { label: "Custom Date", value: "customDate", type: "date" },
-        { label: "Date Range", value: "dateRange", type: "daterange" },
+        { label: "Send/Recieve Date", value: "createdAt", type: "date" },
+        // { label: "Custom Date", value: "customDate", type: "date" },
+        // { label: "Date Range", value: "dateRange", type: "daterange" },
       ],
     };
 
@@ -4993,12 +4982,12 @@ async function generateEmailPerformanceData(
 
       // For folder, provide more descriptive labels
       if (xaxis === "folder") {
-        if (label === "inbox") label = "Incoming Mails";
-        if (label === "sent") label = "Outgoing Mails";
-        if (label === "drafts") label = "Drafts";
-        if (label === "outbox") label = "Outbox";
-        if (label === "archive") label = "Archive";
-        if (label === "trash") label = "Trash";
+        if (label === "inbox") label = "inbox";
+        if (label === "sent") label = "sent";
+        if (label === "drafts") label = "drafts";
+        if (label === "outbox") label = "outbox";
+        if (label === "archive") label = "archive";
+        if (label === "trash") label = "trash";
       }
 
       return {
@@ -5031,17 +5020,35 @@ async function generateEmailPerformanceData(
 
 // Helper function for email-specific conditions
 function getEmailConditionObject(column, operator, value) {
-  // Handle date filters
-  if (column === "today" || column === "yesterday" || column === "tomorrow" ||
-      column === "thisWeek" || column === "thisMonth" || column === "thisQuarter" || 
-      column === "thisYear" || column === "lastWeek" || column === "lastMonth" ||
-      column === "nextWeek" || column === "nextMonth" || column === "nextYear" ||
-      column === "customDate" || column === "dateRange") {
+  // Handle createdAt column with special date values
+  if (column === "createdAt") {
+    // Check if value is one of the special date keywords
+    const dateKeywords = [
+      "today", "yesterday", "tomorrow", "thisMonth", "thisQuarter", "thisWeek",
+      "thisYear", "lastWeek", "lastMonth", "lastQuarter", "lastYear", "nextWeek", "nextMonth", "nextYear", "nextQuarter",
+    ];
     
-    return getDateCondition(column, operator, value);
+    if (dateKeywords.includes(value)) {
+      return getDateCondition(value, operator, null);
+    }
+    
+    // Handle customDate and dateRange for createdAt column
+    if (value === "customDate" || value === "dateRange") {
+      return getDateCondition(value, operator, null);
+    }
+    
+    // If value is a regular date string, treat it as customDate
+    if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return getDateCondition("customDate", operator, value);
+    }
+    
+    // If value is an array (for date range), treat it as dateRange
+    if (Array.isArray(value) && value.length === 2) {
+      return getDateCondition("dateRange", operator, value);
+    }
   }
 
-  // Handle regular text/number filters
+  // Handle regular text/number filters for other columns
   const op = getSequelizeOperator(operator);
   
   switch (operator) {
@@ -5077,80 +5084,107 @@ function getDateCondition(dateType, operator, value) {
 
   switch (dateType) {
     case "today":
-      startDate = new Date(now.setHours(0, 0, 0, 0));
-      endDate = new Date(now.setHours(23, 59, 59, 999));
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
       break;
     case "yesterday":
       const yesterday = new Date(now);
       yesterday.setDate(now.getDate() - 1);
-      startDate = new Date(yesterday.setHours(0, 0, 0, 0));
-      endDate = new Date(yesterday.setHours(23, 59, 59, 999));
+      startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0, 0);
+      endDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999);
       break;
     case "tomorrow":
       const tomorrow = new Date(now);
       tomorrow.setDate(now.getDate() + 1);
-      startDate = new Date(tomorrow.setHours(0, 0, 0, 0));
-      endDate = new Date(tomorrow.setHours(23, 59, 59, 999));
+      startDate = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 0, 0, 0, 0);
+      endDate = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59, 999);
       break;
     case "thisWeek":
       const startOfWeek = new Date(now);
       startOfWeek.setDate(now.getDate() - now.getDay());
-      startDate = new Date(startOfWeek.setHours(0, 0, 0, 0));
+      startDate = new Date(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate(), 0, 0, 0, 0);
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(startOfWeek.getDate() + 6);
-      endDate = new Date(endOfWeek.setHours(23, 59, 59, 999));
+      endDate = new Date(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate(), 23, 59, 59, 999);
       break;
     case "thisMonth":
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
       endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       break;
     case "thisQuarter":
-      const quarter = Math.floor(now.getMonth() / 3);
-      startDate = new Date(now.getFullYear(), quarter * 3, 1);
-      endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      startDate = new Date(now.getFullYear(), currentQuarter * 3, 1, 0, 0, 0, 0);
+      endDate = new Date(now.getFullYear(), (currentQuarter + 1) * 3, 0, 23, 59, 59, 999);
       break;
     case "thisYear":
-      startDate = new Date(now.getFullYear(), 0, 1);
+      startDate = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
       endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
       break;
     case "lastWeek":
       const lastWeekStart = new Date(now);
       lastWeekStart.setDate(now.getDate() - now.getDay() - 7);
-      startDate = new Date(lastWeekStart.setHours(0, 0, 0, 0));
+      startDate = new Date(lastWeekStart.getFullYear(), lastWeekStart.getMonth(), lastWeekStart.getDate(), 0, 0, 0, 0);
       const lastWeekEnd = new Date(lastWeekStart);
       lastWeekEnd.setDate(lastWeekStart.getDate() + 6);
-      endDate = new Date(lastWeekEnd.setHours(23, 59, 59, 999));
+      endDate = new Date(lastWeekEnd.getFullYear(), lastWeekEnd.getMonth(), lastWeekEnd.getDate(), 23, 59, 59, 999);
       break;
     case "lastMonth":
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      startDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1, 0, 0, 0, 0);
+      endDate = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0, 23, 59, 59, 999);
+      break;
+    case "lastQuarter":
+      const currentMonth = now.getMonth();
+      const lastQuarter = Math.floor(currentMonth / 3) - 1;
+      const lastQuarterYear = lastQuarter < 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const adjustedLastQuarter = lastQuarter < 0 ? 3 : lastQuarter; // Q4 of previous year
+      startDate = new Date(lastQuarterYear, adjustedLastQuarter * 3, 1, 0, 0, 0, 0);
+      endDate = new Date(lastQuarterYear, (adjustedLastQuarter + 1) * 3, 0, 23, 59, 59, 999);
+      break;
+    case "lastYear":
+      const lastYear = now.getFullYear() - 1;
+      startDate = new Date(lastYear, 0, 1, 0, 0, 0, 0);
+      endDate = new Date(lastYear, 11, 31, 23, 59, 59, 999);
       break;
     case "nextWeek":
       const nextWeekStart = new Date(now);
       nextWeekStart.setDate(now.getDate() - now.getDay() + 7);
-      startDate = new Date(nextWeekStart.setHours(0, 0, 0, 0));
+      startDate = new Date(nextWeekStart.getFullYear(), nextWeekStart.getMonth(), nextWeekStart.getDate(), 0, 0, 0, 0);
       const nextWeekEnd = new Date(nextWeekStart);
       nextWeekEnd.setDate(nextWeekStart.getDate() + 6);
-      endDate = new Date(nextWeekEnd.setHours(23, 59, 59, 999));
+      endDate = new Date(nextWeekEnd.getFullYear(), nextWeekEnd.getMonth(), nextWeekEnd.getDate(), 23, 59, 59, 999);
       break;
     case "nextMonth":
-      startDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      endDate = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      startDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 1, 0, 0, 0, 0);
+      endDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0, 23, 59, 59, 999);
+      break;
+    case "nextQuarter":
+      const nextQuarter = Math.floor(now.getMonth() / 3) + 1;
+      const nextQuarterYear = nextQuarter > 3 ? now.getFullYear() + 1 : now.getFullYear();
+      const adjustedNextQuarter = nextQuarter > 3 ? 0 : nextQuarter; // Q1 of next year
+      startDate = new Date(nextQuarterYear, adjustedNextQuarter * 3, 1, 0, 0, 0, 0);
+      endDate = new Date(nextQuarterYear, (adjustedNextQuarter + 1) * 3, 0, 23, 59, 59, 999);
       break;
     case "nextYear":
-      startDate = new Date(now.getFullYear() + 1, 0, 1);
-      endDate = new Date(now.getFullYear() + 1, 11, 31, 23, 59, 59, 999);
+      const nextYear = now.getFullYear() + 1;
+      startDate = new Date(nextYear, 0, 1, 0, 0, 0, 0);
+      endDate = new Date(nextYear, 11, 31, 23, 59, 59, 999);
       break;
     case "customDate":
       if (value) {
-        startDate = new Date(value + " 00:00:00");
-        endDate = new Date(value + " 23:59:59");
+        startDate = new Date(value);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(value);
+        endDate.setHours(23, 59, 59, 999);
       }
       break;
     case "dateRange":
       if (Array.isArray(value) && value.length === 2) {
-        startDate = new Date(value[0] + " 00:00:00");
-        endDate = new Date(value[1] + " 23:59:59");
+        startDate = new Date(value[0]);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(value[1]);
+        endDate.setHours(23, 59, 59, 999);
       }
       break;
   }
@@ -5172,6 +5206,25 @@ function getDateCondition(dateType, operator, value) {
   }
 
   return {};
+}
+
+// Helper function to get Sequelize operator
+function getSequelizeOperator(operator) {
+  const operatorMap = {
+    "=": Op.eq,
+    "≠": Op.ne,
+    ">": Op.gt,
+    ">=": Op.gte,
+    "<": Op.lt,
+    "<=": Op.lte,
+    "contains": Op.like,
+    "startsWith": Op.like,
+    "endsWith": Op.like,
+    "is": Op.eq,
+    "is not": Op.ne,
+  };
+  
+  return operatorMap[operator] || Op.eq;
 }
 
 exports.saveEmailReport = async (req, res) => {
@@ -5520,11 +5573,13 @@ async function generateEmailPerformanceDataForSave(
   }
 
   // Y-axis calculation
+  let countAttribute;
   if (yaxis === "no of emails") {
-    attributes.push([
+    countAttribute = [
       Sequelize.fn("COUNT", Sequelize.col("emailID")),
       "yValue",
-    ]);
+    ];
+    attributes.push(countAttribute);
   }
 
   // Build include models
@@ -5548,7 +5603,7 @@ async function generateEmailPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.fn("COUNT", Sequelize.col("emailID")), "DESC"]],
+      order: [[Sequelize.fn("COUNT", Sequelize.col("emailID")), "DESC"]]
     });
   } else {
     // Non-segmented query
@@ -5558,7 +5613,7 @@ async function generateEmailPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: [[Sequelize.fn("COUNT", Sequelize.col("emailID")), "DESC"]],
+      order: [[Sequelize.fn("COUNT", Sequelize.col("emailID")), "DESC"]]
     });
   }
 
@@ -5628,12 +5683,12 @@ async function generateEmailPerformanceDataForSave(
 
       // For folder, provide more descriptive labels
       if (xaxis === "folder") {
-        if (label === "inbox") label = "Incoming Mails";
-        if (label === "sent") label = "Outgoing Mails";
-        if (label === "drafts") label = "Drafts";
-        if (label === "outbox") label = "Outbox";
-        if (label === "archive") label = "Archive";
-        if (label === "trash") label = "Trash";
+        if (label === "inbox") label = "inbox";
+        if (label === "sent") label = "sent";
+        if (label === "drafts") label = "drafts";
+        if (label === "outbox") label = "outbox";
+        if (label === "archive") label = "archive";
+        if (label === "trash") label = "trash";
       }
 
       return {
@@ -5649,7 +5704,7 @@ async function generateEmailPerformanceDataForSave(
 
   return {
     data: formattedResults,
-    totalValue: totalValue,
+    totalValue: totalValue
   };
 }
 
