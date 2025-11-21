@@ -12371,6 +12371,39 @@ exports.createFunnelDealConversionReport = async (req, res) => {
         .join(' ');
     };
 
+    // Helper function to get default xaxis (all stages) for a pipeline
+    const getDefaultXaxisForPipeline = async (pipelineId) => {
+      const pipeline = await Pipeline.findByPk(pipelineId, {
+        include: [
+          {
+            model: PipelineStage,
+            as: "stages",
+            where: { isActive: true },
+            required: false,
+            order: [["stageOrder", "ASC"]],
+          },
+        ],
+      });
+
+      if (!pipeline) {
+        throw new Error("Pipeline not found");
+      }
+
+      // Create formatted stages for xaxis with labels
+      const formattedStages = pipeline.stages.map((stage) => ({
+        label: formatStageLabel(stage.stageName),
+        value: stage.stageName,
+      }));
+
+      // Add 'won' stage at the end
+      const allStages = [
+        ...formattedStages,
+        { label: "Won", value: "won" }
+      ];
+
+      return allStages;
+    };
+
     // Case 1: Create new report or update existing with entity/type
     if (entity && type && !reportId) {
       if (entity === "Deal" && type === "FunnelConversion") {
@@ -12382,10 +12415,24 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           });
         }
 
-        if (!xaxis || !yaxis) {
+        // If xaxis is not provided, get all stages from the pipeline as default
+        let selectedXaxis = xaxis;
+        if (!selectedXaxis) {
+          try {
+            selectedXaxis = await getDefaultXaxisForPipeline(pipelineId);
+          } catch (error) {
+            return res.status(404).json({
+              success: false,
+              message: "Failed to get default stages for pipeline",
+              error: error.message,
+            });
+          }
+        }
+
+        if (!yaxis) {
           return res.status(400).json({
             success: false,
-            message: "X-axis and Y-axis are required for Deal Funnel Conversion reports",
+            message: "Y-axis is required for Deal Funnel Conversion reports",
           });
         }
 
@@ -12432,8 +12479,8 @@ exports.createFunnelDealConversionReport = async (req, res) => {
         const allStageValues = allStages.map(stage => stage.value);
 
         // Validate xaxis selections
-        const selectedXaxis = Array.isArray(xaxis) ? xaxis : [xaxis];
-        const selectedStageValues = getStageValues(selectedXaxis);
+        const selectedXaxisArray = Array.isArray(selectedXaxis) ? selectedXaxis : [selectedXaxis];
+        const selectedStageValues = getStageValues(selectedXaxisArray);
         
         const invalidStages = selectedStageValues.filter(
           (stage) => !allStageValues.includes(stage)
@@ -12501,7 +12548,7 @@ exports.createFunnelDealConversionReport = async (req, res) => {
           reportConfig = {
             entity,
             type,
-            xaxis: selectedXaxis, // Keep the original object format
+            xaxis: selectedXaxisArray, // Keep the original object format
             yaxis,
             pipelineId,
             pipelineName: pipeline.pipelineName,
