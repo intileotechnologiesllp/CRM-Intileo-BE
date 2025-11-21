@@ -4588,7 +4588,7 @@ exports.createEmailReport = async (req, res) => {
       Email: [
         { label: "Subject", value: "subject", type: "text" },
         { label: "Email Direction", value: "folder", type: "text" },
-        { label: "User", value: "masterUserID", type: "number" },
+        { label: "User", value: "masterUserID", type: "text" },
         { label: "Send/Recieve Date", value: "createdAt", type: "date" },
         // { label: "Custom Date", value: "customDate", type: "date" },
         // { label: "Date Range", value: "dateRange", type: "daterange" },
