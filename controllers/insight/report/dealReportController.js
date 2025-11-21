@@ -13104,9 +13104,9 @@ async function generateDealConversionFunnelData(
       };
 
       if (yaxis === "no of deals") {
-        stageObj.noOfDeals = stageData[stage];
+        stageObj.value = stageData[stage];
       } else if (yaxis === "proposalValue") {
-        stageObj.proposalValue = stageData[stage];
+        stageObj.value = stageData[stage];
       } else if (yaxis === "value") {
         stageObj.value = stageData[stage];
       }
