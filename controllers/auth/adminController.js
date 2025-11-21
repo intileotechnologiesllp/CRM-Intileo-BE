@@ -175,17 +175,6 @@ exports.signIn = async (req, res) => {
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        id: user.masterUserID,
-        email: user.email,
-        loginType: user.loginType,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
-
     // Get the current UTC time
     const loginTimeUTC = new Date();
 
@@ -226,7 +215,7 @@ exports.signIn = async (req, res) => {
     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
     // Save the new login history
-    await LoginHistory.create({
+    const newSession = await LoginHistory.create({
       userId: user.masterUserID,
       loginType: user.loginType,
       ipAddress: ipAddress || null,
@@ -239,6 +228,18 @@ exports.signIn = async (req, res) => {
       device: device,
       location: `${locationInfo?.city}, ${locationInfo?.country}` || null
     });
+
+    // Generate JWT token with sessionId for device management
+    const token = jwt.sign(
+      {
+        id: user.masterUserID,
+        email: user.email,
+        loginType: user.loginType,
+        sessionId: newSession.id, // Include session ID for tracking
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
 
     // Delete any existing records for the user in RecentLoginHistory
     await RecentLoginHistory.destroy({
@@ -507,14 +508,28 @@ exports.resetPassword = async (req, res) => {
 
 exports.logout = async (req, res) => {
   try {
-    // Extract userId (adminId) from the middleware
+    // Extract userId (adminId) and sessionId from the middleware
     const userId = req.adminId;
+    const sessionId = req.sessionId;
 
-    // Find the latest login history entry for the user
-    const loginHistory = await LoginHistory.findOne({
-      where: { userId },
-      order: [["loginTime", "DESC"]],
-    });
+    // Find the specific session from JWT token (preferred) or fall back to latest
+    let loginHistory;
+    if (sessionId) {
+      loginHistory = await LoginHistory.findOne({
+        where: { 
+          id: sessionId,
+          userId: userId 
+        },
+      });
+    }
+    
+    // Fallback to latest session if sessionId not found (backward compatibility)
+    if (!loginHistory) {
+      loginHistory = await LoginHistory.findOne({
+        where: { userId },
+        order: [["loginTime", "DESC"]],
+      });
+    }
 
     if (!loginHistory) {
       return res
