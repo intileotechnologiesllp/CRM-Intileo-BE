@@ -56,7 +56,7 @@ router.post("/bulk-mark", verifyToken, emailController.bulkMarkEmails);
 router.post("/bulk-move", verifyToken, emailController.bulkMoveEmails);
 
 // Email visibility (shared/private)
-router.post("/visibility/:emailId", verifyToken, emailController.updateEmailVisibility);
+router.post("/visibility/:emailId", verifyToken,emailController.updateEmailVisibility);
 
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 

@@ -757,6 +757,10 @@ exports.getDeals = async (req, res) => {
       if (!attributes.includes("status")) {
         attributes.push("status");
       }
+      // Always include ownerId in the attributes, regardless of preferences
+      if (!attributes.includes("ownerId")) {
+        attributes.push("ownerId");
+      }
 
       if (attributes.length === 0) attributes = undefined;
       if (dealDetailsAttributes.length === 0) dealDetailsAttributes = undefined;
@@ -1246,7 +1250,13 @@ exports.getDeals = async (req, res) => {
         Object.assign(dealObj, dealObj.details);
         delete dealObj.details;
       }
-      
+
+      // Always include ownerId in the response
+      if (typeof dealObj.ownerId === 'undefined' || dealObj.ownerId === null) {
+        // Try to get from the original deal instance if not present
+        dealObj.ownerId = deal.ownerId || null;
+      }
+
       // For proposal currency - keep both ID and description
       if (dealObj.proposalCurrency) {
         dealObj.proposalCurrencyId = dealObj.proposalCurrency;
@@ -1270,11 +1280,11 @@ exports.getDeals = async (req, res) => {
         console.log(`🔍 Processing first deal ID: ${dealObj.dealId}`);
         console.log(`🔍 Custom fields available for deal ${dealObj.dealId}:`, customFieldsByDeal[dealObj.dealId]);
       }
-      
+
       // Add custom fields directly to the deal object (not wrapped in customFields) - same as getLeads
       const customFieldsData = customFieldsByDeal[dealObj.dealId] || {};
       console.log(`🔍 Deal ${dealObj.dealId} - Custom fields data:`, customFieldsData);
-      
+
       Object.entries(customFieldsData).forEach(([fieldName, fieldData]) => {
         dealObj[fieldName] = fieldData.value;
         console.log(`🔍 Deal ${dealObj.dealId} - Added custom field: ${fieldName} = ${fieldData.value}`);
@@ -1291,7 +1301,7 @@ exports.getDeals = async (req, res) => {
       });
       // Keep the customFields property for backward compatibility (same as getLeads)
       dealObj.customFields = customFieldsForDeal;
-      
+
       console.log(`🔍 Deal ${dealObj.dealId} - Final customFields object:`, dealObj.customFields);
 
       // Ensure status is present (from deal or details)
@@ -1303,7 +1313,7 @@ exports.getDeals = async (req, res) => {
       dealObj.isConvertedToLead = dealObj.isConvertedToLead || false;
       dealObj.convertedToLeadAt = dealObj.convertedToLeadAt || null;
       dealObj.convertedToLeadBy = dealObj.convertedToLeadBy || null;
-      
+
       // Add display flag for UI
       if (dealObj.isConvertedToLead) {
         dealObj.conversionFlag = {
@@ -1312,7 +1322,6 @@ exports.getDeals = async (req, res) => {
           color: '#ff9800',
           tooltip: `Converted to lead on ${dealObj.convertedToLeadAt ? new Date(dealObj.convertedToLeadAt).toLocaleDateString() : 'Unknown date'}`
         };
-        
       }
 
       return dealObj;
