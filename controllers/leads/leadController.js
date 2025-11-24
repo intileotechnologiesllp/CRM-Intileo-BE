@@ -151,6 +151,19 @@ async function getUserLeadVisibilityPermissions(userId, userRole) {
 }
 //.....................changes......original....................
 exports.createLead = async (req, res) => {
+  // If this lead is being created as a conversion from a deal, update all emails with this leadId to also set the dealId
+  // (This is a defensive addition in case you ever support lead creation from a deal conversion)
+  if (req.body.dealId) {
+    try {
+      const updated = await Email.update(
+        { dealId: req.body.dealId },
+        { where: { leadId: req.body.leadId } }
+      );
+      console.log(`[LEAD->DEAL] Updated ${updated[0]} emails to set dealId=${req.body.dealId} for leadId=${req.body.leadId}`);
+    } catch (err) {
+      console.error(`[LEAD->DEAL] Error updating emails for leadId=${req.body.leadId}:`, err);
+    }
+  }
   // Only use these fields as standard fields for root-level custom field extraction
   const standardFields = [
     "title",

@@ -5067,37 +5067,47 @@ const getLinkedEntities = async (email) => {
 
     // Format the results and fetch activities for persons
     // Format directly linked leads
-    linkedEntities.leads = directLeads.map((lead) => ({
-      leadId: lead.leadId,
-      title: lead.title,
-      contactPerson: lead.contactPerson,
-      organization: lead.organization,
-      email: lead.email,
-      phone: lead.phone,
-      status: lead.status,
-      value: lead.value,
-      currency: lead.currency,
-      owner: lead.Owner ? lead.Owner.name : null,
-      createdAt: lead.createdAt,
-      linkType: 'direct'
-    }));
+    console.log(`[getLinkedEntities] 🔍 Processing ${directLeads.length} directly linked leads...`);
+    linkedEntities.leads = directLeads.map((lead, index) => {
+      console.log(`[getLinkedEntities] 📋 Direct Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
+      return {
+        leadId: lead.leadId,
+        dealId: lead.dealId, // 🔧 CRITICAL: Include dealId in response
+        title: lead.title,
+        contactPerson: lead.contactPerson,
+        organization: lead.organization,
+        email: lead.email,
+        phone: lead.phone,
+        status: lead.status,
+        value: lead.value,
+        currency: lead.currency,
+        owner: lead.Owner ? lead.Owner.name : null,
+        createdAt: lead.createdAt,
+        linkType: 'direct'
+      };
+    });
 
     // Format email-matched leads
-    linkedEntities.emailMatchedLeads = emailMatchedLeads.map((lead) => ({
-      leadId: lead.leadId,
-      title: lead.title,
-      contactPerson: lead.contactPerson,
-      organization: lead.organization,
-      email: lead.email,
-      phone: lead.phone,
-      status: lead.status,
-      value: lead.value,
-      currency: lead.currency,
-      owner: lead.Owner ? lead.Owner.name : null,
-      createdAt: lead.createdAt,
-      linkType: 'email_match',
-      matchedEmails: uniqueEmails.filter(emailAddr => emailAddr === lead.email)
-    }));
+    console.log(`[getLinkedEntities] 🔍 Processing ${emailMatchedLeads.length} email-matched leads...`);
+    linkedEntities.emailMatchedLeads = emailMatchedLeads.map((lead, index) => {
+      console.log(`[getLinkedEntities] 📋 EmailMatched Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
+      return {
+        leadId: lead.leadId,
+        dealId: lead.dealId, // 🔧 CRITICAL: Include dealId in response
+        title: lead.title,
+        contactPerson: lead.contactPerson,
+        organization: lead.organization,
+        email: lead.email,
+        phone: lead.phone,
+        status: lead.status,
+        value: lead.value,
+        currency: lead.currency,
+        owner: lead.Owner ? lead.Owner.name : null,
+        createdAt: lead.createdAt,
+        linkType: 'email_match',
+        matchedEmails: uniqueEmails.filter(emailAddr => emailAddr === lead.email)
+      };
+    });
 
     // Format directly linked deals
     linkedEntities.deals = directDeals.map((deal) => ({
@@ -5464,12 +5474,23 @@ const getAggregatedLinkedEntities = async (emails) => {
     };
 
     // Process each email in the conversation for additional linked entities
+    console.log(`[getAggregatedLinkedEntities] 🔍 Processing ${emails.length} emails for linked entities...`);
     for (const email of emails) {
+      console.log(`[getAggregatedLinkedEntities] 📧 Processing email ${email.emailID} (leadId=${email.leadId}, dealId=${email.dealId})`);
       const linkedEntities = await getLinkedEntities(email);
 
+      console.log(`[getAggregatedLinkedEntities] 📋 Email ${email.emailID} linked entities:`, {
+        leads: linkedEntities.leads.length,
+        deals: linkedEntities.deals.length,
+        emailMatchedLeads: linkedEntities.emailMatchedLeads.length,
+        emailMatchedDeals: linkedEntities.emailMatchedDeals.length
+      });
+
       // Aggregate leads (deduplicate by leadId and preserve email matching info)
-      linkedEntities.leads.forEach((lead) => {
+      linkedEntities.leads.forEach((lead, index) => {
+        console.log(`[getAggregatedLinkedEntities] 🔍 Processing direct lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
         if (!seenLeads.has(lead.leadId)) {
+          console.log(`[getAggregatedLinkedEntities] ✅ Adding new direct lead ${lead.leadId} to aggregated leads`);
           seenLeads.add(lead.leadId);
           aggregatedEntities.leads.push({
             ...lead,
@@ -5480,12 +5501,16 @@ const getAggregatedLinkedEntities = async (emails) => {
               createdAt: email.createdAt,
             },
           });
+        } else {
+          console.log(`[getAggregatedLinkedEntities] ⚠️ Skipping duplicate direct lead ${lead.leadId}`);
         }
       });
 
       // Aggregate deals (deduplicate by dealId and preserve email matching info)
-      linkedEntities.deals.forEach((deal) => {
+      linkedEntities.deals.forEach((deal, index) => {
+        console.log(`[getAggregatedLinkedEntities] 🔍 Processing direct deal ${index + 1}: ID=${deal.dealId}, title="${deal.title}"`);
         if (!seenDeals.has(deal.dealId)) {
+          console.log(`[getAggregatedLinkedEntities] ✅ Adding new direct deal ${deal.dealId} to aggregated deals`);
           seenDeals.add(deal.dealId);
           aggregatedEntities.deals.push({
             ...deal,
@@ -5496,12 +5521,16 @@ const getAggregatedLinkedEntities = async (emails) => {
               createdAt: email.createdAt,
             },
           });
+        } else {
+          console.log(`[getAggregatedLinkedEntities] ⚠️ Skipping duplicate direct deal ${deal.dealId}`);
         }
       });
 
       // Aggregate email-matched leads (deduplicate by leadId)
-      linkedEntities.emailMatchedLeads.forEach((lead) => {
+      linkedEntities.emailMatchedLeads.forEach((lead, index) => {
+        console.log(`[getAggregatedLinkedEntities] 🔍 Processing email-matched lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
         if (!seenLeads.has(lead.leadId)) {
+          console.log(`[getAggregatedLinkedEntities] ✅ Adding new email-matched lead ${lead.leadId} to aggregated emailMatchedLeads`);
           seenLeads.add(lead.leadId);
           aggregatedEntities.emailMatchedLeads.push({
             ...lead,
@@ -5512,12 +5541,16 @@ const getAggregatedLinkedEntities = async (emails) => {
               createdAt: email.createdAt,
             },
           });
+        } else {
+          console.log(`[getAggregatedLinkedEntities] ⚠️ Skipping duplicate email-matched lead ${lead.leadId}`);
         }
       });
 
       // Aggregate email-matched deals (deduplicate by dealId)
-      linkedEntities.emailMatchedDeals.forEach((deal) => {
+      linkedEntities.emailMatchedDeals.forEach((deal, index) => {
+        console.log(`[getAggregatedLinkedEntities] 🔍 Processing email-matched deal ${index + 1}: ID=${deal.dealId}, title="${deal.title}"`);
         if (!seenDeals.has(deal.dealId)) {
+          console.log(`[getAggregatedLinkedEntities] ✅ Adding new email-matched deal ${deal.dealId} to aggregated emailMatchedDeals`);
           seenDeals.add(deal.dealId);
           aggregatedEntities.emailMatchedDeals.push({
             ...deal,
@@ -5528,6 +5561,8 @@ const getAggregatedLinkedEntities = async (emails) => {
               createdAt: email.createdAt,
             },
           });
+        } else {
+          console.log(`[getAggregatedLinkedEntities] ⚠️ Skipping duplicate email-matched deal ${deal.dealId}`);
         }
       });
 
@@ -6264,7 +6299,172 @@ exports.getOneEmail = async (req, res) => {
     });
 
     // Fetch linked entities from ALL emails in the conversation thread
-    const linkedEntities = await getAggregatedLinkedEntities(conversation);
+    let linkedEntities = await getAggregatedLinkedEntities(conversation);
+
+    console.log(`[getOneEmail] 🔍 LEAD CONVERSION DEBUG: Initial linked entities analysis for email ${emailId}:`);
+    console.log(`   - Total leads found: ${linkedEntities.leads ? linkedEntities.leads.length : 0}`);
+    console.log(`   - Total deals found: ${linkedEntities.deals ? linkedEntities.deals.length : 0}`);
+    console.log(`   - Total emailMatchedLeads: ${linkedEntities.emailMatchedLeads ? linkedEntities.emailMatchedLeads.length : 0}`);
+    console.log(`   - Total emailMatchedDeals: ${linkedEntities.emailMatchedDeals ? linkedEntities.emailMatchedDeals.length : 0}`);
+
+    // Log all leads with their dealId status
+    if (linkedEntities.leads && linkedEntities.leads.length > 0) {
+      console.log(`[getOneEmail] 📋 LEADS ANALYSIS:`);
+      linkedEntities.leads.forEach((lead, index) => {
+        console.log(`   - Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}", linkType=${lead.linkType}`);
+      });
+    } else {
+      console.log(`[getOneEmail] ❌ NO LEADS FOUND in linkedEntities.leads`);
+    }
+
+    // Log email-matched leads with their dealId status
+    if (linkedEntities.emailMatchedLeads && linkedEntities.emailMatchedLeads.length > 0) {
+      console.log(`[getOneEmail] 📋 EMAIL-MATCHED LEADS ANALYSIS:`);
+      linkedEntities.emailMatchedLeads.forEach((lead, index) => {
+        console.log(`   - EmailMatched Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}", linkType=${lead.linkType}`);
+      });
+    } else {
+      console.log(`[getOneEmail] ❌ NO EMAIL-MATCHED LEADS FOUND in linkedEntities.emailMatchedLeads`);
+    }
+
+    // --- PATCH: Move converted leads (lead.dealId != null) to deals array ---
+    console.log(`[getOneEmail] 🔧 Starting lead conversion check...`);
+    
+    if (linkedEntities && Array.isArray(linkedEntities.leads)) {
+      console.log(`[getOneEmail] ✅ linkedEntities.leads is valid array with ${linkedEntities.leads.length} items`);
+      
+      const convertedLeads = linkedEntities.leads.filter(lead => lead.dealId != null);
+      console.log(`[getOneEmail] 🔍 Found ${convertedLeads.length} converted leads (dealId != null)`);
+      
+      if (convertedLeads.length > 0) {
+        console.log(`[getOneEmail] 📋 CONVERTED LEADS TO PROCESS:`);
+        convertedLeads.forEach((lead, index) => {
+          console.log(`   - Converted Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
+        });
+
+        // Remove converted leads from leads array
+        const originalLeadsCount = linkedEntities.leads.length;
+        linkedEntities.leads = linkedEntities.leads.filter(lead => lead.dealId == null);
+        console.log(`[getOneEmail] ✅ Removed ${originalLeadsCount - linkedEntities.leads.length} converted leads from leads array`);
+        console.log(`[getOneEmail] 📊 Remaining unconverted leads: ${linkedEntities.leads.length}`);
+        
+        // Add converted leads to deals array (if not already present)
+        if (!Array.isArray(linkedEntities.deals)) {
+          linkedEntities.deals = [];
+          console.log(`[getOneEmail] 🔧 Created new deals array`);
+        } else {
+          console.log(`[getOneEmail] ✅ Using existing deals array with ${linkedEntities.deals.length} items`);
+        }
+        
+        // Avoid duplicate deals by dealId
+        const existingDealIds = new Set(linkedEntities.deals.map(deal => deal.dealId));
+        console.log(`[getOneEmail] 📋 Existing deal IDs: [${Array.from(existingDealIds).join(', ')}]`);
+        
+        let addedDealsCount = 0;
+        convertedLeads.forEach((lead, index) => {
+          console.log(`[getOneEmail] 🔍 Processing converted lead ${index + 1}: leadId=${lead.leadId}, dealId=${lead.dealId}`);
+          
+          if (!existingDealIds.has(lead.dealId)) {
+            console.log(`[getOneEmail] ✅ Adding converted lead ${lead.leadId} as deal ${lead.dealId} to deals array`);
+            
+            // Map lead fields to deal fields as best as possible
+            linkedEntities.deals.push({
+              dealId: lead.dealId,
+              title: lead.title,
+              contactPerson: lead.contactPerson,
+              organization: lead.organization,
+              email: lead.email,
+              phone: lead.phone,
+              status: lead.status,
+              value: lead.value,
+              currency: lead.currency,
+              owner: lead.owner,
+              createdAt: lead.createdAt,
+              linkType: 'converted_lead'
+            });
+            existingDealIds.add(lead.dealId);
+            addedDealsCount++;
+          } else {
+            console.log(`[getOneEmail] ⚠️ Deal ${lead.dealId} already exists in deals array, skipping duplicate`);
+          }
+        });
+        
+        console.log(`[getOneEmail] 📊 CONVERSION SUMMARY: Added ${addedDealsCount} converted leads to deals array`);
+        console.log(`[getOneEmail] 📊 FINAL COUNTS: leads=${linkedEntities.leads.length}, deals=${linkedEntities.deals.length}`);
+      } else {
+        console.log(`[getOneEmail] ℹ️ No converted leads found (all leads have dealId == null)`);
+      }
+    } else {
+      console.log(`[getOneEmail] ❌ linkedEntities.leads is not a valid array:`, typeof linkedEntities.leads);
+    }
+
+    // Also check emailMatchedLeads for converted leads
+    console.log(`[getOneEmail] 🔧 Checking emailMatchedLeads for conversions...`);
+    if (linkedEntities && Array.isArray(linkedEntities.emailMatchedLeads)) {
+      console.log(`[getOneEmail] ✅ linkedEntities.emailMatchedLeads is valid array with ${linkedEntities.emailMatchedLeads.length} items`);
+      
+      const convertedEmailMatchedLeads = linkedEntities.emailMatchedLeads.filter(lead => lead.dealId != null);
+      console.log(`[getOneEmail] 🔍 Found ${convertedEmailMatchedLeads.length} converted email-matched leads (dealId != null)`);
+      
+      if (convertedEmailMatchedLeads.length > 0) {
+        console.log(`[getOneEmail] 📋 CONVERTED EMAIL-MATCHED LEADS TO PROCESS:`);
+        convertedEmailMatchedLeads.forEach((lead, index) => {
+          console.log(`   - Converted EmailMatched Lead ${index + 1}: ID=${lead.leadId}, dealId=${lead.dealId}, title="${lead.title}"`);
+        });
+
+        // Remove converted leads from emailMatchedLeads array
+        const originalEmailMatchedCount = linkedEntities.emailMatchedLeads.length;
+        linkedEntities.emailMatchedLeads = linkedEntities.emailMatchedLeads.filter(lead => lead.dealId == null);
+        console.log(`[getOneEmail] ✅ Removed ${originalEmailMatchedCount - linkedEntities.emailMatchedLeads.length} converted leads from emailMatchedLeads array`);
+        
+        // Add to emailMatchedDeals array
+        if (!Array.isArray(linkedEntities.emailMatchedDeals)) {
+          linkedEntities.emailMatchedDeals = [];
+          console.log(`[getOneEmail] 🔧 Created new emailMatchedDeals array`);
+        }
+        
+        const existingEmailMatchedDealIds = new Set(linkedEntities.emailMatchedDeals.map(deal => deal.dealId));
+        let addedEmailMatchedDealsCount = 0;
+        
+        convertedEmailMatchedLeads.forEach((lead, index) => {
+          if (!existingEmailMatchedDealIds.has(lead.dealId)) {
+            console.log(`[getOneEmail] ✅ Adding converted emailMatched lead ${lead.leadId} as deal ${lead.dealId} to emailMatchedDeals array`);
+            
+            linkedEntities.emailMatchedDeals.push({
+              dealId: lead.dealId,
+              title: lead.title,
+              contactPerson: lead.contactPerson,
+              organization: lead.organization,
+              email: lead.email,
+              phone: lead.phone,
+              status: lead.status,
+              value: lead.value,
+              currency: lead.currency,
+              owner: lead.owner,
+              createdAt: lead.createdAt,
+              linkType: 'converted_email_matched_lead',
+              matchedEmails: lead.matchedEmails
+            });
+            existingEmailMatchedDealIds.add(lead.dealId);
+            addedEmailMatchedDealsCount++;
+          } else {
+            console.log(`[getOneEmail] ⚠️ Deal ${lead.dealId} already exists in emailMatchedDeals array, skipping duplicate`);
+          }
+        });
+        
+        console.log(`[getOneEmail] 📊 EMAIL-MATCHED CONVERSION SUMMARY: Added ${addedEmailMatchedDealsCount} converted email-matched leads to emailMatchedDeals array`);
+      } else {
+        console.log(`[getOneEmail] ℹ️ No converted email-matched leads found (all have dealId == null)`);
+      }
+    } else {
+      console.log(`[getOneEmail] ❌ linkedEntities.emailMatchedLeads is not a valid array:`, typeof linkedEntities.emailMatchedLeads);
+    }
+
+    console.log(`[getOneEmail] 🏁 FINAL LINKED ENTITIES SUMMARY:`);
+    console.log(`   - leads: ${linkedEntities.leads ? linkedEntities.leads.length : 0}`);
+    console.log(`   - deals: ${linkedEntities.deals ? linkedEntities.deals.length : 0}`);
+    console.log(`   - emailMatchedLeads: ${linkedEntities.emailMatchedLeads ? linkedEntities.emailMatchedLeads.length : 0}`);
+    console.log(`   - emailMatchedDeals: ${linkedEntities.emailMatchedDeals ? linkedEntities.emailMatchedDeals.length : 0}`);
 
     res.status(200).json({
       message: "Email fetched successfully.",
@@ -10003,6 +10203,7 @@ async function getEmailsRealtimeLightweight(req, res) {
         model: Lead,
         as: "Lead",
         required: false,
+        where: { dealId: { [require('sequelize').Op.is]: null } },
         attributes: [
           "leadId",
           "title",
@@ -10123,16 +10324,21 @@ async function getEmailsRealtimeLightweight(req, res) {
       if (email.dealId) emailsWithDealIdCount++;
       if (email.Lead) emailsWithLeadObjectCount++;
       if (email.Deal) emailsWithDealObjectCount++;
-      
+
       if (email.leadId || email.dealId) {
         console.log(`📧 [USER-${masterUserID}-EMAIL-${index}] ID: ${email.emailID}, Subject: "${email.subject?.substring(0, 30)}...", leadId: ${email.leadId}, dealId: ${email.dealId}, hasLeadObj: ${!!email.Lead}, hasDealObj: ${!!email.Deal}`);
-        
-        // If ID exists but object doesn't, log more details
-        if (email.leadId && !email.Lead) {
-          console.log(`⚠️ [USER-${masterUserID}-MISSING-LEAD] Email ${email.emailID} has leadId ${email.leadId} but NO Lead object!`);
+
+        // If leadId exists, dealId is null, and Lead object is missing, log as likely converted
+        if (email.leadId && !email.dealId && !email.Lead) {
+          console.warn(`[EMAIL-DEBUG] EmailID ${email.emailID}: leadId=${email.leadId} present, dealId=null, but Lead object missing (likely filtered out as converted).`);
         }
-        if (email.dealId && !email.Deal) {
-          console.log(`⚠️ [USER-${masterUserID}-MISSING-DEAL] Email ${email.emailID} has dealId ${email.dealId} but NO Deal object!`);
+        // If leadId exists, dealId is null, and Lead object is present (should be active lead)
+        if (email.leadId && !email.dealId && email.Lead) {
+          console.info(`[EMAIL-DEBUG] EmailID ${email.emailID}: leadId=${email.leadId} present, dealId=null, Lead object present (not converted).`);
+        }
+        // If both leadId and dealId exist
+        if (email.leadId && email.dealId) {
+          console.info(`[EMAIL-DEBUG] EmailID ${email.emailID}: leadId=${email.leadId}, dealId=${email.dealId} (should be converted).`);
         }
       }
     });
