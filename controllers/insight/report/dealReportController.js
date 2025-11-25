@@ -486,19 +486,29 @@ async function generateExistingDealPerformanceData(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -856,17 +866,6 @@ async function generateExistingDealPerformanceData(
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -882,20 +881,30 @@ async function generateExistingDealPerformanceData(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -914,17 +923,6 @@ async function generateExistingDealPerformanceData(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = item.xValue || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -995,24 +993,34 @@ async function generateDealPerformanceData(
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, we'll handle this differently
     // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -1375,19 +1383,30 @@ async function generateDealPerformanceData(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -1471,7 +1490,12 @@ function getDateGroupExpression(dateField, durationUnit) {
       );
 
     case "monthly":
-      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%m/%Y");
+      return Sequelize.literal(`
+            CONCAT(
+              ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
+              ' ',
+              YEAR(${field})
+     `);
 
     case "quarterly":
       return Sequelize.literal(
@@ -1495,6 +1519,12 @@ function formatDateValue(value, durationUnit) {
   // For yearly, just return the year as string
   if (durationUnit.toLowerCase() === "yearly") {
     return value.toString();
+  }
+
+  if (durationUnit.toLowerCase() === "monthly" && value) {
+    // If you want to ensure proper formatting, you can parse and reformat
+    // But typically the SQL function already returns "Jan 2025" format
+    return value;
   }
 
   // For other cases, return the value as is (already formatted by SQL)
@@ -1875,21 +1905,29 @@ async function generateExistingDealPerformanceDataForSave(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
     xaxisNullExcludeCondition["$ActivityPerson.contactPerson$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$ActivityOrganization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -2197,17 +2235,6 @@ async function generateExistingDealPerformanceDataForSave(
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -2223,20 +2250,30 @@ async function generateExistingDealPerformanceDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -2254,18 +2291,7 @@ async function generateExistingDealPerformanceDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label = item.xValue || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
@@ -2323,24 +2349,34 @@ async function generateDealPerformanceDataForSave(
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, we'll handle this differently
     // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -2639,17 +2675,6 @@ async function generateDealPerformanceDataForSave(
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -2665,19 +2690,30 @@ async function generateDealPerformanceDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
-
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -2695,17 +2731,6 @@ async function generateDealPerformanceDataForSave(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -3873,21 +3898,31 @@ async function generateDealConversionData(
 
   if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -4320,17 +4355,27 @@ async function generateExistingDealConversionData(
   //   isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
   if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -4765,24 +4810,34 @@ async function generateDealConversionDataForSave(
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, we'll handle this differently
     // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -5162,19 +5217,29 @@ async function generateExistingDealConversionDataForSave(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -6798,7 +6863,13 @@ function getDealDateGroupExpression(dateField, durationUnit) {
       );
 
     case "monthly":
-      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%m/%Y");
+          return Sequelize.literal(`
+            CONCAT(
+              ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
+              ' ',
+              YEAR(${field})
+            )
+         `); 
 
     case "quarterly":
       return Sequelize.literal(
@@ -6823,7 +6894,11 @@ function formatDealDateValue(value, durationUnit) {
   if (durationUnit.toLowerCase() === "yearly") {
     return value.toString();
   }
-
+  if (durationUnit.toLowerCase() === "monthly" && value) {
+    // If you want to ensure proper formatting, you can parse and reformat
+    // But typically the SQL function already returns "Jan 2025" format
+    return value;
+  }
   // For other cases, return the value as is (already formatted by SQL)
   return value;
 }
@@ -6892,26 +6967,34 @@ async function generateProgressExistingActivityPerformanceData(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, exclude null dates
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "creator") {
     // For creator, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "creatorstatus") {
     // For creatorstatus, exclude where assignedUser.creatorstatus is null
     xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else if (existingxaxis === "contactPerson") {
     // For contactPerson, exclude where Person.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     // For organization, exclude where Organization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Deal columns, exclude where the column value is null
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -7339,22 +7422,30 @@ async function generateProgressActivityPerformanceData(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, exclude null dates
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "creator") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "creatorstatus") {
     xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else if (xaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Deal columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -8147,21 +8238,29 @@ async function generateProgressActivityPerformanceDataForSave(
   let xaxisNullExcludeCondition = {};
 
   if (shouldGroupByDuration) {
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "creator") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "creatorstatus") {
     xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else if (xaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -8529,21 +8628,29 @@ async function generateProgressExistingActivityPerformanceDataForSave(
   let xaxisNullExcludeCondition = {};
 
   if (shouldGroupByDuration) {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "creator") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "creatorstatus") {
     xaxisNullExcludeCondition["$assignedUser.creatorstatus$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -9556,19 +9663,29 @@ async function generateExistingDealDurationData(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -10117,24 +10234,34 @@ async function generateDealDurationData(
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, we'll handle this differently
     // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -10693,19 +10820,29 @@ async function generateExistingDealDurationDataForSave(
 
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (existingxaxis === "organization") {
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
@@ -11191,24 +11328,34 @@ async function generateDealDurationDataForSave(
   if (shouldGroupByDuration) {
     // For date fields with duration grouping, we'll handle this differently
     // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   } else if (xaxis === "Owner" || xaxis === "assignedTo") {
     // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "Team") {
     // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "contactPerson") {
     // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$Person.contactPerson$"] = { [Op.ne]: null };
+    xaxisNullExcludeCondition["$Person.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
   } else if (xaxis === "organization") {
     // For organization, exclude where ActivityOrganization.organization is null
     xaxisNullExcludeCondition["$Organization.organization$"] = {
       [Op.ne]: null,
+      [Op.ne]: "",
     };
   } else {
     // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere

@@ -1,5 +1,6 @@
 const { Op, Sequelize } = require("sequelize");
 const LeadOrganization = require("../../models/leads/leadOrganizationModel");
+const { Person } = require("../../models");
 
 exports.getActivityConditionObject = (column, operator, value, includeModels = []) => {
   let conditionValue = value;
