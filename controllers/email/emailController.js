@@ -832,12 +832,12 @@ const fetchSingleEmailBody = async (messageId, userCredential) => {
 // Enhanced progressive timeout calculation based on strategy
 const getProgressiveTimeout = (strategy) => {
   switch (strategy) {
-    case "MASSIVE_INBOX": return 60000; // 60s for metadata-only fetching (Yandex compatibility)
-    case "VERY_LARGE": return 45000; // 45 seconds for very large inboxes
-    case "LARGE": return 30000; // 30 seconds for large inboxes
-    case "MEDIUM": return 20000; // 20 seconds for medium inboxes
-    case "SMALL_CHUNKS": return 15000; // 15 seconds for small chunks
-    default: return 10000; // 10 seconds for normal
+    case "MASSIVE_INBOX": return 180000; // 3 minutes for metadata-only fetching (Google Workspace compatibility)
+    case "VERY_LARGE": return 150000; // 2.5 minutes for very large inboxes
+    case "LARGE": return 120000; // 2 minutes for large inboxes
+    case "MEDIUM": return 90000; // 1.5 minutes for medium inboxes
+    case "SMALL_CHUNKS": return 60000; // 1 minute for small chunks
+    default: return 45000; // 45 seconds for normal (increased from 10s)
   }
 };
 
@@ -1127,8 +1127,8 @@ const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider
       
       // Enhanced progressive timeout based on strategy and chunk number
       const baseTimeout = getProgressiveTimeout(strategy);
-      const adaptiveTimeout = baseTimeout + (chunk * 1000); // Add 1s per chunk for older data
-      const maxTimeout = Math.min(adaptiveTimeout, 120000); // Cap at 2 minutes
+      const adaptiveTimeout = baseTimeout + (chunk * 2000); // Add 2s per chunk for older data (increased from 1s)
+      const maxTimeout = Math.min(adaptiveTimeout, 300000); // Cap at 5 minutes (increased from 2 minutes)
       
       const searchPromise = connection.search([
         ["SINCE", startDateStr],
@@ -1249,8 +1249,8 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
       
       // Search for emails in this date range with progressive timeout
-      const baseTimeout = 20000; // Base 20 seconds
-      const progressiveTimeout = baseTimeout + (chunk * 3000); // Add 3s per chunk for older data
+      const baseTimeout = 60000; // Base 60 seconds (increased from 20s for Google Workspace)
+      const progressiveTimeout = baseTimeout + (chunk * 5000); // Add 5s per chunk for older data (increased from 3s)
       
       const searchPromise = connection.search([
         ["SINCE", startDateStr],
