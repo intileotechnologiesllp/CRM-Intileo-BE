@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
-const imapTestController = require("../../controllers/email/imapTestController");
+const testImapController = require("../../controllers/email/testImapController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
 // const validatePrivilege = require("../../middlewares/validatePrivilege");
 
@@ -63,10 +63,9 @@ router.post("/visibility/:emailId", verifyToken,emailController.updateEmailVisib
 // Gmail IMAP test routes (no auth for testing)
 router.get("/inbox-count", emailController.checkGmailInboxCount);
 
-// IMAP sync test endpoints
-router.get("/imap/health", verifyToken, imapTestController.testImapHealth);
-router.post("/imap/test-sync", verifyToken, imapTestController.testImapSync);
-router.get("/imap/stats", verifyToken, imapTestController.getImapStats);
+// IMAP Connection Testing
+router.post("/test-imap", verifyToken, testImapController.testImapConnection);
+
 router.post("/update-default-email-visibility",verifyToken, emailController.updateDefaultEmailVisibility); // Endpoint to trigger the update script
 router.get("/search-leads-deals", verifyToken, emailController.searchLeadsAndDeals);
 
@@ -85,5 +84,8 @@ router.post("/stop-realtime-sync", verifyToken, emailController.stopRealtimeSync
 router.get("/realtime-status", verifyToken, emailController.getRealtimeStatus); // Check IDLE connection status (temp: no auth)
 router.get("/realtime-connections", verifyToken, emailController.getAllRealtimeConnections); // Admin: view all connections (temp: no auth)
 router.get("/detailed-connection-status", verifyToken, emailController.getDetailedConnectionStatus); // Detailed Redis locks and backoff status (temp: no auth)
+
+// IMAP Connection Testing
+router.post("/test-imap", verifyToken, testImapController.testImapConnection);
 
 module.exports = router;

@@ -145,6 +145,11 @@ const Email = sequelize.define(
       allowNull: true,
       comment: 'ID of the single label associated with this email'
     },
+    lastError: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Last error message encountered during email processing (scheduling, sending, etc.)'
+    },
   },
   {
     indexes: [
@@ -152,6 +157,26 @@ const Email = sequelize.define(
         fields: ["messageId", "folder"], // Composite unique index
       },
     ],
+    hooks: {
+      beforeCreate: (email, options) => {
+        // Validate recipients for scheduled emails (outbox folder)
+        if (email.folder === 'outbox' && email.scheduledAt) {
+          const hasRecipients = email.recipient || email.cc || email.bcc;
+          if (!hasRecipients) {
+            throw new Error('Scheduled emails must have at least one recipient (recipient, cc, or bcc)');
+          }
+        }
+      },
+      beforeUpdate: (email, options) => {
+        // Validate recipients for scheduled emails (outbox folder) on update
+        if (email.folder === 'outbox' && email.scheduledAt) {
+          const hasRecipients = email.recipient || email.cc || email.bcc;
+          if (!hasRecipients) {
+            throw new Error('Scheduled emails must have at least one recipient (recipient, cc, or bcc)');
+          }
+        }
+      }
+    }
   }
 );
 
