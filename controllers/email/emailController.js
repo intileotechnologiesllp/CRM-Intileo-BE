@@ -832,12 +832,12 @@ const fetchSingleEmailBody = async (messageId, userCredential) => {
 // Enhanced progressive timeout calculation based on strategy
 const getProgressiveTimeout = (strategy) => {
   switch (strategy) {
-    case "MASSIVE_INBOX": return 180000; // 3 minutes for metadata-only fetching (Google Workspace compatibility)
-    case "VERY_LARGE": return 150000; // 2.5 minutes for very large inboxes
-    case "LARGE": return 120000; // 2 minutes for large inboxes
-    case "MEDIUM": return 90000; // 1.5 minutes for medium inboxes
-    case "SMALL_CHUNKS": return 60000; // 1 minute for small chunks
-    default: return 45000; // 45 seconds for normal (increased from 10s)
+    case "MASSIVE_INBOX": return 60000; // 60s for metadata-only fetching (Yandex compatibility)
+    case "VERY_LARGE": return 45000; // 45 seconds for very large inboxes
+    case "LARGE": return 30000; // 30 seconds for large inboxes
+    case "MEDIUM": return 20000; // 20 seconds for medium inboxes
+    case "SMALL_CHUNKS": return 15000; // 15 seconds for small chunks
+    default: return 10000; // 10 seconds for normal
   }
 };
 
@@ -1127,8 +1127,8 @@ const fetchEmailsInChunksEnhanced = async (connection, chunkDays, page, provider
       
       // Enhanced progressive timeout based on strategy and chunk number
       const baseTimeout = getProgressiveTimeout(strategy);
-      const adaptiveTimeout = baseTimeout + (chunk * 2000); // Add 2s per chunk for older data (increased from 1s)
-      const maxTimeout = Math.min(adaptiveTimeout, 300000); // Cap at 5 minutes (increased from 2 minutes)
+      const adaptiveTimeout = baseTimeout + (chunk * 1000); // Add 1s per chunk for older data
+      const maxTimeout = Math.min(adaptiveTimeout, 120000); // Cap at 2 minutes
       
       const searchPromise = connection.search([
         ["SINCE", startDateStr],
@@ -1249,8 +1249,8 @@ const fetchEmailsInChunks = async (connection, chunkDays, page, provider = 'unkn
       console.log(`[Batch ${page}] 📅 USER ${userID} ${provider} Chunk ${chunk + 1}/${maxChunks}: ${startDateStr} to ${endDateStr}`);
       
       // Search for emails in this date range with progressive timeout
-      const baseTimeout = 60000; // Base 60 seconds (increased from 20s for Google Workspace)
-      const progressiveTimeout = baseTimeout + (chunk * 5000); // Add 5s per chunk for older data (increased from 3s)
+      const baseTimeout = 20000; // Base 20 seconds
+      const progressiveTimeout = baseTimeout + (chunk * 3000); // Add 3s per chunk for older data
       
       const searchPromise = connection.search([
         ["SINCE", startDateStr],
@@ -1632,34 +1632,13 @@ exports.fetchInboxEmails = async (req, res) => {
       );
       return res.status(404).json({ message: "User credentials not found." });
     }
-    
     console.log(userCredential.email, "email");
     console.log(userCredential.appPassword, "appPassword");
-
-    // Validate email and app password
-    if (!userCredential.email || !userCredential.appPassword) {
-      console.error(`[Batch ${page}] ❌ Invalid credentials for user ${masterUserID}:`);
-      console.error(`  Email: "${userCredential.email}" (${userCredential.email ? 'valid' : 'MISSING'})`);
-      console.error(`  App Password: "${userCredential.appPassword}" (${userCredential.appPassword ? 'valid' : 'MISSING'})`);
-      return res.status(400).json({ 
-        message: "Invalid email credentials - email or app password is missing.",
-        details: {
-          hasEmail: !!userCredential.email,
-          hasAppPassword: !!userCredential.appPassword
-        }
-      });
-    }
-
-    // Validate app password format (basic check)
-    if (userCredential.appPassword.length < 12) {
-      console.warn(`[Batch ${page}] ⚠️ App password seems too short: ${userCredential.appPassword.length} characters`);
-      console.warn(`[Batch ${page}] ⚠️ For Gmail, app passwords are typically 16 characters`);
-    }
 
     const userEmail = userCredential.email;
     const userPassword = userCredential.appPassword;
 
-    console.log(`[Batch ${page}] 🔐 Connecting to IMAP server for ${userEmail}...`);
+    console.log("Connecting to IMAP server...");
     // const imapConfig = {
     //   imap: {
     //     user: userEmail,
@@ -1674,57 +1653,12 @@ exports.fetchInboxEmails = async (req, res) => {
     //   },
     // };
     let imapConfig;
-    const providerd = userCredential.provider || 'gmail'; // default to gmail
+    const providerd = userCredential.provider; // default to gmail
 
-    console.log(`[Batch ${page}] 📧 Using provider: ${providerd} for ${userEmail}`);
-
-    // Auto-detect provider based on email domain if not explicitly set
-    let effectiveProvider = providerd;
-    if (!userCredential.provider || providerd === 'gmail') {
-      const emailDomain = userEmail.split('@')[1]?.toLowerCase();
-      console.log(`[Batch ${page}] 🔍 Email domain detected: ${emailDomain}`);
-      
-      if (emailDomain) {
-        if (emailDomain.includes('gmail.') || emailDomain === 'gmail.com') {
-          effectiveProvider = 'gmail';
-        } else if (emailDomain.includes('outlook.') || emailDomain.includes('hotmail.') || emailDomain.includes('live.')) {
-          effectiveProvider = 'outlook';
-          console.log(`[Batch ${page}] 🔄 Auto-detected Outlook/Hotmail provider for ${emailDomain}`);
-        } else if (emailDomain.includes('yandex.')) {
-          effectiveProvider = 'yandex';
-          console.log(`[Batch ${page}] 🔄 Auto-detected Yandex provider for ${emailDomain}`);
-        } else if (emailDomain.includes('yahoo.')) {
-          effectiveProvider = 'yahoo';
-          console.log(`[Batch ${page}] 🔄 Auto-detected Yahoo provider for ${emailDomain}`);
-        } else if (emailDomain === 'earthood.in') {
-          // Custom handling for earthood.in domain
-          console.log(`[Batch ${page}] 🔄 Special handling for earthood.in domain - this might need custom IMAP settings`);
-          console.log(`[Batch ${page}] ⚠️ earthood.in emails may require manual IMAP configuration. Current provider: ${effectiveProvider}`);
-          // Keep the current provider but add a warning
-        } else {
-          console.log(`[Batch ${page}] ⚠️ Unknown email domain: ${emailDomain}, keeping provider as ${effectiveProvider}`);
-          console.log(`[Batch ${page}] 💡 Suggestion: If this is a custom domain, you may need to set up custom IMAP settings`);
-        }
-      }
-    }
-
-    console.log(`[Batch ${page}] 🎯 Final provider: ${effectiveProvider}`);
-
-    const providerConfig = PROVIDER_CONFIG[effectiveProvider];
-    if (!providerConfig && effectiveProvider !== 'custom') {
-      console.error(`[Batch ${page}] ❌ Unknown provider: ${effectiveProvider}. Falling back to Gmail.`);
-      effectiveProvider = 'gmail';
-      providerConfig = PROVIDER_CONFIG['gmail'];
-    }
-
-    console.log(`[Batch ${page}] 🔧 Provider config:`, {
-      host: providerConfig?.host,
-      port: providerConfig?.port,
-      tls: providerConfig?.tls
-    });
-
-    const folderMap = PROVIDER_FOLDER_MAP[effectiveProvider] || PROVIDER_FOLDER_MAP["gmail"];
-    if (effectiveProvider === "custom") {
+    const providerConfig = PROVIDER_CONFIG[providerd];
+    const folderMap =
+      PROVIDER_FOLDER_MAP[providerd] || PROVIDER_FOLDER_MAP["gmail"];
+    if (providerd === "custom") {
       if (!userCredential.imapHost || !userCredential.imapPort) {
         return res.status(400).json({
           message: "Custom IMAP settings are missing in user credentials.",
@@ -1737,17 +1671,9 @@ exports.fetchInboxEmails = async (req, res) => {
           host: userCredential.imapHost,
           port: userCredential.imapPort,
           tls: userCredential.imapTLS,
-          authTimeout: 60000, // Increased timeout for Google Workspace
-          connTimeout: 60000, // Add connection timeout
-          tlsOptions: { 
-            rejectUnauthorized: false,
-            servername: userCredential.imapHost
-          },
-          keepalive: {
-            interval: 10000, // Send keepalive every 10 seconds  
-            idleInterval: 300000, // 5 minutes idle interval
-            forceNoop: true
-          },
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+          keepalive: true, // Enable keepalive for better performance
         },
       };
     } else {
@@ -1758,85 +1684,18 @@ exports.fetchInboxEmails = async (req, res) => {
           host: providerConfig.host,
           port: providerConfig.port,
           tls: providerConfig.tls,
-          authTimeout: 60000, // Increased timeout for Google Workspace  
-          connTimeout: 60000, // Add connection timeout
-          tlsOptions: { 
-            rejectUnauthorized: false,
-            servername: providerConfig.host
-          },
-          keepalive: {
-            interval: 10000, // Send keepalive every 10 seconds
-            idleInterval: 300000, // 5 minutes idle interval  
-            forceNoop: true
-          },
+          authTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false },
+          keepalive: true, // Enable keepalive for better performance
         },
       };
     }
 
-    // Add timeout wrapper for IMAP connection
-    const connectWithTimeout = async () => {
-      console.log(`[Batch ${page}] 🔄 Attempting IMAP connection to ${providerConfig.host}:${providerConfig.port}...`);
-      console.log(`[Batch ${page}] 🔐 Using credentials: ${userEmail} with ${userPassword.length}-char password`);
-      
-      const connectionPromise = Imap.connect(imapConfig);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => {
-          reject(new Error(`IMAP connection timeout after 2 minutes for ${userEmail} (${effectiveProvider} provider)`));
-        }, 120000); // Increased to 2 minutes like fetchRecentEmail
-      });
+    connection = await Imap.connect(imapConfig);
 
-      try {
-        return await Promise.race([connectionPromise, timeoutPromise]);
-      } catch (error) {
-        console.error(`[Batch ${page}] ❌ IMAP connection failed for ${userEmail}:`, {
-          message: error.message,
-          code: error.code,
-          provider: effectiveProvider,
-          host: providerConfig.host,
-          port: providerConfig.port
-        });
-        
-        // Add specific error messages for common issues
-        if (error.message.includes('timeout')) {
-          throw new Error(`Connection timeout: Unable to connect to ${effectiveProvider} IMAP server after 2 minutes. Please check your internet connection.`);
-        } else if (error.message.includes('authentication') || error.message.includes('login')) {
-          throw new Error(`Authentication failed: Invalid email or app password for ${userEmail}. Please verify your credentials.`);
-        } else if (error.message.includes('Connection ended unexpectedly')) {
-          const domain = userEmail.split('@')[1];
-          if (domain && (domain.endsWith('.in') || domain.includes('workspace') || !domain.includes('gmail.com'))) {
-            throw new Error(`Connection dropped: The ${effectiveProvider} server terminated the connection for custom domain ${domain}. For Google Workspace domains, please: 1) Enable 2-factor authentication, 2) Generate a NEW app password from Google Account settings, 3) Enable IMAP in Gmail settings, 4) Update your credentials with the new app password.`);
-          } else {
-            throw new Error(`Connection dropped: The ${effectiveProvider} server terminated the connection. This may be due to invalid credentials or server restrictions.`);
-          }
-        } else if (error.message.includes('ENOTFOUND') || error.message.includes('getaddrinfo')) {
-          throw new Error(`DNS Error: Cannot resolve ${providerConfig.host}. Please check your internet connection and provider settings.`);
-        }
-        
-        throw error;
-      }
-    };
-
-    connection = await connectWithTimeout();
-
-    console.log(`[Batch ${page}] ✅ IMAP connection successful for ${userEmail}`);
-
-    // Add robust error handlers
+    // Add robust error handler
     connection.on("error", (err) => {
-      console.error(`[Batch ${page}] ❌ IMAP connection error for ${userEmail}:`, err.message);
-      console.error(`[Batch ${page}] ❌ Error details:`, {
-        code: err.code,
-        errno: err.errno,
-        syscall: err.syscall,
-        provider: providerd
-      });
-    });
-
-    connection.on("end", () => {
-      console.log(`[Batch ${page}] 🔌 IMAP connection ended for ${userEmail}`);
-    });
-
-    connection.on("close", () => {
-      console.log(`[Batch ${page}] 🔒 IMAP connection closed for ${userEmail}`);
+      console.error("IMAP connection error:", err);
     });
 
     // Helper function to fetch emails from a specific folder using dynamic calculation
@@ -7298,8 +7157,9 @@ exports.composeEmail = [
         };
         await uploadToSentFolder(mailOptions, credentialForUpload, info.messageId);
 
-        // Save to database via queue worker
-        await publishToQueue("EMAIL_QUEUE", emailData);
+  // Save to database via queue worker
+  // Mark the queued job to skip sending since we already sent via SMTP above
+  await publishToQueue("EMAIL_QUEUE", { ...emailData, skipSend: true });
 
         res.status(200).json({
           message: `Email sent and saved successfully. Copy added to Sent folder. Provider: ${provider}`,
