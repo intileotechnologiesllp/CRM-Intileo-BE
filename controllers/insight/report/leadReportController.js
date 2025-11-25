@@ -530,17 +530,17 @@ async function generateExistingLeadPerformanceData(
   
     if (shouldGroupByDuration) {
       // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -923,20 +923,30 @@ let totalCountResult;
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -953,17 +963,6 @@ let totalCountResult;
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -1035,22 +1034,22 @@ async function generateLeadPerformanceData(
     if (shouldGroupByDuration) {
       // For date fields with duration grouping, we'll handle this differently
       // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Owner" || xaxis === "assignedTo") {
       // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Team") {
       // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "contactPerson") {
       // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "organization") {
       // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
       // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -1399,17 +1398,6 @@ async function generateLeadPerformanceData(
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -1425,20 +1413,31 @@ async function generateLeadPerformanceData(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
-
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
-    }); // Sort groups based on their total value
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
+    });
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
@@ -1453,17 +1452,6 @@ async function generateLeadPerformanceData(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
        let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -1686,7 +1674,13 @@ function getDateGroupExpression(dateField, durationUnit) {
       );
 
     case "monthly":
-      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%m/%Y");
+      return Sequelize.literal(`
+        CONCAT(
+          ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
+          ' ',
+          YEAR(${field})
+        )
+     `); 
 
     case "quarterly":
       return Sequelize.literal(
@@ -1710,6 +1704,11 @@ function formatDateValue(value, durationUnit) {
   // For yearly, just return the year as string
   if (durationUnit.toLowerCase() === "yearly") {
     return value.toString();
+  }
+  if (durationUnit.toLowerCase() === "monthly" && value) {
+    // If you want to ensure proper formatting, you can parse and reformat
+    // But typically the SQL function already returns "Jan 2025" format
+    return value;
   }
 
   // For other cases, return the value as is (already formatted by SQL)
@@ -2057,17 +2056,17 @@ async function generateExistingLeadPerformanceDataForSave(
   
     if (shouldGroupByDuration) {
       // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -2310,16 +2309,6 @@ async function generateExistingLeadPerformanceDataForSave(
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
 
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
@@ -2336,20 +2325,30 @@ async function generateExistingLeadPerformanceDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+       // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+     // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -2366,17 +2365,6 @@ async function generateExistingLeadPerformanceDataForSave(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -2433,22 +2421,22 @@ async function generateLeadPerformanceDataForSave(
     if (shouldGroupByDuration) {
       // For date fields with duration grouping, we'll handle this differently
       // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Owner" || xaxis === "assignedTo") {
       // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Team") {
       // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "contactPerson") {
       // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "organization") {
       // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
       // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -2676,17 +2664,6 @@ async function generateLeadPerformanceDataForSave(
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -2702,20 +2679,30 @@ async function generateLeadPerformanceDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate and add total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -2731,17 +2718,6 @@ async function generateLeadPerformanceDataForSave(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
        let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -4005,17 +3981,17 @@ async function generateExistingLeadConversionData(
   
     if (shouldGroupByDuration) {
       // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -4427,18 +4403,6 @@ async function generateExistingLeadConversionData(
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -4454,20 +4418,30 @@ async function generateExistingLeadConversionData(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
    // Only sort for non-date fields
@@ -4484,17 +4458,6 @@ async function generateExistingLeadConversionData(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = item.xValue || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -4566,22 +4529,22 @@ async function generateLeadConversionData(
     if (shouldGroupByDuration) {
       // For date fields with duration grouping, we'll handle this differently
       // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Owner" || xaxis === "assignedTo") {
       // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Team") {
       // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "contactPerson") {
       // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "organization") {
       // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
       // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -4964,17 +4927,6 @@ async function generateLeadConversionData(
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -4990,20 +4942,31 @@ async function generateLeadConversionData(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
-
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+    // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
-    }); // Sort groups based on their total value
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
+    });
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
@@ -5018,17 +4981,6 @@ async function generateLeadConversionData(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
        let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -5089,17 +5041,17 @@ async function generateExistingLeadConversionDataForSave(
   
     if (shouldGroupByDuration) {
       // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -5367,17 +5319,6 @@ async function generateExistingLeadConversionDataForSave(
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -5393,20 +5334,30 @@ async function generateExistingLeadConversionDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData);
-
-    // Calculate total for each segment group
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+     // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
     });
 
     // Only sort for non-date fields
@@ -5423,17 +5374,6 @@ async function generateExistingLeadConversionDataForSave(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
@@ -5492,22 +5432,22 @@ async function generateLeadConversionDataForSave(
     if (shouldGroupByDuration) {
       // For date fields with duration grouping, we'll handle this differently
       // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Owner" || xaxis === "assignedTo") {
       // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "Team") {
       // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "contactPerson") {
       // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else if (xaxis === "organization") {
       // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null };
+      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
     } else {
       // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null };
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
     }
   
     // Add the null exclusion condition to baseWhere
@@ -5839,17 +5779,6 @@ async function generateLeadConversionDataForSave(
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
         // Set id based on xaxis type
         let id = null;
@@ -5865,20 +5794,31 @@ async function generateLeadConversionDataForSave(
           id: id,
         };
       }
-      groupedData[xValue].segments.push({
-        labeltype: segmentValue,
-        value: yValue,
-      });
+      // Merge segments with the same labeltype
+      if (!groupedData[xValue].segments[segmentValue]) {
+        groupedData[xValue].segments[segmentValue] = 0;
+      }
+      groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    formattedResults = Object.values(groupedData); // Calculate and add total for each segment group
-
-    formattedResults.forEach((group) => {
-      group.totalSegmentValue = group.segments.reduce(
-        (sum, seg) => sum + seg.value,
-        0
+     // Convert segments object to array
+    formattedResults = Object.values(groupedData).map((group) => {
+      const segmentsArray = Object.entries(group.segments).map(
+        ([labeltype, value]) => ({
+          labeltype,
+          value,
+        })
       );
-    }); // Sort groups based on their total value
+
+      return {
+        ...group,
+        segments: segmentsArray,
+        totalSegmentValue: segmentsArray.reduce(
+          (sum, seg) => sum + seg.value,
+          0
+        ),
+      };
+    });
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
@@ -5893,17 +5833,6 @@ async function generateLeadConversionDataForSave(
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
        let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
-      // Handle null values for special cases
-      if (xaxis === "contactPerson" && !item.xValue && item.personId) {
-        label = "Unknown Contact";
-      } else if (
-        xaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        label = "Unknown Organization";
-      }
 
       // Set id based on xaxis type
       let id = null;
