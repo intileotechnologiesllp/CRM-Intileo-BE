@@ -819,16 +819,22 @@ async function sendEmailJob(emailData) {
     };
   }
 
-  const transporter = nodemailer.createTransport(transporterConfig);
-  // const transporter = nodemailer.createTransport({
-  //   service: "gmail",
-  //   auth: {
-  //     user: SENDER_EMAIL,
-  //     pass: SENDER_PASSWORD,
-  //   },
-  // });
+  // If the job was queued after a direct SMTP send (composeEmail), skip sending again.
+  let info = { messageId: emailData.messageId || null };
+  if (!emailData.skipSend) {
+    const transporter = nodemailer.createTransport(transporterConfig);
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail",
+    //   auth: {
+    //     user: SENDER_EMAIL,
+    //     pass: SENDER_PASSWORD,
+    //   },
+    // });
 
-  const info = await transporter.sendMail(mailOptions);
+    info = await transporter.sendMail(mailOptions);
+  } else {
+    console.log(`[EmailWorker] Skipping SMTP send for queued email (skipSend=true). messageId=${info.messageId}`);
+  }
 
   // --- Save or update email and attachments ---
   if (emailData.draftId) {
