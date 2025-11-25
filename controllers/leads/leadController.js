@@ -4255,7 +4255,7 @@ exports.getAllLeadDetails = async (req, res) => {
   const { leadId } = req.params;
 
   // Add pagination parameters for emails
-  const { emailPage = 1, emailLimit = 20 } = req.query;
+  const { emailPage = 1, emailLimit = 10 } = req.query;
   const emailOffset = (emailPage - 1) * emailLimit;
 
   if (!leadId) {
@@ -4300,6 +4300,31 @@ exports.getAllLeadDetails = async (req, res) => {
       } catch (auditErr) {
         console.error('Error logging audit trail for missing lead email:', auditErr);
       }
+    } else {
+      // Debug: Check what emails exist for this email address in the database
+      console.log(`🔍 [getAllLeadDetails] Lead email: ${clientEmail}`);
+      const allEmailsForThisAddress = await Email.findAll({
+        where: {
+          [Op.or]: [
+            { sender: clientEmail },
+            { recipient: { [Op.like]: `%${clientEmail}%` } }
+          ]
+        },
+        attributes: ['emailID', 'sender', 'recipient', 'subject', 'leadId', 'dealId', 'visibility', 'userEmail'],
+        limit: 20
+      });
+      console.log(`📊 [getAllLeadDetails] Found ${allEmailsForThisAddress.length} total emails for ${clientEmail} in database:`, 
+        allEmailsForThisAddress.map(e => ({
+          emailID: e.emailID,
+          sender: e.sender,
+          recipient: e.recipient,
+          subject: e.subject,
+          leadId: e.leadId,
+          dealId: e.dealId,
+          visibility: e.visibility,
+          userEmail: e.userEmail
+        }))
+      );
     }
 
     // Get user credentials for email visibility filtering
@@ -4380,51 +4405,44 @@ exports.getAllLeadDetails = async (req, res) => {
       }
     });
 
-    // Fetch emails linked to this lead with pagination, essential fields, and visibility filtering
-    const emailsByLead = await Email.findAll({
-      where: {
-        [Op.and]: [
-          { leadId },
-          emailVisibilityWhere
-        ]
-      },
-      attributes: [
-        "emailID",
-        "messageId",
-        "inReplyTo",
-        "references",
-        "sender",
-        "recipient",
-        "subject",
-        "createdAt",
-        "folder",
-        "visibility",
-        "userEmail",
-        [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
-      ],
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-          attributes: ["attachmentID", "filename", "size", "contentType"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-      limit: Math.ceil(maxEmailLimit / 2),
-      offset: Math.floor(emailOffset / 2),
-    });
-
-    // Fetch emails by address with pagination, essential fields, and visibility filtering
-    let emailsByAddress = [];
+    // NEW APPROACH: Fetch emails through person/organization relationships instead of direct leadId
+    console.log(`🔍 [getAllLeadDetails] Finding emails through person/organization relationships for lead: ${leadId}`);
+    
+    // Collect all email addresses associated with this lead
+    const leadEmailAddresses = new Set();
+    
+    // Add lead's direct email
     if (lead.email) {
-      emailsByAddress = await Email.findAll({
+      leadEmailAddresses.add(lead.email.toLowerCase());
+      console.log(`📧 [getAllLeadDetails] Added lead email: ${lead.email}`);
+    }
+    
+    // Add person's email (if person exists)
+    if (person && person.email) {
+      leadEmailAddresses.add(person.email.toLowerCase());
+      console.log(`� [getAllLeadDetails] Added person email: ${person.email}`);
+    }
+    
+    // Add organization email (if organization exists and has email)
+    if (leadOrganization && leadOrganization.email) {
+      leadEmailAddresses.add(leadOrganization.email.toLowerCase());
+      console.log(`📧 [getAllLeadDetails] Added organization email: ${leadOrganization.email}`);
+    }
+    
+    console.log(`📧 [getAllLeadDetails] Total email addresses to search: ${leadEmailAddresses.size}`);
+    
+    // Fetch emails based on these email addresses (relationship-based approach)
+    let emailsByRelationship = [];
+    if (leadEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(leadEmailAddresses);
+      emailsByRelationship = await Email.findAll({
         where: {
           [Op.and]: [
             {
-              [Op.or]: [
-                { sender: lead.email },
-                { recipient: { [Op.like]: `%${lead.email}%` } }
-              ]
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
             },
             emailVisibilityWhere
           ]
@@ -4432,7 +4450,7 @@ exports.getAllLeadDetails = async (req, res) => {
         attributes: [
           "emailID",
           "messageId",
-          "inReplyTo",
+          "inReplyTo", 
           "references",
           "sender",
           "recipient",
@@ -4451,16 +4469,16 @@ exports.getAllLeadDetails = async (req, res) => {
           },
         ],
         order: [["createdAt", "DESC"]],
-        limit: Math.ceil(maxEmailLimit / 2),
-        offset: Math.floor(emailOffset / 2),
+        limit: maxEmailLimit,
+        offset: emailOffset,
       });
     }
+    console.log(`📧 [getAllLeadDetails] Found ${emailsByRelationship.length} emails through relationship-based approach`);
 
-    // Merge and deduplicate emails (like deals API)
-    const allEmailsMap = new Map();
-    emailsByLead.forEach((email) => allEmailsMap.set(email.emailID, email));
-    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
-    let emails = Array.from(allEmailsMap.values());
+    // Merge all relationship-based emails and deduplicate
+    let emails = emailsByRelationship;
+    
+    console.log(`� [getAllLeadDetails] Using relationship-based emails: ${emails.length}`);
 
     // Log visibility statistics
     const visibilityStats = emails.reduce((stats, email) => {
@@ -4473,89 +4491,11 @@ exports.getAllLeadDetails = async (req, res) => {
     // Limit final email results and add optimization metadata
     const limitedEmails = emails.slice(0, maxEmailLimit);
 
-    // Simplified thread handling
-    const threadIds = [];
-    limitedEmails.forEach((email) => {
-      if (email.messageId) threadIds.push(email.messageId);
-      if (email.inReplyTo) threadIds.push(email.inReplyTo);
-    });
-    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
-
-    // Fetch related emails with stricter limits and visibility filtering
-    let relatedEmails = [];
-    if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
-      // Build related emails where clause with visibility filtering
-      let relatedEmailsWhereClause = {
-        [Op.or]: [
-          { messageId: { [Op.in]: uniqueThreadIds } },
-          { inReplyTo: { [Op.in]: uniqueThreadIds } },
-        ],
-      };
-
-      // Apply same visibility filtering to related emails
-      if (currentUserEmail) {
-        relatedEmailsWhereClause[Op.and] = [
-          relatedEmailsWhereClause[Op.or], // Keep the original thread conditions
-          {
-            [Op.or]: [
-              { visibility: 'shared' }, // Show all shared emails
-              { 
-                visibility: 'private',
-                userEmail: currentUserEmail // Show only private emails from current user
-              },
-              { visibility: { [Op.is]: null } } // Show legacy emails without visibility set
-            ]
-          }
-        ];
-      } else {
-        // If no user credentials found, only show shared emails and legacy emails
-        relatedEmailsWhereClause[Op.and] = [
-          relatedEmailsWhereClause[Op.or],
-          {
-            [Op.or]: [
-              { visibility: 'shared' },
-              { visibility: { [Op.is]: null } } // Legacy emails without visibility
-            ]
-          }
-        ];
-      }
-
-      relatedEmails = await Email.findAll({
-        where: relatedEmailsWhereClause,
-        attributes: [
-          "emailID",
-          "messageId",
-          "inReplyTo",
-          "sender",
-          "recipient",
-          "subject",
-          "createdAt",
-          "folder",
-          "visibility", // Include visibility field for debugging
-          "userEmail", // Include userEmail field for debugging
-          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
-        ],
-        include: [
-          {
-            model: Attachment,
-            as: "attachments",
-            attributes: ["attachmentID", "filename", "size", "contentType"],
-          },
-        ],
-        order: [["createdAt", "DESC"]],
-        limit: maxEmailLimit,
-      });
-
-      // Remove duplicates by messageId
-      const seen = new Set();
-      relatedEmails = relatedEmails.filter((email) => {
-        if (seen.has(email.messageId)) return false;
-        seen.add(email.messageId);
-        return true;
-      });
-    } else {
-      relatedEmails = limitedEmails;
-    }
+    // Simplified thread handling for relationship-based emails
+    // Since we're using relationship-based email fetching, we already have the relevant emails
+    // No need for complex thread handling that might filter out results
+    console.log(`🔍 [getAllLeadDetails] Simplifying email handling: using ${limitedEmails.length} relationship-based emails directly`);
+    let relatedEmails = limitedEmails;
 
     // Enrich emails with connected person, organization, leads, and deals
     console.log(`🔗 [getAllLeadDetails] Enriching ${relatedEmails.length} emails with connected entities`);
@@ -4954,13 +4894,25 @@ exports.getAllLeadDetails = async (req, res) => {
       },
       _emailMetadata: {
         count: relatedEmails.length,
-        totalEmails: totalEmailsCount,
+        totalEmails: relatedEmails.length,
         page: parseInt(emailPage),
         limit: maxEmailLimit,
         hasMore: relatedEmails.length === maxEmailLimit,
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+        // Email fetching approach
+        fetchingMethod: {
+          approach: "relationship-based",
+          description: "Emails are fetched through person/organization relationships rather than direct leadId associations",
+          emailSources: {
+            leadEmail: lead.email || null,
+            personEmails: person?.email ? [person.email] : [],
+            organizationEmails: leadOrganization?.email ? [leadOrganization.email] : []
+          },
+          totalEmailAddresses: leadEmailAddresses.size,
+          searchedAddresses: Array.from(leadEmailAddresses)
+        },
         entityEnrichment: {
           enabled: true,
           description: "Each email is enriched with connected persons, organizations, leads, and deals based on email addresses",

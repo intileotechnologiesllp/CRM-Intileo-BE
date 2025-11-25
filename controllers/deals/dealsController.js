@@ -5183,67 +5183,52 @@ exports.getDealDetail = async (req, res) => {
       };
     }
 
-    // Get total email count first with visibility filtering
-    const totalEmailsCount = await Email.count({
-      where: {
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { dealId },
-              ...(deal.email
-                ? [
-                    { sender: deal.email },
-                    { recipient: { [Op.like]: `%${deal.email}%` } },
-                  ]
-                : []),
-            ],
-          },
-          emailVisibilityWhere
-        ]
-      },
-    });
-
-    // Fetch emails linked to this deal with pagination, essential fields, and visibility filtering
-    const emailsByDeal = await Email.findAll({
-      where: {
-        [Op.and]: [
-          { dealId },
-          emailVisibilityWhere
-        ]
-      },
-      attributes: [
-        "emailID",
-        "messageId",
-        "sender",
-        "senderName",
-        "recipient",
-        "cc",
-        "bcc",
-        "subject",
-        "createdAt",
-        "folder",
-        "isRead",
-        "leadId",
-        "dealId",
-        "visibility",
-        "userEmail"
-      ],
-      order: [["createdAt", "DESC"]],
-      limit: Math.ceil(safeEmailLimit / 2),
-      offset: Math.floor(emailOffset / 2),
-    });
-
-    // Fetch emails by address with pagination, essential fields, and visibility filtering
-    let emailsByAddress = [];
+    // NEW APPROACH: Fetch emails through person/organization relationships instead of direct dealId
+    console.log(`🔍 [getDealDetail] Finding emails through person/organization relationships for deal: ${dealId}`);
+    
+    // Collect all email addresses associated with this deal
+    const dealEmailAddresses = new Set();
+    
+    // Add deal's direct email
     if (deal.email) {
-      emailsByAddress = await Email.findAll({
+      dealEmailAddresses.add(deal.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal email: ${deal.email}`);
+    }
+    
+    // Add person emails (from participants and direct person)
+    if (deal.Person && deal.Person.email) {
+      dealEmailAddresses.add(deal.Person.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal person email: ${deal.Person.email}`);
+    }
+    
+    // Add organization email
+    if (deal.Organization && deal.Organization.email) {
+      dealEmailAddresses.add(deal.Organization.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal organization email: ${deal.Organization.email}`);
+    }
+    
+    // Add participant emails
+    participants.forEach(participant => {
+      if (participant.Person && participant.Person.email) {
+        dealEmailAddresses.add(participant.Person.email.toLowerCase());
+        console.log(`📧 [getDealDetail] Added participant email: ${participant.Person.email}`);
+      }
+    });
+    
+    console.log(`📧 [getDealDetail] Total email addresses to search: ${dealEmailAddresses.size}`);
+    
+    // Fetch emails based on these email addresses (relationship-based approach)
+    let emailsByRelationship = [];
+    if (dealEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(dealEmailAddresses);
+      emailsByRelationship = await Email.findAll({
         where: {
           [Op.and]: [
             {
-              [Op.or]: [
-                { sender: deal.email },
-                { recipient: { [Op.like]: `%${deal.email}%` } },
-              ],
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
             },
             emailVisibilityWhere
           ]
@@ -5260,22 +5245,19 @@ exports.getDealDetail = async (req, res) => {
           "createdAt",
           "folder",
           "isRead",
-          "leadId",
-          "dealId",
           "visibility",
           "userEmail"
         ],
         order: [["createdAt", "DESC"]],
-        limit: Math.ceil(safeEmailLimit / 2),
-        offset: Math.floor(emailOffset / 2),
+        limit: safeEmailLimit,
+        offset: emailOffset,
       });
     }
-
-    // Merge and deduplicate emails
-    const allEmailsMap = new Map();
-    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
-    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
-    const allEmails = Array.from(allEmailsMap.values());
+    
+    console.log(`📧 [getDealDetail] Found ${emailsByRelationship.length} emails through relationship-based approach`);
+    
+    // Use relationship-based emails
+    const allEmails = emailsByRelationship;
 
     // Log visibility statistics
     const visibilityStats = allEmails.reduce((stats, email) => {
@@ -6146,11 +6128,11 @@ exports.getDealDetail = async (req, res) => {
       userActivityAnalytics: mostActiveUsersAnalytics,
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
-        totalEmails: totalEmailsCount,
+        totalEmails: allEmails.length,
         returnedEmails: optimizedEmails.length,
         emailPage: parseInt(emailPage),
         emailLimit: safeEmailLimit,
-        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        hasMoreEmails: false, // Since we're using relationship-based approach
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
@@ -6164,6 +6146,19 @@ exports.getDealDetail = async (req, res) => {
             "connectedLeads", 
             "connectedDeals"
           ]
+        },
+        // Email fetching approach
+        fetchingMethod: {
+          approach: "relationship-based",
+          description: "Emails are fetched through person/organization relationships rather than direct dealId associations",
+          emailSources: {
+            dealEmail: deal.email || null,
+            personEmails: deal.Person?.email ? [deal.Person.email] : [],
+            organizationEmails: deal.Organization?.email ? [deal.Organization.email] : [],
+            participantEmails: participants.filter(p => p.Person?.email).map(p => p.Person.email)
+          },
+          totalEmailAddresses: dealEmailAddresses.size,
+          searchedAddresses: Array.from(dealEmailAddresses)
         },
         // Email visibility information
         visibilityFiltering: {
