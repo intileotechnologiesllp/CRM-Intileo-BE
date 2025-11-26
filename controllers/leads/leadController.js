@@ -4854,6 +4854,11 @@ exports.getAllLeadDetails = async (req, res) => {
       });
     }
 
+    // Add responsiblePerson from LeadDetails if available
+    if (leadDetails && leadDetails.responsiblePerson !== undefined) {
+      filteredLead.responsiblePerson = leadDetails.responsiblePerson;
+    }
+
     // Add some logging for debugging email visibility
     console.log(`📧 [getAllLeadDetails] Fetching emails for lead ${leadId} with visibility filtering`);
     console.log(`[getAllLeadDetails] User ${masterUserID} fetching emails for lead ${leadId}`);
