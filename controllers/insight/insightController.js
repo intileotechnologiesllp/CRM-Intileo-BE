@@ -96,9 +96,11 @@ const { Op } = require("sequelize");
 const ReportFolder = require("../../models/insight/reportFolderModel");
 // const {  generateActivityPerformanceDataForSave } = require("./report/activityReportController");
 const LeadPerson = require("../../models/leads/leadPersonModel");
-const { generateActivityPerformanceDataForSave } = require("../../utils/insight/activityReport");
-const { generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave } = require("../../utils/insight/dealReport");
-const { generatePersonPerformanceDataForSave, generateOrganizationPerformanceDataForSave } = require("../../utils/insight/contactperson");
+const { generateActivityPerformanceDataForSave, generateEmailPerformanceDataForSave } = require("../../utils/insight/activityReport");
+const { generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave, generateDealProgressDataForSave } = require("../../utils/insight/dealReport");
+const { generateLeadPerformanceDataForSave, generateLeadConversionDataForSave } = require("../../utils/insight/leadReport.js");
+const { generatePersonPerformanceDataForSave } = require("../../utils/insight/contactperson");
+const { generateOrganizationPerformanceDataForSave } = require("../../utils/insight/organizationReport");
 // const { generateExistingDealPerformanceDataForSave, generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave } = require("./report/dealReportController");
 // const { generatePersonPerformanceDataForSave, generateOrganizationPerformanceDataForSave } = require("./report/contactReportController");
 
@@ -7852,14 +7854,50 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
                 endDateCondition
               ]
             }
-        if (entity === "Activity") {
+        if (entity === "Activity" && type === "Performance") {
           data = await generateActivityPerformanceDataForSave(
             ownerId,
             "",
             config?.xaxis,
             config?.yaxis,
+            config?.durationUnit,
             config?.segmentedBy,
             // {},
+            filter,
+            masterUserId
+          );
+        }
+        else if (entity === "Activity" && type === "Emails") {
+          data = await generateEmailPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        }
+        else if (entity === "Lead" && type === "Performance") {
+          data = await generateLeadPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Lead" && type === "Conversion") {
+          data = await generateLeadConversionDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
             filter,
             masterUserId
           );
@@ -7870,21 +7908,35 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             "",
             config?.xaxis,
             config?.yaxis,
+            config?.durationUnit,
             config?.segmentedBy,
-            filter
+            filter,
+            masterUserId
           );
         } 
+        else if (entity === "Deal" && type === "Progress") {
+          data = await generateDealProgressDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            "",
+            masterUserId
+          );
+        }
         else if (entity === "Deal" && type === "Duration") {
           data = await generateDealDurationData(
             ownerId,
             "",
             config?.xaxis,
             config?.yaxis,
-            null,
+            config?.duration,
+            config?.durationUnit,
             config?.segmentedBy,
             filter,
-            1,
-            1000,
             masterUserId
           );
         } 
@@ -7894,7 +7946,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             "",
             config?.xaxis,
             config?.yaxis,
-            null,
+            config?.durationUnit,
             config?.segmentedBy,
             filter,
             masterUserId
@@ -7906,7 +7958,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             "",
             config?.xaxis,
             config?.yaxis,
-            null,
+            config?.durationUnit,
             config?.segmentedBy,
             filter,
             masterUserId
@@ -7918,7 +7970,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             "",
             config?.xaxis,
             config?.yaxis,
-            null,
+            config?.durationUnit,
             config?.segmentedBy,
             filter,
             masterUserId

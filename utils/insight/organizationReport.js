@@ -10,7 +10,7 @@ const ReportFolder = require("../../models/insight/reportFolderModel");
 const { Op, Sequelize } = require("sequelize");
 const LeadPerson = require("../../models/leads/leadPersonModel");
 
-exports.createPersonReport = async (req, res) => {
+exports.createOrganizationReport = async (req, res) => {
   try {
     const {
       reportId,
@@ -29,76 +29,45 @@ exports.createPersonReport = async (req, res) => {
 
     // Define available options for xaxis and yaxis
     const xaxisArray = [
-      { label: "Contact Person", value: "contactPerson", type: "Person" },
-      { label: "Organization", value: "organization", type: "Person" },
-      { label: "Email", value: "email", type: "Person" },
-      { label: "Phone", value: "phone", type: "Person" },
-      { label: "Notes", value: "notes", type: "Person" },
-      { label: "Postal Address", value: "postalAddress", type: "Person" },
-      { label: "Job Title", value: "jobTitle", type: "Person" },
-      { label: "Person Labels", value: "personLabels", type: "Person" },
+      { label: "Organization", value: "organization", type: "Organization" },
+      { label: "Address", value: "address", type: "Organization" },
+      {
+        label: "Organization Labels",
+        value: "organizationLabels",
+        type: "Organization",
+      },
       { label: "Add On", value: "createdAt", type: "Date" },
       { label: "Updated On", value: "updatedAt", type: "Date" },
     ];
-
     const segmentedByOptions = [
       { label: "None", value: "none" },
-      { label: "Contact Person", value: "contactPerson" },
       { label: "Organization", value: "organization" },
-      { label: "Email", value: "email" },
-      { label: "Phone", value: "phone" },
-      { label: "Notes", value: "notes" },
-      { label: "Postal Address", value: "postalAddress" },
-      { label: "Job Title", value: "jobTitle" },
-      { label: "Person Labels", value: "personLabels" },
+      { label: "Address", value: "address" },
+      { label: "Organization Labels", value: "organizationLabels" },
     ];
-
     const yaxisArray = [
-      { label: "No of People", value: "no of people", type: "Person" },
+      {
+        label: "No of Organizations",
+        value: "no of organizations",
+        type: "Organization",
+      },
     ];
 
     // Add this to your createActivityReport function or make it available globally
     const availableFilterColumns = {
-      Person: [
-        { label: "Email", value: "email", type: "text" },
-        { label: "Phone", value: "phone", type: "number" },
-        { label: "Notes", value: "notes", type: "text" },
-        { label: "Postal Address", value: "postalAddress", type: "text" },
-        { label: "Job Title", value: "jobTitle", type: "text" },
-        { label: "Contact Person", value: "contactPerson", type: "text" },
-        { label: "Organization", value: "organization", type: "text" },
-        { label: "Person Labels", value: "personLabels", type: "text" },
-        { label: "Created At", value: "createdAt", type: "date" },
-        { label: "Updated At", value: "updatedAt", type: "date" },
-        { label: "Add on", value: "daterange", type: "daterange" },
-      ],
       Organization: [
         {
           label: "Organization",
-          value: "LeadOrganization.organization",
+          value: "organization",
           type: "text",
         },
         {
           label: "Organization Labels",
-          value: "LeadOrganization.organizationLabels",
+          value: "organizationLabels",
           type: "text",
         },
-        { label: "Address", value: "LeadOrganization.address", type: "text" },
-        {
-          label: "Created At",
-          value: "LeadOrganization.createdAt",
-          type: "date",
-        },
-        {
-          label: "Updated At",
-          value: "LeadOrganization.updatedAt",
-          type: "date",
-        },
-        {
-          label: "Add on",
-          value: "LeadOrganization.daterange",
-          type: "daterange",
-        },
+        { label: "Address", value: "address", type: "text" },
+        { label: "Add on", value: "daterange", type: "daterange" },
       ],
     };
 
@@ -110,19 +79,19 @@ exports.createPersonReport = async (req, res) => {
     let reportConfig = null;
 
     if (entity && type && !reportId) {
-      if (entity === "Contact" && type === "Person") {
+      if (entity === "Contact" && type === "Organization") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Contact Person reports",
+              "X-axis and Y-axis are required for Contact Organization reports",
           });
         }
 
         try {
           // Generate data with pagination
-          const result = await generatePersonPerformanceData(
+          const result = await generateOrganizationPerformanceData(
             ownerId,
             role,
             xaxis,
@@ -149,14 +118,10 @@ exports.createPersonReport = async (req, res) => {
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
             const maxValue = Math.max(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
+              ...reportData.map((item) => item.value || 0)
             );
             const minValue = Math.min(
-              ...reportData.map(
-                (item) => item.value || item.totalSegmentValue || 0
-              )
+              ...reportData.map((item) => item.value || 0)
             );
 
             summary = {
@@ -168,15 +133,16 @@ exports.createPersonReport = async (req, res) => {
             };
           }
         } catch (error) {
-          console.error("Error generating Contact Person data:", error);
+          console.error("Error generating Contact Organization data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate Contact Person data",
+            message: "Failed to generate Contact Organization data",
             error: error.message,
           });
         }
       }
-    } else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+    } 
+    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -200,64 +166,61 @@ exports.createPersonReport = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      if (existingentity === "Contact" && existingtype === "Person") {
-        // Validate required fields for Person reports
+      if (existingentity === "Contact" && existingtype === "Organization") {
+        // Validate required fields for Organization reports
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Contact Person reports",
+              "X-axis and Y-axis are required for Contact Organization reports",
           });
         }
-        // Generate data with pagination
-        const result = await generateExistingPersonPerformanceData(
-          ownerId,
-          role,
-          existingxaxis,
-          existingyaxis,
-          existingDurationUnit,
-          existingSegmentedBy,
-          existingfilters,
-          page,
-          limit
-        );
-        reportData = result.data;
-        paginationInfo = result.pagination;
-        totalValue = result.totalValue;
-        reportConfig = {
-          reportId,
-          entity: existingentity,
-          type: existingtype,
-          xaxis: existingxaxis,
-          yaxis: existingyaxis,
-          durationUnit: existingDurationUnit,
-          segmentedBy: existingSegmentedBy,
-          filters: existingfilters || {},
-          graphtype: existinggraphtype,
-          colors: colors,
-          reportData,
-        };
-        if (reportData.length > 0) {
-          const avgValue = totalValue / reportData.length;
-          const maxValue = Math.max(
-            ...reportData.map(
-              (item) => item.value || item.totalSegmentValue || 0
-            )
-          );
-          const minValue = Math.min(
-            ...reportData.map(
-              (item) => item.value || item.totalSegmentValue || 0
-            )
-          );
 
-          summary = {
-            totalCategories: reportData.length,
-            totalValue: totalValue,
-            avgValue: parseFloat(avgValue.toFixed(2)),
-            maxValue: maxValue,
-            minValue: minValue,
+          // Generate data with pagination
+          const result = await generateExistingOrganizationPerformanceData(
+            ownerId,
+            role,
+            existingxaxis,
+            existingyaxis,
+            existingDurationUnit,
+            existingSegmentedBy,
+            existingfilters,
+            page,
+            limit
+          );
+          reportData = result.data;
+          paginationInfo = result.pagination;
+          totalValue = result.totalValue;
+          reportConfig = {
+            reportId,
+            entity: existingentity,
+            type: existingtype,
+            xaxis: existingxaxis,
+            yaxis: existingyaxis,
+            durationUnit: existingDurationUnit,
+            segmentedBy: existingSegmentedBy,
+            filters: existingfilters || {},
+            graphtype: existinggraphtype,
+            colors: colors,
+            reportData,
           };
-        }
+          if (reportData.length > 0) {
+            const avgValue = totalValue / reportData.length;
+            const maxValue = Math.max(
+              ...reportData.map((item) => item.value || 0)
+            );
+            const minValue = Math.min(
+              ...reportData.map((item) => item.value || 0)
+            );
+
+            summary = {
+              totalCategories: reportData.length,
+              totalValue: totalValue,
+              avgValue: parseFloat(avgValue.toFixed(2)),
+              maxValue: maxValue,
+              minValue: minValue,
+            };
+          }
       }
     }
 
@@ -286,14 +249,14 @@ exports.createPersonReport = async (req, res) => {
   }
 };
 
-async function generateExistingPersonPerformanceData(
+async function generateExistingOrganizationPerformanceData(
   ownerId,
   role,
   existingxaxis,
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters,
+  existingfilters,
   page = 1,
   limit = 8
 ) {
@@ -309,42 +272,32 @@ async function generateExistingPersonPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
-  let xaxisNullExcludeCondition = {};
+ let xaxisNullExcludeCondition = {};
 
   // Check if xaxis is a date field and durationUnit is provided
   const isDateFieldX = isDateField(existingxaxis);
   const shouldGroupByDuration =
     isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
+
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
+    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "organization") {
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
+    xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
   Object.assign(baseWhere, xaxisNullExcludeCondition);
-
-  // Handle filters if provided
+  
+  // Handle existingfilters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
+  if (existingfilters && existingfilters.conditions) {
+    const validConditions = existingfilters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
     );
 
@@ -367,7 +320,7 @@ async function generateExistingPersonPerformanceData(
 
       for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
+          existingfilters.logicalOperators[i - 1] || "AND"
         ).toUpperCase();
 
         if (logicalOp === "AND") {
@@ -397,7 +350,6 @@ async function generateExistingPersonPerformanceData(
   let groupBy = [];
   let attributes = [];
 
-  // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -410,14 +362,13 @@ async function generateExistingPersonPerformanceData(
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
+      as: "assignedUser",
+      attributes: [],
     });
-    groupBy.push("assignedUser.masterUserID");
+    groupBy.push("assignedUser.name");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
     attributes.push([
-      Sequelize.col("LeadPerson.masterUserID"),
+      Sequelize.col("LeadOrganization.masterUserID"),
       "assignedUserId",
     ]);
   } else if (existingxaxis === "Team") {
@@ -430,24 +381,13 @@ async function generateExistingPersonPerformanceData(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  } else if (existingxaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("LeadPerson.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("LeadPerson.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`LeadPerson.${existingxaxis}`);
-    attributes.push([Sequelize.col(`LeadPerson.${existingxaxis}`), "xValue"]);
+    groupBy.push(`LeadOrganization.${existingxaxis}`);
+    attributes.push([
+      Sequelize.col(`LeadOrganization.${existingxaxis}`),
+      "xValue",
+    ]);
   }
 
   // Handle segmentedBy if not "none"
@@ -457,7 +397,7 @@ async function generateExistingPersonPerformanceData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(existingSegmentedBy);
+     const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -473,44 +413,32 @@ async function generateExistingPersonPerformanceData(
       groupBy.push(segmentDateExpression);
     } else if (
       existingSegmentedBy === "Owner" ||
-      (existingSegmentedBy === "assignedTo" && assignedUserIncludeExists)
+      (existingSegmentedBy === "assignedTo" && !assignedUserIncludeExists)
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team" && assignedUserIncludeExists) {
+    } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (existingSegmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("LeadPerson.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
     } else {
-      groupBy.push(`LeadPerson.${existingSegmentedBy}`);
+      groupBy.push(`LeadOrganization.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`LeadPerson.${existingSegmentedBy}`),
+        Sequelize.col(`LeadOrganization.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
   }
 
   // Handle existingyaxis
-  if (existingyaxis === "no of people") {
+  if (existingyaxis === "no of organizations") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("personId")),
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
       "yValue",
     ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${existingyaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -518,7 +446,7 @@ async function generateExistingPersonPerformanceData(
   // Pagination and Query logic
   let totalCountResult;
   if (shouldGroupByDuration) {
-    totalCountResult = await LeadPerson.findAll({
+    totalCountResult = await Organization.findAll({
       where: baseWhere,
       attributes: [
         [
@@ -539,13 +467,11 @@ async function generateExistingPersonPerformanceData(
     let countColumn;
     if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
       countColumn = Sequelize.col("assignedUser.name");
-    } else if (existingxaxis === "organization") {
-      countColumn = Sequelize.col("LeadPerson.leadOrganizationId");
     } else {
-      countColumn = Sequelize.col(`LeadPerson.${existingxaxis}`);
+      countColumn = Sequelize.col(`LeadOrganization.${existingxaxis}`);
     }
 
-    totalCountResult = await LeadPerson.findAll({
+    totalCountResult = await Organization.findAll({
       where: baseWhere,
       attributes: [
         [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
@@ -571,22 +497,19 @@ async function generateExistingPersonPerformanceData(
       if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
         groupColumn = Sequelize.col("assignedUser.name");
         paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (existingxaxis === "organization") {
-        groupColumn = Sequelize.col("LeadPerson.leadOrganizationId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
       } else {
-        groupColumn = Sequelize.col(`LeadPerson.${existingxaxis}`);
+        groupColumn = Sequelize.col(`LeadOrganization.${existingxaxis}`);
         paginationAttributes.push([groupColumn, "groupKey"]);
       }
     }
 
-    const paginatedGroups = await LeadPerson.findAll({
+    const paginatedGroups = await Organization.findAll({
       attributes: paginationAttributes,
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
@@ -611,8 +534,6 @@ async function generateExistingPersonPerformanceData(
         });
       } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
         groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
-      } else if (existingxaxis === "organization") {
-        groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
       } else {
         groupCondition = { [existingxaxis]: { [Op.in]: groupKeys } };
       }
@@ -621,40 +542,42 @@ async function generateExistingPersonPerformanceData(
         ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
-      results = await LeadPerson.findAll({
+      results = await Organization.findAll({
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: isDateFieldX
-          ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
-          : getOrderClause(existingyaxis, existingxaxis),
+        order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
+        : getOrderClause(existingyaxis, existingxaxis),
       });
     }
   } else {
-    results = await LeadPerson.findAll({
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
     });
   }
 
-  // --- NEW FORMATTING AND TOTALING LOGIC ---
+  // Format the results for the frontend
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
     const groupedData = {};
+
     results.forEach((item) => {
-      let xValue =
+      const xValue =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
@@ -663,25 +586,16 @@ async function generateExistingPersonPerformanceData(
       if (!groupedData[xValue]) {
         // Set proper ID based on xaxis type
         let id = null;
-
-        if (existingxaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (existingxaxis === "organization") {
-          id = item.leadOrganizationId || null;
-        } else if (
-          existingxaxis === "Owner" ||
-          existingxaxis === "assignedTo"
-        ) {
+        if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
           id = item.assignedUserId || null;
         }
 
         groupedData[xValue] = {
           label: xValue,
-          segments: {}, // Change to object to merge segments
+          segments: [],
           id: id,
         };
       }
-
       // Merge segments with the same labeltype
       if (!groupedData[xValue].segments[segmentValue]) {
         groupedData[xValue].segments[segmentValue] = 0;
@@ -710,9 +624,7 @@ async function generateExistingPersonPerformanceData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort(
-        (a, b) => b.totalSegmentValue - a.totalSegmentValue
-      );
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
     }
 
     // Calculate the grand total
@@ -721,18 +633,14 @@ async function generateExistingPersonPerformanceData(
       0
     );
   } else {
-    // Logic for non-segmented data
+    // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
       // Set proper ID based on xaxis type
       let id = null;
-      if (existingxaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
         id = item.assignedUserId || null;
       }
 
@@ -763,7 +671,7 @@ async function generateExistingPersonPerformanceData(
 }
 
 // Helper function to generate activity performance data with pagination
-async function generatePersonPerformanceData(
+async function generateOrganizationPerformanceData(
   ownerId,
   role,
   xaxis,
@@ -788,44 +696,32 @@ async function generatePersonPerformanceData(
   }
 
   let xaxisNullExcludeCondition = {};
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
-
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping, we'll handle this differently
-    // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-    // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "Team") {
-    // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "organization") {
-    // For organization, exclude where LeadOrganization.organization is null
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  }
-
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
-
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else {
+      // For regular columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+  
   // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
@@ -876,10 +772,8 @@ async function generatePersonPerformanceData(
   }
 
   // Handle special cases for xaxis (like Owner which needs join)
-
   let groupBy = [];
   let attributes = [];
-  // let attributes = ["personId", "leadOrganizationId"];
 
   // Handle xaxis special cases
   // Attribute and GroupBy setup with durationUnit support
@@ -897,10 +791,6 @@ async function generatePersonPerformanceData(
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([
-      Sequelize.col("LeadPerson.masterUserID"),
-      "assignedUserId",
-    ]);
   } else if (xaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -911,24 +801,10 @@ async function generatePersonPerformanceData(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  } else if (xaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("LeadPerson.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("LeadPerson.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the LeadPeople table
-    groupBy.push(`LeadPerson.${xaxis}`);
-    attributes.push([Sequelize.col(`LeadPerson.${xaxis}`), "xValue"]);
+    // For regular columns, explicitly specify the LeadOrganization table
+    groupBy.push(`LeadOrganization.${xaxis}`);
+    attributes.push([Sequelize.col(`LeadOrganization.${xaxis}`), "xValue"]);
   }
 
   // Handle segmentedBy if not "none"
@@ -939,7 +815,6 @@ async function generatePersonPerformanceData(
 
     // Check if segmentedBy is also a date field
     const isSegmentedByDate = isDateField(segmentedBy);
-
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
 
@@ -950,40 +825,38 @@ async function generatePersonPerformanceData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if (segmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("LeadPerson.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
     } else if (
-      segmentedBy === "Owner" ||
-      (segmentedBy === "assignedTo" && !assignedUserIncludeExists)
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`LeadPerson.${segmentedBy}`);
+      groupBy.push(`LeadOrganization.${segmentedBy}`);
       attributes.push([
-        Sequelize.col(`LeadPerson.${segmentedBy}`),
+        Sequelize.col(`LeadOrganization.${segmentedBy}`),
         "segmentValue",
       ]);
     }
   }
 
   // Handle yaxis
-  if (yaxis === "no of people") {
+  if (yaxis === "no of organizations") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("personId")),
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
       "yValue",
     ]);
   } else if (yaxis === "duration") {
@@ -1001,9 +874,9 @@ async function generatePersonPerformanceData(
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the LeadPeople table
+    // For other yaxis values, explicitly specify the LeadOrganization table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)),
       "yValue",
     ]);
   }
@@ -1011,7 +884,7 @@ async function generatePersonPerformanceData(
   // Total count calculation
   let totalCountResult;
   if (shouldGroupByDuration) {
-    totalCountResult = await Person.findAll({
+    totalCountResult = await Organization.findAll({
       where: baseWhere,
       attributes: [
         [
@@ -1031,14 +904,14 @@ async function generatePersonPerformanceData(
   } else {
     let countColumn;
     if (xaxis === "Owner" || xaxis === "assignedTo") {
-      countColumn = Sequelize.col("assignedUser.name");
-    } else if (xaxis === "organization") {
-      countColumn = Sequelize.col("LeadPerson.leadOrganizationId");
+      countColumn = Sequelize.col("assignedUser.masterUserID");
+    } else if (xaxis === "Team") {
+      countColumn = Sequelize.col("assignedUser.team");
     } else {
-      countColumn = Sequelize.col(`LeadPerson.${xaxis}`);
+      countColumn = Sequelize.col(`LeadOrganization.${xaxis}`);
     }
 
-    totalCountResult = await Person.findAll({
+    totalCountResult = await Organization.findAll({
       where: baseWhere,
       attributes: [
         [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
@@ -1067,22 +940,19 @@ async function generatePersonPerformanceData(
       if (xaxis === "Owner" || xaxis === "assignedTo") {
         groupColumn = Sequelize.col("assignedUser.name");
         paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (xaxis === "organization") {
-        groupColumn = Sequelize.col("LeadPerson.leadOrganizationId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
       } else {
-        groupColumn = Sequelize.col(`LeadPerson.${xaxis}`);
+        groupColumn = Sequelize.col(`LeadOrganization.${xaxis}`);
         paginationAttributes.push([groupColumn, "groupKey"]);
       }
     }
 
-    const paginatedGroups = await LeadPerson.findAll({
+    const paginatedGroups = await Organization.findAll({
       attributes: paginationAttributes,
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]]
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
@@ -1108,11 +978,14 @@ async function generatePersonPerformanceData(
       } else if (xaxis === "Owner" || xaxis === "assignedTo") {
         // For Owner/assignedTo - use proper Sequelize syntax for related table
         groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
+      } else if (xaxis === "contactPerson") {
+        // For contactPerson - use proper column reference
+        groupCondition = { personId: { [Op.in]: groupKeys } };
       } else if (xaxis === "organization") {
         // For organization - use proper column reference
         groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
       } else {
-        // For regular columns
+        // For regular Organization columns
         groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
       }
 
@@ -1120,28 +993,27 @@ async function generatePersonPerformanceData(
         ? [...finalWhere[Op.and], groupCondition]
         : [groupCondition];
 
-      results = await LeadPerson.findAll({
+      results = await Organization.findAll({
         where: finalWhere,
         attributes: attributes,
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: isDateFieldX
-          ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]]
-          : [[Sequelize.literal("yValue"), "DESC"]],
+        order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       });
     }
   } else {
-    // Non-segmented query
-    results = await LeadPerson.findAll({
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]]
-        : [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
     });
@@ -1156,8 +1028,7 @@ async function generatePersonPerformanceData(
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
+      const xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
@@ -1165,21 +1036,16 @@ async function generatePersonPerformanceData(
       if (!groupedData[xValue]) {
         // Set proper ID based on xaxis type
         let id = null;
-        if (xaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (xaxis === "organization") {
-          id = item.leadOrganizationId || null;
-        } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        if (xaxis === "Owner" || xaxis === "assignedTo") {
           id = item.assignedUserId || null;
         }
 
         groupedData[xValue] = {
           label: xValue,
-          segments: {}, // Change to object to merge segments
+          segments: [],
           id: id,
         };
       }
-
       // Merge segments with the same labeltype
       if (!groupedData[xValue].segments[segmentValue]) {
         groupedData[xValue].segments[segmentValue] = 0;
@@ -1187,7 +1053,7 @@ async function generatePersonPerformanceData(
       groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array
+     // Convert segments object to array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -1208,11 +1074,10 @@ async function generatePersonPerformanceData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort(
-        (a, b) => b.totalSegmentValue - a.totalSegmentValue
-      );
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
     }
 
+    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
@@ -1224,11 +1089,7 @@ async function generatePersonPerformanceData(
 
       // Set proper ID based on xaxis type
       let id = null;
-      if (xaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (xaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      if (xaxis === "Owner" || xaxis === "assignedTo") {
         id = item.assignedUserId || null;
       }
 
@@ -1238,6 +1099,8 @@ async function generatePersonPerformanceData(
         id: id,
       };
     });
+
+    // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -1258,16 +1121,20 @@ async function generatePersonPerformanceData(
 
 // Helper function to check if xaxis is a date field
 function isDateField(xaxis) {
-  const dateFields = ["createdAt", "dueDate"];
+  const dateFields = [
+    "createdAt",
+    "dueDate"
+  ];
   return dateFields.includes(xaxis);
 }
 
+// Helper function to convert operator strings to Sequelize operators
 function getConditionObject(column, operator, value, includeModels = []) {
   let conditionValue = value;
 
   // Check if column contains a dot (indicating a related table field)
   const hasRelation = column.includes(".");
-  let tableAlias = "LeadPerson";
+  let tableAlias = "LeadOrganization";
   let fieldName = column;
 
   if (hasRelation) {
@@ -1278,13 +1145,8 @@ function getConditionObject(column, operator, value, includeModels = []) {
   const isDateColumn =
     fieldName.includes("Date") ||
     fieldName.includes("Time") ||
-    fieldName === "startDateTime" ||
-    fieldName === "endDateTime" ||
-    fieldName === "dueDate" ||
     fieldName === "createdAt" ||
-    fieldName === "updatedAt" ||
-    fieldName === "expectedCloseDate" ||
-    fieldName === "proposalSentDate";
+    fieldName === "updatedAt";
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
@@ -1293,70 +1155,30 @@ function getConditionObject(column, operator, value, includeModels = []) {
     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
     const [fromDate, toDate] = value;
 
-    // Determine which date field to filter based on the table alias
-    let dateField;
-    switch (tableAlias) {
-      case "LeadOrganization":
-        dateField = "createdAt";
-        break;
-      default:
-        dateField = "createdAt";
-    }
-
-    // For related tables, use the proper Sequelize syntax
-    if (tableAlias !== "LeadPerson") {
-      // Add the required include model
-      addIncludeModel(tableAlias, includeModels);
-
-      // Return the condition with proper nested syntax
-      if (operator === "between" || operator === "=" || operator === "is") {
-        return {
-          [`$${tableAlias}.${dateField}$`]: {
-            [Op.between]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      } else if (
-        operator === "notBetween" ||
-        operator === "≠" ||
-        operator === "is not"
-      ) {
-        return {
-          [`$${tableAlias}.${dateField}$`]: {
-            [Op.notBetween]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      }
-    } else {
-      // For Activity table
-      if (operator === "between" || operator === "=" || operator === "is") {
-        return {
-          [dateField]: {
-            [Op.between]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      } else if (
-        operator === "notBetween" ||
-        operator === "≠" ||
-        operator === "is not"
-      ) {
-        return {
-          [dateField]: {
-            [Op.notBetween]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      }
+    if (operator === "between" || operator === "=" || operator === "is") {
+      // Include records within the date range
+      return {
+        [dateField]: {
+          [Op.between]: [
+            new Date(fromDate + " 00:00:00"),
+            new Date(toDate + " 23:59:59"),
+          ],
+        },
+      };
+    } else if (
+      operator === "notBetween" ||
+      operator === "≠" ||
+      operator === "is not"
+    ) {
+      // Exclude records within the date range (records NOT between the dates)
+      return {
+        [dateField]: {
+          [Op.notBetween]: [
+            new Date(fromDate + " 00:00:00"),
+            new Date(toDate + " 23:59:59"),
+          ],
+        },
+      };
     }
   } else if (isDateColumn) {
     // Handle single date filtering (e.g., "2025-06-23")
@@ -1421,36 +1243,38 @@ function getConditionObject(column, operator, value, includeModels = []) {
 
     const op = getSequelizeOperator(operator);
 
-    // Use proper Sequelize syntax for related table conditions
+    // Handle special operators for related tables
     switch (operator) {
       case "contains":
         return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
+          [`$${tableAlias.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
         };
       case "startsWith":
         return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` },
+          [`$${tableAlias.as}.${fieldName}$`]: { [op]: `${conditionValue}%` },
         };
       case "endsWith":
         return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` },
+          [`$${tableAlias.as}.${fieldName}$`]: { [op]: `%${conditionValue}` },
         };
       case "isEmpty":
         return {
           [Op.or]: [
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.is]: null } },
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.eq]: "" } },
+            { [`$${tableAlias.as}.${fieldName}$`]: { [Op.is]: null } },
+            { [`$${tableAlias.as}.${fieldName}$`]: { [Op.eq]: "" } },
           ],
         };
       case "isNotEmpty":
         return {
           [Op.and]: [
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.not]: null } },
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.ne]: "" } },
+            { [`$${tableAlias.as}.${fieldName}$`]: { [Op.not]: null } },
+            { [`$${tableAlias.as}.${fieldName}$`]: { [Op.ne]: "" } },
           ],
         };
       default:
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: conditionValue } };
+        return {
+          [`$${tableAlias.as}.${fieldName}$`]: { [op]: conditionValue },
+        };
     }
   } else {
     // Regular activity table column
@@ -1553,7 +1377,7 @@ function getSequelizeOperator(operator) {
 
 // Helper function to get date group expression based on durationUnit
 function getDateGroupExpression(dateField, durationUnit) {
-  const field = `LeadPerson.${dateField}`;
+  const field = `LeadOrganization.${dateField}`;
 
   if (!durationUnit || durationUnit === "none") {
     return Sequelize.col(field);
@@ -1575,7 +1399,7 @@ function getDateGroupExpression(dateField, durationUnit) {
           ' ',
           YEAR(${field})
         )
-     `);
+     `); 
 
     case "quarterly":
       return Sequelize.literal(
@@ -1615,26 +1439,26 @@ function formatDateValue(value, durationUnit) {
 function getOrderClause(yaxis, xaxis) {
   // If xaxis is a date field, return natural order (no sorting by value)
   if (isDateField(xaxis)) {
-    // For date fields, order by the date field itself to maintain chronological order
-    return [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]];
+      // For date fields, order by the date field itself to maintain chronological order
+      return [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]];
   }
-  if (yaxis === "no of people") {
-    return [[Sequelize.fn("COUNT", Sequelize.col("personId")), "DESC"]];
+  if (yaxis === "no of organizations") {
+    return [[Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")), "DESC"]];
   } else {
     return [
-      [Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${yaxis}`)), "DESC"],
+      [Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)), "DESC"],
     ];
   }
 }
 
-async function generateExistingPersonPerformanceDataForSave(
+async function generateExistingOrganizationPerformanceDataForSave(
   ownerId,
   role,
   existingxaxis,
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  existingfilters
 ) {
   let includeModels = [];
   const baseWhere = {};
@@ -1651,34 +1475,25 @@ async function generateExistingPersonPerformanceDataForSave(
   const shouldGroupByDuration =
     isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
+
   if (shouldGroupByDuration) {
     // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
+    xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
   } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "organization") {
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
+    xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
   } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
   }
 
   // Add the null exclusion condition to baseWhere
   Object.assign(baseWhere, xaxisNullExcludeCondition);
 
-  // Handle filters if provided
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
+  
+  // Handle existingfilters if provided
+  if (existingfilters && existingfilters.conditions) {
+    const validConditions = existingfilters.conditions.filter(
       (cond) => cond.value !== undefined && cond.value !== ""
     );
 
@@ -1701,7 +1516,7 @@ async function generateExistingPersonPerformanceDataForSave(
 
       for (let i = 1; i < conditions.length; i++) {
         const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
+          existingfilters.logicalOperators[i - 1] || "AND"
         ).toUpperCase();
 
         if (logicalOp === "AND") {
@@ -1729,7 +1544,6 @@ async function generateExistingPersonPerformanceDataForSave(
   let groupBy = [];
   let attributes = [];
 
-  // Handle existingxaxis special cases
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -1742,14 +1556,13 @@ async function generateExistingPersonPerformanceDataForSave(
   } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
+      as: "assignedUser",
+      attributes: [],
     });
-    groupBy.push("assignedUser.masterUserID");
+    groupBy.push("assignedUser.name");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
     attributes.push([
-      Sequelize.col("LeadPerson.masterUserID"),
+      Sequelize.col("LeadOrganization.masterUserID"),
       "assignedUserId",
     ]);
   } else if (existingxaxis === "Team") {
@@ -1762,24 +1575,13 @@ async function generateExistingPersonPerformanceDataForSave(
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  } else if (existingxaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("LeadPerson.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("LeadPerson.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
-    groupBy.push(`LeadPerson.${existingxaxis}`);
-    attributes.push([Sequelize.col(`LeadPerson.${existingxaxis}`), "xValue"]);
+    groupBy.push(`LeadOrganization.${existingxaxis}`);
+    attributes.push([
+      Sequelize.col(`LeadOrganization.${existingxaxis}`),
+      "xValue",
+    ]);
   }
 
   // Handle segmentedBy if not "none"
@@ -1805,44 +1607,32 @@ async function generateExistingPersonPerformanceDataForSave(
       groupBy.push(segmentDateExpression);
     } else if (
       existingSegmentedBy === "Owner" ||
-      (existingSegmentedBy === "assignedTo" && assignedUserIncludeExists)
+      (existingSegmentedBy === "assignedTo" && !assignedUserIncludeExists)
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team" && assignedUserIncludeExists) {
+    } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (existingSegmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("LeadPerson.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
     } else {
-      groupBy.push(`LeadPerson.${existingSegmentedBy}`);
+      groupBy.push(`LeadOrganization.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`LeadPerson.${existingSegmentedBy}`),
+        Sequelize.col(`LeadOrganization.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
   }
 
   // Handle existingyaxis
-  if (existingyaxis === "no of people") {
+  if (existingyaxis === "no of organizations") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("personId")),
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
       "yValue",
     ]);
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${existingyaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -1851,38 +1641,40 @@ async function generateExistingPersonPerformanceDataForSave(
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // For segmented queries - get all results without pagination
-    results = await LeadPerson.findAll({
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   } else {
     // Get all results without pagination
-    results = await LeadPerson.findAll({
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${existingxaxis}`), "ASC"]]
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
-  // Formatting and totaling logic
+  // Format the results for the frontend
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group by xValue and then by segmentValue
     const groupedData = {};
+
     results.forEach((item) => {
-      let xValue =
+      const xValue =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
@@ -1891,15 +1683,7 @@ async function generateExistingPersonPerformanceDataForSave(
       if (!groupedData[xValue]) {
         // Set proper ID based on xaxis type
         let id = null;
-
-        if (existingxaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (existingxaxis === "organization") {
-          id = item.leadOrganizationId || null;
-        } else if (
-          existingxaxis === "Owner" ||
-          existingxaxis === "assignedTo"
-        ) {
+        if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
           id = item.assignedUserId || null;
         }
 
@@ -1916,7 +1700,7 @@ async function generateExistingPersonPerformanceDataForSave(
       groupedData[xValue].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array
+     // Convert segments object to array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -1937,9 +1721,7 @@ async function generateExistingPersonPerformanceDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort(
-        (a, b) => b.totalSegmentValue - a.totalSegmentValue
-      );
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
     }
 
     // Calculate the grand total
@@ -1948,18 +1730,14 @@ async function generateExistingPersonPerformanceDataForSave(
       0
     );
   } else {
-    // Logic for non-segmented data
+    // Original format for non-segmented data
     formattedResults = results.map((item) => {
       let label =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
       // Set proper ID based on xaxis type
       let id = null;
-      if (existingxaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
         id = item.assignedUserId || null;
       }
 
@@ -1981,8 +1759,8 @@ async function generateExistingPersonPerformanceDataForSave(
   };
 }
 
-// Helper function to generate activity performance data without pagination
-exports.generatePersonPerformanceDataForSave = async (
+// Helper function to generate organization performance data without pagination
+exports.generateOrganizationPerformanceDataForSave = async(
   ownerId,
   role,
   xaxis,
@@ -2004,42 +1782,31 @@ exports.generatePersonPerformanceDataForSave = async (
   }
 
   let xaxisNullExcludeCondition = {};
-
-  // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
-  const shouldGroupByDuration =
-    isDateFieldX && durationUnit && durationUnit !== "none";
-
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping, we'll handle this differently
-    // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-    // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "Team") {
-    // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "organization") {
-    // For organization, exclude where LeadOrganization.organization is null
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  }
-
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
-
+  
+     // Check if xaxis is a date field and durationUnit is provided
+    const isDateFieldX = isDateField(xaxis);
+    const shouldGroupByDuration =
+      isDateFieldX && durationUnit && durationUnit !== "none";
+  
+  
+    if (shouldGroupByDuration) {
+      // For date fields with duration grouping, we'll handle this differently
+      // since we're grouping by date expressions
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      // For Owner/assignedTo, exclude where assignedUser is null
+      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else if (xaxis === "Team") {
+      // For Team, exclude where assignedUser.team is null
+      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
+    } else {
+      // For regular Activity columns, exclude where the column value is null
+      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
+    }
+  
+    // Add the null exclusion condition to baseWhere
+    Object.assign(baseWhere, xaxisNullExcludeCondition);
+    
   // Handle filters if provided
   if (filters && filters.conditions) {
     const validConditions = filters.conditions.filter(
@@ -2090,6 +1857,7 @@ exports.generatePersonPerformanceDataForSave = async (
     }
   }
 
+  // Handle special cases for xaxis (like Owner which needs join)
   let groupBy = [];
   let attributes = [];
 
@@ -2109,10 +1877,6 @@ exports.generatePersonPerformanceDataForSave = async (
     });
     groupBy.push("assignedUser.masterUserID");
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([
-      Sequelize.col("LeadPerson.masterUserID"),
-      "assignedUserId",
-    ]);
   } else if (xaxis === "Team") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -2123,24 +1887,10 @@ exports.generatePersonPerformanceDataForSave = async (
     });
     groupBy.push("assignedUser.team");
     attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  } else if (xaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("LeadPerson.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("LeadPerson.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the LeadPeople table
-    groupBy.push(`LeadPerson.${xaxis}`);
-    attributes.push([Sequelize.col(`LeadPerson.${xaxis}`), "xValue"]);
+    // For regular columns, explicitly specify the LeadOrganization table
+    groupBy.push(`LeadOrganization.${xaxis}`);
+    attributes.push([Sequelize.col(`LeadOrganization.${xaxis}`), "xValue"]);
   }
 
   // Handle segmentedBy if not "none"
@@ -2151,7 +1901,6 @@ exports.generatePersonPerformanceDataForSave = async (
 
     // Check if segmentedBy is also a date field
     const isSegmentedByDate = isDateField(segmentedBy);
-
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
 
@@ -2162,40 +1911,38 @@ exports.generatePersonPerformanceDataForSave = async (
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if (segmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("LeadPerson.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
     } else if (
-      segmentedBy === "Owner" ||
-      (segmentedBy === "assignedTo" && !assignedUserIncludeExists)
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: [],
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else {
-      groupBy.push(`LeadPerson.${segmentedBy}`);
+      groupBy.push(`LeadOrganization.${segmentedBy}`);
       attributes.push([
-        Sequelize.col(`LeadPerson.${segmentedBy}`),
+        Sequelize.col(`LeadOrganization.${segmentedBy}`),
         "segmentValue",
       ]);
     }
   }
 
   // Handle yaxis
-  if (yaxis === "no of people") {
+  if (yaxis === "no of organizations") {
     attributes.push([
-      Sequelize.fn("COUNT", Sequelize.col("personId")),
+      Sequelize.fn("COUNT", Sequelize.col("leadOrganizationId")),
       "yValue",
     ]);
   } else if (yaxis === "duration") {
@@ -2213,9 +1960,9 @@ exports.generatePersonPerformanceDataForSave = async (
       "yValue",
     ]);
   } else {
-    // For other yaxis values, explicitly specify the LeadPeople table
+    // For other yaxis values, explicitly specify the LeadOrganization table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`LeadPerson.${yaxis}`)),
+      Sequelize.fn("SUM", Sequelize.col(`LeadOrganization.${yaxis}`)),
       "yValue",
     ]);
   }
@@ -2224,27 +1971,27 @@ exports.generatePersonPerformanceDataForSave = async (
 
   if (segmentedBy && segmentedBy !== "none") {
     // For segmented queries - get all results without pagination
-    results = await LeadPerson.findAll({
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]]
-        : [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   } else {
-    // Non-segmented query - get all results without pagination
-    results = await LeadPerson.findAll({
+    // Get all results without pagination
+    results = await Organization.findAll({
       where: baseWhere,
       attributes: attributes,
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`LeadPerson.${xaxis}`), "ASC"]]
-        : [[Sequelize.literal("yValue"), "DESC"]],
+      order: isDateFieldX 
+        ? [[Sequelize.col(`LeadOrganization.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
     });
   }
 
@@ -2257,8 +2004,7 @@ exports.generatePersonPerformanceDataForSave = async (
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
-
+      const xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
@@ -2266,11 +2012,7 @@ exports.generatePersonPerformanceDataForSave = async (
       if (!groupedData[xValue]) {
         // Set proper ID based on xaxis type
         let id = null;
-        if (xaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (xaxis === "organization") {
-          id = item.leadOrganizationId || null;
-        } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        if (xaxis === "Owner" || xaxis === "assignedTo") {
           id = item.assignedUserId || null;
         }
 
@@ -2308,11 +2050,10 @@ exports.generatePersonPerformanceDataForSave = async (
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort(
-        (a, b) => b.totalSegmentValue - a.totalSegmentValue
-      );
+      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
     }
 
+    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
@@ -2324,11 +2065,7 @@ exports.generatePersonPerformanceDataForSave = async (
 
       // Set proper ID based on xaxis type
       let id = null;
-      if (xaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (xaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      if (xaxis === "Owner" || xaxis === "assignedTo") {
         id = item.assignedUserId || null;
       }
 
@@ -2338,6 +2075,8 @@ exports.generatePersonPerformanceDataForSave = async (
         id: id,
       };
     });
+
+    // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -2346,9 +2085,9 @@ exports.generatePersonPerformanceDataForSave = async (
     data: formattedResults,
     totalValue: totalValue,
   };
-};
+}
 
-exports.savePersonReport = async (req, res) => {
+exports.saveOrganizationReport = async (req, res) => {
   try {
     const {
       reportId,
@@ -2375,19 +2114,19 @@ exports.savePersonReport = async (req, res) => {
     let reportConfig = null;
 
     if ((entity && type && !reportId) || (entity && type && reportId)) {
-      if (entity === "Contact" && type === "Person") {
+      if (entity === "Contact" && type === "Organization") {
         // Validate required fields for performance reports
         if (!xaxis || !yaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for Contact Person reports",
+              "X-axis and Y-axis are required for Contact Organization reports",
           });
         }
 
         try {
           // Generate data with pagination
-          const result = await generatePersonPerformanceDataForSave(
+          const result = await generateOrganizationPerformanceDataForSave(
             ownerId,
             role,
             xaxis,
@@ -2403,17 +2142,17 @@ exports.savePersonReport = async (req, res) => {
             type,
             xaxis,
             yaxis,
-            segmentedBy,
             durationUnit,
+            segmentedBy,
             filters: filters || {},
             reportData,
             totalValue,
           };
         } catch (error) {
-          console.error("Error generating contact person data:", error);
+          console.error("Error generating contact organization data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate contact person data",
+            message: "Failed to generate contact organization data",
             error: error.message,
           });
         }
@@ -2437,31 +2176,32 @@ exports.savePersonReport = async (req, res) => {
       const {
         xaxis: existingxaxis,
         yaxis: existingyaxis,
-        segmentedBy: existingSegmentedBy,
         durationUnit: existingDurationUnit,
+        segmentedBy: existingSegmentedBy,
         filters: existingfilters,
         reportData: existingReportData,
       } = config;
 
-      if (existingentity === "Contact" && existingtype === "Person") {
+      if (existingentity === "Contact" && existingtype === "Organization") {
         if (!existingxaxis || !existingyaxis) {
           return res.status(400).json({
             success: false,
             message:
-              "X-axis and Y-axis are required for contact person reports",
+              "X-axis and Y-axis are required for contact organization reports",
           });
         }
 
         try {
-          const result = await generateExistingPersonPerformanceDataForSave(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingDurationUnit,
-            existingSegmentedBy,
-            existingfilters
-          );
+          const result =
+            await generateExistingOrganizationPerformanceDataForSave(
+              ownerId,
+              role,
+              existingxaxis,
+              existingyaxis,
+              existingDurationUnit,
+              existingSegmentedBy,
+              existingfilters
+            );
           reportData = result.data;
           totalValue = result.totalValue;
           reportConfig = {
@@ -2470,8 +2210,8 @@ exports.savePersonReport = async (req, res) => {
             type: existingtype,
             xaxis: existingxaxis,
             yaxis: existingyaxis,
-            segmentedBy: existingSegmentedBy,
             durationUnit: existingDurationUnit,
+            segmentedBy: existingSegmentedBy,
             filters: existingfilters || {},
             graphtype: existinggraphtype,
             colors: colorsParsed,
@@ -2479,10 +2219,10 @@ exports.savePersonReport = async (req, res) => {
             totalValue,
           };
         } catch (error) {
-          console.error("Error generating contact person data:", error);
+          console.error("Error generating contact organization data:", error);
           return res.status(500).json({
             success: false,
-            message: "Failed to generate contact person data",
+            message: "Failed to generate contact organization data",
             error: error.message,
           });
         }
@@ -2532,9 +2272,9 @@ exports.savePersonReport = async (req, res) => {
               config: {
                 xaxis: xaxis ?? existingReport.config?.xaxis,
                 yaxis: yaxis ?? existingReport.config?.yaxis,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 durationUnit:
                   durationUnit ?? existingReport.config?.durationUnit,
+                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
                 filters: filters ?? existingReport.config?.filters,
                 reportData: reportData ?? existingReport.config?.reportData,
                 totalValue: totalValue ?? existingReport.config?.totalValue,
@@ -2631,7 +2371,7 @@ exports.savePersonReport = async (req, res) => {
   }
 };
 
-exports.getPersonReportSummary = async (req, res) => {
+exports.getOrganizationReportSummary = async (req, res) => {
   try {
     const {
       reportId,
@@ -2666,66 +2406,61 @@ exports.getPersonReportSummary = async (req, res) => {
     // Handle search
     if (search) {
       baseWhere[Op.or] = [
-        { contactPerson: { [Op.like]: `%${search}%` } },
         { organization: { [Op.like]: `%${search}%` } },
-        { jobTitle: { [Op.like]: `%${search}%` } },
-        { postalAddress: { [Op.like]: `%${search}%` } },
+        { address: { [Op.like]: `%${search}%` } },
       ];
     }
 
-    // Initialize include array for main query (empty for now)
-    const include = [];
-
     // Handle filters if provided
     if (filters && filters.conditions) {
-      const validConditions = filters.conditions.filter(
-        (cond) => cond.value !== undefined && cond.value !== ""
-      );
-
-      if (validConditions.length > 0) {
-        const filterIncludeModels = [];
-        const conditions = validConditions.map((cond) => {
-          return getConditionObject(
-            cond.column,
-            cond.operator,
-            cond.value,
-            filterIncludeModels
+          const validConditions = filters.conditions.filter(
+            (cond) => cond.value !== undefined && cond.value !== ""
           );
-        });
-
-        // Add filter includes to main includes
-        filterIncludeModels.forEach((newInclude) => {
-          const exists = include.some(
-            (existingInclude) => existingInclude.as === newInclude.as
-          );
-          if (!exists) {
-            include.push(newInclude);
-          }
-        });
-
-        // Start with the first condition
-        let combinedCondition = conditions[0];
-
-        // Add remaining conditions with their logical operators
-        for (let i = 1; i < conditions.length; i++) {
-          const logicalOp = (
-            filters.logicalOperators[i - 1] || "AND"
-          ).toUpperCase();
-
-          if (logicalOp === "AND") {
-            combinedCondition = {
-              [Op.and]: [combinedCondition, conditions[i]],
-            };
-          } else {
-            combinedCondition = {
-              [Op.or]: [combinedCondition, conditions[i]],
-            };
+    
+          if (validConditions.length > 0) {
+            const filterIncludeModels = [];
+            const conditions = validConditions.map((cond) => {
+              return getConditionObject(
+                cond.column,
+                cond.operator,
+                cond.value,
+                filterIncludeModels
+              );
+            });
+    
+            // Add filter includes to main includes
+            filterIncludeModels.forEach((newInclude) => {
+              const exists = include.some(
+                (existingInclude) => existingInclude.as === newInclude.as
+              );
+              if (!exists) {
+                include.push(newInclude);
+              }
+            });
+    
+            // Start with the first condition
+            let combinedCondition = conditions[0];
+    
+            // Add remaining conditions with their logical operators
+            for (let i = 1; i < conditions.length; i++) {
+              const logicalOp = (
+                filters.logicalOperators[i - 1] || "AND"
+              ).toUpperCase();
+    
+              if (logicalOp === "AND") {
+                combinedCondition = {
+                  [Op.and]: [combinedCondition, conditions[i]],
+                };
+              } else {
+                combinedCondition = {
+                  [Op.or]: [combinedCondition, conditions[i]],
+                };
+              }
+            }
+    
+            Object.assign(baseWhere, combinedCondition);
           }
         }
-
-        Object.assign(baseWhere, combinedCondition);
-      }
-    }
 
     // Build order clause
     const order = [];
@@ -2741,60 +2476,51 @@ exports.getPersonReportSummary = async (req, res) => {
     }
 
     // Get total count
-    const totalCount = await Person.count({
+    const totalCount = await Organization.count({
       where: baseWhere,
-      include: include.length > 0 ? include : undefined,
     });
 
     // Get paginated results
-    const persons = await Person.findAll({
+    const organizations = await Organization.findAll({
       where: baseWhere,
-      include: include.length > 0 ? include : undefined,
       order: order,
       limit: parseInt(limit),
       offset: offset,
       attributes: [
-        "personId",
-        "contactPerson",
+        "leadOrganizationId",
         "organization",
-        "email",
-        "phone",
-        "notes",
-        "postalAddress",
-        "birthday",
-        "jobTitle",
-        "personLabels",
+        "organizationLabels",
+        "address",
+        "visibleTo",
+        // "active",
         "createdAt",
         "updatedAt",
-        "masterUserID",
+        "masterUserID", // Include masterUserID if you need it
       ],
     });
 
-    // Get user information separately since there's no association
+    // If you need user information, you'll need to fetch it separately
+    // since there's no association between Person and MasterUser
     let userMap = {};
-    if (persons.length > 0) {
+    if (organizations.length > 0) {
       // Get all unique user IDs from persons
       const userIds = [
-        ...new Set(
-          persons.map((person) => person.masterUserID).filter(Boolean)
-        ),
+        ...new Set(organizations.map((person) => person.masterUserID)),
       ];
 
-      if (userIds.length > 0) {
-        // Fetch users in bulk
-        const users = await MasterUser.findAll({
-          where: {
-            masterUserID: userIds,
-          },
-          attributes: ["masterUserID", "name", "email"],
-        });
+      // Fetch users in bulk
+      const users = await MasterUser.findAll({
+        where: {
+          masterUserID: userIds,
+        },
+        attributes: ["masterUserID", "name", "email"],
+      });
 
-        // Create a map for easy lookup
-        userMap = users.reduce((map, user) => {
-          map[user.masterUserID] = user;
-          return map;
-        }, {});
-      }
+      // Create a map for easy lookup
+      userMap = users.reduce((map, user) => {
+        map[user.masterUserID] = user;
+        return map;
+      }, {});
     }
 
     // Generate report data (like your existing performance report)
@@ -2802,7 +2528,7 @@ exports.getPersonReportSummary = async (req, res) => {
     let summary = {};
 
     if (xaxis && yaxis && !reportId) {
-      const reportResult = await generatePersonPerformanceData(
+      const reportResult = await generateOrganizationPerformanceData(
         ownerId,
         role,
         xaxis,
@@ -2853,13 +2579,6 @@ exports.getPersonReportSummary = async (req, res) => {
         where: { reportId },
       });
 
-      if (!existingReports) {
-        return res.status(404).json({
-          success: false,
-          message: "Report not found",
-        });
-      }
-
       const {
         entity: existingentity,
         type: existingtype,
@@ -2876,7 +2595,7 @@ exports.getPersonReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
-      const reportResult = await generateExistingPersonPerformanceData(
+      const reportResult = await generateOrganizationPerformanceData(
         ownerId,
         role,
         existingxaxis,
@@ -2892,7 +2611,7 @@ exports.getPersonReportSummary = async (req, res) => {
       if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
-        if (existingSegmentedBy === "none") {
+        if (segmentedBy === "none") {
           // Non-segmented data structure
           const values = reportData.map((item) => item.value || 0);
           totalValue = values.reduce((sum, value) => sum + value, 0);
@@ -2922,35 +2641,21 @@ exports.getPersonReportSummary = async (req, res) => {
           minValue: minValue,
         };
       }
-    } else {
-      // Default summary when no report data is generated
-      summary = {
-        totalRecords: totalCount,
-        totalCategories: 0,
-        totalValue: 0,
-        avgValue: 0,
-        maxValue: 0,
-        minValue: 0,
-      };
     }
 
     // Format persons for response
-    const formattedPersons = persons.map((person) => {
+    const formattedPersons = organizations.map((person) => {
       const user = userMap[person.masterUserID];
 
       return {
-        id: person.personId,
-        contactPerson: person.contactPerson,
+        id: person.leadOrganizationId,
         organization: person.organization,
+        organizationLabels: person.organizationLabels,
+        address: person.address,
+        visibleTo: person.visibleTo,
+        // active: person.active == true ? "Yes" : "No",
         updatedAt: person.updatedAt,
         createdAt: person.createdAt,
-        email: person.email,
-        phone: person.phone,
-        notes: person.notes,
-        postalAddress: person.postalAddress,
-        birthday: person.birthday,
-        jobTitle: person.jobTitle,
-        personLabels: person.personLabels,
         assignedTo: user
           ? {
               id: user.masterUserID,
@@ -2965,7 +2670,7 @@ exports.getPersonReportSummary = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Persons data retrieved successfully",
+      message: "Organization data retrieved successfully",
       data: {
         activities: formattedPersons,
         reportData: reportData,
@@ -2981,10 +2686,10 @@ exports.getPersonReportSummary = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error retrieving Persons data:", error);
+    console.error("Error retrieving Organization data:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve Persons data",
+      message: "Failed to retrieve Organization data",
       error: error.message,
     });
   }
