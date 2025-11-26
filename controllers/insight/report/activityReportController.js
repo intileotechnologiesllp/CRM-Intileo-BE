@@ -2092,7 +2092,6 @@ exports.createActivityReportDrillDown = async (req, res) => {
     if(isDate){
       const resp = groupActivitiesWithStats(result?.data, dateType);
       const filterDate = resp.filter((idx)=>{
-        console.log(idx.period,weekName)
         return idx.period == weekName
       })
       dateData = filterDate[0]?.activities || []
