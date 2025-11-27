@@ -3466,6 +3466,15 @@ exports.updateLead = async (req, res) => {
     // Update or create Organization
     let orgRecord;
     if (Object.keys(organizationData).length > 0) {
+      // Ensure masterUserID is included in organizationData for proper scoping
+      if (!organizationData.masterUserID) {
+        organizationData.masterUserID = req.adminId;
+      }
+      // Ensure ownerId is included if not explicitly provided
+      if (!organizationData.ownerId) {
+        organizationData.ownerId = lead.ownerId || req.adminId;
+      }
+      
       orgRecord = await Organization.findOne({
         where: { leadOrganizationId: lead.leadOrganizationId },
       });
