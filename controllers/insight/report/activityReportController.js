@@ -2013,14 +2013,44 @@ exports.createActivityReportDrillDown = async (req, res) => {
     } = req.body;
     const ownerId = req.adminId;
     const role = req.role;
+    const {masterUserId, startDate, endDate} = req.query;
 
+      if ((startDate && endDate) ) {
+        let startDateCondition = {};
+        let endDateCondition = {};
+        if(startDate){
+          startDateCondition = {
+              "column": "startDateTime",
+              "operator": "is",
+              "value": startDate
+          }
+        }
+        if(endDate){
+          endDateCondition = {
+              "column": "startDateTime",
+              "operator": "is",
+              "value": endDate
+          }
+        }
+        filters = config.filters ? {...config.filters,
+              condition: [
+               startDateCondition,
+               endDateCondition
+              ]
+            } : {
+              condition: [
+                startDateCondition,
+                endDateCondition
+              ]
+            }
+      }
     // ==================================================================================
     // NEW: Handle Deal Progress Drilldown (moduleId === 2) with stage breakdown
     // ==================================================================================
 
     // for Deal Progress use moduleId 8
     if (moduleId == 8 || parseInt(moduleId) === 8) {
-      console.log('🎯 [createActivityReportDrillDown] Routing to Deal Progress Drilldown');
+      // console.log('🎯 [createActivityReportDrillDown] Routing to Deal Progress Drilldown');
       
       const dealResult = await generateDealProgressDrillDownForActivity(
         ownerId,
@@ -2032,7 +2062,8 @@ exports.createActivityReportDrillDown = async (req, res) => {
         pipelineId,
         pipelineStage,
         page,
-        limit
+        limit,
+        masterUserId
       );
 
       return res.status(200).json({
@@ -2051,7 +2082,7 @@ exports.createActivityReportDrillDown = async (req, res) => {
 // for Email Performance use moduleId 9
 
     if (moduleId == 9 || parseInt(moduleId) === 9) {
-      console.log('📧 [createActivityReportDrillDown] Routing to Email Drilldown');
+      // console.log('📧 [createActivityReportDrillDown] Routing to Email Drilldown');
       
       const emailResult = await generateEmailDrillDownForActivity(
         ownerId,
@@ -2061,7 +2092,8 @@ exports.createActivityReportDrillDown = async (req, res) => {
         fieldValue,
         id,
         page,
-        limit
+        limit,
+        masterUserId
       );
 
       return res.status(200).json({
@@ -2085,7 +2117,8 @@ exports.createActivityReportDrillDown = async (req, res) => {
       fieldValue,
       id,
       moduleId,
-      isDate
+      isDate,
+      masterUserId
     );
 
     let dateData = null
@@ -2218,12 +2251,15 @@ async function generateActivityPerformanceDataForDrillDown(
   value,
   id,
   entity,
-  isDate
+  isDate,
+  masterUserId
 ) {
   let includeModels = [];
   const baseWhere = {};
 
-  if (role !== "admin") {
+  if (masterUserId) {
+    baseWhere.masterUserID = masterUserId;
+  }else if (role !== "admin") {
     baseWhere.masterUserID = ownerId;
   }
 
@@ -2446,14 +2482,17 @@ async function generateDealProgressDrillDownForActivity(
   pipelineId,
   pipelineStage,
   page = 1,
-  limit = 50
+  limit = 50,
+  masterUserId
 ) {
   const baseWhere = {};
 
-  console.log('📊 [generateDealProgressDrillDownForActivity] Starting data generation');
+  // console.log('📊 [generateDealProgressDrillDownForActivity] Starting data generation');
 
   // Role-based filtering
-  if (role !== "admin") {
+  if (masterUserId) {
+    baseWhere.masterUserID = masterUserId;
+  }else if (role !== "admin") {
     baseWhere.masterUserID = ownerId;
   }
 
@@ -2783,15 +2822,18 @@ async function generateEmailDrillDownForActivity(
   fieldValue,
   id,
   page = 1,
-  limit = 50
+  limit = 50,
+  masterUserId
 ) {
   const baseWhere = {};
 
-  console.log('📧 [generateEmailDrillDownForActivity] Starting email drilldown generation');
-  console.log('📧 Field:', { fieldName, fieldValue, id });
+  // console.log('📧 [generateEmailDrillDownForActivity] Starting email drilldown generation');
+  // console.log('📧 Field:', { fieldName, fieldValue, id });
 
   // Role-based filtering
-  if (role !== "admin") {
+  if (masterUserId) {
+    baseWhere.masterUserID = masterUserId;
+  }else if (role !== "admin") {
     baseWhere.masterUserID = ownerId;
   }
 
