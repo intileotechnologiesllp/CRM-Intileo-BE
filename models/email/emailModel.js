@@ -1,0 +1,186 @@
+const { DataTypes } = require("sequelize");
+const sequelize = require("../../config/db");
+const Attachment = require("../../models/email/attachmentModel");
+
+const Email = sequelize.define(
+  "Email",
+  {
+    emailID: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    messageId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    inReplyTo: {
+      type: DataTypes.STRING, // Stores the messageId of the email being replied to
+      allowNull: true,
+    },
+    sender: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    senderName: {
+      type: DataTypes.STRING, // New field for sender's name
+      allowNull: true,
+    },
+    recipient: {
+      type: DataTypes.TEXT("long"),
+      allowNull: true,
+    },
+    recipientName: {
+      type: DataTypes.TEXT("long"), // New field for recipient's name
+      allowNull: true,
+    },
+    subject: {
+      type: DataTypes.TEXT("long"),
+      allowNull: true,
+    },
+    body: {
+      type: DataTypes.TEXT("long"), // or 'medium' if you prefer
+      allowNull: true,
+    },
+    folder: {
+      type: DataTypes.ENUM(
+        "inbox",
+        "drafts",
+        "outbox",
+        "sent",
+        "archive",
+        "trash"
+      ),
+      allowNull: false,
+      defaultValue: "inbox",
+    },
+    isRead: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    createdAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    updatedAt: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+    cc: {
+      type: DataTypes.TEXT("long"),
+      allowNull: true,
+    },
+    bcc: {
+      type: DataTypes.TEXT("long"),
+      allowNull: true,
+    },
+    references: {
+      type: DataTypes.TEXT,
+      allowNull: true, // Allow NULL values
+    },
+    masterUserID: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    draftId: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    isDraft: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+    },
+    isOpened: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    isClicked: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    tempMessageId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    scheduledAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    threadId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    uid: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'IMAP UID for email body fetching'
+    },
+    body_fetch_status: {
+      type: DataTypes.ENUM('pending', 'completed', 'failed'),
+      allowNull: true,
+      defaultValue: 'pending',
+      comment: 'Status of email body fetching for on-demand loading'
+    },
+    leadId: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Allow NULL values for emails not linked to a lead
+    },
+    dealId: {
+      type: DataTypes.INTEGER,
+      allowNull: true, // Allow NULL values for emails not linked to a deal
+    },
+    visibility: {
+      type: DataTypes.ENUM('shared', 'private'),
+      allowNull: false,
+      defaultValue: 'shared', // Default to shared visibility
+      comment: 'Email visibility: shared (visible to all users) or private (visible only to owner)'
+    },
+    userEmail: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'Email address of the user who owns this email (for privacy filtering)'
+    },
+    labelId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'ID of the single label associated with this email'
+    },
+    lastError: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'Last error message encountered during email processing (scheduling, sending, etc.)'
+    },
+  },
+  {
+    indexes: [
+      {
+        fields: ["messageId", "folder"], // Composite unique index
+      },
+    ],
+    hooks: {
+      beforeCreate: (email, options) => {
+        // Validate recipients for scheduled emails (outbox folder)
+        if (email.folder === 'outbox' && email.scheduledAt) {
+          const hasRecipients = email.recipient || email.cc || email.bcc;
+          if (!hasRecipients) {
+            throw new Error('Scheduled emails must have at least one recipient (recipient, cc, or bcc)');
+          }
+        }
+      },
+      beforeUpdate: (email, options) => {
+        // Validate recipients for scheduled emails (outbox folder) on update
+        if (email.folder === 'outbox' && email.scheduledAt) {
+          const hasRecipients = email.recipient || email.cc || email.bcc;
+          if (!hasRecipients) {
+            throw new Error('Scheduled emails must have at least one recipient (recipient, cc, or bcc)');
+          }
+        }
+      }
+    }
+  }
+);
+
+Email.hasMany(Attachment, { foreignKey: "emailID", as: "attachments" });
+Attachment.belongsTo(Email, { foreignKey: "emailID" });
+
+module.exports = Email;

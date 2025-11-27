@@ -1,0 +1,62 @@
+  {
+  "apps": [
+    {
+      "name": "pipedrive-main",
+      "script": "app.js",
+      "instances": 1,
+      "exec_mode": "cluster",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": 3000
+      },
+      "error_file": "./logs/main-error.log",
+      "out_file": "./logs/main-out.log",
+      "log_file": "./logs/main.log"
+    },
+    {
+      "name": "flag-sync-worker-1",
+      "script": "startSyncFlagsWorker.js",
+      "args": "--concurrency=2 --prefetch=5 --name=worker-1",
+      "instances": 1,
+      "exec_mode": "fork",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "error_file": "./logs/flag-worker-1-error.log",
+      "out_file": "./logs/flag-worker-1-out.log",
+      "log_file": "./logs/flag-worker-1.log",
+      "restart_delay": 5000,
+      "max_restarts": 10
+    },
+    {
+      "name": "flag-sync-worker-2",
+      "script": "startSyncFlagsWorker.js",
+      "args": "--concurrency=2 --prefetch=5 --name=worker-2",
+      "instances": 1,
+      "exec_mode": "fork",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "error_file": "./logs/flag-worker-2-error.log",
+      "out_file": "./logs/flag-worker-2-out.log",
+      "log_file": "./logs/flag-worker-2.log",
+      "restart_delay": 5000,
+      "max_restarts": 10
+    },
+    {
+      "name": "flag-sync-worker-3",
+      "script": "startSyncFlagsWorker.js",
+      "args": "--concurrency=3 --prefetch=10 --name=worker-3",
+      "instances": 1,
+      "exec_mode": "fork",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "error_file": "./logs/flag-worker-3-error.log",
+      "out_file": "./logs/flag-worker-3-out.log",
+      "log_file": "./logs/flag-worker-3.log",
+      "restart_delay": 5000,
+      "max_restarts": 10
+    }
+  ]
+}

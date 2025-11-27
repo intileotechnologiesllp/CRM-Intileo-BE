@@ -1,0 +1,41 @@
+# Node.js dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
+
+# Database files
+*.sqlite
+*.db
+
+# Secrets and configuration
+config/*.json
+config/*.js
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Build files
+dist/
+build/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# Coverage reports
+coverage/
+
+# Other sensitive files
+secrets/

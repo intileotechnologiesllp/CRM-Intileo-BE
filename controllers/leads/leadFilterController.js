@@ -1,0 +1,865 @@
+const LeadFilter = require("../../models/leads/leadFiltersModel");
+const Lead = require("../../models/leads/leadsModel");
+const CustomField = require("../../models/customFieldModel");
+const { Op } = require("sequelize"); // Import Sequelize operators
+const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail logger
+const PROGRAMS = require("../../utils/programConstants"); // Import program constants
+const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
+const { convertRelativeDate } = require("../../utils/helper"); // Import the utility to convert relative dates
+const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import your LeadDetails model
+const { Person } = require("../../models");
+const Organization = require("../../models/leads/leadOrganizationModel");
+exports.saveLeadFilter = async (req, res) => {
+  const {
+    filterName,
+    filterConfig,
+    visibility = "Private",
+    columns,
+    filterEntityType = "lead", // New parameter with default value
+  } = req.body;
+  const masterUserID = req.adminId; // or req.user.id
+
+  if (!filterName || !filterConfig) {
+    return res
+      .status(400)
+      .json({ message: "filterName and filterConfig are required." });
+  }
+
+  // Validate filterEntityType
+  const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+  if (!validEntityTypes.includes(filterEntityType)) {
+    return res
+      .status(400)
+      .json({ 
+        message: `Invalid filterEntityType. Must be one of: ${validEntityTypes.join(', ')}` 
+      });
+  }
+
+  try {
+    const filter = await LeadFilter.create({
+      filterName,
+      filterConfig,
+      visibility,
+      masterUserID,
+      columns,
+      filterEntityType, // Add the new field
+    });
+    
+    res.status(201).json({ 
+      message: "Filter saved successfully", 
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        visibility: filter.visibility,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        filterEntityType: filter.filterEntityType,
+        isFavorite: filter.isFavorite || false, // Include favorite status
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error("Error saving filter:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getLeadFilters = async (req, res) => {
+  const masterUserID = req.adminId; // or req.user.id
+  const { entityType, filterEntityType } = req.query; // Added filterEntityType parameter
+  try {
+    
+
+    // if (req.role === "admin") {
+    //   // Admin can see all filters
+    //   filters = await LeadFilter.findAll();
+    // } else {
+    //   // Non-admin users: public filters for everyone, private only for this user
+    //   filters = await LeadFilter.findAll({
+    //     where: {
+    //       [Op.or]: [
+    //         { visibility: "Public" },
+    //         { visibility: "Private", masterUserID },
+    //       ],
+    //     },
+    //   });
+    // }
+        // Fetch filters visible to everyone or private filters belonging to this user
+    let filters = await LeadFilter.findAll({
+      where: {
+        [Op.or]: [
+          { visibility: "Public" },
+          { visibility: "Private", masterUserID },
+        ],
+      },
+    });
+
+    // Filter by filterEntityType if provided (new filtering option)
+    if (filterEntityType) {
+      filters = filters.filter(f => f.filterEntityType === filterEntityType);
+    }
+
+    // Filter by entityType if provided (legacy filtering based on filterConfig)
+    let filtered = filters;
+    if (entityType) {
+      filtered = filters.filter((f) => {
+        const filterConfig =
+          typeof f.filterConfig === "string"
+            ? JSON.parse(f.filterConfig)
+            : f.filterConfig;
+        const all = filterConfig.all || [];
+        const any = filterConfig.any || [];
+        const allEntities = [...all, ...any];
+        return allEntities.some((cond) => cond.entity === entityType);
+      });
+    }
+
+    // Format the filtered results to include all necessary fields
+    const formattedFilters = filtered.map(filter => ({
+      filterId: filter.filterId,
+      filterName: filter.filterName,
+      filterConfig: filter.filterConfig,
+      filterEntityType: filter.filterEntityType,
+      visibility: filter.visibility,
+      masterUserID: filter.masterUserID,
+      isFavorite: filter.isFavorite || false, // Include favorite status
+      columns: filter.columns,
+      createdAt: filter.createdAt,
+      updatedAt: filter.updatedAt
+    }));
+
+    res.status(200).json({ 
+      filters: formattedFilters,
+      totalFilters: formattedFilters.length,
+      availableEntityTypes: ['lead', 'deal', 'person', 'organization', 'activity']
+    });
+  } catch (error) {
+    console.error("Error fetching filters:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.useFilters = async (req, res) => {
+  const { filterId } = req.params;
+
+  try {
+    // Fetch the saved filter
+    const filter = await LeadFilter.findByPk(filterId);
+    if (!filter) {
+      return res.status(404).json({ message: "Filter not found." });
+    }
+
+    // Build the where clause from filterConfig
+    const { all = [], any = [] } = filter.filterConfig;
+    const where = {};
+    const leadDetailsWhere = {};
+
+    // List of fields that belong to LeadDetails
+    const leadDetailsFields = [
+      // Add all LeadDetails fields you want to support, e.g.:
+      "someLeadDetailsField",
+      "anotherLeadDetailsField",
+      // e.g. "archiveReason", "archivedBy", etc.
+    ];
+
+    // Separate conditions for Lead and LeadDetails
+    if (all.length > 0) {
+      where[Op.and] = [];
+      leadDetailsWhere[Op.and] = [];
+      all.forEach((cond) => {
+        if (leadDetailsFields.includes(cond.field)) {
+          leadDetailsWhere[Op.and].push(buildCondition(cond));
+        } else {
+          where[Op.and].push(buildCondition(cond));
+        }
+      });
+      if (where[Op.and].length === 0) delete where[Op.and];
+      if (leadDetailsWhere[Op.and].length === 0)
+        delete leadDetailsWhere[Op.and];
+    }
+    if (any.length > 0) {
+      where[Op.or] = [];
+      leadDetailsWhere[Op.or] = [];
+      any.forEach((cond) => {
+        if (leadDetailsFields.includes(cond.field)) {
+          leadDetailsWhere[Op.or].push(buildCondition(cond));
+        } else {
+          where[Op.or].push(buildCondition(cond));
+        }
+      });
+      if (where[Op.or].length === 0) delete where[Op.or];
+      if (leadDetailsWhere[Op.or].length === 0) delete leadDetailsWhere[Op.or];
+    }
+
+    // Build include array if needed
+    const include = [];
+    if (Object.keys(leadDetailsWhere).length > 0) {
+      include.push({
+        model: LeadDetails,
+        as: "leadDetails", // Use the correct alias if you have one
+        where: leadDetailsWhere,
+        required: true,
+      });
+    }
+
+    // Fetch leads using the built where clause and include
+    const leads = await Lead.findAll({
+      where,
+      include,
+    });
+
+    res.status(200).json({ leads });
+  } catch (error) {
+    console.error("Error fetching leads by filter:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+// Operator label to backend key mapping
+const operatorMap = {
+  is: "eq",
+  "is not": "ne",
+  "is empty": "is empty",
+  "is not empty": "is not empty",
+  "is exactly or earlier than": "lte",
+  "is earlier than": "lt",
+  "is exactly or later than": "gte",
+  "is later than": "gt",
+  // Add more mappings if needed
+};
+// Helper to build a single condition
+function buildCondition(cond) {
+  const ops = {
+    eq: Op.eq,
+    ne: Op.ne,
+    like: Op.like,
+    notLike: Op.notLike,
+    gt: Op.gt,
+    gte: Op.gte,
+    lt: Op.lt,
+    lte: Op.lte,
+    in: Op.in,
+    notIn: Op.notIn,
+    is: Op.eq,
+    isNot: Op.ne,
+    isEmpty: Op.is,
+    isNotEmpty: Op.not,
+  };
+
+  let operator = cond.operator;
+  if (operatorMap[operator]) {
+    operator = operatorMap[operator];
+  }
+
+  // Handle "is empty" and "is not empty"
+  if (operator === "is empty") {
+    return { [cond.field]: { [Op.is]: null } };
+  }
+  if (operator === "is not empty") {
+    return { [cond.field]: { [Op.not]: null, [Op.ne]: "" } };
+  }
+
+  // Handle date fields
+  const leadDateFields = Object.entries(Lead.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
+
+  const leadDetailsDateFields = Object.entries(LeadDetails.rawAttributes)
+    .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+    .map(([key]) => key);
+
+  const allDateFields = [...leadDateFields, ...leadDetailsDateFields];
+  // if (
+  //   ["createdAt", "updatedAt", "expectedCloseDate", "proposalSentDate", "nextActivityDate", "archiveTime"].includes(cond.field)
+  // ) {
+  //   // If useExactDate is true, use the value directly
+  //   if (cond.useExactDate) {
+  //     // Validate the date
+  //     const date = new Date(cond.value);
+  //     if (isNaN(date.getTime())) return {};
+  //     return {
+  //       [cond.field]: {
+  //         [ops[operator] || Op.eq]: date,
+  //       },
+  //     };
+  //   }
+  if (allDateFields.includes(cond.field)) {
+    if (cond.useExactDate) {
+      const date = new Date(cond.value);
+      if (isNaN(date.getTime())) return {};
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: date,
+        },
+      };
+    }
+    // Otherwise, use relative date conversion
+    const dateRange = convertRelativeDate(cond.value);
+    const isValidDate = (d) => d instanceof Date && !isNaN(d.getTime());
+
+    if (
+      dateRange &&
+      isValidDate(dateRange.start) &&
+      isValidDate(dateRange.end)
+    ) {
+      return {
+        [cond.field]: {
+          [Op.between]: [dateRange.start, dateRange.end],
+        },
+      };
+    }
+    if (dateRange && isValidDate(dateRange.start)) {
+      return {
+        [cond.field]: {
+          [ops[operator] || Op.eq]: dateRange.start,
+        },
+      };
+    }
+    return {};
+  }
+
+  // Default
+  return {
+    [cond.field]: {
+      [ops[operator] || Op.eq]: cond.value,
+    },
+  };
+}
+exports.updateLeadFilter = async (req, res) => {
+  const { filterId } = req.params;
+  const { filterName, filterConfig, visibility, columns, filterEntityType } = req.body;
+  const masterUserID = req.adminId; // or req.user.id
+
+  try {
+    const filter = await LeadFilter.findByPk(filterId);
+
+    if (!filter) {
+      return res.status(404).json({ message: "Filter not found." });
+    }
+
+    // Allow admin to edit any filter, non-admin can only edit their own filters
+    // if (req.role !== "admin" && filter.masterUserID !== masterUserID) {
+    //   return res
+    //     .status(403)
+    //     .json({ message: "You are not allowed to edit this filter." });
+    // }
+
+    // Validate filterEntityType if provided
+    if (filterEntityType) {
+      const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+      if (!validEntityTypes.includes(filterEntityType)) {
+        return res
+          .status(400)
+          .json({ 
+            message: `Invalid filterEntityType. Must be one of: ${validEntityTypes.join(', ')}` 
+          });
+      }
+    }
+
+    // Update fields if provided
+    if (filterName !== undefined) filter.filterName = filterName;
+    if (filterConfig !== undefined) filter.filterConfig = filterConfig;
+    if (visibility !== undefined) filter.visibility = visibility;
+    if (columns !== undefined) filter.columns = columns;
+    if (filterEntityType !== undefined) filter.filterEntityType = filterEntityType; // Add the new field
+
+    await filter.save();
+
+    res.status(200).json({ 
+      message: "Filter updated successfully", 
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        visibility: filter.visibility,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        filterEntityType: filter.filterEntityType,
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error("Error updating filter:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+exports.getLeadFields = async (req, res) => {
+  try {
+    const fields = [];
+    
+    // Helper function to convert Sequelize data types to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType || !sequelizeType.key) return 'text';
+      
+      switch (sequelizeType.key) {
+        case 'STRING':
+        case 'TEXT':
+          return 'text';
+        case 'INTEGER':
+        case 'BIGINT':
+        case 'FLOAT':
+        case 'DECIMAL':
+        case 'DOUBLE':
+          return 'number';
+        case 'DATE':
+        case 'DATEONLY':
+          return 'date';
+        case 'BOOLEAN':
+          return 'boolean';
+        case 'JSON':
+        case 'JSONB':
+          return 'json';
+        case 'ENUM':
+          return 'select';
+        default:
+          return 'text';
+      }
+    };
+
+    // Helper function to format field labels
+    const formatLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/_/g, ' ') // Replace underscores with spaces
+        .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize each word
+    };
+
+    // Get all Lead model fields
+    const leadAttributes = Lead.rawAttributes;
+    
+    // Process Lead model fields
+    Object.entries(leadAttributes).forEach(([fieldName, fieldConfig]) => {
+      const fieldType = getFieldType(fieldConfig.type);
+      const label = formatLabel(fieldName);
+      
+      fields.push({
+        value: fieldName,
+        label: label,
+        type: fieldType,
+        entity: 'Lead',
+        isCustomField: false
+      });
+    });
+
+    // Get all Lead custom fields
+    const leadCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ['lead', 'both'] }, // Include both lead-specific and universal custom fields
+        isActive: true
+      },
+      attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType']
+    });
+
+    // Process custom fields
+    leadCustomFields.forEach(customField => {
+      // Convert custom field type to standard type
+      let fieldType = 'text'; // default
+      switch (customField.fieldType) {
+        case 'text':
+        case 'textarea':
+          fieldType = 'text';
+          break;
+        case 'number':
+        case 'monetary':
+          fieldType = 'number';
+          break;
+        case 'date':
+        case 'datetime':
+          fieldType = 'date';
+          break;
+        case 'singleselect':
+        case 'multiselect':
+          fieldType = 'select';
+          break;
+        case 'boolean':
+        case 'checkbox':
+          fieldType = 'boolean';
+          break;
+        default:
+          fieldType = 'text';
+      }
+
+      fields.push({
+        value: customField.fieldName,
+        label: customField.fieldLabel || formatLabel(customField.fieldName),
+        type: fieldType,
+        entity: 'Lead',
+        isCustomField: true,
+        fieldId: customField.fieldId
+      });
+    });
+
+    // Sort fields by entity type and then by label
+    fields.sort((a, b) => {
+      // First sort by entity (Lead fields first, then custom fields)
+      if (a.isCustomField !== b.isCustomField) {
+        return a.isCustomField ? 1 : -1;
+      }
+      // Then sort by label
+      return a.label.localeCompare(b.label);
+    });
+
+    res.status(200).json({ 
+      success: true,
+      fields,
+      totalFields: fields.length,
+      standardFields: fields.filter(f => !f.isCustomField).length,
+      customFields: fields.filter(f => f.isCustomField).length
+    });
+  } catch (error) {
+    console.error("Error fetching lead fields:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching lead fields",
+      error: error.message 
+    });
+  }
+};
+
+exports.getAllLeadContactPersons = async (req, res) => {
+  try {
+    const { page = 1, limit = 100, search = "" } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Build search condition for contactPerson
+    const where = search ? { contactPerson: { [Op.like]: `${search}%` } } : {};
+
+    const { rows, count } = await Person.findAndCountAll({
+      where,
+      attributes: ["contactPerson",],
+      limit: parseInt(limit),
+      offset,
+      distinct: true,
+    });
+
+    // Extract contactPerson values
+    const contactPersons = rows
+      .map((lead) => lead.contactPerson)
+      .filter(Boolean);
+
+    res.status(200).json({
+      contactPersons,
+      total: count,
+      page: parseInt(page),
+      totalPages: Math.ceil(count / limit),
+    });
+  } catch (error) {
+    console.error("Error fetching contact persons:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Add filter to favorites (mark as favorite)
+ */
+exports.addFilterToFavorites = async (req, res) => {
+  try {
+    const { filterId } = req.params;
+    const { filterEntityType } = req.query; // Get expected entity type from query params
+    const masterUserID = req.adminId;
+
+    // Check if filter exists and user has access to it
+    const filter = await LeadFilter.findOne({
+      where: {
+        filterId: filterId,
+        [Op.or]: [
+          { masterUserID: masterUserID }, // User's own filter (private or public)
+          { visibility: 'Public' }        // Public filter from other users
+        ]
+      }
+    });
+
+    if (!filter) {
+      return res.status(404).json({
+        message: "Filter not found or you don't have access to it."
+      });
+    }
+
+    // Validate filterEntityType if provided
+    if (filterEntityType && filter.filterEntityType !== filterEntityType) {
+      return res.status(400).json({
+        message: `Filter entity type mismatch. Expected '${filterEntityType}' but filter is of type '${filter.filterEntityType}'.`,
+        details: {
+          requestedEntityType: filterEntityType,
+          actualEntityType: filter.filterEntityType,
+          filterId: filter.filterId,
+          filterName: filter.filterName
+        }
+      });
+    }
+
+    // Check if already favorite
+    if (filter.isFavorite) {
+      return res.status(409).json({
+        message: "Filter is already marked as favorite.",
+        filter: {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          filterEntityType: filter.filterEntityType,
+          isFavorite: filter.isFavorite
+        }
+      });
+    }
+
+    // Mark as favorite
+    await filter.update({ isFavorite: true });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "ADD_FILTER_TO_FAVORITES",
+      masterUserID,
+      `Marked filter "${filter.filterName}" as favorite`,
+      filter.filterId
+    );
+
+    res.status(200).json({
+      message: "Filter added to favorites successfully",
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        filterEntityType: filter.filterEntityType,
+        visibility: filter.visibility,
+        isFavorite: filter.isFavorite,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      },
+      entityInfo: {
+        entityType: filter.filterEntityType,
+        totalFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        }),
+        favoriteFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            isFavorite: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        })
+      }
+    });
+
+  } catch (error) {
+    console.error("Error adding filter to favorites:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Remove filter from favorites (unmark as favorite)
+ */
+exports.removeFilterFromFavorites = async (req, res) => {
+  try {
+    const { filterId } = req.params;
+    const { filterEntityType } = req.query; // Get expected entity type from query params
+    const masterUserID = req.adminId;
+
+    // Check if filter exists and user has access to it
+    const filter = await LeadFilter.findOne({
+      where: {
+        filterId: filterId,
+        [Op.or]: [
+          { masterUserID: masterUserID }, // User's own filter
+          { visibility: 'Public' }        // Public filter
+        ]
+      }
+    });
+
+    if (!filter) {
+      return res.status(404).json({
+        message: "Filter not found or you don't have access to it."
+      });
+    }
+
+    // Validate filterEntityType if provided
+    if (filterEntityType && filter.filterEntityType !== filterEntityType) {
+      return res.status(400).json({
+        message: `Filter entity type mismatch. Expected '${filterEntityType}' but filter is of type '${filter.filterEntityType}'.`,
+        details: {
+          requestedEntityType: filterEntityType,
+          actualEntityType: filter.filterEntityType,
+          filterId: filter.filterId,
+          filterName: filter.filterName
+        }
+      });
+    }
+
+    // Check if not favorite
+    if (!filter.isFavorite) {
+      return res.status(409).json({
+        message: "Filter is not marked as favorite.",
+        filter: {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          isFavorite: filter.isFavorite
+        }
+      });
+    }
+
+    // Remove from favorites
+    await filter.update({ isFavorite: false });
+
+    // Log audit trail
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "REMOVE_FILTER_FROM_FAVORITES",
+      masterUserID,
+      `Removed filter "${filter.filterName}" from favorites`,
+      filter.filterId
+    );
+
+    res.status(200).json({
+      message: "Filter removed from favorites successfully",
+      filter: {
+        filterId: filter.filterId,
+        filterName: filter.filterName,
+        filterConfig: filter.filterConfig,
+        filterEntityType: filter.filterEntityType,
+        visibility: filter.visibility,
+        isFavorite: filter.isFavorite,
+        masterUserID: filter.masterUserID,
+        columns: filter.columns,
+        createdAt: filter.createdAt,
+        updatedAt: filter.updatedAt
+      },
+      entityInfo: {
+        entityType: filter.filterEntityType,
+        totalFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        }),
+        favoriteFiltersForEntity: await LeadFilter.count({
+          where: {
+            filterEntityType: filter.filterEntityType,
+            isFavorite: true,
+            [Op.or]: [
+              { masterUserID: masterUserID },
+              { visibility: 'Public' }
+            ]
+          }
+        })
+      }
+    });
+
+  } catch (error) {
+    console.error("Error removing filter from favorites:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all favorite filters
+ */
+exports.getFavoriteFilters = async (req, res) => {
+  try {
+    const masterUserID = req.adminId;
+    const { filterEntityType } = req.query;
+
+    // Build where clause
+    let whereClause = {
+      isFavorite: true,
+      [Op.or]: [
+        { masterUserID: masterUserID }, // User's own filters
+        { visibility: 'Public' }        // Public filters
+      ]
+    };
+
+    // Filter by entity type if specified
+    if (filterEntityType) {
+      whereClause.filterEntityType = filterEntityType;
+    }
+
+    // Get all favorite filters
+    const favoriteFilters = await LeadFilter.findAll({
+      where: whereClause,
+      order: [['updatedAt', 'DESC'], ['createdAt', 'DESC']]
+    });
+
+    // Get filter owner details for each filter
+    const filtersWithOwnerDetails = await Promise.all(
+      favoriteFilters.map(async (filter) => {
+        // Get owner information
+        const owner = await require('../../models/master/masterUserModel').findByPk(filter.masterUserID, {
+          attributes: ['masterUserID', 'name', 'email']
+        });
+
+        return {
+          filterId: filter.filterId,
+          filterName: filter.filterName,
+          filterConfig: filter.filterConfig,
+          filterEntityType: filter.filterEntityType,
+          visibility: filter.visibility,
+          isFavorite: filter.isFavorite,
+          columns: filter.columns,
+          owner: owner ? {
+            masterUserID: owner.masterUserID,
+            name: owner.name,
+            email: owner.email
+          } : null,
+          isOwnFilter: filter.masterUserID === masterUserID,
+          createdAt: filter.createdAt,
+          updatedAt: filter.updatedAt
+        };
+      })
+    );
+
+    // Get summary information
+    const totalFavorites = filtersWithOwnerDetails.length;
+    const ownFavorites = filtersWithOwnerDetails.filter(f => f.isOwnFilter).length;
+    const publicFavorites = filtersWithOwnerDetails.filter(f => !f.isOwnFilter).length;
+
+    // Group by entity type
+    const byEntityType = filtersWithOwnerDetails.reduce((acc, filter) => {
+      const entityType = filter.filterEntityType;
+      if (!acc[entityType]) {
+        acc[entityType] = 0;
+      }
+      acc[entityType]++;
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      message: "Favorite filters retrieved successfully",
+      data: filtersWithOwnerDetails,
+      summary: {
+        totalFavorites,
+        ownFavorites,
+        publicFavorites,
+        byEntityType,
+        filterEntityType: filterEntityType || 'all'
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching favorite filters:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};

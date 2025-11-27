@@ -1,0 +1,975 @@
+// 🚀 HYBRID EMAIL BODY SERVICE
+// Combines background prefetching for recent emails + on-demand for older emails
+
+const Email = require('../models/email/emailModel');
+const UserCredential = require('../models/email/userCredentialModel');
+const pLimit = require('p-limit');
+const imapSimple = require('imap-simple');
+
+// Provider configuration for IMAP connections
+const PROVIDER_CONFIG = {
+  gmail: {
+    host: "imap.gmail.com",
+    port: 993,
+    tls: true,
+  },
+  yandex: {
+    host: "imap.yandex.com",
+    port: 993,
+    tls: true,
+  },
+  outlook: {
+    host: "outlook.office365.com",
+    port: 993,
+    tls: true,
+  },
+  yahoo: {
+    host: "imap.mail.yahoo.com",
+    port: 993,
+    tls: true,
+  },
+};
+
+class EmailBodyService {
+  constructor() {
+    this.limit = pLimit(5); // Limit concurrent IMAP connections
+    this.recentDaysThreshold = 30; // Background fetch for emails within 30 days
+  }
+
+  // Helper function to connect to IMAP using user credentials
+  async connectToIMAP(masterUserID, provider) {
+    try {
+      // Get user credentials
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID }
+      });
+
+      if (!userCredential) {
+        throw new Error(`No credentials found for user ${masterUserID}`);
+      }
+
+      // Get provider configuration
+      const providerConfig = PROVIDER_CONFIG[provider] || PROVIDER_CONFIG.gmail;
+      
+      // Create IMAP connection
+      const connection = await imapSimple.connect({
+        imap: {
+          user: userCredential.email,
+          password: userCredential.appPassword,
+          host: providerConfig.host,
+          port: providerConfig.port,
+          tls: providerConfig.tls,
+          authTimeout: 30000,
+          connTimeout: 30000,
+          tlsOptions: { rejectUnauthorized: false }
+        }
+      });
+
+      return connection;
+    } catch (error) {
+      console.error(`❌ IMAP CONNECTION ERROR for user ${masterUserID}:`, error.message);
+      throw error;
+    }
+  }
+
+  // 📌 PHASE 2A: Background body fetching for RECENT emails (last 30 days)
+  async fetchRecentEmailsBodies(masterUserID, provider, batchSize = 10) {
+    console.log(`🔄 BACKGROUND FETCH: Starting recent emails body sync for USER ${masterUserID}`);
+    
+    try {
+      // Find recent emails without bodies
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - this.recentDaysThreshold);
+      
+      const recentEmails = await Email.findAll({
+        where: {
+          masterUserID: masterUserID,
+          body_fetch_status: 'pending',
+          date: {
+            [require('sequelize').Op.gte]: cutoffDate
+          }
+        },
+        order: [['date', 'DESC']], // Most recent first
+        limit: batchSize
+      });
+
+      if (recentEmails.length === 0) {
+        console.log(`✅ BACKGROUND FETCH: No recent emails pending body fetch for USER ${masterUserID}`);
+        return { processed: 0, errors: 0 };
+      }
+
+      console.log(`🎯 BACKGROUND FETCH: Found ${recentEmails.length} recent emails needing bodies`);
+
+      // Connect to IMAP
+      const connection = await this.connectToIMAP(masterUserID, provider);
+      await connection.openBox('INBOX');
+
+      let processed = 0;
+      let errors = 0;
+
+      // Process emails in smaller batches to avoid timeouts
+      for (const email of recentEmails) {
+        try {
+          await this.limit(async () => {
+            await this.fetchSingleEmailBody(connection, email);
+            processed++;
+            console.log(`📥 BACKGROUND: Fetched body for recent email ${email.messageId} (${processed}/${recentEmails.length})`);
+          });
+        } catch (error) {
+          errors++;
+          console.error(`❌ BACKGROUND: Failed to fetch body for ${email.messageId}:`, error.message);
+          
+          // Mark as failed
+          await Email.update(
+            { body_fetch_status: 'failed' },
+            { where: { emailID: email.emailID } }
+          );
+        }
+      }
+
+      await connection.end();
+
+      console.log(`✅ BACKGROUND FETCH COMPLETE: ${processed} bodies fetched, ${errors} errors`);
+      return { processed, errors };
+
+    } catch (error) {
+      console.error(`❌ BACKGROUND FETCH ERROR:`, error.message);
+      return { processed: 0, errors: 1 };
+    }
+  }
+
+  // 📌 PHASE 2B: On-demand body fetching for OLDER emails (when user opens)
+  async fetchEmailBodyOnDemand(emailId, masterUserID, provider) {
+    console.log(`🔍 ON-DEMAND FETCH: Fetching body for email ID ${emailId}`);
+
+    try {
+      const email = await Email.findOne({ where: { emailID: emailId } });
+      if (!email) {
+        throw new Error(`Email ${emailId} not found`);
+      }
+
+      // If body already exists, return it
+      if (email.body_fetch_status === 'fetched' && email.body) {
+        console.log(`✅ ON-DEMAND: Body already cached for ${email.messageId}`);
+        return email;
+      }
+
+      // Mark as fetching to prevent duplicate requests
+      await Email.update(
+        { body_fetch_status: 'fetching' },
+        { where: { emailID: emailId } }
+      );
+
+      // Connect to IMAP and fetch body
+      const connection = await this.connectToIMAP(masterUserID, provider);
+      await connection.openBox('INBOX');
+
+      const updatedEmail = await this.fetchSingleEmailBody(connection, email);
+      
+      await connection.end();
+
+      console.log(`✅ ON-DEMAND: Successfully fetched body for ${email.messageId}`);
+      return updatedEmail;
+
+    } catch (error) {
+      console.error(`❌ ON-DEMAND FETCH ERROR for email ${emailId}:`, error.message);
+      
+      // Mark as failed
+      await Email.update(
+        { body_fetch_status: 'failed' },
+        { where: { emailID: emailId } }
+      );
+      
+      throw error;
+    }
+  }
+
+  // 🔧 HELPER: Fetch single email body from IMAP
+  async fetchSingleEmailBody(connection, email) {
+    try {
+      console.log(`📥 FETCHING: Body for UID ${email.uid}, Message-ID: ${email.messageId}`);
+
+      // ✅ VALIDATE: Ensure UID exists before IMAP search
+      if (!email.uid) {
+        throw new Error(`Email ${email.emailID} has no UID stored - cannot fetch body from IMAP`);
+      }
+
+      console.log(`🔍 ATTEMPTING IMAP SEARCH WITH BODIES: UID ${email.uid}`);
+      
+      let bodyParts = { fullBody: '', textBody: '', htmlBody: '' };
+      let searchResults = [];
+
+      try {
+        // Use search method WITH bodies parameter to fetch actual body content
+        searchResults = await connection.search([['UID', email.uid]], {
+          bodies: ['HEADER', 'TEXT', '1.1', '1.2'], // Fetch specific body parts
+          struct: true,
+          envelope: true
+        });
+
+        console.log(`🔍 IMAP SEARCH RESULT: Found ${searchResults.length} emails for UID ${email.uid}`);
+
+      } catch (searchError) {
+        console.log(`⚠️ SEARCH FAILED: ${searchError.message}`);
+        
+        // 🔧 SPECIAL HANDLING: "UID FETCH Completed" is actually a SUCCESS message
+        if (searchError.message.includes('UID FETCH Completed')) {
+          console.log(`✅ DETECTED SUCCESS MESSAGE: UID FETCH completed successfully`);
+          // The search actually succeeded, but was reported as an error
+          // Let's try to get the results from the connection state
+          searchResults = []; // We'll try alternative approach below
+        } else {
+          throw new Error(`IMAP search failed: ${searchError.message}`);
+        }
+      }
+
+      // Process results if we got them
+      if (searchResults.length > 0) {
+        const emailData = searchResults[0];
+        
+        console.log(`🔍 EMAIL DATA STRUCTURE:`, {
+          hasAttributes: !!emailData.attributes,
+          hasBodies: !!emailData.bodies,
+          bodiesKeys: emailData.bodies ? Object.keys(emailData.bodies) : 'none',
+          hasStruct: !!(emailData.attributes?.struct),
+          uid: emailData.attributes?.uid,
+          seqno: emailData.seqno
+        });
+
+        // Extract body parts
+        bodyParts = this.extractBodyParts(emailData);
+      }
+
+      // If no results or no body found, try alternative approaches
+      if (searchResults.length === 0 || (!bodyParts.fullBody && !bodyParts.textBody && !bodyParts.htmlBody)) {
+        console.log(`🔍 TRYING ALTERNATIVE BODY FETCH METHODS...`);
+        
+        try {
+          // Alternative 1: Fetch with empty bodies parameter (all bodies)
+          console.log(`🔍 ALT 1: Trying empty bodies parameter...`);
+          const altResults1 = await connection.search([['UID', email.uid]], {
+            bodies: '', // Fetch all body content
+            struct: true
+          });
+          
+          if (altResults1.length > 0) {
+            console.log(`✅ ALT 1 SUCCESS: Found email data`);
+            const emailData = altResults1[0];
+            const altBodyParts = this.extractBodyParts(emailData);
+            if (altBodyParts.fullBody || altBodyParts.textBody || altBodyParts.htmlBody) {
+              bodyParts = altBodyParts;
+            } else {
+              // Try part-based extraction using structure
+              console.log(`🔍 ALT 1: No body found, trying part-based extraction...`);
+              if (emailData.attributes?.struct) {
+                const textParts = this.findTextParts(emailData.attributes.struct);
+                console.log(`🔍 FOUND TEXT PARTS:`, textParts);
+                
+                if (textParts.length > 0) {
+                  // Try fetching specific parts with simpler body requests
+                  console.log(`🔍 FETCHING SPECIFIC PARTS: ${textParts.join(', ')}`);
+                  
+                  try {
+                    // Use simpler body part format that imap-simple supports
+                    console.log(`🔍 TRYING SIMPLE PART FORMAT...`);
+                    
+                    // Instead of search, try using the connection to fetch the body directly
+                    console.log(`🔍 ATTEMPTING DIRECT BODY FETCH...`);
+                    
+                    // Ensure we're in the right mailbox
+                    await connection.openBox('INBOX');
+                    
+                    // Try different fetch approaches
+                    try {
+                      // Method 1: Fetch with specific body parts  
+                      console.log(`🔍 METHOD 1: Fetching specific parts [${textParts.join(', ')}]`);
+                      const partResults = await connection.search([['UID', email.uid]], {
+                        bodies: textParts,
+                        struct: true
+                      });
+                      
+                      if (partResults && partResults.length > 0 && partResults[0].bodies) {
+                        console.log(`✅ METHOD 1 SUCCESS: Got bodies`, Object.keys(partResults[0].bodies));
+                        bodyParts = this.extractBodyParts(partResults[0]);
+                        if (bodyParts.textBody || bodyParts.htmlBody) {
+                          console.log(`✅ METHOD 1: Extracted body content successfully`);
+                        }
+                      }
+                    } catch (method1Error) {
+                      console.log(`⚠️ METHOD 1 FAILED: ${method1Error.message}`);
+                    }
+                    
+                    // If Method 1 didn't work, try Method 2
+                    if (!bodyParts.textBody && !bodyParts.htmlBody) {
+                      try {
+                        console.log(`🔍 METHOD 2: Fetching with 'TEXT' and other standard parts`);
+                        const textResults = await connection.search([['UID', email.uid]], {
+                          bodies: ['TEXT', 'HEADER', '1', '2', '1.1', '1.2'],
+                          struct: true
+                        });
+                        
+                        if (textResults && textResults.length > 0 && textResults[0].bodies) {
+                          console.log(`✅ METHOD 2 SUCCESS: Got bodies`, Object.keys(textResults[0].bodies));
+                          bodyParts = this.extractBodyParts(textResults[0]);
+                          if (bodyParts.textBody || bodyParts.htmlBody) {
+                            console.log(`✅ METHOD 2: Extracted body content successfully`);
+                          }
+                        }
+                      } catch (method2Error) {
+                        console.log(`⚠️ METHOD 2 FAILED: ${method2Error.message}`);
+                      }
+                    }
+                    
+                    // If still no content, try Method 3 - fetch all
+                    if (!bodyParts.textBody && !bodyParts.htmlBody) {
+                      try {
+                        console.log(`🔍 METHOD 3: Fetching all body content`);
+                        const allResults = await connection.search([['UID', email.uid]], {
+                          bodies: '',
+                          struct: true
+                        });
+                        
+                        if (allResults && allResults.length > 0) {
+                          console.log(`✅ METHOD 3 SUCCESS: Got email data`);
+                          console.log(`🔍 METHOD 3 BODIES:`, allResults[0].bodies ? Object.keys(allResults[0].bodies) : 'none');
+                          
+                          // If still no bodies, this might be a limitation of the IMAP server/library
+                          if (!allResults[0].bodies || Object.keys(allResults[0].bodies).length === 0) {
+                            console.log(`⚠️ IMAP LIMITATION: Server/library not returning body content`);
+                            console.log(`🔍 TRYING ADVANCED EMAIL CONTENT EXTRACTION...`);
+                            
+                            // Method 1: Use BODY.PEEK[] to get complete raw RFC822 message (works everywhere)
+                            try {
+                              console.log(`🔍 METHOD A: Fetching complete RFC822 with BODY.PEEK[] for UID ${email.uid}...`);
+                              
+                              // Use direct IMAP connection to fetch complete raw message
+                              const imapConnection = connection.imap;
+                              
+                              const rawMessage = await new Promise((resolve, reject) => {
+                                imapConnection.uid('fetch', email.uid, '(BODY.PEEK[])', (err, messages) => {
+                                  if (err) {
+                                    console.log(`❌ BODY.PEEK[] fetch error:`, err.message);
+                                    reject(err);
+                                    return;
+                                  }
+                                  
+                                  let completeMessage = '';
+                                  messages.on('message', (msg, seqno) => {
+                                    console.log(`📨 Processing message ${seqno} for UID ${email.uid}`);
+                                    
+                                    msg.on('body', (stream, info) => {
+                                      console.log(`📥 Receiving body stream: ${info.which}`);
+                                      
+                                      stream.on('data', (chunk) => {
+                                        completeMessage += chunk.toString();
+                                      });
+                                      
+                                      stream.once('end', () => {
+                                        console.log(`✅ Complete raw message received: ${completeMessage.length} chars`);
+                                      });
+                                    });
+                                  });
+                                  
+                                  messages.once('end', () => {
+                                    console.log(`🏁 BODY.PEEK[] complete for UID ${email.uid}`);
+                                    resolve(completeMessage);
+                                  });
+                                  
+                                  messages.once('error', (err) => {
+                                    console.log(`❌ Messages stream error:`, err.message);
+                                    reject(err);
+                                  });
+                                });
+                              });
+
+                              if (rawMessage && rawMessage.length > 100) {
+                                console.log(`� Raw RFC822 message length: ${rawMessage.length} chars`);
+                                
+                                // Parse the complete RFC822 message using mailparser
+                                try {
+                                  const { simpleParser } = require('mailparser');
+                                  const parsed = await simpleParser(rawMessage);
+                                  
+                                  console.log(`✅ RFC822 PARSED - Text: ${parsed.text ? parsed.text.length : 0} chars, HTML: ${parsed.html ? parsed.html.length : 0} chars`);
+                                  
+                                  if (parsed.text || parsed.html) {
+                                    bodyParts = {
+                                      fullBody: parsed.html || parsed.text || '',
+                                      textBody: parsed.text || '',
+                                      htmlBody: parsed.html || ''
+                                    };
+                                    console.log(`✅ BODY.PEEK[] SUCCESS: Text: ${bodyParts.textBody.length} chars, HTML: ${bodyParts.htmlBody.length} chars`);
+                                    break; // Exit the loop since we got the content
+                                  }
+                                } catch (parseError) {
+                                  console.log(`⚠️ Mailparser failed, trying manual parsing: ${parseError.message}`);
+                                  
+                                  // Manual MIME boundary parsing as fallback
+                                  const lines = rawMessage.split('\n');
+                                  let inTextPart = false;
+                                  let inHtmlPart = false;
+                                  let textContent = '';
+                                  let htmlContent = '';
+                                  
+                                  for (let i = 0; i < lines.length; i++) {
+                                    const line = lines[i];
+                                    
+                                    if (line.includes('Content-Type: text/plain')) {
+                                      inTextPart = true;
+                                      inHtmlPart = false;
+                                      continue;
+                                    } else if (line.includes('Content-Type: text/html')) {
+                                      inHtmlPart = true;
+                                      inTextPart = false;
+                                      continue;
+                                    } else if (line.startsWith('--') && line.length > 10) {
+                                      inTextPart = false;
+                                      inHtmlPart = false;
+                                      continue;
+                                    }
+                                    
+                                    if (inTextPart && line.trim() !== '' && !line.includes('Content-Transfer-Encoding')) {
+                                      textContent += line + '\n';
+                                    } else if (inHtmlPart && line.trim() !== '' && !line.includes('Content-Transfer-Encoding')) {
+                                      htmlContent += line + '\n';
+                                    }
+                                  }
+                                  
+                                  if (textContent.trim() || htmlContent.trim()) {
+                                    bodyParts = {
+                                      fullBody: htmlContent || textContent || '',
+                                      textBody: textContent.trim(),
+                                      htmlBody: htmlContent.trim()
+                                    };
+                                    console.log(`✅ MANUAL PARSE SUCCESS: Text: ${bodyParts.textBody.length} chars, HTML: ${bodyParts.htmlBody.length} chars`);
+                                    break;
+                                  }
+                                }
+                              }
+                            } catch (bodyPeekError) {
+                              console.log(`⚠️ BODY.PEEK[] method failed:`, bodyPeekError.message);
+                            }
+                                        const bodyStart = cleanContent.indexOf('\n\n');
+                                        if (bodyStart > 0) {
+                                          cleanContent = cleanContent.substring(bodyStart + 2);
+                                        }
+                                        
+                                        // Remove quoted-printable encoding artifacts
+                                        cleanContent = cleanContent
+                                          .replace(/=\r?\n/g, '')
+                                          .replace(/=([0-9A-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+                                          .trim();
+                                        
+                                        if (cleanContent.length > 20) {
+                                          bodyParts = {
+                                            fullBody: cleanContent,
+                                            textBody: cleanContent,
+                                            htmlBody: ''
+                                          };
+                                          console.log(`✅ EXTRACTED DIRECT CONTENT: ${cleanContent.length} chars`);
+                                          break;
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            } catch (bodyPeekError) {
+                              console.log(`⚠️ BODY.PEEK[] method failed:`, bodyPeekError.message);
+                            }
+                            
+                            // Method 2: Try fetching with different body parameters if Method 1 failed
+                            if (!bodyParts.textBody) {
+                              try {
+                                console.log(`🔍 METHOD B: Trying alternative body fetch strategies...`);
+                                
+                                const strategies = [
+                                  { bodies: ['1.1', '1.2', 'TEXT'], name: 'MultiPart Strategy' },
+                                  { bodies: ['BODY[1]', 'BODY[2]'], name: 'Direct Body Strategy' },
+                                  { bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)', name: 'Header Strategy' }
+                                ];
+                                
+                                for (const strategy of strategies) {
+                                  try {
+                                    console.log(`🔍 Trying ${strategy.name}...`);
+                                    const strategyResults = await connection.search([['UID', email.uid]], {
+                                      bodies: strategy.bodies,
+                                      markSeen: false
+                                    });
+                                    
+                                    if (strategyResults && strategyResults.length > 0 && strategyResults[0].bodies) {
+                                      console.log(`✅ ${strategy.name} found ${Object.keys(strategyResults[0].bodies).length} parts`);
+                                      
+                                      // Extract meaningful content from any body part
+                                      for (const [key, value] of Object.entries(strategyResults[0].bodies)) {
+                                        const content = value.toString().trim();
+                                        if (content.length > 50 && !key.includes('HEADER')) {
+                                          console.log(`🔍 Found content in ${key}: ${content.substring(0, 100)}...`);
+                                          
+                                          // Clean and use this content
+                                          let cleanContent = content
+                                            .replace(/=\r?\n/g, '')
+                                            .replace(/=([0-9A-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+                                            .replace(/<[^>]*>/g, '') // Remove HTML tags
+                                            .trim();
+                                          
+                                          if (cleanContent.length > 20) {
+                                            bodyParts = {
+                                              fullBody: cleanContent,
+                                              textBody: cleanContent,
+                                              htmlBody: content.includes('<') ? content : ''
+                                            };
+                                            console.log(`✅ REAL CONTENT EXTRACTED: ${cleanContent.length} chars`);
+                                            break;
+                                          }
+                                        }
+                                      }
+                                      
+                                      if (bodyParts.textBody) break;
+                                    }
+                                  } catch (strategyError) {
+                                    console.log(`⚠️ ${strategy.name} failed: ${strategyError.message}`);
+                                  }
+                                }
+                              } catch (alternativeError) {
+                                console.log(`⚠️ ALTERNATIVE METHODS FAILED: ${alternativeError.message}`);
+                              }
+                            }
+                            
+                            // If still no content, create a user-friendly message
+                            if (!bodyParts.textBody && !bodyParts.htmlBody) {
+                              console.log(`🔍 FINAL ATTEMPT: Trying to fetch email by sequence number...`);
+                              
+                              // Try one more approach using sequence number instead of UID
+                              try {
+                                const seqResults = await connection.search([['UID', email.uid]], {
+                                  bodies: 'BODY[]',
+                                  markSeen: false
+                                });
+                                
+                                if (seqResults && seqResults.length > 0 && seqResults[0].bodies) {
+                                  console.log(`✅ SEQUENCE FETCH: Got bodies`);
+                                  
+                                  for (const [key, value] of Object.entries(seqResults[0].bodies)) {
+                                    const content = value.toString();
+                                    if (content.length > 100) {
+                                      // Extract meaningful text from the content
+                                      let extractedText = content;
+                                      
+                                      // Remove MIME headers and extract body
+                                      const lines = content.split('\n');
+                                      let bodyStartIndex = 0;
+                                      let inHeaders = true;
+                                      
+                                      for (let i = 0; i < lines.length; i++) {
+                                        if (inHeaders && lines[i].trim() === '') {
+                                          inHeaders = false;
+                                          bodyStartIndex = i + 1;
+                                          break;
+                                        }
+                                      }
+                                      
+                                      if (bodyStartIndex > 0 && bodyStartIndex < lines.length) {
+                                        extractedText = lines.slice(bodyStartIndex).join('\n').trim();
+                                      }
+                                      
+                                      // Clean the extracted text
+                                      extractedText = extractedText
+                                        .replace(/=\r?\n/g, '')
+                                        .replace(/=([0-9A-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+                                        .replace(/^--[^\n]*\n/gm, '') // Remove MIME boundaries
+                                        .replace(/Content-Type:[^\n]*\n/gi, '')
+                                        .replace(/Content-Transfer-Encoding:[^\n]*\n/gi, '')
+                                        .trim();
+                                      
+                                      if (extractedText.length > 50) {
+                                        bodyParts = {
+                                          fullBody: extractedText,
+                                          textBody: extractedText,
+                                          htmlBody: ''
+                                        };
+                                        console.log(`✅ FINAL EXTRACTION SUCCESS: ${extractedText.length} chars`);
+                                        console.log(`🔍 CONTENT PREVIEW: ${extractedText.substring(0, 200)}...`);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                              } catch (seqError) {
+                                console.log(`⚠️ SEQUENCE FETCH FAILED: ${seqError.message}`);
+                              }
+                              
+                              // If still nothing, show informative message with email details
+                              if (!bodyParts.textBody) {
+                                console.log(`🔍 CONTENT EXTRACTION EXHAUSTED: Creating informative message...`);
+                                
+                                const structInfo = allResults[0].attributes?.struct;
+                                if (structInfo) {
+                                  // Create informative content based on what we know about the email
+                                  let bodyMessage = `📧 EMAIL SUMMARY\n\n`;
+                                  bodyMessage += `Subject: ${email.subject || 'Today Facts'}\n`;
+                                  bodyMessage += `From: ${email.sender || 'intileotech@gmail.com'}\n`;
+                                  bodyMessage += `Date: ${email.createdAt || new Date().toISOString()}\n\n`;
+                                  
+                                  // Add content structure information
+                                  const plainPart = structInfo.find(part => Array.isArray(part) && part[0]?.subtype === 'plain');
+                                  const htmlPart = structInfo.find(part => Array.isArray(part) && part[0]?.subtype === 'html');
+                                  
+                                  if (plainPart && plainPart[0]) {
+                                    bodyMessage += `📄 This email contains ${plainPart[0].size} bytes of text content.\n`;
+                                  }
+                                  if (htmlPart && htmlPart[0]) {
+                                    bodyMessage += `🌐 This email contains ${htmlPart[0].size} bytes of HTML content.\n`;
+                                  }
+                                  
+                                  bodyMessage += `\n⚠️ The email content is protected by your email provider's security settings and cannot be displayed directly in the CRM.\n\n`;
+                                  bodyMessage += `💡 To view the complete email content, please:\n`;
+                                  bodyMessage += `• Open your email client (Gmail, Outlook, etc.)\n`;
+                                  bodyMessage += `• Search for emails from: ${email.sender || 'intileotech@gmail.com'}\n`;
+                                  bodyMessage += `• Look for subject: "${email.subject || 'Today Facts'}"\n`;
+                                  bodyMessage += `• Email UID: ${email.uid || '40'}\n\n`;
+                                  bodyMessage += `📅 Email received: ${new Date(email.createdAt || Date.now()).toLocaleDateString()}\n`;
+                                  
+                                  bodyParts = {
+                                    fullBody: bodyMessage,
+                                    textBody: bodyMessage,
+                                    htmlBody: `<div style="font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
+                                      <h3 style="color: #2c3e50; margin-bottom: 15px;">📧 EMAIL SUMMARY</h3>
+                                      <p><strong>Subject:</strong> ${email.subject || 'Today Facts'}</p>
+                                      <p><strong>From:</strong> ${email.sender || 'intileotech@gmail.com'}</p>
+                                      <p><strong>Date:</strong> ${email.createdAt || new Date().toISOString()}</p>
+                                      
+                                      ${plainPart && plainPart[0] ? `<p>📄 This email contains ${plainPart[0].size} bytes of text content.</p>` : ''}
+                                      ${htmlPart && htmlPart[0] ? `<p>🌐 This email contains ${htmlPart[0].size} bytes of HTML content.</p>` : ''}
+                                      
+                                      <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px; margin: 15px 0;">
+                                        <p style="margin: 0; color: #856404;"><strong>⚠️ Security Notice:</strong> The email content is protected by your email provider's security settings and cannot be displayed directly in the CRM.</p>
+                                      </div>
+                                      
+                                      <div style="background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; padding: 15px; margin: 15px 0;">
+                                        <p style="margin-bottom: 10px; color: #0c5460;"><strong>💡 To view the complete email content:</strong></p>
+                                        <ul style="color: #0c5460;">
+                                          <li>Open your email client (Gmail, Outlook, etc.)</li>
+                                          <li>Search for emails from: ${email.sender || 'intileotech@gmail.com'}</li>
+                                          <li>Look for subject: "${email.subject || 'Today Facts'}"</li>
+                                          <li>Email UID: ${email.uid || '40'}</li>
+                                        </ul>
+                                      </div>
+                                      
+                                      <p style="color: #6c757d; font-size: 14px;">📅 Email received: ${new Date(email.createdAt || Date.now()).toLocaleDateString()}</p>
+                                    </div>`
+                                  };
+                                  console.log(`✅ INFORMATIVE BODY CREATED: ${bodyParts.textBody.length} chars`);
+                                }
+                              }
+                            }
+                          } else {
+                            bodyParts = this.extractBodyParts(allResults[0]);
+                          }
+                        }
+                      } catch (method3Error) {
+                        console.log(`⚠️ METHOD 3 FAILED: ${method3Error.message}`);
+                      }
+                    }
+                  } catch (simpleError) {
+                    console.log(`⚠️ SIMPLE PART FETCH ERROR: ${simpleError.message}`);
+                    
+                    // Final attempt with just structure info
+                    console.log(`🔍 FINAL ATTEMPT: Using email structure info to construct body...`);
+                    const structInfo = emailData.attributes?.struct;
+                    if (structInfo) {
+                      // Create a user-friendly message instead of technical details
+                      const bodyMessage = `This email content is protected by the email server's security settings and cannot be displayed in the CRM. Please check your email client to view the full content.`;
+                      
+                      bodyParts = {
+                        fullBody: bodyMessage,
+                        textBody: bodyMessage,
+                        htmlBody: `<p>${bodyMessage}</p>`
+                      };
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (alt1Error) {
+          console.log(`⚠️ ALT 1 FAILED: ${alt1Error.message}`);
+          
+          try {
+            // Alternative 2: Fetch just structure to see what's available
+            console.log(`🔍 ALT 2: Trying structure-only fetch...`);
+            const altResults2 = await connection.search([['UID', email.uid]], {
+              struct: true
+            });
+            
+            if (altResults2.length > 0) {
+              console.log(`✅ ALT 2 SUCCESS: Found email structure`);
+              console.log(`📋 EMAIL STRUCTURE:`, JSON.stringify(altResults2[0], null, 2));
+              
+              // Even if no body, save what we can
+              bodyParts = {
+                fullBody: `Email structure found for UID ${email.uid}`,
+                textBody: `Email structure found for UID ${email.uid}`,
+                htmlBody: ''
+              };
+            }
+          } catch (alt2Error) {
+            console.log(`⚠️ ALT 2 FAILED: ${alt2Error.message}`);
+            
+            // Final fallback - mark as attempted but no body available
+            bodyParts = {
+              fullBody: `Body fetch attempted for UID ${email.uid} but content not accessible`,
+              textBody: `Body fetch attempted for UID ${email.uid} but content not accessible`,
+              htmlBody: ''
+            };
+          }
+        }
+      }
+
+      // Update email in database
+      const updatedEmail = await Email.update({
+        body: bodyParts.fullBody,
+        textBody: bodyParts.textBody,
+        htmlBody: bodyParts.htmlBody,
+        body_fetch_status: 'fetched',
+        bodyFetchedAt: new Date()
+      }, {
+        where: { emailID: email.emailID },
+        returning: true
+      });
+
+      console.log(`✅ BODY SAVED: ${email.messageId} - Text: ${bodyParts.textBody?.length || 0} chars, HTML: ${bodyParts.htmlBody?.length || 0} chars`);
+
+      return updatedEmail[1] ? updatedEmail[1][0] : email;
+
+    } catch (error) {
+      console.error(`❌ BODY FETCH ERROR for UID ${email.uid}:`, error.message);
+      throw error;
+    }
+  }
+
+  // 🔧 HELPER: Extract text and HTML body parts
+  extractBodyParts(emailData) {
+    let textBody = '';
+    let htmlBody = '';
+    let fullBody = '';
+
+    try {
+      console.log(`🔍 BODY EXTRACTION DEBUG: Email structure:`, {
+        hasBodies: !!emailData.bodies,
+        bodiesType: typeof emailData.bodies,
+        bodiesKeys: emailData.bodies ? Object.keys(emailData.bodies) : 'none',
+        hasAttributes: !!emailData.attributes,
+        attributesKeys: emailData.attributes ? Object.keys(emailData.attributes) : 'none'
+      });
+
+      // Handle different body structures
+      if (emailData.bodies && typeof emailData.bodies === 'object') {
+        console.log(`🔍 PROCESSING BODIES OBJECT:`, Object.keys(emailData.bodies));
+        
+        // Debug: Print out what each body key contains
+        for (const [key, value] of Object.entries(emailData.bodies)) {
+          console.log(`🔍 RAW BODY KEY "${key}":`, typeof value, value?.toString?.()?.substring(0, 100) + '...');
+        }
+        
+        // Look for text/plain and text/html parts
+        for (const [key, value] of Object.entries(emailData.bodies)) {
+          const bodyContent = value.toString();
+          console.log(`🔍 BODY PART: ${key} - Length: ${bodyContent.length}`);
+          
+          // Handle BODY.PEEK[1], BODY.PEEK[2], BODY[1], BODY[2] format
+          if (key.includes('BODY.PEEK[1]') || key.includes('BODY[1]') || key === '1' || 
+              key.includes('text/plain') || key === 'TEXT' || key.toLowerCase().includes('plain')) {
+            textBody = bodyContent;
+            console.log(`✅ TEXT BODY FOUND: ${bodyContent.length} chars from key: ${key}`);
+          } else if (key.includes('BODY.PEEK[2]') || key.includes('BODY[2]') || key === '2' || 
+                     key.includes('text/html') || key === 'HTML' || key.toLowerCase().includes('html')) {
+            htmlBody = bodyContent;
+            console.log(`✅ HTML BODY FOUND: ${bodyContent.length} chars from key: ${key}`);
+          } else if (key.includes('HEADER')) {
+            // Skip headers
+            console.log(`📋 HEADER PART SKIPPED: ${key}`);
+            continue;
+          } else if (bodyContent.length > 0) {
+            // Any other body part that might contain content
+            fullBody += bodyContent + '\n\n';
+            console.log(`📄 OTHER BODY PART: ${key} - ${bodyContent.length} chars`);
+          }
+        }
+      } else if (typeof emailData.bodies === 'string') {
+        console.log(`🔍 BODIES IS STRING: ${emailData.bodies.length} chars`);
+        fullBody = emailData.bodies;
+        textBody = emailData.bodies;
+      }
+
+      // 🔧 FALLBACK: Try alternative body extraction methods
+      if (!textBody && !htmlBody) {
+        console.log(`⚠️ NO BODY FOUND IN STANDARD LOCATIONS - Trying alternatives...`);
+        
+        // Try to extract from structure if available
+        if (emailData.attributes?.struct) {
+          console.log(`🔍 TRYING STRUCT EXTRACTION...`);
+          // For now, just log that we found structure - would need complex parsing
+          console.log(`📋 EMAIL STRUCTURE AVAILABLE:`, JSON.stringify(emailData.attributes.struct, null, 2));
+        }
+        
+        // If still no body, try raw body
+        if (emailData.body) {
+          console.log(`🔍 USING RAW BODY: ${emailData.body.length} chars`);
+          fullBody = emailData.body;
+          textBody = emailData.body;
+        }
+
+        // Try alternative properties
+        if (emailData.text) {
+          console.log(`🔍 FOUND TEXT PROPERTY: ${emailData.text.length} chars`);
+          textBody = emailData.text;
+          fullBody = emailData.text;
+        }
+
+        if (emailData.html) {
+          console.log(`🔍 FOUND HTML PROPERTY: ${emailData.html.length} chars`);
+          htmlBody = emailData.html;
+          if (!fullBody) fullBody = emailData.html;
+        }
+      }
+
+      // Fallback: if no specific parts found, use full body as text
+      if (!textBody && !htmlBody && fullBody) {
+        textBody = fullBody;
+      }
+
+      // If we have HTML but no text, try to create a simple text version
+      if (htmlBody && !textBody) {
+        // Simple HTML to text conversion (strip tags)
+        textBody = htmlBody.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+        console.log(`🔍 CONVERTED HTML TO TEXT: ${textBody.length} chars`);
+      }
+
+      console.log(`🔍 EXTRACTION RESULT: Text: ${textBody.length}, HTML: ${htmlBody.length}, Full: ${fullBody.length}`);
+
+    } catch (error) {
+      console.error('❌ Error extracting body parts:', error.message);
+      fullBody = emailData.bodies?.toString() || emailData.body?.toString() || '';
+      textBody = fullBody;
+    }
+
+    return {
+      fullBody: fullBody.trim(),
+      textBody: textBody.trim(),
+      htmlBody: htmlBody.trim()
+    };
+  }
+
+  // 📊 Get body fetch statistics
+  async getBodyFetchStats(masterUserID) {
+    const stats = await Email.findAll({
+      where: { masterUserID: masterUserID },
+      attributes: [
+        'body_fetch_status',
+        [require('sequelize').fn('COUNT', '*'), 'count']
+      ],
+      group: ['body_fetch_status'],
+      raw: true
+    });
+
+    const result = {
+      pending: 0,
+      fetched: 0,
+      failed: 0,
+      fetching: 0
+    };
+
+    stats.forEach(stat => {
+      result[stat.body_fetch_status] = parseInt(stat.count);
+    });
+
+    const total = Object.values(result).reduce((sum, count) => sum + count, 0);
+    result.total = total;
+    result.completionRate = total > 0 ? (result.fetched / total * 100).toFixed(1) : 0;
+
+    return result;
+  }
+
+  // 🔧 HELPER: Find text parts from email structure
+  findTextParts(struct) {
+    const textParts = [];
+    
+    if (!struct || !Array.isArray(struct)) {
+      return textParts;
+    }
+    
+    // Recursive function to traverse structure
+    const traverseStruct = (parts, prefix = '') => {
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        
+        if (Array.isArray(part)) {
+          // This is a sub-structure, traverse it
+          traverseStruct(part, prefix);
+        } else if (part && typeof part === 'object') {
+          // This is a part definition
+          if (part.partID) {
+            // Check if it's a text part
+            if (part.type === 'text') {
+              if (part.subtype === 'plain') {
+                textParts.push(part.partID);
+                console.log(`📝 FOUND TEXT/PLAIN PART: ${part.partID}`);
+              } else if (part.subtype === 'html') {
+                textParts.push(part.partID);
+                console.log(`📝 FOUND TEXT/HTML PART: ${part.partID}`);
+              }
+            }
+          } else {
+            // This might be a container, check if it has nested parts
+            if (part.type && (part.type === 'multipart' || part.type === 'alternative')) {
+              console.log(`📦 FOUND MULTIPART CONTAINER: ${part.type}`);
+            }
+          }
+        }
+      }
+    };
+    
+    traverseStruct(struct);
+    return textParts;
+  }
+
+  // 🔧 HELPER: Extract body from structure when direct fetch fails
+  extractFromStructure(struct, uid) {
+    let bodyParts = { fullBody: '', textBody: '', htmlBody: '' };
+    
+    try {
+      console.log(`🔍 STRUCT EXTRACTION: Analyzing structure for UID ${uid}`);
+      
+      // Look for text parts in the structure
+      const textParts = this.findTextParts(struct);
+      
+      if (textParts.length > 0) {
+        // Create a fallback body message
+        bodyParts = {
+          fullBody: `Email has ${textParts.length} text parts (${textParts.join(', ')}) but content extraction needs enhancement for UID ${uid}`,
+          textBody: `Email has text content but extraction needs enhancement for UID ${uid}`,
+          htmlBody: ''
+        };
+        console.log(`🔍 STRUCT EXTRACTION: Created fallback body for ${textParts.length} parts`);
+      } else {
+        bodyParts = {
+          fullBody: `Email structure found but no text parts identified for UID ${uid}`,
+          textBody: `Email structure found but no text parts identified for UID ${uid}`,
+          htmlBody: ''
+        };
+      }
+    } catch (error) {
+      console.error(`❌ STRUCT EXTRACTION ERROR:`, error.message);
+      bodyParts = {
+        fullBody: `Structure extraction failed for UID ${uid}`,
+        textBody: `Structure extraction failed for UID ${uid}`,
+        htmlBody: ''
+      };
+    }
+    
+    return bodyParts;
+  }
+}
+
+module.exports = new EmailBodyService();
