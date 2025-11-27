@@ -456,11 +456,179 @@ exports.createDeal = async (req, res) => {
 
     if (existingLead) {
       await existingLead.update({ dealId: deal.dealId });
+      
+      // 🎯 AUTOMATIC DATA MIGRATION: Move all related data from Lead to Deal
+      console.log(`🔄 [LEAD-TO-DEAL] Moving data from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+      
+      try {
+        // ✅ 1. Move Activities from Lead to Deal
+        const activitiesUpdateResult = await Activity.update(
+          { dealId: deal.dealId, leadId: null }, // Move to deal, clear lead reference
+          { where: { leadId: existingLead.leadId } }
+        );
+        console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // ✅ 2. Move Notes from Lead to Deal
+        const LeadNote = require("../../models/leads/leadNoteModel");
+        const leadNotes = await LeadNote.findAll({
+          where: { leadId: existingLead.leadId }
+        });
+        
+        // Create corresponding deal notes for each lead note
+        let movedNotesCount = 0;
+        for (const leadNote of leadNotes) {
+          await DealNote.create({
+            dealId: deal.dealId,
+            masterUserID: leadNote.masterUserID,
+            content: leadNote.content,
+            createdBy: leadNote.createdBy,
+            createdAt: leadNote.createdAt,
+            updatedAt: leadNote.updatedAt
+          });
+          // Delete the original lead note
+          await leadNote.destroy();
+          movedNotesCount++;
+        }
+        console.log(`✅ [NOTES] Moved ${movedNotesCount} notes from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // ✅ 3. Move Files from Lead to Deal
+        const LeadFile = require("../../models/leads/leadFileModel");
+        let movedFilesCount = 0;
+        
+        try {
+          const leadFiles = await LeadFile.findAll({
+            where: { leadId: existingLead.leadId }
+          });
+          
+          // Create corresponding deal files for each lead file
+          for (const leadFile of leadFiles) {
+            await DealFile.create({
+              dealId: deal.dealId,
+              fileName: leadFile.fileName,
+              filePath: leadFile.filePath,
+              fileType: leadFile.fileType,
+              fileSize: leadFile.fileSize,
+              uploadedBy: leadFile.uploadedBy,
+              masterUserID: leadFile.masterUserID,
+              createdAt: leadFile.createdAt,
+              updatedAt: leadFile.updatedAt
+            });
+            // Delete the original lead file record
+            await leadFile.destroy();
+            movedFilesCount++;
+          }
+          console.log(`✅ [FILES] Moved ${movedFilesCount} files from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        } catch (fileError) {
+          console.log(`⚠️ [FILES] LeadFile model not available or error moving files:`, fileError.message);
+        }
+        
+        // ✅ 4. Move Emails from Lead to Deal (if any are directly linked)
+        const emailsUpdateResult = await Email.update(
+          { dealId: deal.dealId, leadId: null },
+          { where: { leadId: existingLead.leadId } }
+        );
+        console.log(`✅ [EMAILS] Moved ${emailsUpdateResult[0]} emails from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // Log the successful data migration
+        await historyLogger(
+          dealProgramId,
+          "LEAD_TO_DEAL_MIGRATION",
+          deal.masterUserID,
+          deal.dealId,
+          req.adminId,
+          `Lead ${existingLead.leadId} converted to Deal ${deal.dealId}. Moved: ${activitiesUpdateResult[0]} activities, ${movedNotesCount} notes, ${movedFilesCount} files, ${emailsUpdateResult[0]} emails`,
+          {
+            leadId: existingLead.leadId,
+            dealId: deal.dealId,
+            migratedData: {
+              activities: activitiesUpdateResult[0],
+              notes: movedNotesCount,
+              files: movedFilesCount,
+              emails: emailsUpdateResult[0]
+            }
+          }
+        );
+        
+      } catch (migrationError) {
+        console.error(`❌ [LEAD-TO-DEAL] Error during data migration:`, migrationError);
+        // Don't fail the deal creation, just log the error
+      }
     } else if (leadId) {
       // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
       const leadToUpdate = await Lead.findByPk(leadId);
       if (leadToUpdate) {
         await leadToUpdate.update({ dealId: deal.dealId });
+        
+        // 🎯 Also migrate data for this case
+        console.log(`🔄 [LEAD-TO-DEAL] Moving data from Lead ${leadId} to Deal ${deal.dealId} (non-sourceOrgin 2)`);
+        
+        try {
+          // Move Activities
+          const activitiesUpdateResult = await Activity.update(
+            { dealId: deal.dealId, leadId: null },
+            { where: { leadId: leadId } }
+          );
+          console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+          // Move Notes
+          const LeadNote = require("../../models/leads/leadNoteModel");
+          const leadNotes = await LeadNote.findAll({
+            where: { leadId: leadId }
+          });
+          
+          let movedNotesCount = 0;
+          for (const leadNote of leadNotes) {
+            await DealNote.create({
+              dealId: deal.dealId,
+              masterUserID: leadNote.masterUserID,
+              content: leadNote.content,
+              createdBy: leadNote.createdBy,
+              createdAt: leadNote.createdAt,
+              updatedAt: leadNote.updatedAt
+            });
+            await leadNote.destroy();
+            movedNotesCount++;
+          }
+          console.log(`✅ [NOTES] Moved ${movedNotesCount} notes from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+          // Move Files
+          try {
+            const LeadFile = require("../../models/leads/leadFileModel");
+            const leadFiles = await LeadFile.findAll({
+              where: { leadId: leadId }
+            });
+            
+            let movedFilesCount = 0;
+            for (const leadFile of leadFiles) {
+              await DealFile.create({
+                dealId: deal.dealId,
+                fileName: leadFile.fileName,
+                filePath: leadFile.filePath,
+                fileType: leadFile.fileType,
+                fileSize: leadFile.fileSize,
+                uploadedBy: leadFile.uploadedBy,
+                masterUserID: leadFile.masterUserID,
+                createdAt: leadFile.createdAt,
+                updatedAt: leadFile.updatedAt
+              });
+              await leadFile.destroy();
+              movedFilesCount++;
+            }
+            console.log(`✅ [FILES] Moved ${movedFilesCount} files from Lead ${leadId} to Deal ${deal.dealId}`);
+          } catch (fileError) {
+            console.log(`⚠️ [FILES] LeadFile model not available or error moving files:`, fileError.message);
+          }
+          
+          // Move Emails
+          const emailsUpdateResult = await Email.update(
+            { dealId: deal.dealId, leadId: null },
+            { where: { leadId: leadId } }
+          );
+          console.log(`✅ [EMAILS] Moved ${emailsUpdateResult[0]} emails from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+        } catch (migrationError) {
+          console.error(`❌ [LEAD-TO-DEAL] Error during data migration:`, migrationError);
+        }
       }
     }
 
@@ -666,12 +834,28 @@ exports.createDeal = async (req, res) => {
       customFields: savedCustomFields,
     };
 
+    let migrationMessage = "";
+    let leadToDealdConversion = false;
+    
+    // Check if this was a lead conversion
+    if (existingLead || leadId) {
+      leadToDealdConversion = true;
+      const convertedLeadId = existingLead ? existingLead.leadId : leadId;
+      migrationMessage = ` Lead ${convertedLeadId} converted to Deal with automatic data migration (Activities, Notes, Files, Emails).`;
+    }
+
     const response = {
       message: activityId 
-        ? "Deal created and linked to activity successfully" 
-        : "Deal created successfully",
+        ? "Deal created and linked to activity successfully" + migrationMessage
+        : "Deal created successfully" + migrationMessage,
       deal: dealResponse,
       customFieldsSaved: Object.keys(savedCustomFields).length,
+      leadConversion: {
+        isLeadConversion: leadToDealdConversion,
+        convertedFromLeadId: leadToDealdConversion ? (existingLead ? existingLead.leadId : leadId) : null,
+        dataMigrated: leadToDealdConversion ? ["Activities", "Notes", "Files", "Emails"] : [],
+        migrationNote: leadToDealdConversion ? "All related data automatically moved from Lead to Deal" : null
+      }
     };
 
     // Add activity information to response if activity was linked
