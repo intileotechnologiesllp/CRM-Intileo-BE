@@ -3319,7 +3319,10 @@ exports.updateLead = async (req, res) => {
   const { leadId } = req.params;
   const updateObj = req.body;
 
-  console.log("Request body:", updateObj);
+  console.log("====== UPDATE LEAD API CALLED ======");
+  console.log("Lead ID:", leadId);
+  console.log("Request body:", JSON.stringify(updateObj, null, 2));
+  console.log("Request body keys:", Object.keys(updateObj));
 
   try {
     // Get all columns for Lead, LeadDetails, Person, and Organization
@@ -3327,10 +3330,12 @@ exports.updateLead = async (req, res) => {
     const leadDetailsFields = Object.keys(LeadDetails.rawAttributes);
     const personFields = Object.keys(Person.rawAttributes);
     const organizationFields = Object.keys(Organization.rawAttributes);
+    console.log("\n====== MODEL FIELDS ======");
     console.log("Lead fields:", leadFields);
     console.log("LeadDetails fields:", leadDetailsFields);
     console.log("Person fields:", personFields);
     console.log("Organization fields:", organizationFields);
+    console.log("====== END MODEL FIELDS ======\n");
 
     // Split the update object
     const leadData = {};
@@ -3339,32 +3344,81 @@ exports.updateLead = async (req, res) => {
     const organizationData = {};
     const customFields = {};
 
+    console.log("====== FIELD ROUTING PROCESS ======");
     for (const key in updateObj) {
+      console.log(`→ Processing field: "${key}" with value:`, updateObj[key]);
+      
       if (key === "customFields") {
         // Handle nested customFields object (backward compatibility)
         Object.assign(customFields, updateObj[key]);
+        console.log(`  ✓ Routed to: customFields (nested object)`);
+        continue;
+      }
+
+      // Handle special case: 'organization' field exists in both Lead and Organization tables
+      // We need to update BOTH when this field is provided
+      if (key === 'organization') {
+        if (leadFields.includes(key)) {
+          leadData[key] = updateObj[key];
+          console.log(`  ✓ Routed to: LEAD table (organization field)`);
+        }
+        if (organizationFields.includes(key)) {
+          organizationData[key] = updateObj[key];
+          console.log(`  ✓ Routed to: ORGANIZATION table (organization field)`);
+        }
+        continue;
+      }
+
+      // Handle special case: 'address' field exists in multiple tables
+      if (key === 'address') {
+        // Route to Organization table by default for address updates
+        if (organizationFields.includes(key)) {
+          organizationData[key] = updateObj[key];
+          console.log(`  ✓ Routed to: ORGANIZATION table (address field)`);
+        }
+        continue;
+      }
+
+      // Handle special case: 'phone' field exists in both Lead and Person tables
+      if (key === 'phone') {
+        if (personFields.includes(key)) {
+          personData[key] = updateObj[key];
+          console.log(`  ✓ Routed to: PERSON table (phone field)`);
+        }
+        if (leadFields.includes(key)) {
+          leadData[key] = updateObj[key];
+          console.log(`  ✓ Routed to: LEAD table (phone field)`);
+        }
         continue;
       }
 
       if (leadFields.includes(key)) {
         leadData[key] = updateObj[key];
+        console.log(`  ✓ Routed to: LEAD table (matched in leadFields)`);
       } else if (personFields.includes(key)) {
         personData[key] = updateObj[key];
+        console.log(`  ✓ Routed to: PERSON table (matched in personFields)`);
       } else if (organizationFields.includes(key)) {
         organizationData[key] = updateObj[key];
+        console.log(`  ✓ Routed to: ORGANIZATION table (matched in organizationFields)`);
       } else if (leadDetailsFields.includes(key)) {
         leadDetailsData[key] = updateObj[key];
+        console.log(`  ✓ Routed to: LEADDETAILS table (matched in leadDetailsFields)`);
       } else {
         // If the key doesn't match any model field, treat it as a custom field
         customFields[key] = updateObj[key];
+        console.log(`  ✓ Routed to: CUSTOM FIELDS (no match in any model)`);
       }
     }
+    console.log("====== END FIELD ROUTING PROCESS ======\n");
 
+    console.log("====== FIELD DISTRIBUTION ======");
     console.log("leadData:", leadData);
     console.log("leadDetailsData:", leadDetailsData);
     console.log("personData:", personData);
     console.log("organizationData:", organizationData);
     console.log("customFields:", customFields);
+    console.log("====== END FIELD DISTRIBUTION ======");
 
     // --- Add validation for email and phone ---
     const emailToValidate = leadData.email || personData.email;
@@ -3465,23 +3519,28 @@ exports.updateLead = async (req, res) => {
 
     // Update or create Organization
     let orgRecord;
+    console.log("====== ORGANIZATION UPDATE PROCESS START ======");
+    console.log("organizationData keys count:", Object.keys(organizationData).length);
+    console.log("organizationData content:", organizationData);
+    
     if (Object.keys(organizationData).length > 0) {
-      // Ensure masterUserID is included in organizationData for proper scoping
-      if (!organizationData.masterUserID) {
-        organizationData.masterUserID = req.adminId;
-      }
-      // Ensure ownerId is included if not explicitly provided
-      if (!organizationData.ownerId) {
-        organizationData.ownerId = lead.ownerId || req.adminId;
-      }
+      console.log("→ Organization data is present, proceeding with update/create");
+      console.log("→ lead.leadOrganizationId:", lead.leadOrganizationId);
       
       orgRecord = await Organization.findOne({
         where: { leadOrganizationId: lead.leadOrganizationId },
       });
-      console.log("Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
+      console.log("→ Fetched orgRecord:", orgRecord ? orgRecord.toJSON() : null);
+      
       if (orgRecord) {
+        console.log("→ Organization record FOUND - attempting UPDATE");
+        console.log("→ Before update - orgRecord:", orgRecord.toJSON());
+        console.log("→ Data to update with:", organizationData);
+        
         await orgRecord.update(organizationData);
-        console.log("Organization updated:", orgRecord.toJSON());
+        
+        console.log("→ After update - orgRecord:", orgRecord.toJSON());
+        console.log("✅ Organization UPDATED successfully in LeadOrganization table");
         
         // Sync organization data to Lead table if fields are present
         if (organizationData.organization && leadFields.includes('organization')) {
@@ -3497,18 +3556,27 @@ exports.updateLead = async (req, res) => {
         // Sync organization data to LeadDetails table if fields are present
         if (organizationData.organization && leadDetailsFields.includes('organizationName')) {
           leadDetailsData.organizationName = organizationData.organization;
+          console.log("→ Synced organizationName to LeadDetails:", organizationData.organization);
         }
         if (organizationData.address && leadDetailsFields.includes('address')) {
           leadDetailsData.address = organizationData.address;
+          console.log("→ Synced address to LeadDetails:", organizationData.address);
         }
         if (organizationData.postalAddress && leadDetailsFields.includes('postalAddress')) {
           leadDetailsData.postalAddress = organizationData.postalAddress;
+          console.log("→ Synced postalAddress to LeadDetails:", organizationData.postalAddress);
         }
         
       } else {
+        console.log("→ Organization record NOT FOUND - attempting CREATE");
+        console.log("→ Data to create with:", organizationData);
+        
         orgRecord = await Organization.create(organizationData);
-        console.log("Organization created:", orgRecord.toJSON());
+        
+        console.log("→ After create - orgRecord:", orgRecord.toJSON());
+        console.log("✅ Organization CREATED successfully in LeadOrganization table");
         leadData.leadOrganizationId = orgRecord.leadOrganizationId;
+        console.log("→ Set leadOrganizationId in leadData:", orgRecord.leadOrganizationId);
         
         // Sync organization data to Lead table for new organization
         if (organizationData.organization && leadFields.includes('organization')) {
@@ -3540,12 +3608,19 @@ exports.updateLead = async (req, res) => {
       }
       
       // Log the synced data
-      console.log("Organization data synced to Lead table:", Object.keys(leadData).filter(key => 
+      const syncedToLead = Object.keys(leadData).filter(key => 
         ['organization', 'address', 'phone'].includes(key)
-      ));
-      console.log("Organization data synced to LeadDetails table:", Object.keys(leadDetailsData).filter(key => 
+      );
+      const syncedToLeadDetails = Object.keys(leadDetailsData).filter(key => 
         ['organizationName', 'address', 'postalAddress'].includes(key)
-      ));
+      );
+      
+      console.log("→ Organization data synced to Lead table:", syncedToLead.length > 0 ? syncedToLead : "NONE");
+      console.log("→ Organization data synced to LeadDetails table:", syncedToLeadDetails.length > 0 ? syncedToLeadDetails : "NONE");
+      console.log("====== ORGANIZATION UPDATE PROCESS END ======");
+    } else {
+      console.log("→ No organization data to update");
+      console.log("====== ORGANIZATION UPDATE PROCESS END ======");
     }
 
     // Update or create Person
