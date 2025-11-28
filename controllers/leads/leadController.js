@@ -5331,9 +5331,19 @@ exports.getLeadEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { leadId } = req.params;
 
-  // Pagination parameters for emails
-  const { emailPage = 1, emailLimit = 10 } = req.query;
+  // Pagination parameters for emails, notes, and activities
+  const { 
+    emailPage = 1, 
+    emailLimit = 10,
+    notePage = 1,
+    noteLimit = 20,
+    activityPage = 1,
+    activityLimit = 20
+  } = req.query;
+  
   const emailOffset = (emailPage - 1) * emailLimit;
+  const noteOffset = (notePage - 1) * noteLimit;
+  const activityOffset = (activityPage - 1) * activityLimit;
 
   if (!leadId) {
     return res.status(400).json({ message: "leadId is required in params." });
@@ -5644,35 +5654,244 @@ exports.getLeadEmails = async (req, res) => {
       });
     }
 
-    const totalPages = Math.ceil(totalEmailsCount / maxEmailLimit);
-    const hasMore = parseInt(emailPage) < totalPages;
+    // Fetch paginated lead notes with total count and creator name
+    let notes = [];
+    let totalNotesCount = 0;
+    try {
+      const maxNoteLimit = Math.min(parseInt(noteLimit) || 20, 100);
+      
+      // Get total count
+      totalNotesCount = await LeadNote.count({
+        where: { leadId }
+      });
+      
+      // Get paginated notes
+      notes = await LeadNote.findAll({
+        where: { leadId },
+        attributes: [
+          'noteId',
+          'leadId',
+          'masterUserID',
+          'content',
+          'createdBy',
+          'createdAt',
+          'updatedAt'
+        ],
+        order: [['createdAt', 'DESC']],
+        limit: maxNoteLimit,
+        offset: noteOffset,
+        raw: true
+      });
+      
+      // Fetch creator names for notes
+      const creatorIds = [...new Set(notes.map(note => note.createdBy).filter(Boolean))];
+      let creatorMap = {};
+      
+      if (creatorIds.length > 0) {
+        const creators = await MasterUser.findAll({
+          where: { masterUserID: creatorIds },
+          attributes: ['masterUserID', 'name'],
+          raw: true
+        });
+        
+        creators.forEach(user => {
+          creatorMap[user.masterUserID] = user.name;
+        });
+      }
+      
+      // Format notes with creator name
+      notes = notes.map(note => ({
+        noteId: note.noteId,
+        leadId: note.leadId,
+        masterUserID: note.masterUserID,
+        content: note.content,
+        createdBy: note.createdBy,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        creatorName: creatorMap[note.createdBy] || null
+      }));
+    } catch (error) {
+      console.error('Error fetching lead notes:', error);
+    }
+
+    // Fetch paginated lead activities with total count and all details
+    let activities = [];
+    let totalActivitiesCount = 0;
+    try {
+      const maxActivityLimit = Math.min(parseInt(activityLimit) || 20, 100);
+      
+      // Get total count
+      totalActivitiesCount = await Activity.count({
+        where: { leadId }
+      });
+      
+      // Get paginated activities with full details
+      activities = await Activity.findAll({
+        where: { leadId },
+        attributes: [
+          'activityId',
+          'type',
+          'subject',
+          'startDateTime',
+          'endDateTime',
+          'priority',
+          'guests',
+          'location',
+          'videoCallIntegration',
+          'description',
+          'status',
+          'notes',
+          'assignedTo',
+          'dealId',
+          'leadId',
+          'personId',
+          'leadOrganizationId',
+          'masterUserID',
+          'isDone',
+          'contactPerson',
+          'email',
+          'organization',
+          'dueDate',
+          'markedAsDoneTime',
+          'calendar_event_id',
+          'activityTypeFlag',
+          'allContactPersons',
+          'createdAt',
+          'updatedAt'
+        ],
+        order: [['createdAt', 'DESC']],
+        limit: maxActivityLimit,
+        offset: activityOffset,
+        raw: true
+      });
+      
+      // Fetch assigned user names for activities
+      const assignedToIds = [...new Set(activities.map(activity => activity.assignedTo).filter(Boolean))];
+      let assignedUserMap = {};
+      
+      if (assignedToIds.length > 0) {
+        const assignedUsers = await MasterUser.findAll({
+          where: { masterUserID: assignedToIds },
+          attributes: ['masterUserID', 'name'],
+          raw: true
+        });
+        
+        assignedUsers.forEach(user => {
+          assignedUserMap[user.masterUserID] = user.name;
+        });
+      }
+      
+      // Format activities with assigned user name
+      activities = activities.map(activity => ({
+        activityId: activity.activityId,
+        type: activity.type,
+        subject: activity.subject,
+        startDateTime: activity.startDateTime,
+        endDateTime: activity.endDateTime,
+        priority: activity.priority,
+        guests: activity.guests,
+        location: activity.location,
+        videoCallIntegration: activity.videoCallIntegration,
+        description: activity.description,
+        status: activity.status,
+        notes: activity.notes,
+        assignedTo: activity.assignedTo,
+        dealId: activity.dealId,
+        leadId: activity.leadId,
+        personId: activity.personId,
+        leadOrganizationId: activity.leadOrganizationId,
+        masterUserID: activity.masterUserID,
+        isDone: activity.isDone,
+        contactPerson: activity.contactPerson,
+        email: activity.email,
+        organization: activity.organization,
+        dueDate: activity.dueDate,
+        markedAsDoneTime: activity.markedAsDoneTime,
+        calendar_event_id: activity.calendar_event_id,
+        activityTypeFlag: activity.activityTypeFlag,
+        allContactPersons: activity.allContactPersons,
+        createdAt: activity.createdAt,
+        updatedAt: activity.updatedAt,
+        assignedToName: assignedUserMap[activity.assignedTo] || null
+      }));
+    } catch (error) {
+      console.error('Error fetching lead activities:', error);
+    }
+
+    // Calculate pagination metadata
+    const emailTotalPages = Math.ceil(totalEmailsCount / maxEmailLimit);
+    const emailHasMore = parseInt(emailPage) < emailTotalPages;
+    
+    const noteTotalPages = Math.ceil(totalNotesCount / Math.min(parseInt(noteLimit) || 20, 100));
+    const noteHasMore = parseInt(notePage) < noteTotalPages;
+    
+    const activityTotalPages = Math.ceil(totalActivitiesCount / Math.min(parseInt(activityLimit) || 20, 100));
+    const activityHasMore = parseInt(activityPage) < activityTotalPages;
 
     res.status(200).json({
-      message: "Emails fetched successfully.",
+      message: "Lead data fetched successfully.",
       emails: relatedEmails,
+      notes: notes,
+      activities: activities,
       _emailMetadata: {
         count: relatedEmails.length,
         totalEmails: totalEmailsCount,
-        totalPages: totalPages,
+        totalPages: emailTotalPages,
         page: parseInt(emailPage),
         limit: maxEmailLimit,
-        hasMore: hasMore,
+        hasMore: emailHasMore,
         hasPrevPage: parseInt(emailPage) > 1,
-        nextPage: hasMore ? parseInt(emailPage) + 1 : null,
+        nextPage: emailHasMore ? parseInt(emailPage) + 1 : null,
         prevPage: parseInt(emailPage) > 1 ? parseInt(emailPage) - 1 : null,
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
-        fetchingMethod: {
-          approach: "emails-only",
-          description: "This endpoint returns ONLY emails (no notes, activities, or other lead data) for efficient pagination/infinite scroll"
-        }
+      },
+      _noteMetadata: {
+        count: notes.length,
+        totalNotes: totalNotesCount,
+        totalPages: noteTotalPages,
+        page: parseInt(notePage),
+        limit: Math.min(parseInt(noteLimit) || 20, 100),
+        hasMore: noteHasMore,
+        hasPrevPage: parseInt(notePage) > 1,
+        nextPage: noteHasMore ? parseInt(notePage) + 1 : null,
+        prevPage: parseInt(notePage) > 1 ? parseInt(notePage) - 1 : null,
+      },
+      _activityMetadata: {
+        count: activities.length,
+        totalActivities: totalActivitiesCount,
+        totalPages: activityTotalPages,
+        page: parseInt(activityPage),
+        limit: Math.min(parseInt(activityLimit) || 20, 100),
+        hasMore: activityHasMore,
+        hasPrevPage: parseInt(activityPage) > 1,
+        nextPage: activityHasMore ? parseInt(activityPage) + 1 : null,
+        prevPage: parseInt(activityPage) > 1 ? parseInt(activityPage) - 1 : null,
       },
       _pagination: {
-        emailPage: parseInt(emailPage),
-        emailLimit: maxEmailLimit,
-        emailOffset: emailOffset,
+        email: {
+          page: parseInt(emailPage),
+          limit: maxEmailLimit,
+          offset: emailOffset,
+        },
+        note: {
+          page: parseInt(notePage),
+          limit: Math.min(parseInt(noteLimit) || 20, 100),
+          offset: noteOffset,
+        },
+        activity: {
+          page: parseInt(activityPage),
+          limit: Math.min(parseInt(activityLimit) || 20, 100),
+          offset: activityOffset,
+        }
       },
+      _dataIncluded: {
+        emails: "paginated (max 50 per page)",
+        notes: "paginated (max 100 per page)",
+        activities: "paginated (max 100 per page)",
+        customFields: "not included (use getAllLeadDetails for full data)"
+      }
     });
   } catch (error) {
     console.error("Error fetching lead emails:", error);
