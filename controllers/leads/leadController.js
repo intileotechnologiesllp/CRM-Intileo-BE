@@ -5326,6 +5326,367 @@ exports.getAllLeadDetails = async (req, res) => {
 //   }
 // };
 
+// New lightweight endpoint: Get ONLY paginated emails for a lead (for infinite scroll)
+exports.getLeadEmails = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { leadId } = req.params;
+
+  // Pagination parameters for emails
+  const { emailPage = 1, emailLimit = 10 } = req.query;
+  const emailOffset = (emailPage - 1) * emailLimit;
+
+  if (!leadId) {
+    return res.status(400).json({ message: "leadId is required in params." });
+  }
+
+  try {
+    // Get the lead details (basic info only)
+    const lead = await Lead.findByPk(leadId, {
+      attributes: ['leadId', 'email', 'personId', 'leadOrganizationId']
+    });
+    
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found." });
+    }
+
+    // Allow leads without email
+    if (!lead.email) {
+      return res.status(200).json({
+        message: "Lead has no email address.",
+        emails: [],
+        _emailMetadata: {
+          count: 0,
+          totalEmails: 0,
+          page: parseInt(emailPage),
+          limit: 0,
+          hasMore: false,
+        }
+      });
+    }
+
+    // Get user credentials for email visibility filtering
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    // Fetch person and organization for email addresses
+    let person = null;
+    let leadOrganization = null;
+
+    if (lead.personId) {
+      person = await Person.findByPk(lead.personId, {
+        attributes: ['personId', 'email'],
+        raw: true
+      });
+    }
+
+    if (lead.leadOrganizationId) {
+      leadOrganization = await Organization.findByPk(lead.leadOrganizationId, {
+        attributes: ['leadOrganizationId', 'organization'],
+        raw: true
+      });
+    }
+
+    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
+    const maxBodyLength = 1000;
+
+    // Build email visibility where clause
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    } else {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    // Collect all email addresses associated with this lead
+    const leadEmailAddresses = new Set();
+    if (lead.email) {
+      leadEmailAddresses.add(lead.email.toLowerCase());
+    }
+    if (person && person.email) {
+      leadEmailAddresses.add(person.email.toLowerCase());
+    }
+    if (leadOrganization && leadOrganization.email) {
+      leadEmailAddresses.add(leadOrganization.email.toLowerCase());
+    }
+
+    // Get total email count (only once, for metadata)
+    const totalEmailsCount = await Email.count({
+      where: {
+        [Op.and]: [
+          {
+            [Op.or]: Array.from(leadEmailAddresses).flatMap(email => [
+              { sender: email },
+              { recipient: { [Op.like]: `%${email}%` } }
+            ])
+          },
+          emailVisibilityWhere
+        ]
+      }
+    });
+
+    // Fetch paginated emails
+    let emailsByRelationship = [];
+    if (leadEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(leadEmailAddresses);
+      emailsByRelationship = await Email.findAll({
+        where: {
+          [Op.and]: [
+            {
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
+            },
+            emailVisibilityWhere
+          ]
+        },
+        attributes: [
+          "emailID",
+          "messageId",
+          "inReplyTo", 
+          "references",
+          "sender",
+          "recipient",
+          "subject",
+          "createdAt",
+          "folder",
+          "visibility",
+          "userEmail",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [
+          {
+            model: Attachment,
+            as: "attachments",
+            attributes: ["attachmentID", "filename", "size", "contentType"],
+          },
+        ],
+        order: [["createdAt", "DESC"]],
+        limit: maxEmailLimit,
+        offset: emailOffset,
+      });
+    }
+
+    // Enrich emails with connected entities (same as main API)
+    let relatedEmails = emailsByRelationship;
+    
+    if (relatedEmails.length > 0) {
+      const emailAddresses = new Set();
+      
+      relatedEmails.forEach(email => {
+        if (email.sender) {
+          emailAddresses.add(email.sender.toLowerCase());
+        }
+        if (email.recipient) {
+          const recipients = email.recipient.split(/[,;]/).map(r => r.trim().toLowerCase());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              emailAddresses.add(recipient);
+            }
+          });
+        }
+      });
+      
+      const uniqueEmailAddresses = Array.from(emailAddresses);
+      
+      // Bulk fetch all related entities
+      const [connectedPersons, connectedOrganizations, connectedLeads, connectedDeals] = await Promise.all([
+        Person.findAll({
+          where: { email: { [Op.in]: uniqueEmailAddresses } },
+          attributes: ['personId', 'contactPerson', 'email', 'phone', 'jobTitle', 'leadOrganizationId'],
+          raw: true
+        }),
+        Organization.findAll({
+          where: {
+            ...(Organization.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['leadOrganizationId', 'organization', 'address'],
+          raw: true
+        }),
+        Lead.findAll({
+          where: { email: { [Op.in]: uniqueEmailAddresses } },
+          attributes: ['leadId', 'title', 'email', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        }),
+        Deal.findAll({
+          where: {
+            ...(Deal.rawAttributes.email ? { email: { [Op.in]: uniqueEmailAddresses } } : {})
+          },
+          attributes: ['dealId', 'title', 'value', 'currency', 'contactPerson', 'organization', 'ownerId', 'status'],
+          raw: true
+        })
+      ]);
+      
+      // Create lookup maps
+      const personEmailMap = new Map();
+      const organizationEmailMap = new Map();
+      const leadEmailMap = new Map();
+      const dealEmailMap = new Map();
+      
+      connectedPersons.forEach(person => {
+        if (person.email) {
+          const emailKey = person.email.toLowerCase();
+          if (!personEmailMap.has(emailKey)) {
+            personEmailMap.set(emailKey, []);
+          }
+          personEmailMap.get(emailKey).push(person);
+        }
+      });
+      
+      connectedOrganizations.forEach(org => {
+        if (org.email) {
+          const emailKey = org.email.toLowerCase();
+          if (!organizationEmailMap.has(emailKey)) {
+            organizationEmailMap.set(emailKey, []);
+          }
+          organizationEmailMap.get(emailKey).push(org);
+        }
+      });
+      
+      connectedLeads.forEach(leadItem => {
+        if (leadItem.email) {
+          const emailKey = leadItem.email.toLowerCase();
+          if (!leadEmailMap.has(emailKey)) {
+            leadEmailMap.set(emailKey, []);
+          }
+          leadEmailMap.get(emailKey).push(leadItem);
+        }
+      });
+      
+      connectedDeals.forEach(deal => {
+        if (deal.email) {
+          const emailKey = deal.email.toLowerCase();
+          if (!dealEmailMap.has(emailKey)) {
+            dealEmailMap.set(emailKey, []);
+          }
+          dealEmailMap.get(emailKey).push(deal);
+        }
+      });
+      
+      // Enrich each email
+      relatedEmails = relatedEmails.map(email => {
+        const emailObj = email.toJSON ? email.toJSON() : email;
+        
+        emailObj.connectedPersons = [];
+        emailObj.connectedOrganizations = [];
+        emailObj.connectedLeads = [];
+        emailObj.connectedDeals = [];
+        
+        const addConnectedEntities = (emailAddress) => {
+          const emailKey = emailAddress.toLowerCase();
+          
+          if (personEmailMap.has(emailKey)) {
+            emailObj.connectedPersons.push(...personEmailMap.get(emailKey));
+          }
+          if (organizationEmailMap.has(emailKey)) {
+            emailObj.connectedOrganizations.push(...organizationEmailMap.get(emailKey));
+          }
+          if (leadEmailMap.has(emailKey)) {
+            emailObj.connectedLeads.push(...leadEmailMap.get(emailKey));
+          }
+          if (dealEmailMap.has(emailKey)) {
+            emailObj.connectedDeals.push(...dealEmailMap.get(emailKey));
+          }
+        };
+        
+        if (emailObj.sender) {
+          addConnectedEntities(emailObj.sender);
+        }
+        
+        if (emailObj.recipient) {
+          const recipients = emailObj.recipient.split(/[,;]/).map(r => r.trim());
+          recipients.forEach(recipient => {
+            if (recipient && recipient.includes('@')) {
+              addConnectedEntities(recipient);
+            }
+          });
+        }
+        
+        // Remove duplicates
+        emailObj.connectedPersons = emailObj.connectedPersons.filter((person, index, self) => 
+          index === self.findIndex(p => p.personId === person.personId)
+        );
+        emailObj.connectedOrganizations = emailObj.connectedOrganizations.filter((org, index, self) => 
+          index === self.findIndex(o => o.leadOrganizationId === org.leadOrganizationId)
+        );
+        emailObj.connectedLeads = emailObj.connectedLeads.filter((leadItem, index, self) => 
+          index === self.findIndex(l => l.leadId === leadItem.leadId)
+        );
+        emailObj.connectedDeals = emailObj.connectedDeals.filter((deal, index, self) => 
+          index === self.findIndex(d => d.dealId === deal.dealId)
+        );
+        
+        return emailObj;
+      });
+    }
+
+    const totalPages = Math.ceil(totalEmailsCount / maxEmailLimit);
+    const hasMore = parseInt(emailPage) < totalPages;
+
+    res.status(200).json({
+      message: "Emails fetched successfully.",
+      emails: relatedEmails,
+      _emailMetadata: {
+        count: relatedEmails.length,
+        totalEmails: totalEmailsCount,
+        totalPages: totalPages,
+        page: parseInt(emailPage),
+        limit: maxEmailLimit,
+        hasMore: hasMore,
+        hasPrevPage: parseInt(emailPage) > 1,
+        nextPage: hasMore ? parseInt(emailPage) + 1 : null,
+        prevPage: parseInt(emailPage) > 1 ? parseInt(emailPage) - 1 : null,
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
+        fetchingMethod: {
+          approach: "emails-only",
+          description: "This endpoint returns ONLY emails (no notes, activities, or other lead data) for efficient pagination/infinite scroll"
+        }
+      },
+      _pagination: {
+        emailPage: parseInt(emailPage),
+        emailLimit: maxEmailLimit,
+        emailOffset: emailOffset,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching lead emails:", error);
+    await logAuditTrail(
+      PROGRAMS.LEAD_MANAGEMENT,
+      "LEAD_EMAILS_FETCH",
+      masterUserID,
+      `Lead emails fetch failed: ${error.message}`,
+      null
+    );
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 exports.addLeadNote = async (req, res) => {
   const { content } = req.body;
   const { leadId } = req.params;

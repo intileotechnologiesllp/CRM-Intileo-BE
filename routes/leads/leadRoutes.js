@@ -48,6 +48,12 @@ router.get(
   verifyToken,
   leadController.getAllLeadDetails
 );
+// New lightweight endpoint: Get ONLY paginated emails for a lead (no notes, activities, etc.)
+router.get(
+  "/emails/:leadId",
+  verifyToken,
+  leadController.getLeadEmails
+);
 router.post("/add-lead-note/:leadId", verifyToken, validatePrivilege(7, "create"), leadController.addLeadNote);
 router.get(
   "/delete-lead-note/:noteId",
