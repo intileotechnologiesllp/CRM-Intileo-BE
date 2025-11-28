@@ -1426,6 +1426,55 @@ exports.getDeals = async (req, res) => {
     console.log("🔍 All active custom fields template:", Object.keys(allActiveCustomFields));
     console.log("🔍 Deals with custom field data:", Object.keys(customFieldsByDeal));
 
+    // Fetch activity counts and next activity date for all deals
+    const dealActivities = await Activity.findAll({
+      where: {
+        dealId: { [Op.in]: dealIds }
+      },
+      attributes: [
+        'dealId',
+        'activityId',
+        'dueDate',
+        'isDone',
+        'type',
+        'subject'
+      ],
+      order: [['dueDate', 'ASC']],
+      raw: true
+    });
+
+    // Group activities by dealId and calculate counts
+    const activityDataByDeal = {};
+    dealActivities.forEach(activity => {
+      if (!activityDataByDeal[activity.dealId]) {
+        activityDataByDeal[activity.dealId] = {
+          totalActivities: 0,
+          upcomingActivities: 0,
+          completedActivities: 0,
+          nextActivityDate: null,
+          nextActivityType: null,
+          nextActivitySubject: null
+        };
+      }
+      
+      const data = activityDataByDeal[activity.dealId];
+      data.totalActivities++;
+      
+      if (activity.isDone) {
+        data.completedActivities++;
+      } else {
+        data.upcomingActivities++;
+        // Set next activity date if not already set (earliest upcoming activity)
+        if (!data.nextActivityDate && activity.dueDate) {
+          data.nextActivityDate = activity.dueDate;
+          data.nextActivityType = activity.type;
+          data.nextActivitySubject = activity.subject;
+        }
+      }
+    });
+
+    console.log(`📊 Activity data calculated for ${Object.keys(activityDataByDeal).length} deals`);
+
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
 
@@ -1507,6 +1556,23 @@ exports.getDeals = async (req, res) => {
           tooltip: `Converted to lead on ${dealObj.convertedToLeadAt ? new Date(dealObj.convertedToLeadAt).toLocaleDateString() : 'Unknown date'}`
         };
       }
+
+      // Add activity information to the deal
+      const activityData = activityDataByDeal[dealObj.dealId] || {
+        totalActivities: 0,
+        upcomingActivities: 0,
+        completedActivities: 0,
+        nextActivityDate: null,
+        nextActivityType: null,
+        nextActivitySubject: null
+      };
+      
+      dealObj.totalActivities = activityData.totalActivities;
+      dealObj.upcomingActivities = activityData.upcomingActivities;
+      dealObj.completedActivities = activityData.completedActivities;
+      dealObj.nextActivityDate = activityData.nextActivityDate;
+      dealObj.nextActivityType = activityData.nextActivityType;
+      dealObj.nextActivitySubject = activityData.nextActivitySubject;
 
       return dealObj;
     });
