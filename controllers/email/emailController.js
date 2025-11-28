@@ -10468,40 +10468,87 @@ async function getEmailsRealtimeLightweight(req, res) {
 
     if (direction === "prev") emails.reverse();
 
-    // 🚀 FAST STATISTICS: Use sampling instead of full COUNT queries
+    // 🚀 FAST STATISTICS: Smart counting based on query type
     let estimatedStats = {};
     
     try {
-      // Sample-based estimation for large datasets (much faster than COUNT(*))
-      const sampleSize = Math.min(1000, pageSize * 10); // Sample 10 pages worth or 1000 max
-      const sampleEmails = await Email.findAll({
-        where: { masterUserID },
-        limit: sampleSize,
-        attributes: ['isRead'],
-        order: [['createdAt', 'DESC']] // Sample recent emails
-      });
+      // 🔧 FIX: Use the SAME filters as the main query (includes folder filter!)
+      console.log(`📊 [LIGHTWEIGHT-STATS] Calculating stats with filters:`, JSON.stringify(filters, null, 2));
+      
+      // 🎯 SMART COUNTING: Use ACTUAL COUNT for filtered queries (much smaller dataset)
+      // Only use sampling for unfiltered "all emails" queries
+      const hasFilters = folder || isRead !== undefined || search;
+      
+      if (hasFilters) {
+        // Filtered queries are fast enough for actual COUNT
+        console.log(`📊 [LIGHTWEIGHT-STATS] Using ACTUAL COUNT (filtered query)`);
+        
+        const totalCount = await Email.count({
+          where: filters
+        });
+        
+        const readCount = await Email.count({
+          where: { ...filters, isRead: true }
+        });
+        
+        const unreadCount = totalCount - readCount;
+        
+        estimatedStats = {
+          totalEmails: totalCount,
+          readCount: readCount,
+          unreadCount: unreadCount,
+          readPercentage: totalCount > 0 ? Math.round((readCount / totalCount) * 100) : 0,
+          unreadPercentage: totalCount > 0 ? Math.round((unreadCount / totalCount) * 100) : 0,
+          isEstimated: false,
+          estimationMethod: "accurate_count_filtered",
+          appliedFilters: { 
+            folder: folder || 'none',
+            isRead: isRead !== undefined ? isRead : 'all',
+            search: search || 'none'
+          }
+        };
+        
+        console.log(`✅ [LIGHTWEIGHT-STATS] Accurate count: ${totalCount} total emails (folder: ${folder || 'all'})`);
+        
+      } else {
+        // Unfiltered queries: use sampling for performance
+        console.log(`� [LIGHTWEIGHT-STATS] Using SAMPLING (unfiltered query)`);
+        
+        const sampleSize = Math.min(1000, pageSize * 10);
+        const sampleEmails = await Email.findAll({
+          where: filters,
+          limit: sampleSize,
+          attributes: ['isRead', 'folder'],
+          order: [['createdAt', 'DESC']]
+        });
 
-      const sampleReadCount = sampleEmails.filter(e => e.isRead === true).length;
-      const sampleUnreadCount = sampleEmails.filter(e => e.isRead === false).length;
-      const sampleTotal = sampleEmails.length;
+        const sampleReadCount = sampleEmails.filter(e => e.isRead === true).length;
+        const sampleUnreadCount = sampleEmails.filter(e => e.isRead === false).length;
+        const sampleTotal = sampleEmails.length;
 
-      // Estimate total counts based on sample ratios
-      const estimatedTotal = Math.round(sampleTotal * 50); // Rough estimate: sample represents 1/50th
-      const readRatio = sampleTotal > 0 ? sampleReadCount / sampleTotal : 0.5;
-      const unreadRatio = sampleTotal > 0 ? sampleUnreadCount / sampleTotal : 0.5;
+        // Estimate total counts based on sample ratios
+        const estimatedTotal = Math.round(sampleTotal * 50);
+        const readRatio = sampleTotal > 0 ? sampleReadCount / sampleTotal : 0.5;
+        const unreadRatio = sampleTotal > 0 ? sampleUnreadCount / sampleTotal : 0.5;
 
-      estimatedStats = {
-        totalEmails: estimatedTotal,
-        readCount: Math.round(estimatedTotal * readRatio),
-        unreadCount: Math.round(estimatedTotal * unreadRatio),
-        readPercentage: Math.round(readRatio * 100),
-        unreadPercentage: Math.round(unreadRatio * 100),
-        isEstimated: true,
-        sampleSize: sampleTotal,
-        estimationMethod: "recent_sample_extrapolation"
-      };
+        estimatedStats = {
+          totalEmails: estimatedTotal,
+          readCount: Math.round(estimatedTotal * readRatio),
+          unreadCount: Math.round(estimatedTotal * unreadRatio),
+          readPercentage: Math.round(readRatio * 100),
+          unreadPercentage: Math.round(unreadRatio * 100),
+          isEstimated: true,
+          sampleSize: sampleTotal,
+          estimationMethod: "recent_sample_extrapolation",
+          appliedFilters: { 
+            folder: 'all',
+            isRead: 'all',
+            search: 'none'
+          }
+        };
 
-      console.log(`⚡ [LIGHTWEIGHT-STATS] Estimated from ${sampleTotal} samples: ~${estimatedTotal} total emails`);
+        console.log(`⚡ [LIGHTWEIGHT-STATS] Estimated from ${sampleTotal} samples: ~${estimatedTotal} total emails`);
+      }
 
     } catch (statsError) {
       console.warn(`⚠️ [LIGHTWEIGHT-STATS] Estimation failed, using minimal stats:`, statsError.message);

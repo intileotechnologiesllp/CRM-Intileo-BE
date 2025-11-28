@@ -5327,23 +5327,19 @@ exports.getAllLeadDetails = async (req, res) => {
 // };
 
 // New lightweight endpoint: Get ONLY paginated emails for a lead (for infinite scroll)
+// Returns unified array of emails, activities, and notes with single pagination
 exports.getLeadEmails = async (req, res) => {
   const masterUserID = req.adminId;
   const { leadId } = req.params;
 
-  // Pagination parameters for emails, notes, and activities
+  // Single pagination for all items (emails, notes, activities combined)
   const { 
-    emailPage = 1, 
-    emailLimit = 10,
-    notePage = 1,
-    noteLimit = 20,
-    activityPage = 1,
-    activityLimit = 20
+    page = 1, 
+    limit = 20
   } = req.query;
   
-  const emailOffset = (emailPage - 1) * emailLimit;
-  const noteOffset = (notePage - 1) * noteLimit;
-  const activityOffset = (activityPage - 1) * activityLimit;
+  const offset = (page - 1) * limit;
+  const maxLimit = Math.min(parseInt(limit) || 20, 50);
 
   if (!leadId) {
     return res.status(400).json({ message: "leadId is required in params." });
@@ -5404,7 +5400,6 @@ exports.getLeadEmails = async (req, res) => {
       });
     }
 
-    const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50);
     const maxBodyLength = 1000;
 
     // Build email visibility where clause
@@ -5443,22 +5438,7 @@ exports.getLeadEmails = async (req, res) => {
       leadEmailAddresses.add(leadOrganization.email.toLowerCase());
     }
 
-    // Get total email count (only once, for metadata)
-    const totalEmailsCount = await Email.count({
-      where: {
-        [Op.and]: [
-          {
-            [Op.or]: Array.from(leadEmailAddresses).flatMap(email => [
-              { sender: email },
-              { recipient: { [Op.like]: `%${email}%` } }
-            ])
-          },
-          emailVisibilityWhere
-        ]
-      }
-    });
-
-    // Fetch paginated emails
+    // Fetch ALL emails (no pagination yet - we'll paginate the combined array)
     let emailsByRelationship = [];
     if (leadEmailAddresses.size > 0) {
       const emailAddressArray = Array.from(leadEmailAddresses);
@@ -5495,9 +5475,7 @@ exports.getLeadEmails = async (req, res) => {
             attributes: ["attachmentID", "filename", "size", "contentType"],
           },
         ],
-        order: [["createdAt", "DESC"]],
-        limit: maxEmailLimit,
-        offset: emailOffset,
+        order: [["createdAt", "DESC"]]
       });
     }
 
@@ -5654,18 +5632,9 @@ exports.getLeadEmails = async (req, res) => {
       });
     }
 
-    // Fetch paginated lead notes with total count and creator name
+    // Fetch ALL lead notes (no pagination yet)
     let notes = [];
-    let totalNotesCount = 0;
     try {
-      const maxNoteLimit = Math.min(parseInt(noteLimit) || 20, 100);
-      
-      // Get total count
-      totalNotesCount = await LeadNote.count({
-        where: { leadId }
-      });
-      
-      // Get paginated notes
       notes = await LeadNote.findAll({
         where: { leadId },
         attributes: [
@@ -5678,8 +5647,6 @@ exports.getLeadEmails = async (req, res) => {
           'updatedAt'
         ],
         order: [['createdAt', 'DESC']],
-        limit: maxNoteLimit,
-        offset: noteOffset,
         raw: true
       });
       
@@ -5699,8 +5666,9 @@ exports.getLeadEmails = async (req, res) => {
         });
       }
       
-      // Format notes with creator name
+      // Format notes with creator name and type identifier
       notes = notes.map(note => ({
+        type: 'note', // Identifier for unified array
         noteId: note.noteId,
         leadId: note.leadId,
         masterUserID: note.masterUserID,
@@ -5714,18 +5682,9 @@ exports.getLeadEmails = async (req, res) => {
       console.error('Error fetching lead notes:', error);
     }
 
-    // Fetch paginated lead activities with total count and all details
+    // Fetch ALL lead activities (no pagination yet)
     let activities = [];
-    let totalActivitiesCount = 0;
     try {
-      const maxActivityLimit = Math.min(parseInt(activityLimit) || 20, 100);
-      
-      // Get total count
-      totalActivitiesCount = await Activity.count({
-        where: { leadId }
-      });
-      
-      // Get paginated activities with full details
       activities = await Activity.findAll({
         where: { leadId },
         attributes: [
@@ -5760,8 +5719,6 @@ exports.getLeadEmails = async (req, res) => {
           'updatedAt'
         ],
         order: [['createdAt', 'DESC']],
-        limit: maxActivityLimit,
-        offset: activityOffset,
         raw: true
       });
       
@@ -5781,10 +5738,11 @@ exports.getLeadEmails = async (req, res) => {
         });
       }
       
-      // Format activities with assigned user name
+      // Format activities with assigned user name and type identifier
       activities = activities.map(activity => ({
+        type: 'activity', // Identifier for unified array
         activityId: activity.activityId,
-        type: activity.type,
+        activityType: activity.type,
         subject: activity.subject,
         startDateTime: activity.startDateTime,
         endDateTime: activity.endDateTime,
@@ -5818,79 +5776,59 @@ exports.getLeadEmails = async (req, res) => {
       console.error('Error fetching lead activities:', error);
     }
 
+    // Add type identifier to emails
+    const emailsWithType = relatedEmails.map(email => ({
+      type: 'email', // Identifier for unified array
+      ...email
+    }));
+
+    // Combine all items into a single array
+    const allItems = [
+      ...emailsWithType,
+      ...notes,
+      ...activities
+    ];
+
+    // Sort by createdAt (latest first)
+    allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // Get total count
+    const totalItems = allItems.length;
+
+    // Apply pagination to combined array
+    const paginatedItems = allItems.slice(offset, offset + maxLimit);
+
     // Calculate pagination metadata
-    const emailTotalPages = Math.ceil(totalEmailsCount / maxEmailLimit);
-    const emailHasMore = parseInt(emailPage) < emailTotalPages;
-    
-    const noteTotalPages = Math.ceil(totalNotesCount / Math.min(parseInt(noteLimit) || 20, 100));
-    const noteHasMore = parseInt(notePage) < noteTotalPages;
-    
-    const activityTotalPages = Math.ceil(totalActivitiesCount / Math.min(parseInt(activityLimit) || 20, 100));
-    const activityHasMore = parseInt(activityPage) < activityTotalPages;
+    const totalPages = Math.ceil(totalItems / maxLimit);
+    const hasMore = parseInt(page) < totalPages;
 
     res.status(200).json({
       message: "Lead data fetched successfully.",
-      emails: relatedEmails,
-      notes: notes,
-      activities: activities,
-      _emailMetadata: {
-        count: relatedEmails.length,
-        totalEmails: totalEmailsCount,
-        totalPages: emailTotalPages,
-        page: parseInt(emailPage),
-        limit: maxEmailLimit,
-        hasMore: emailHasMore,
-        hasPrevPage: parseInt(emailPage) > 1,
-        nextPage: emailHasMore ? parseInt(emailPage) + 1 : null,
-        prevPage: parseInt(emailPage) > 1 ? parseInt(emailPage) - 1 : null,
+      data: paginatedItems, // Single unified array
+      pagination: {
+        page: parseInt(page),
+        limit: maxLimit,
+        offset: offset,
+        totalItems: totalItems,
+        totalPages: totalPages,
+        hasMore: hasMore,
+        hasPrevPage: parseInt(page) > 1,
+        nextPage: hasMore ? parseInt(page) + 1 : null,
+        prevPage: parseInt(page) > 1 ? parseInt(page) - 1 : null
+      },
+      summary: {
+        totalEmails: emailsWithType.length,
+        totalNotes: notes.length,
+        totalActivities: activities.length,
+        totalItems: totalItems,
+        itemsInPage: paginatedItems.length,
+        sorting: "createdAt DESC (latest first)"
+      },
+      _metadata: {
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
-      },
-      _noteMetadata: {
-        count: notes.length,
-        totalNotes: totalNotesCount,
-        totalPages: noteTotalPages,
-        page: parseInt(notePage),
-        limit: Math.min(parseInt(noteLimit) || 20, 100),
-        hasMore: noteHasMore,
-        hasPrevPage: parseInt(notePage) > 1,
-        nextPage: noteHasMore ? parseInt(notePage) + 1 : null,
-        prevPage: parseInt(notePage) > 1 ? parseInt(notePage) - 1 : null,
-      },
-      _activityMetadata: {
-        count: activities.length,
-        totalActivities: totalActivitiesCount,
-        totalPages: activityTotalPages,
-        page: parseInt(activityPage),
-        limit: Math.min(parseInt(activityLimit) || 20, 100),
-        hasMore: activityHasMore,
-        hasPrevPage: parseInt(activityPage) > 1,
-        nextPage: activityHasMore ? parseInt(activityPage) + 1 : null,
-        prevPage: parseInt(activityPage) > 1 ? parseInt(activityPage) - 1 : null,
-      },
-      _pagination: {
-        email: {
-          page: parseInt(emailPage),
-          limit: maxEmailLimit,
-          offset: emailOffset,
-        },
-        note: {
-          page: parseInt(notePage),
-          limit: Math.min(parseInt(noteLimit) || 20, 100),
-          offset: noteOffset,
-        },
-        activity: {
-          page: parseInt(activityPage),
-          limit: Math.min(parseInt(activityLimit) || 20, 100),
-          offset: activityOffset,
-        }
-      },
-      _dataIncluded: {
-        emails: "paginated (max 50 per page)",
-        notes: "paginated (max 100 per page)",
-        activities: "paginated (max 100 per page)",
-        customFields: "not included (use getAllLeadDetails for full data)"
+        dataStructure: "Unified array with type identifiers (email, note, activity)"
       }
     });
   } catch (error) {
