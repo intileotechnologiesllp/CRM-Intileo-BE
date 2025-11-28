@@ -13,4 +13,20 @@ router.get("/", verifyToken, organizationController.getAllOrganizations);
 router.get("/:organizationId", verifyToken, organizationController.getOrganizationById);
 router.put("/:organizationId", verifyToken, organizationController.updateOrganization);
 router.delete("/:organizationId", verifyToken, organizationController.deleteOrganization);
+
+// Timeline Routes - Get unified timeline (emails, activities) for an organization
+const leadController = require("../controllers/leads/leadController");
+
+router.get(
+  "/timeline/:organizationId",
+  verifyToken,
+  leadController.getOrganizationTimeline
+);
+
+router.get(
+  "/emails/:organizationId",
+  verifyToken,
+  leadController.getOrganizationTimeline
+);
+
 module.exports = router;
