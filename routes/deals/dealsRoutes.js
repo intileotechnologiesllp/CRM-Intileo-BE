@@ -145,6 +145,22 @@ router.get(
   dealsController.checkDealQuestionSharedStatus
 );
 
+// ================ TIMELINE ROUTES ================
+// Get unified timeline (emails, notes, activities) for a deal
+const leadController = require("../../controllers/leads/leadController");
+
+router.get(
+  "/timeline/:dealId",
+  verifyToken,
+  leadController.getDealTimeline
+);
+
+router.get(
+  "/emails/:dealId",
+  verifyToken,
+  leadController.getDealTimeline
+);
+
 module.exports = router;
 
 

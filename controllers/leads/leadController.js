@@ -5359,13 +5359,16 @@ exports.getLeadEmails = async (req, res) => {
     if (!lead.email) {
       return res.status(200).json({
         message: "Lead has no email address.",
-        emails: [],
-        _emailMetadata: {
-          count: 0,
-          totalEmails: 0,
-          page: parseInt(emailPage),
+        entityType: 'lead',
+        entityId: leadId,
+        data: [],
+        pagination: {
+          page: parseInt(page),
           limit: 0,
-          hasMore: false,
+          offset: 0,
+          totalItems: 0,
+          totalPages: 0,
+          hasMore: false
         }
       });
     }
@@ -5776,10 +5779,23 @@ exports.getLeadEmails = async (req, res) => {
       console.error('Error fetching lead activities:', error);
     }
 
-    // Add type identifier to emails
+    // Add type identifier and entityType to emails
     const emailsWithType = relatedEmails.map(email => ({
       type: 'email', // Identifier for unified array
+      entityType: 'lead', // Entity this timeline belongs to
       ...email
+    }));
+
+    // Add entityType to notes
+    notes = notes.map(note => ({
+      ...note,
+      entityType: 'lead'
+    }));
+
+    // Add entityType to activities
+    activities = activities.map(activity => ({
+      ...activity,
+      entityType: 'lead'
     }));
 
     // Combine all items into a single array
@@ -5803,7 +5819,9 @@ exports.getLeadEmails = async (req, res) => {
     const hasMore = parseInt(page) < totalPages;
 
     res.status(200).json({
-      message: "Lead data fetched successfully.",
+      message: "Lead timeline fetched successfully.",
+      entityType: 'lead',
+      entityId: leadId,
       data: paginatedItems, // Single unified array
       pagination: {
         page: parseInt(page),
@@ -5828,7 +5846,7 @@ exports.getLeadEmails = async (req, res) => {
         bodyTruncated: true,
         bodyMaxLength: maxBodyLength,
         note: "Email bodies are truncated for performance. Use separate email detail API for full content.",
-        dataStructure: "Unified array with type identifiers (email, note, activity)"
+        dataStructure: "Unified array with type (email, note, activity) and entityType (lead, deal, person, organization)"
       }
     });
   } catch (error) {
@@ -5920,6 +5938,669 @@ exports.addLeadNote = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Get unified timeline for Deal (emails, activities, notes) - same as getLeadEmails
+exports.getDealTimeline = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { dealId } = req.params;
+
+  const { 
+    page = 1, 
+    limit = 20
+  } = req.query;
+  
+  const offset = (page - 1) * limit;
+  const maxLimit = Math.min(parseInt(limit) || 20, 50);
+
+  if (!dealId) {
+    return res.status(400).json({ message: "dealId is required in params." });
+  }
+
+  try {
+    const deal = await Deal.findByPk(dealId, {
+      attributes: ['dealId', 'email', 'personId', 'leadOrganizationId']
+    });
+    
+    if (!deal) {
+      return res.status(404).json({ message: "Deal not found." });
+    }
+
+    if (!deal.email) {
+      return res.status(200).json({
+        message: "Deal has no email address.",
+        entityType: 'deal',
+        entityId: dealId,
+        data: [],
+        pagination: {
+          page: parseInt(page),
+          limit: 0,
+          offset: 0,
+          totalItems: 0,
+          totalPages: 0,
+          hasMore: false
+        }
+      });
+    }
+
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    let person = null;
+    let organization = null;
+
+    if (deal.personId) {
+      person = await Person.findByPk(deal.personId, {
+        attributes: ['personId', 'email'],
+        raw: true
+      });
+    }
+
+    if (deal.leadOrganizationId) {
+      organization = await Organization.findByPk(deal.leadOrganizationId, {
+        attributes: ['leadOrganizationId', 'organization'],
+        raw: true
+      });
+    }
+
+    const maxBodyLength = 1000;
+
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    } else {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    const dealEmailAddresses = new Set();
+    if (deal.email) dealEmailAddresses.add(deal.email.toLowerCase());
+    if (person && person.email) dealEmailAddresses.add(person.email.toLowerCase());
+    if (organization && organization.email) dealEmailAddresses.add(organization.email.toLowerCase());
+
+    let emailsByRelationship = [];
+    if (dealEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(dealEmailAddresses);
+      emailsByRelationship = await Email.findAll({
+        where: {
+          [Op.and]: [
+            {
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
+            },
+            emailVisibilityWhere
+          ]
+        },
+        attributes: [
+          "emailID", "messageId", "inReplyTo", "references",
+          "sender", "recipient", "subject", "createdAt",
+          "folder", "visibility", "userEmail",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [{
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size", "contentType"],
+        }],
+        order: [["createdAt", "DESC"]]
+      });
+    }
+
+    const emailsWithType = emailsByRelationship.map(email => ({
+      type: 'email',
+      entityType: 'deal',
+      ...(email.toJSON ? email.toJSON() : email)
+    }));
+
+    let notes = await DealNote.findAll({
+      where: { dealId },
+      attributes: ['noteId', 'dealId', 'content', 'createdBy', 'createdAt', 'updatedAt'],
+      order: [['createdAt', 'DESC']],
+      raw: true
+    });
+
+    const creatorIds = [...new Set(notes.map(note => note.createdBy).filter(Boolean))];
+    let creatorMap = {};
+    
+    if (creatorIds.length > 0) {
+      const creators = await MasterUser.findAll({
+        where: { masterUserID: creatorIds },
+        attributes: ['masterUserID', 'name'],
+        raw: true
+      });
+      creators.forEach(user => {
+        creatorMap[user.masterUserID] = user.name;
+      });
+    }
+
+    notes = notes.map(note => ({
+      type: 'note',
+      entityType: 'deal',
+      noteId: note.noteId,
+      dealId: note.dealId,
+      content: note.content,
+      createdBy: note.createdBy,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+      creatorName: creatorMap[note.createdBy] || null
+    }));
+
+    let activities = await Activity.findAll({
+      where: { dealId },
+      attributes: [
+        'activityId', 'type', 'subject', 'startDateTime', 'endDateTime',
+        'priority', 'guests', 'location', 'videoCallIntegration',
+        'description', 'status', 'notes', 'assignedTo', 'dealId',
+        'leadId', 'personId', 'leadOrganizationId', 'masterUserID',
+        'isDone', 'contactPerson', 'email', 'organization', 'dueDate',
+        'markedAsDoneTime', 'calendar_event_id', 'activityTypeFlag',
+        'allContactPersons', 'createdAt', 'updatedAt'
+      ],
+      order: [['createdAt', 'DESC']],
+      raw: true
+    });
+
+    const assignedToIds = [...new Set(activities.map(activity => activity.assignedTo).filter(Boolean))];
+    let assignedUserMap = {};
+    
+    if (assignedToIds.length > 0) {
+      const assignedUsers = await MasterUser.findAll({
+        where: { masterUserID: assignedToIds },
+        attributes: ['masterUserID', 'name'],
+        raw: true
+      });
+      assignedUsers.forEach(user => {
+        assignedUserMap[user.masterUserID] = user.name;
+      });
+    }
+
+    activities = activities.map(activity => ({
+      type: 'activity',
+      entityType: 'deal',
+      ...activity,
+      activityType: activity.type,
+      assignedToName: assignedUserMap[activity.assignedTo] || null
+    }));
+
+    const allItems = [...emailsWithType, ...notes, ...activities];
+    allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const totalItems = allItems.length;
+    const paginatedItems = allItems.slice(offset, offset + maxLimit);
+    const totalPages = Math.ceil(totalItems / maxLimit);
+    const hasMore = parseInt(page) < totalPages;
+
+    res.status(200).json({
+      message: "Deal timeline fetched successfully.",
+      entityType: 'deal',
+      entityId: dealId,
+      data: paginatedItems,
+      pagination: {
+        page: parseInt(page),
+        limit: maxLimit,
+        offset: offset,
+        totalItems: totalItems,
+        totalPages: totalPages,
+        hasMore: hasMore,
+        hasPrevPage: parseInt(page) > 1,
+        nextPage: hasMore ? parseInt(page) + 1 : null,
+        prevPage: parseInt(page) > 1 ? parseInt(page) - 1 : null
+      },
+      summary: {
+        totalEmails: emailsWithType.length,
+        totalNotes: notes.length,
+        totalActivities: activities.length,
+        totalItems: totalItems,
+        itemsInPage: paginatedItems.length,
+        sorting: "createdAt DESC (latest first)"
+      },
+      _metadata: {
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance.",
+        dataStructure: "Unified array with type (email, note, activity) and entityType (deal)"
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching deal timeline:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Get unified timeline for Person (emails, activities, notes)
+exports.getPersonTimeline = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { personId } = req.params;
+
+  const { 
+    page = 1, 
+    limit = 20
+  } = req.query;
+  
+  const offset = (page - 1) * limit;
+  const maxLimit = Math.min(parseInt(limit) || 20, 50);
+
+  if (!personId) {
+    return res.status(400).json({ message: "personId is required in params." });
+  }
+
+  try {
+    const person = await Person.findByPk(personId, {
+      attributes: ['personId', 'email', 'leadOrganizationId']
+    });
+    
+    if (!person) {
+      return res.status(404).json({ message: "Person not found." });
+    }
+
+    if (!person.email) {
+      return res.status(200).json({
+        message: "Person has no email address.",
+        entityType: 'person',
+        entityId: personId,
+        data: [],
+        pagination: {
+          page: parseInt(page),
+          limit: 0,
+          offset: 0,
+          totalItems: 0,
+          totalPages: 0,
+          hasMore: false
+        }
+      });
+    }
+
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    const maxBodyLength = 1000;
+
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    } else {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    const personEmailAddresses = new Set();
+    if (person.email) personEmailAddresses.add(person.email.toLowerCase());
+
+    let emailsByRelationship = [];
+    if (personEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(personEmailAddresses);
+      emailsByRelationship = await Email.findAll({
+        where: {
+          [Op.and]: [
+            {
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
+            },
+            emailVisibilityWhere
+          ]
+        },
+        attributes: [
+          "emailID", "messageId", "inReplyTo", "references",
+          "sender", "recipient", "subject", "createdAt",
+          "folder", "visibility", "userEmail",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [{
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size", "contentType"],
+        }],
+        order: [["createdAt", "DESC"]]
+      });
+    }
+
+    const emailsWithType = emailsByRelationship.map(email => ({
+      type: 'email',
+      entityType: 'person',
+      ...(email.toJSON ? email.toJSON() : email)
+    }));
+
+    let activities = await Activity.findAll({
+      where: { personId },
+      attributes: [
+        'activityId', 'type', 'subject', 'startDateTime', 'endDateTime',
+        'priority', 'guests', 'location', 'videoCallIntegration',
+        'description', 'status', 'notes', 'assignedTo', 'dealId',
+        'leadId', 'personId', 'leadOrganizationId', 'masterUserID',
+        'isDone', 'contactPerson', 'email', 'organization', 'dueDate',
+        'markedAsDoneTime', 'calendar_event_id', 'activityTypeFlag',
+        'allContactPersons', 'createdAt', 'updatedAt'
+      ],
+      order: [['createdAt', 'DESC']],
+      raw: true
+    });
+
+    const assignedToIds = [...new Set(activities.map(activity => activity.assignedTo).filter(Boolean))];
+    let assignedUserMap = {};
+    
+    if (assignedToIds.length > 0) {
+      const assignedUsers = await MasterUser.findAll({
+        where: { masterUserID: assignedToIds },
+        attributes: ['masterUserID', 'name'],
+        raw: true
+      });
+      assignedUsers.forEach(user => {
+        assignedUserMap[user.masterUserID] = user.name;
+      });
+    }
+
+    activities = activities.map(activity => ({
+      type: 'activity',
+      entityType: 'person',
+      ...activity,
+      activityType: activity.type,
+      assignedToName: assignedUserMap[activity.assignedTo] || null
+    }));
+
+    const allItems = [...emailsWithType, ...activities];
+    allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const totalItems = allItems.length;
+    const paginatedItems = allItems.slice(offset, offset + maxLimit);
+    const totalPages = Math.ceil(totalItems / maxLimit);
+    const hasMore = parseInt(page) < totalPages;
+
+    res.status(200).json({
+      message: "Person timeline fetched successfully.",
+      entityType: 'person',
+      entityId: personId,
+      data: paginatedItems,
+      pagination: {
+        page: parseInt(page),
+        limit: maxLimit,
+        offset: offset,
+        totalItems: totalItems,
+        totalPages: totalPages,
+        hasMore: hasMore,
+        hasPrevPage: parseInt(page) > 1,
+        nextPage: hasMore ? parseInt(page) + 1 : null,
+        prevPage: parseInt(page) > 1 ? parseInt(page) - 1 : null
+      },
+      summary: {
+        totalEmails: emailsWithType.length,
+        totalNotes: 0,
+        totalActivities: activities.length,
+        totalItems: totalItems,
+        itemsInPage: paginatedItems.length,
+        sorting: "createdAt DESC (latest first)"
+      },
+      _metadata: {
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance. Person entity does not have notes.",
+        dataStructure: "Unified array with type (email, activity) and entityType (person)"
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching person timeline:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
+// Get unified timeline for Organization (emails, activities)
+exports.getOrganizationTimeline = async (req, res) => {
+  const masterUserID = req.adminId;
+  const { organizationId } = req.params;
+
+  const { 
+    page = 1, 
+    limit = 20
+  } = req.query;
+  
+  const offset = (page - 1) * limit;
+  const maxLimit = Math.min(parseInt(limit) || 20, 50);
+
+  if (!organizationId) {
+    return res.status(400).json({ message: "organizationId is required in params." });
+  }
+
+  try {
+    const organization = await Organization.findByPk(organizationId, {
+      attributes: ['leadOrganizationId', 'organization']
+    });
+    
+    if (!organization) {
+      return res.status(404).json({ message: "Organization not found." });
+    }
+
+    // Find all persons belonging to this organization
+    const persons = await Person.findAll({
+      where: { leadOrganizationId: organizationId },
+      attributes: ['personId', 'email'],
+      raw: true
+    });
+
+    const orgEmailAddresses = new Set();
+    persons.forEach(person => {
+      if (person.email) orgEmailAddresses.add(person.email.toLowerCase());
+    });
+
+    if (orgEmailAddresses.size === 0) {
+      return res.status(200).json({
+        message: "Organization has no associated email addresses.",
+        entityType: 'organization',
+        entityId: organizationId,
+        data: [],
+        pagination: {
+          page: parseInt(page),
+          limit: 0,
+          offset: 0,
+          totalItems: 0,
+          totalPages: 0,
+          hasMore: false
+        }
+      });
+    }
+
+    let currentUserEmail = null;
+    try {
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID: req.adminId },
+        attributes: ['email']
+      });
+      currentUserEmail = userCredential?.email;
+    } catch (error) {
+      console.error('Error fetching user credential:', error);
+    }
+
+    const maxBodyLength = 1000;
+
+    let emailVisibilityWhere = {};
+    if (currentUserEmail) {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { 
+            [Op.and]: [
+              { visibility: 'private' },
+              { userEmail: currentUserEmail }
+            ]
+          },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    } else {
+      emailVisibilityWhere = {
+        [Op.or]: [
+          { visibility: 'shared' },
+          { visibility: { [Op.is]: null } }
+        ]
+      };
+    }
+
+    let emailsByRelationship = [];
+    if (orgEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(orgEmailAddresses);
+      emailsByRelationship = await Email.findAll({
+        where: {
+          [Op.and]: [
+            {
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
+            },
+            emailVisibilityWhere
+          ]
+        },
+        attributes: [
+          "emailID", "messageId", "inReplyTo", "references",
+          "sender", "recipient", "subject", "createdAt",
+          "folder", "visibility", "userEmail",
+          [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+        ],
+        include: [{
+          model: Attachment,
+          as: "attachments",
+          attributes: ["attachmentID", "filename", "size", "contentType"],
+        }],
+        order: [["createdAt", "DESC"]]
+      });
+    }
+
+    const emailsWithType = emailsByRelationship.map(email => ({
+      type: 'email',
+      entityType: 'organization',
+      ...(email.toJSON ? email.toJSON() : email)
+    }));
+
+    let activities = await Activity.findAll({
+      where: { leadOrganizationId: organizationId },
+      attributes: [
+        'activityId', 'type', 'subject', 'startDateTime', 'endDateTime',
+        'priority', 'guests', 'location', 'videoCallIntegration',
+        'description', 'status', 'notes', 'assignedTo', 'dealId',
+        'leadId', 'personId', 'leadOrganizationId', 'masterUserID',
+        'isDone', 'contactPerson', 'email', 'organization', 'dueDate',
+        'markedAsDoneTime', 'calendar_event_id', 'activityTypeFlag',
+        'allContactPersons', 'createdAt', 'updatedAt'
+      ],
+      order: [['createdAt', 'DESC']],
+      raw: true
+    });
+
+    const assignedToIds = [...new Set(activities.map(activity => activity.assignedTo).filter(Boolean))];
+    let assignedUserMap = {};
+    
+    if (assignedToIds.length > 0) {
+      const assignedUsers = await MasterUser.findAll({
+        where: { masterUserID: assignedToIds },
+        attributes: ['masterUserID', 'name'],
+        raw: true
+      });
+      assignedUsers.forEach(user => {
+        assignedUserMap[user.masterUserID] = user.name;
+      });
+    }
+
+    activities = activities.map(activity => ({
+      type: 'activity',
+      entityType: 'organization',
+      ...activity,
+      activityType: activity.type,
+      assignedToName: assignedUserMap[activity.assignedTo] || null
+    }));
+
+    const allItems = [...emailsWithType, ...activities];
+    allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const totalItems = allItems.length;
+    const paginatedItems = allItems.slice(offset, offset + maxLimit);
+    const totalPages = Math.ceil(totalItems / maxLimit);
+    const hasMore = parseInt(page) < totalPages;
+
+    res.status(200).json({
+      message: "Organization timeline fetched successfully.",
+      entityType: 'organization',
+      entityId: organizationId,
+      data: paginatedItems,
+      pagination: {
+        page: parseInt(page),
+        limit: maxLimit,
+        offset: offset,
+        totalItems: totalItems,
+        totalPages: totalPages,
+        hasMore: hasMore,
+        hasPrevPage: parseInt(page) > 1,
+        nextPage: hasMore ? parseInt(page) + 1 : null,
+        prevPage: parseInt(page) > 1 ? parseInt(page) - 1 : null
+      },
+      summary: {
+        totalEmails: emailsWithType.length,
+        totalNotes: 0,
+        totalActivities: activities.length,
+        totalItems: totalItems,
+        itemsInPage: paginatedItems.length,
+        sorting: "createdAt DESC (latest first)"
+      },
+      _metadata: {
+        bodyTruncated: true,
+        bodyMaxLength: maxBodyLength,
+        note: "Email bodies are truncated for performance. Organization entity does not have notes.",
+        dataStructure: "Unified array with type (email, activity) and entityType (organization)",
+        emailSources: `Fetched from ${persons.length} persons associated with this organization`
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching organization timeline:", error);
+    res.status(500).json({ message: "Internal server error." });
+  }
+};
+
 exports.deleteLeadNote = async (req, res) => {
   const { noteId } = req.params;
   const masterUserID = req.adminId;
