@@ -14,7 +14,7 @@ logs/
 
 # Secrets and configuration
 config/*.json
-config/*.js
+# config/*.js  # Removed - config/db.js is safe to commit as it uses env vars
 
 # OS-specific files
 .DS_Store

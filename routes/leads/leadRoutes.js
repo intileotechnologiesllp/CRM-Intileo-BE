@@ -48,6 +48,18 @@ router.get(
   verifyToken,
   leadController.getAllLeadDetails
 );
+// New lightweight endpoint: Get unified timeline (emails, notes, activities) for a lead
+router.get(
+  "/emails/:leadId",
+  verifyToken,
+  leadController.getLeadEmails
+);
+// Alternative route name for clarity
+router.get(
+  "/timeline/:leadId",
+  verifyToken,
+  leadController.getLeadEmails
+);
 router.post("/add-lead-note/:leadId", verifyToken, validatePrivilege(7, "create"), leadController.addLeadNote);
 router.get(
   "/delete-lead-note/:noteId",
