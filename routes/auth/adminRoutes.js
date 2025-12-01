@@ -33,6 +33,16 @@ router.get("/google/login", adminController.googleAuthLogin);
 router.post("/google/callback", adminController.googleAuthCallback);
 router.get("/oauth2callback", adminController.googleAuthCallback); // Google redirect endpoint
 
+// Debug route - Remove this after testing
+router.get("/google/debug", (req, res) => {
+  res.json({
+    clientId: process.env.GOOGLE_CLIENT_ID ? 'SET ✓' : 'NOT SET ✗',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ? 'SET ✓' : 'NOT SET ✗',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'NOT SET ✗',
+    fullUrl: process.env.GOOGLE_REDIRECT_URI
+  });
+});
+
 // Master user routes
 
 router.post("/logout", verifyToken,adminController.logout);

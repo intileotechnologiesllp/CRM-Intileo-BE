@@ -1054,8 +1054,12 @@ exports.googleAuthLogin = async (req, res) => {
 // Google OAuth Login - Callback
 exports.googleAuthCallback = async (req, res) => {
   // Google sends code as query parameter, but frontend can send as body
-  const code = req.query.code || req.body.code;
-  const { systemInfo, device, longitude, latitude, ipAddress } = req.body;
+  const code = req.query.code || (req.body && req.body.code);
+  const systemInfo = req.body && req.body.systemInfo;
+  const device = req.body && req.body.device;
+  const longitude = req.body && req.body.longitude;
+  const latitude = req.body && req.body.latitude;
+  const ipAddress = req.body && req.body.ipAddress;
 
   if (!code) {
     return res.status(400).json({ 
@@ -1228,6 +1232,18 @@ exports.googleAuthCallback = async (req, res) => {
       user.masterUserID
     );
 
+    // If this is a GET request (direct from Google), redirect to frontend with token
+    if (req.method === 'GET') {
+      // Redirect to a success page with token and user data
+      // Use localhost for development, or FRONTEND_URL for production
+      const frontendUrl = process.env.NODE_ENV === 'production' 
+        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
+        : 'http://localhost:3056';
+      const redirectUrl = `${frontendUrl}/google-login-success.html?token=${encodeURIComponent(token)}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    // If POST request (from frontend), return JSON
     res.status(200).json({
       success: true,
       message: "Login successful",
@@ -1250,6 +1266,16 @@ exports.googleAuthCallback = async (req, res) => {
       `Google OAuth error: ${error.message}`,
       null
     );
+
+    // If GET request, redirect to error page
+    if (req.method === 'GET') {
+      // Use localhost for development, or FRONTEND_URL for production
+      const frontendUrl = process.env.NODE_ENV === 'production' 
+        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
+        : 'http://localhost:3056';
+      const redirectUrl = `${frontendUrl}/google-login-error.html?error=${encodeURIComponent(error.message)}`;
+      return res.redirect(redirectUrl);
+    }
 
     res.status(500).json({
       success: false,
