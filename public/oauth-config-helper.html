@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google OAuth Configuration Helper</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .copy-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+        .copy-btn:hover {
+            background: #5568d3;
+        }
+        .config-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+            margin: 15px 0;
+            font-family: monospace;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 3px solid #667eea;
+        }
+        .step h3 {
+            margin-top: 0;
+            color: #667eea;
+        }
+        .url-display {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .btn-test {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn-test:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔧 Google OAuth Configuration Helper</h1>
+        <p>This page helps you configure Google OAuth correctly for your CRM.</p>
+    </div>
+
+    <div class="card">
+        <h2>📋 Your Current Configuration</h2>
+        <div id="configStatus">Loading...</div>
+    </div>
+
+    <div class="card">
+        <h2>✅ Step-by-Step Fix</h2>
+        
+        <div class="step">
+            <h3>Step 1: Copy Your Redirect URI</h3>
+            <p>Your exact redirect URI is:</p>
+            <div class="config-box" id="redirectUri">
+                Loading...
+            </div>
+            <button class="copy-btn" onclick="copyRedirectUri()">📋 Copy to Clipboard</button>
+        </div>
+
+        <div class="step">
+            <h3>Step 2: Add to Google Cloud Console</h3>
+            <ol>
+                <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → Credentials</a></li>
+                <li>Click on your OAuth 2.0 Client ID: <code id="clientId">Loading...</code></li>
+                <li>Scroll to <strong>"Authorized redirect URIs"</strong></li>
+                <li>Click <strong>"+ ADD URI"</strong></li>
+                <li>Paste the redirect URI (copied from Step 1)</li>
+                <li>Click <strong>"SAVE"</strong></li>
+                <li><strong>Wait 5 minutes</strong> for changes to propagate</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <h3>Step 3: Test Your Configuration</h3>
+            <button class="btn-test" onclick="testOAuth()">🧪 Test Google Login</button>
+            <div id="testResult" style="margin-top: 15px;"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔍 Common Issues</h2>
+        <div class="info">
+            <strong>Error: redirect_uri_mismatch</strong><br>
+            ❌ Extra slash: <code>http://localhost:3056/api/oauth2callback/</code><br>
+            ❌ Wrong protocol: <code>https://localhost:3056/api/oauth2callback</code><br>
+            ❌ Extra space at end<br>
+            ✅ Correct: <code>http://localhost:3056/api/oauth2callback</code><br><br>
+            <strong>Solution:</strong> Make sure the URI in Google Console matches EXACTLY (no extra characters)
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3056/api';
+        let redirectUriValue = '';
+
+        async function loadConfiguration() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/google/debug`);
+                const data = await response.json();
+
+                redirectUriValue = data.redirectUri;
+
+                document.getElementById('redirectUri').textContent = data.redirectUri;
+                document.getElementById('clientId').textContent = data.clientId === 'SET ✓' ? 
+                    'Your Client ID (check debug response)' : 'NOT CONFIGURED';
+
+                const statusHtml = `
+                    <div class="${data.clientId === 'SET ✓' && data.clientSecret === 'SET ✓' && data.redirectUri !== 'NOT SET ✗' ? 'status success' : 'status error'}">
+                        <strong>Environment Variables:</strong><br>
+                        Google Client ID: ${data.clientId}<br>
+                        Google Client Secret: ${data.clientSecret}<br>
+                        Redirect URI: ${data.redirectUri !== 'NOT SET ✗' ? '✓ SET' : '✗ NOT SET'}<br>
+                        <br>
+                        <strong>Full Redirect URI:</strong><br>
+                        <code>${data.fullUrl || 'Not configured'}</code>
+                    </div>
+                `;
+                document.getElementById('configStatus').innerHTML = statusHtml;
+
+                // Get actual OAuth URL
+                const loginResponse = await fetch(`${API_BASE_URL}/google/login`);
+                const loginData = await loginResponse.json();
+                
+                if (loginData.authUrl) {
+                    const url = new URL(loginData.authUrl);
+                    const actualRedirectUri = url.searchParams.get('redirect_uri');
+                    
+                    if (actualRedirectUri !== data.redirectUri) {
+                        document.getElementById('configStatus').innerHTML += `
+                            <div class="status error" style="margin-top: 10px;">
+                                <strong>⚠️ Mismatch Detected!</strong><br>
+                                Expected: <code>${data.redirectUri}</code><br>
+                                Actually using: <code>${actualRedirectUri}</code>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (error) {
+                document.getElementById('configStatus').innerHTML = `
+                    <div class="status error">
+                        <strong>Error loading configuration:</strong><br>
+                        ${error.message}<br><br>
+                        Make sure your server is running on http://localhost:3056
+                    </div>
+                `;
+            }
+        }
+
+        function copyRedirectUri() {
+            navigator.clipboard.writeText(redirectUriValue).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        async function testOAuth() {
+            const resultDiv = document.getElementById('testResult');
+            resultDiv.innerHTML = '<div class="status info">Opening Google login...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/google/login`);
+                const data = await response.json();
+
+                if (data.success && data.authUrl) {
+                    resultDiv.innerHTML = '<div class="status success">✓ OAuth URL generated successfully! Opening in new window...</div>';
+                    window.open(data.authUrl, '_blank');
+                } else {
+                    resultDiv.innerHTML = `<div class="status error">✗ Failed to generate OAuth URL: ${data.message || 'Unknown error'}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="status error">✗ Error: ${error.message}</div>`;
+            }
+        }
+
+        // Load configuration on page load
+        loadConfiguration();
+    </script>
+</body>
+</html>
