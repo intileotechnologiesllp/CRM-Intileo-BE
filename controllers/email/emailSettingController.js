@@ -1692,6 +1692,28 @@ exports.getSignature = async (req, res) => {
     });
   }
 };
+exports.deleteSignature = async (req, res) => {
+  const masterUserID = req.adminId;
+  try {
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    await userCredential.update({
+      signature: null,
+      signatureName: null,
+      signatureImage: null,
+    });
+    res.status(200).json({ message: "Signature deleted successfully." });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to delete signature.",
+      error: error.message,
+    });
+  }
+};
 exports.getBlockedAddress = async (req, res) => {
   const masterUserID = req.adminId;
   try {

@@ -28,6 +28,11 @@ router.post("/forgot-password", adminController.forgotPassword);
 router.post("/verify-otp", adminController.verifyOtp);
 router.post("/reset-password", adminController.resetPassword);
 
+// Google OAuth routes
+router.get("/google/login", adminController.googleAuthLogin);
+router.post("/google/callback", adminController.googleAuthCallback);
+router.get("/oauth2callback", adminController.googleAuthCallback); // Google redirect endpoint
+
 // Master user routes
 
 router.post("/logout", verifyToken,adminController.logout);
