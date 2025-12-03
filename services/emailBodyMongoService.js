@@ -1,5 +1,6 @@
 const { EmailBody } = require('../models/mongodb');
 const { cleanEmailBody, replaceCidReferences, processEmailBodyData } = require('../utils/emailProcessingUtils');
+const { isMongoDBConnected } = require('../config/mongodb');
 
 /**
  * EmailBody MongoDB Service
@@ -15,6 +16,12 @@ class EmailBodyMongoService {
    */
   static async saveEmailBody(emailID, masterUserID, bodyData, options = {}) {
     const startTime = Date.now();
+    
+    // Check MongoDB connection before attempting operation
+    if (!isMongoDBConnected()) {
+      console.log(`[EmailBodyMongoService] ⚠️ MongoDB not connected, skipping save for email ${emailID}`);
+      return { success: false, error: 'MongoDB not connected', skipped: true };
+    }
     
     try {
       console.log(`[EmailBodyMongoService] 💾 Saving email body for ${emailID} to MongoDB...`);
@@ -93,6 +100,12 @@ class EmailBodyMongoService {
    * Get email body from MongoDB
    */
   static async getEmailBody(emailID, masterUserID, options = {}) {
+    // Check MongoDB connection before attempting operation
+    if (!isMongoDBConnected()) {
+      console.log(`[EmailBodyMongoService] ⚠️ MongoDB not connected, skipping fetch for email ${emailID}`);
+      return null;
+    }
+    
     try {
       console.log(`[EmailBodyMongoService] 🔍 Fetching email body for ${emailID} from MongoDB...`);
       
@@ -143,6 +156,11 @@ class EmailBodyMongoService {
    * Check if email body exists in MongoDB
    */
   static async hasEmailBody(emailID, masterUserID) {
+    // Check MongoDB connection before attempting operation
+    if (!isMongoDBConnected()) {
+      return { exists: false, status: 'mongodb_unavailable', hasContent: false, lastUpdated: null };
+    }
+    
     try {
       const body = await EmailBody.findByEmailID(String(emailID), String(masterUserID));
       return {
@@ -166,6 +184,12 @@ class EmailBodyMongoService {
    * Update email body processing status
    */
   static async updateBodyStatus(emailID, masterUserID, status, details = '') {
+    // Check MongoDB connection before attempting operation
+    if (!isMongoDBConnected()) {
+      console.log(`[EmailBodyMongoService] ⚠️ MongoDB not connected, skipping status update for email ${emailID}`);
+      return { success: false, error: 'MongoDB not connected', skipped: true };
+    }
+    
     try {
       const body = await EmailBody.findByEmailID(emailID, masterUserID);
       if (body) {
@@ -240,6 +264,12 @@ class EmailBodyMongoService {
    * Migration helper: Move email body from MySQL to MongoDB
    */
   static async migrateEmailBodyFromMySQL(emailID, masterUserID, mysqlBody, attachments = []) {
+    // Check MongoDB connection before attempting migration
+    if (!isMongoDBConnected()) {
+      console.log(`[EmailBodyMongoService] ⚠️ MongoDB not connected, skipping migration for email ${emailID}`);
+      return { success: false, error: 'MongoDB not connected', skipped: true };
+    }
+    
     try {
       console.log(`[EmailBodyMongoService] 🔄 Migrating email body ${emailID} from MySQL to MongoDB...`);
       
