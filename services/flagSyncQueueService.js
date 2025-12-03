@@ -31,6 +31,32 @@ class FlagSyncQueueService {
       await this.channel.assertQueue('SYNC_FLAGS_QUEUE', {
         durable: true
       });
+      this.connection.on('close', () => {
+        console.warn('⚠️ [FLAG SYNC QUEUE] RabbitMQ connection closed');
+        this.isInitialized = false;
+      });
+
+      this.channel = await this.connection.createChannel();
+      // Attach channel-level handlers to avoid unhandled events that can crash the process
+      this.channel.on('error', (err) => {
+        console.error('❌ [FLAG SYNC QUEUE] RabbitMQ channel error:', err && err.message ? err.message : err);
+      });
+      this.channel.on('close', () => {
+        console.warn('⚠️ [FLAG SYNC QUEUE] RabbitMQ channel closed');
+        this.isInitialized = false;
+      });
+
+      // Assert the main flag sync queue (idempotent). Prefer assertQueue instead of checkQueue
+      // to avoid race conditions and ensure the queue exists (if the RabbitMQ user has permission).
+      try {
+        await this.channel.assertQueue('SYNC_FLAGS_QUEUE', { durable: true });
+        console.log('ℹ️ [FLAG SYNC QUEUE] SYNC_FLAGS_QUEUE is ready (asserted)');
+      } catch (assertErr) {
+        // If asserting fails (for example due to permissions or vhost misconfiguration),
+        // log a clear error and rethrow so initialization caller can handle it.
+        console.error('❌ [FLAG SYNC QUEUE] Failed to assert SYNC_FLAGS_QUEUE:', assertErr && assertErr.message ? assertErr.message : assertErr);
+        throw assertErr;
+      }
       
       this.isInitialized = true;
       console.log('✅ [FLAG SYNC QUEUE] Successfully initialized RabbitMQ connection');
