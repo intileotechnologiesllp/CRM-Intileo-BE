@@ -141,13 +141,10 @@ app.use("/api/favorites", userFavoritesRoutes); // Register user favorites route
 app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
-<<<<<<< HEAD
 app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
-=======
 app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
->>>>>>> e7944d571a124e17249bca3a16f25ad68ec34727
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -206,39 +203,34 @@ sequelize
   try {
     // Initialize MongoDB connection
     console.log("🔄 Initializing MongoDB connection...");
-    await connectMongoDB();
+    const mongoConnected = await connectMongoDB();
     
     // Initialize Redis connection
     console.log("🔄 Initializing Redis connection...");
-    await connectRedis();
+    const redisConnected = await connectRedis();
     
     await loadPrograms();
-<<<<<<< HEAD
-    // Start server after loading programs and connecting to databases
-    const PORT = process.env.PORT || 3056 ;
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📊 MySQL Database: Connected via Sequelize`);
-      console.log(`🍃 MongoDB: Connected via Mongoose`);
-      console.log(`🔴 Redis: Connected for caching & sessions`);
-      console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
-=======
+    console.log("Program cache loaded.");
     
-    // 🚀 Initialize IMAP IDLE Manager for real-time email sync
+    // 🚀 Initialize IMAP IDLE Manager for real-time email sync (only if MongoDB is available)
     try {
-      await imapIdleManager.initialize();
-      console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
-      
-      // Set up event handlers for real-time updates
-      imapIdleManager.on('newMail', (data) => {
-        console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
-        // You can emit WebSocket events here for real-time UI updates
-      });
-      
-      imapIdleManager.on('flagChange', (data) => {
-        console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
-        // You can emit WebSocket events here for real-time UI updates
-      });
+      if (mongoConnected) {
+        await imapIdleManager.initialize();
+        console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
+        
+        // Set up event handlers for real-time updates
+        imapIdleManager.on('newMail', (data) => {
+          console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
+          // You can emit WebSocket events here for real-time UI updates
+        });
+        
+        imapIdleManager.on('flagChange', (data) => {
+          console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
+          // You can emit WebSocket events here for real-time UI updates
+        });
+      } else {
+        console.log('⚠️ Skipping IMAP IDLE Manager - MongoDB not available');
+      }
       
     } catch (idleError) {
       console.warn('⚠️ IMAP IDLE Manager failed to initialize:', idleError.message);
@@ -246,13 +238,15 @@ sequelize
     }
     
     // Start server after loading programs and initializing IMAP IDLE
-    const PORT = process.env.PORT || 3056 ;
+    const PORT = process.env.PORT || 3056;
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 MySQL Database: Connected via Sequelize`);
+      console.log(`🍃 MongoDB: ${mongoConnected ? 'Connected' : 'Unavailable'}`);
+      console.log(`🔴 Redis: ${redisConnected ? 'Connected' : 'Unavailable'}`);
+      console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
       console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
->>>>>>> e7944d571a124e17249bca3a16f25ad68ec34727
     });
-    console.log("Program cache loaded.");
   } catch (err) {
     console.error("Failed to initialize application:", err);
     process.exit(1);
