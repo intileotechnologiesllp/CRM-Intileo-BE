@@ -3084,34 +3084,7 @@ exports.createPerson = async (req, res) => {
       }
     }
 
-    // Check for duplicate primary email (primary email must be unique across all persons)
-    const existingEmailPerson = await Person.findOne({ where: { email: primaryEmail } });
-    if (existingEmailPerson) {
-      return res.status(409).json({
-        message: "A person with this email address already exists.",
-        person: {
-          personId: existingEmailPerson.personId,
-          contactPerson: existingEmailPerson.contactPerson,
-          email: existingEmailPerson.email,
-          organization: existingEmailPerson.organization,
-        },
-      });
-    }
-
-    // Check for duplicate person in the same organization (or globally if no org)
-    const whereClause = organization
-      ? { contactPerson, organization }
-      : { contactPerson, organization: null };
-
-    const existingPerson = await Person.findOne({ where: whereClause });
-    if (existingPerson) {
-      return res.status(409).json({
-        message:
-          "Person already exists" +
-          (organization ? " in this organization." : "."),
-        person: existingPerson,
-      });
-    }
+    // ✅ DUPLICATE VALIDATION REMOVED - Same contact person can now be added multiple times
 
     let org = null;
     if (organization) {
@@ -5732,6 +5705,558 @@ const getQuarter = (date, granularity = 'quarterly') => {
   }
 };
 
+exports.getPersonsByIds = async (req, res) => {
+  try {
+    // Import required models
+    const { Lead, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const PersonColumnPreference = require("../../models/leads/personColumnModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Get personId(s) from query params or request body
+    let personIds = [];
+    
+    // Handle single personId
+    if (req.query.personId) {
+      personIds = [req.query.personId];
+    }
+    
+    // Handle multiple personIds from query (comma-separated)
+    if (req.query.personIds) {
+      const queryPersonIds = Array.isArray(req.query.personIds) 
+        ? req.query.personIds 
+        : req.query.personIds.split(',');
+      personIds = [...personIds, ...queryPersonIds];
+    }
+    
+    // Handle personIds from request body
+    if (req.body && req.body.personIds) {
+      const bodyPersonIds = Array.isArray(req.body.personIds) 
+        ? req.body.personIds 
+        : [req.body.personIds];
+      personIds = [...personIds, ...bodyPersonIds];
+    }
+    
+    // Handle single personId from request body
+    if (req.body && req.body.personId) {
+      personIds.push(req.body.personId);
+    }
+
+    // Remove duplicates and convert to integers
+    personIds = [...new Set(personIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
+
+    if (personIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "personId or personIds parameter is required"
+      });
+    }
+
+    console.log('[DEBUG] Fetching persons for IDs:', personIds);
+
+    // Build where clause for person filtering
+    let personWhere = {
+      personId: { [Op.in]: personIds }
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      personWhere.masterUserID = req.adminId;
+    }
+
+    // Fetch persons
+    const persons = await Person.findAll({
+      where: personWhere,
+      raw: true,
+    });
+
+    if (persons.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No persons found for the provided IDs"
+      });
+    }
+
+    console.log(`[DEBUG] Found ${persons.length} persons`);
+
+    // Get organization IDs from persons for organization data lookup
+    const orgIds = [...new Set(persons.map(p => p.leadOrganizationId).filter(Boolean))];
+    
+    // Fetch related organizations if any
+    let organizations = [];
+    if (orgIds.length > 0) {
+      let orgWhere = {
+        leadOrganizationId: { [Op.in]: orgIds }
+      };
+
+      if (req.role !== "admin") {
+        orgWhere.masterUserID = req.adminId;
+      }
+
+      organizations = await Organization.findAll({
+        where: orgWhere,
+        raw: true,
+      });
+    }
+
+    // Build org map for quick lookup
+    const orgMap = {};
+    organizations.forEach((org) => {
+      orgMap[org.leadOrganizationId] = org;
+    });
+
+    // Get all unique ownerIds from persons and organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+    const personOwnerIds = persons.map((p) => p.ownerId).filter(Boolean);
+    const ownerIds = [...new Set([...orgOwnerIds, ...personOwnerIds])];
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: ownerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Count leads for each person
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "personId",
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        [Op.or]: [
+          { personId: { [Op.in]: personIds } }, 
+          { leadOrganizationId: { [Op.in]: orgIds } }
+        ],
+      },
+      group: ["personId", "leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build maps for quick lookup
+    const personLeadCountMap = {};
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.personId)
+        personLeadCountMap[lc.personId] = parseInt(lc.leadCount, 10);
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Enrich persons with computed fields
+    let enrichedPersons = persons.map((p) => {
+      let ownerName = null;
+      let organizationName = p.organization; // Keep existing organization name if present
+      
+      if (p.leadOrganizationId && orgMap[p.leadOrganizationId]) {
+        const org = orgMap[p.leadOrganizationId];
+        // Set organization name from the related organization
+        organizationName = org.organization || p.organization;
+        
+        if (org.ownerId && ownerMap[org.ownerId]) {
+          ownerName = ownerMap[org.ownerId];
+        }
+      }
+      
+      // Add person's own owner name if available
+      if (p.ownerId && ownerMap[p.ownerId]) {
+        ownerName = ownerMap[p.ownerId];
+      }
+
+      return {
+        ...p,
+        organization: organizationName,
+        ownerName,
+        leadCount: personLeadCountMap[p.personId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all persons
+    let customFieldValues = [];
+    if (personIds.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: { [Op.in]: personIds.map(id => id.toString()) },
+          entityType: "person",
+          masterUserID: req.adminId
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for person entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ["person", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map personId to their custom field values as { fieldName: value }
+    const personCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!personCustomFieldsMap[cfv.entityId])
+        personCustomFieldsMap[cfv.entityId] = {};
+      personCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each person
+    enrichedPersons = enrichedPersons.map((p) => {
+      const customFields = personCustomFieldsMap[p.personId.toString()] || {};
+      return { ...p, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const personColumnPref = await PersonColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = ['personId', 'leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter persons based on person column preferences
+    const filteredPersons = filterDataByColumnPreference(enrichedPersons, personColumnPref, 'person');
+
+    // Prepare response with detailed information
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched ${filteredPersons.length} person(s)`,
+      data: {
+        persons: filteredPersons,
+        totalCount: filteredPersons.length,
+        requestedIds: personIds,
+        foundIds: filteredPersons.map(p => p.personId),
+        missingIds: personIds.filter(id => !filteredPersons.some(p => p.personId === id)),
+        columnFiltering: {
+          enabled: !!(personColumnPref && personColumnPref.columns),
+          totalAvailableFields: Object.keys(Person.rawAttributes).length + allCustomFields.length,
+          displayedFields: personColumnPref && personColumnPref.columns ? 
+            (typeof personColumnPref.columns === "string" ? JSON.parse(personColumnPref.columns) : personColumnPref.columns)
+              .filter(col => col.check === true).length + 5 : // +5 for essential fields
+            Object.keys(Person.rawAttributes).length + allCustomFields.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching persons by IDs:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
+exports.getOrganizationsByIds = async (req, res) => {
+  try {
+    // Import required models
+    const { Lead, Person, Organization } = require("../../models");
+    const Deal = require("../../models/deals/dealsModels");
+    const MasterUser = require("../../models/master/masterUserModel");
+    const OrganizationColumnPreference = require("../../models/leads/organizationColumnModel");
+    const CustomField = require("../../models/customFieldModel");
+    const CustomFieldValue = require("../../models/customFieldValueModel");
+    const { Op } = require("sequelize");
+    const Sequelize = require("sequelize");
+
+    // Get organizationId(s) from query params or request body
+    let organizationIds = [];
+    
+    // Handle single organizationId
+    if (req.query.organizationId) {
+      organizationIds = [req.query.organizationId];
+    }
+    
+    // Handle single leadOrganizationId (alias)
+    if (req.query.leadOrganizationId) {
+      organizationIds = [req.query.leadOrganizationId];
+    }
+    
+    // Handle multiple organizationIds from query (comma-separated)
+    if (req.query.organizationIds) {
+      const queryOrgIds = Array.isArray(req.query.organizationIds) 
+        ? req.query.organizationIds 
+        : req.query.organizationIds.split(',');
+      organizationIds = [...organizationIds, ...queryOrgIds];
+    }
+    
+    // Handle multiple leadOrganizationIds from query (comma-separated)
+    if (req.query.leadOrganizationIds) {
+      const queryOrgIds = Array.isArray(req.query.leadOrganizationIds) 
+        ? req.query.leadOrganizationIds 
+        : req.query.leadOrganizationIds.split(',');
+      organizationIds = [...organizationIds, ...queryOrgIds];
+    }
+    
+    // Handle organizationIds from request body
+    if (req.body && req.body.organizationIds) {
+      const bodyOrgIds = Array.isArray(req.body.organizationIds) 
+        ? req.body.organizationIds 
+        : [req.body.organizationIds];
+      organizationIds = [...organizationIds, ...bodyOrgIds];
+    }
+    
+    // Handle leadOrganizationIds from request body
+    if (req.body && req.body.leadOrganizationIds) {
+      const bodyOrgIds = Array.isArray(req.body.leadOrganizationIds) 
+        ? req.body.leadOrganizationIds 
+        : [req.body.leadOrganizationIds];
+      organizationIds = [...organizationIds, ...bodyOrgIds];
+    }
+    
+    // Handle single organizationId from request body
+    if (req.body && req.body.organizationId) {
+      organizationIds.push(req.body.organizationId);
+    }
+    
+    // Handle single leadOrganizationId from request body
+    if (req.body && req.body.leadOrganizationId) {
+      organizationIds.push(req.body.leadOrganizationId);
+    }
+
+    // Remove duplicates and convert to integers
+    organizationIds = [...new Set(organizationIds)].map(id => parseInt(id)).filter(id => !isNaN(id));
+
+    if (organizationIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "organizationId/leadOrganizationId or organizationIds/leadOrganizationIds parameter is required"
+      });
+    }
+
+    console.log('[DEBUG] Fetching organizations for IDs:', organizationIds);
+
+    // Build where clause for organization filtering
+    let orgWhere = {
+      leadOrganizationId: { [Op.in]: organizationIds }
+    };
+
+    // Apply role-based filtering
+    if (req.role !== "admin") {
+      orgWhere.masterUserID = req.adminId;
+    }
+
+    // Fetch organizations
+    const organizations = await Organization.findAll({
+      where: orgWhere,
+      raw: true,
+    });
+
+    if (organizations.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No organizations found for the provided IDs"
+      });
+    }
+
+    console.log(`[DEBUG] Found ${organizations.length} organizations`);
+
+    // Get organization IDs for related data lookup
+    const orgIds = organizations.map(org => org.leadOrganizationId);
+
+    // Get all unique ownerIds from organizations
+    const orgOwnerIds = organizations.map((o) => o.ownerId).filter(Boolean);
+
+    // Fetch owner names from MasterUser
+    const owners = await MasterUser.findAll({
+      where: { masterUserID: orgOwnerIds },
+      attributes: ["masterUserID", "name"],
+      raw: true,
+    });
+    const ownerMap = {};
+    owners.forEach((o) => {
+      ownerMap[o.masterUserID] = o.name;
+    });
+
+    // Count leads for each organization
+    const leadCounts = await Lead.findAll({
+      attributes: [
+        "leadOrganizationId",
+        [Sequelize.fn("COUNT", Sequelize.col("leadId")), "leadCount"],
+      ],
+      where: {
+        leadOrganizationId: { [Op.in]: orgIds }
+      },
+      group: ["leadOrganizationId"],
+      raw: true,
+    });
+
+    // Build map for quick lookup
+    const orgLeadCountMap = {};
+    leadCounts.forEach((lc) => {
+      if (lc.leadOrganizationId)
+        orgLeadCountMap[lc.leadOrganizationId] = parseInt(lc.leadCount, 10);
+    });
+
+    // Enrich organizations with computed fields
+    let enrichedOrganizations = organizations.map((org) => {
+      return {
+        ...org,
+        ownerName: ownerMap[org.ownerId] || null,
+        leadCount: orgLeadCountMap[org.leadOrganizationId] || 0,
+      };
+    });
+
+    // Fetch custom field values for all organizations
+    let customFieldValues = [];
+    if (organizationIds.length > 0) {
+      customFieldValues = await CustomFieldValue.findAll({
+        where: {
+          entityId: { [Op.in]: organizationIds.map(id => id.toString()) },
+          entityType: "organization",
+          masterUserID: req.adminId
+        },
+        raw: true,
+      });
+    }
+
+    // Fetch all custom fields for organization entity
+    const allCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ["organization", "both"] },
+        isActive: true,
+      },
+      raw: true,
+    });
+
+    const customFieldIdToName = {};
+    allCustomFields.forEach((cf) => {
+      customFieldIdToName[cf.fieldId] = cf.fieldName;
+    });
+
+    // Map organizationId to their custom field values as { fieldName: value }
+    const orgCustomFieldsMap = {};
+    customFieldValues.forEach((cfv) => {
+      const fieldName = customFieldIdToName[cfv.fieldId] || cfv.fieldId;
+      if (!orgCustomFieldsMap[cfv.entityId])
+        orgCustomFieldsMap[cfv.entityId] = {};
+      orgCustomFieldsMap[cfv.entityId][fieldName] = cfv.value;
+    });
+
+    // Attach custom fields as direct properties to each organization
+    enrichedOrganizations = enrichedOrganizations.map((org) => {
+      const customFields = orgCustomFieldsMap[org.leadOrganizationId.toString()] || {};
+      return { ...org, ...customFields };
+    });
+
+    // Fetch column preferences to filter displayed fields
+    const orgColumnPref = await OrganizationColumnPreference.findOne({ where: {} });
+
+    // Helper function to filter data based on column preferences
+    const filterDataByColumnPreference = (data, columnPreference, entityType) => {
+      if (!columnPreference || !columnPreference.columns) {
+        return data;
+      }
+
+      let columns = [];
+      if (columnPreference.columns) {
+        columns = typeof columnPreference.columns === "string" 
+          ? JSON.parse(columnPreference.columns) 
+          : columnPreference.columns;
+      }
+
+      // Filter to only include columns where check is true
+      const checkedColumns = columns.filter(col => col.check === true);
+      const allowedFields = checkedColumns.map(col => col.key);
+
+      // Always include essential fields regardless of preferences
+      const essentialFields = ['leadOrganizationId', 'organization', 'ownerName', 'leadCount'];
+      const finalAllowedFields = [...new Set([...allowedFields, ...essentialFields])];
+
+      return data.map(item => {
+        const filteredItem = {};
+        finalAllowedFields.forEach(field => {
+          if (item.hasOwnProperty(field)) {
+            filteredItem[field] = item[field];
+          }
+        });
+        // Add entity information
+        filteredItem.entity = entityType;
+        return filteredItem;
+      });
+    };
+
+    // Filter organizations based on organization column preferences
+    const filteredOrganizations = filterDataByColumnPreference(enrichedOrganizations, orgColumnPref, 'organization');
+
+    // Prepare response with detailed information
+    res.status(200).json({
+      success: true,
+      message: `Successfully fetched ${filteredOrganizations.length} organization(s)`,
+      data: {
+        organizations: filteredOrganizations,
+        totalCount: filteredOrganizations.length,
+        requestedIds: organizationIds,
+        foundIds: filteredOrganizations.map(org => org.leadOrganizationId),
+        missingIds: organizationIds.filter(id => !filteredOrganizations.some(org => org.leadOrganizationId === id)),
+        columnFiltering: {
+          enabled: !!(orgColumnPref && orgColumnPref.columns),
+          totalAvailableFields: Object.keys(Organization.rawAttributes).length + allCustomFields.length,
+          displayedFields: orgColumnPref && orgColumnPref.columns ? 
+            (typeof orgColumnPref.columns === "string" ? JSON.parse(orgColumnPref.columns) : orgColumnPref.columns)
+              .filter(col => col.check === true).length + 4 : // +4 for essential fields
+            Object.keys(Organization.rawAttributes).length + allCustomFields.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching organizations by IDs:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error",
+      error: error.message 
+    });
+  }
+};
+
 exports.getPersonsAndOrganizations = async (req, res) => {
   try {
     // Import required models at the beginning of the function
@@ -5798,6 +6323,36 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     
     // Overdue activities tracking flag
     const includeOverdueCount = req.query.includeOverdueCount === 'true' || req.query.includeOverdueCount === true || includeTimeline;
+
+    // Handle specific person IDs from request body or query parameters
+    let specificPersonIds = [];
+    
+    // Handle multiple personIds from query (comma-separated)
+    if (req.query.personIds) {
+      specificPersonIds = req.query.personIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+    }
+    
+    // Handle personIds from request body
+    if (req.body && req.body.personIds) {
+      if (Array.isArray(req.body.personIds)) {
+        specificPersonIds = [...specificPersonIds, ...req.body.personIds.map(id => parseInt(id)).filter(id => !isNaN(id))];
+      } else if (typeof req.body.personIds === 'string') {
+        specificPersonIds = [...specificPersonIds, ...req.body.personIds.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id))];
+      }
+    }
+    
+    // Handle single personId from request body
+    if (req.body && req.body.personId) {
+      const singlePersonId = parseInt(req.body.personId);
+      if (!isNaN(singlePersonId)) {
+        specificPersonIds.push(singlePersonId);
+      }
+    }
+    
+    // Remove duplicates
+    specificPersonIds = [...new Set(specificPersonIds)];
+    
+    console.log('[DEBUG] Specific person IDs requested:', specificPersonIds);
 
     // Dynamic filter config (from body or query) -- now supports filterId as number or object
     const LeadFilter = require("../../models/leads/leadFiltersModel");
@@ -6769,13 +7324,34 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         ...dealFilteredPersonIds,
         ...orgFilteredPersonIds,
         ...personFilteredPersonIds,
+        ...specificPersonIds, // Include specific person IDs requested
       ]),
     ];
 
     // Merge personWhere from filters with filtered person IDs
     let finalPersonWhere = { ...personWhere };
 
-    if (allFilteredPersonIds.length > 0) {
+    // If specific person IDs are provided, prioritize them
+    if (specificPersonIds.length > 0) {
+      console.log(
+        "[DEBUG] Specific person IDs provided, restricting to:",
+        specificPersonIds.length,
+        "person IDs"
+      );
+      
+      if (Object.keys(finalPersonWhere).length > 0) {
+        // Combine specific IDs with existing filters using AND
+        finalPersonWhere = {
+          [Op.and]: [
+            finalPersonWhere,
+            { personId: { [Op.in]: specificPersonIds } },
+          ],
+        };
+      } else {
+        // Only specific person IDs apply
+        finalPersonWhere = { personId: { [Op.in]: specificPersonIds } };
+      }
+    } else if (allFilteredPersonIds.length > 0) {
       console.log(
         "[DEBUG] Applying combined filters: restricting to person IDs:",
         allFilteredPersonIds.length
@@ -7184,6 +7760,16 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       timelineGranularity: timelineGranularity, // weekly, monthly, quarterly
       dateRangeFilter: dateRangeFilter, // 1-month-back, 3-months-back, 6-months-back, 12-months-back
       overdueTrackingEnabled: includeOverdueCount, // Whether overdue activity counting is enabled
+      
+      // Specific person IDs information
+      personIdsFilter: specificPersonIds.length > 0 ? {
+        enabled: true,
+        requestedIds: specificPersonIds,
+        foundIds: personsWithTimeline.map(p => p.personId),
+        missingIds: specificPersonIds.filter(id => !personsWithTimeline.some(p => p.personId === id))
+      } : {
+        enabled: false
+      },
       
       // Summary with overdue statistics and database counts
       summary: {
@@ -8342,4 +8928,823 @@ exports.downloadOrganizationFile = async (req, res) => {
  */
 exports.deleteOrganizationFile = async (req, res) => {
   return exports.deleteEntityFile(req, res);
+};
+
+// ===========================
+// PERSON SIDEBAR MANAGEMENT
+// ===========================
+
+/**
+ * Get person sidebar section preferences for the current user
+ */
+exports.getPersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+
+    // Find existing preferences for this user
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    // If no preferences exist, create default ones
+    if (!sidebarPrefs) {
+      const defaultSections = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'organization',
+          name: 'Organization',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 7,
+          draggable: true
+        }
+      ];
+
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences retrieved successfully",
+      sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections) 
+            : []),
+      totalSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections.length 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections).length 
+            : 0)
+    });
+
+  } catch (error) {
+    console.error("Error fetching person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update person sidebar section preferences (toggle visibility, reorder sections)
+ */
+exports.updatePersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+    const { sidebarSections } = req.body;
+
+    // Validate input
+    if (!Array.isArray(sidebarSections)) {
+      return res.status(400).json({
+        success: false,
+        message: "sidebarSections must be an array"
+      });
+    }
+
+    // Validate each section has required properties
+    for (const section of sidebarSections) {
+      if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        });
+      }
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences if none exist
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: sidebarSections
+      });
+    } else {
+      // Update existing preferences
+      sidebarPrefs.sidebarSections = sidebarSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences updated successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error updating person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Reset person sidebar preferences to default
+ */
+exports.resetPersonSidebarPreferences = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+
+    const defaultSections = [
+      {
+        id: 'summary',
+        name: 'Summary',
+        enabled: true,
+        order: 1,
+        draggable: false
+      },
+      {
+        id: 'details',
+        name: 'Details',
+        enabled: true,
+        order: 2,
+        draggable: true
+      },
+      {
+        id: 'organization',
+        name: 'Organization',
+        enabled: true,
+        order: 3,
+        draggable: true
+      },
+      {
+        id: 'deals',
+        name: 'Deals',
+        enabled: true,
+        order: 4,
+        draggable: true
+      },
+      {
+        id: 'overview',
+        name: 'Overview',
+        enabled: true,
+        order: 5,
+        draggable: true
+      },
+      {
+        id: 'smart_bcc',
+        name: 'Smart BCC',
+        enabled: true,
+        order: 6,
+        draggable: true
+      },
+      {
+        id: 'leads',
+        name: 'Leads',
+        enabled: true,
+        order: 7,
+        draggable: true
+      }
+    ];
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences with defaults
+      sidebarPrefs = await PersonSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    } else {
+      // Reset existing preferences to defaults
+      sidebarPrefs.sidebarSections = defaultSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Person sidebar preferences reset to defaults successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error resetting person sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting person sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Toggle a specific sidebar section visibility
+ */
+exports.togglePersonSidebarSection = async (req, res) => {
+  try {
+    const PersonSidebarPreference = require("../../models/leads/personSidebarModel");
+    const masterUserID = req.adminId;
+    const { sectionId, enabled } = req.body;
+
+    // Validate input
+    if (!sectionId || typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: "sectionId and enabled (boolean) are required"
+      });
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await PersonSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      return res.status(404).json({
+        success: false,
+        message: "Person sidebar preferences not found. Please initialize preferences first."
+      });
+    }
+
+    // Ensure sidebarSections is an array (handle both JSON string and object cases)
+    let sectionsArray = sidebarPrefs.sidebarSections;
+    
+    // If it's a string, try to parse it
+    if (typeof sectionsArray === 'string') {
+      try {
+        sectionsArray = JSON.parse(sectionsArray);
+      } catch (parseError) {
+        console.error("Error parsing sidebarSections JSON:", parseError);
+        return res.status(500).json({
+          success: false,
+          message: "Invalid sidebar sections data format"
+        });
+      }
+    }
+
+    // If it's still not an array, initialize with default sections
+    if (!Array.isArray(sectionsArray)) {
+      console.warn("sidebarSections is not an array, initializing with defaults");
+      sectionsArray = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'organization',
+          name: 'Organization',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 7,
+          draggable: true
+        }
+      ];
+    }
+
+    // Update the specific section
+    const sections = sectionsArray.map(section => {
+      if (section.id === sectionId) {
+        return { ...section, enabled };
+      }
+      return section;
+    });
+
+    // Check if the section was found
+    const sectionExists = sections.find(s => s.id === sectionId);
+    if (!sectionExists) {
+      return res.status(404).json({
+        success: false,
+        message: `Section '${sectionId}' not found in sidebar preferences`
+      });
+    }
+
+    // Save updated preferences
+    sidebarPrefs.sidebarSections = sections;
+    sidebarPrefs.updatedAt = new Date();
+    await sidebarPrefs.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+      sidebarSections: sidebarPrefs.sidebarSections,
+      updatedSection: sectionExists
+    });
+
+  } catch (error) {
+    console.error("Error toggling person sidebar section:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error toggling person sidebar section",
+      error: error.message
+    });
+  }
+};
+
+// ===========================
+// ORGANIZATION SIDEBAR MANAGEMENT
+// ===========================
+
+/**
+ * Get organization sidebar section preferences for the current user
+ */
+exports.getOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+
+    // Find existing preferences for this user
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    // If no preferences exist, create default ones
+    if (!sidebarPrefs) {
+      const defaultSections = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'related_organizations',
+          name: 'Related organizations',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'people',
+          name: 'People',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 7,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 8,
+          draggable: true
+        }
+      ];
+
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences retrieved successfully",
+      sidebarSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections) 
+            : []),
+      totalSections: Array.isArray(sidebarPrefs.sidebarSections) 
+        ? sidebarPrefs.sidebarSections.length 
+        : (typeof sidebarPrefs.sidebarSections === 'string' 
+            ? JSON.parse(sidebarPrefs.sidebarSections).length 
+            : 0)
+    });
+
+  } catch (error) {
+    console.error("Error fetching organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update organization sidebar section preferences (toggle visibility, reorder sections)
+ */
+exports.updateOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+    const { sidebarSections } = req.body;
+
+    // Validate input
+    if (!Array.isArray(sidebarSections)) {
+      return res.status(400).json({
+        success: false,
+        message: "sidebarSections must be an array"
+      });
+    }
+
+    // Validate each section has required properties
+    for (const section of sidebarSections) {
+      if (!section.id || typeof section.name !== 'string' || typeof section.enabled !== 'boolean' || typeof section.order !== 'number') {
+        return res.status(400).json({
+          success: false,
+          message: "Each section must have id, name (string), enabled (boolean), and order (number) properties"
+        });
+      }
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences if none exist
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: sidebarSections
+      });
+    } else {
+      // Update existing preferences
+      sidebarPrefs.sidebarSections = sidebarSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences updated successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error updating organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Reset organization sidebar preferences to default
+ */
+exports.resetOrganizationSidebarPreferences = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+
+    const defaultSections = [
+      {
+        id: 'summary',
+        name: 'Summary',
+        enabled: true,
+        order: 1,
+        draggable: false
+      },
+      {
+        id: 'details',
+        name: 'Details',
+        enabled: true,
+        order: 2,
+        draggable: true
+      },
+      {
+        id: 'deals',
+        name: 'Deals',
+        enabled: true,
+        order: 3,
+        draggable: true
+      },
+      {
+        id: 'related_organizations',
+        name: 'Related organizations',
+        enabled: true,
+        order: 4,
+        draggable: true
+      },
+      {
+        id: 'people',
+        name: 'People',
+        enabled: true,
+        order: 5,
+        draggable: true
+      },
+      {
+        id: 'overview',
+        name: 'Overview',
+        enabled: true,
+        order: 6,
+        draggable: true
+      },
+      {
+        id: 'smart_bcc',
+        name: 'Smart BCC',
+        enabled: true,
+        order: 7,
+        draggable: true
+      },
+      {
+        id: 'leads',
+        name: 'Leads',
+        enabled: true,
+        order: 8,
+        draggable: true
+      }
+    ];
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      // Create new preferences with defaults
+      sidebarPrefs = await OrganizationSidebarPreference.create({
+        masterUserID,
+        sidebarSections: defaultSections
+      });
+    } else {
+      // Reset existing preferences to defaults
+      sidebarPrefs.sidebarSections = defaultSections;
+      sidebarPrefs.updatedAt = new Date();
+      await sidebarPrefs.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Organization sidebar preferences reset to defaults successfully",
+      sidebarSections: sidebarPrefs.sidebarSections,
+      totalSections: sidebarPrefs.sidebarSections.length
+    });
+
+  } catch (error) {
+    console.error("Error resetting organization sidebar preferences:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting organization sidebar preferences",
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Toggle a specific organization sidebar section visibility
+ */
+exports.toggleOrganizationSidebarSection = async (req, res) => {
+  try {
+    const OrganizationSidebarPreference = require("../../models/leads/organizationSidebarModel");
+    const masterUserID = req.adminId;
+    const { sectionId, enabled } = req.body;
+
+    // Validate input
+    if (!sectionId || typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: "sectionId and enabled (boolean) are required"
+      });
+    }
+
+    // Find existing preferences
+    let sidebarPrefs = await OrganizationSidebarPreference.findOne({
+      where: { masterUserID }
+    });
+
+    if (!sidebarPrefs) {
+      return res.status(404).json({
+        success: false,
+        message: "Organization sidebar preferences not found. Please initialize preferences first."
+      });
+    }
+
+    // Ensure sidebarSections is an array (handle both JSON string and object cases)
+    let sectionsArray = sidebarPrefs.sidebarSections;
+    
+    // If it's a string, try to parse it
+    if (typeof sectionsArray === 'string') {
+      try {
+        sectionsArray = JSON.parse(sectionsArray);
+      } catch (parseError) {
+        console.error("Error parsing organization sidebarSections JSON:", parseError);
+        return res.status(500).json({
+          success: false,
+          message: "Invalid sidebar sections data format"
+        });
+      }
+    }
+
+    // If it's still not an array, initialize with default sections
+    if (!Array.isArray(sectionsArray)) {
+      console.warn("organization sidebarSections is not an array, initializing with defaults");
+      sectionsArray = [
+        {
+          id: 'summary',
+          name: 'Summary',
+          enabled: true,
+          order: 1,
+          draggable: false
+        },
+        {
+          id: 'details',
+          name: 'Details',
+          enabled: true,
+          order: 2,
+          draggable: true
+        },
+        {
+          id: 'deals',
+          name: 'Deals',
+          enabled: true,
+          order: 3,
+          draggable: true
+        },
+        {
+          id: 'related_organizations',
+          name: 'Related organizations',
+          enabled: true,
+          order: 4,
+          draggable: true
+        },
+        {
+          id: 'people',
+          name: 'People',
+          enabled: true,
+          order: 5,
+          draggable: true
+        },
+        {
+          id: 'overview',
+          name: 'Overview',
+          enabled: true,
+          order: 6,
+          draggable: true
+        },
+        {
+          id: 'smart_bcc',
+          name: 'Smart BCC',
+          enabled: true,
+          order: 7,
+          draggable: true
+        },
+        {
+          id: 'leads',
+          name: 'Leads',
+          enabled: true,
+          order: 8,
+          draggable: true
+        }
+      ];
+    }
+
+    // Update the specific section
+    const sections = sectionsArray.map(section => {
+      if (section.id === sectionId) {
+        return { ...section, enabled };
+      }
+      return section;
+    });
+
+    // Check if the section was found
+    const sectionExists = sections.find(s => s.id === sectionId);
+    if (!sectionExists) {
+      return res.status(404).json({
+        success: false,
+        message: `Section '${sectionId}' not found in organization sidebar preferences`
+      });
+    }
+
+    // Save updated preferences
+    sidebarPrefs.sidebarSections = sections;
+    sidebarPrefs.updatedAt = new Date();
+    await sidebarPrefs.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Section '${sectionId}' ${enabled ? 'enabled' : 'disabled'} successfully`,
+      sidebarSections: sidebarPrefs.sidebarSections,
+      updatedSection: sectionExists
+    });
+
+  } catch (error) {
+    console.error("Error toggling organization sidebar section:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error toggling organization sidebar section",
+      error: error.message
+    });
+  }
 };

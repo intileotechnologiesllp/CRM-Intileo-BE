@@ -1113,14 +1113,98 @@ exports.markAsUnread = async (req, res) => {
       .json({ message: "emailIds must be a non-empty array." });
   }
 
-  const [updatedCount] = await Email.update(
-    { isRead: false },
-    { where: { emailID: emailIds, masterUserID } }
-  );
+  try {
+    // Update database first
+    const [updatedCount] = await Email.update(
+      { isRead: false },
+      { where: { emailID: emailIds, masterUserID } }
+    );
 
-  res
-    .status(200)
-    .json({ message: `${updatedCount} email(s) marked as unread.` });
+    // Fetch email details to sync with IMAP server
+    const emails = await Email.findAll({
+      where: { emailID: emailIds, masterUserID },
+      attributes: ['emailID', 'uid', 'folder', 'messageId']
+    });
+
+    // Get user credentials for IMAP connection
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+
+    if (userCredential && userCredential.email && userCredential.appPassword) {
+      // Detect provider from email
+      const emailDomain = userCredential.email.split('@')[1].toLowerCase();
+      let provider = 'gmail'; // default
+      if (emailDomain.includes('yandex')) {
+        provider = 'yandex';
+      }
+
+      const providerConfig = PROVIDER_CONFIG[provider];
+
+      // Sync unread status with IMAP server for each email
+      for (const email of emails) {
+        if (email.uid) {
+          try {
+            const imapConfig = {
+              imap: {
+                user: userCredential.email,
+                password: userCredential.appPassword,
+                host: providerConfig.host,
+                port: providerConfig.port,
+                tls: providerConfig.tls,
+                authTimeout: 10000,
+                connTimeout: 10000,
+                tlsOptions: {
+                  rejectUnauthorized: false,
+                  servername: providerConfig.host
+                }
+              },
+            };
+
+            const connection = await Imap.connect(imapConfig);
+            
+            // Determine folder name based on provider and folder type
+            let folderName = 'INBOX';
+            if (email.folder === 'sent') {
+              folderName = provider === 'gmail' ? '[Gmail]/Sent Mail' : 'Sent';
+            } else if (email.folder === 'drafts') {
+              folderName = provider === 'gmail' ? '[Gmail]/Drafts' : 'Drafts';
+            } else if (email.folder === 'trash') {
+              folderName = provider === 'gmail' ? '[Gmail]/Trash' : 'Trash';
+            } else if (email.folder === 'archive') {
+              folderName = provider === 'gmail' ? '[Gmail]/All Mail' : 'Archive';
+            }
+
+            await connection.openBox(folderName);
+            
+            // Remove the \Seen flag to mark as unread
+            await connection.delFlags(email.uid, ['\\Seen']);
+            
+            await connection.end();
+            
+            console.log(`✅ [IMAP SYNC] Marked email ${email.emailID} (UID: ${email.uid}) as unread on ${provider}`);
+          } catch (imapError) {
+            console.error(`❌ [IMAP SYNC] Failed to sync email ${email.emailID} with IMAP:`, imapError.message);
+            // Continue with other emails even if one fails
+          }
+        }
+      }
+    }
+
+    res
+      .status(200)
+      .json({ 
+        message: `${updatedCount} email(s) marked as unread.`,
+        syncedToIMAP: emails.filter(e => e.uid).length,
+        totalEmails: updatedCount
+      });
+  } catch (error) {
+    console.error('Error marking emails as unread:', error);
+    res.status(500).json({ 
+      message: 'Failed to mark emails as unread.', 
+      error: error.message 
+    });
+  }
 };
 
 exports.markAsUnreadSingle = async (req, res) => {
@@ -1132,6 +1216,7 @@ exports.markAsUnreadSingle = async (req, res) => {
   }
 
   try {
+    // Update database first
     const [updatedCount] = await Email.update(
       { isRead: false },
       { where: { emailID, masterUserID } }
@@ -1143,8 +1228,84 @@ exports.markAsUnreadSingle = async (req, res) => {
         .json({ message: "Email not found or already unread." });
     }
 
-    res.status(200).json({ message: "Email marked as unread." });
+    // Fetch email details to sync with IMAP server
+    const email = await Email.findOne({
+      where: { emailID, masterUserID },
+      attributes: ['emailID', 'uid', 'folder', 'messageId']
+    });
+
+    let syncedToIMAP = false;
+
+    if (email && email.uid) {
+      // Get user credentials for IMAP connection
+      const userCredential = await UserCredential.findOne({
+        where: { masterUserID }
+      });
+
+      if (userCredential && userCredential.email && userCredential.appPassword) {
+        try {
+          // Detect provider from email
+          const emailDomain = userCredential.email.split('@')[1].toLowerCase();
+          let provider = 'gmail'; // default
+          if (emailDomain.includes('yandex')) {
+            provider = 'yandex';
+          }
+
+          const providerConfig = PROVIDER_CONFIG[provider];
+
+          const imapConfig = {
+            imap: {
+              user: userCredential.email,
+              password: userCredential.appPassword,
+              host: providerConfig.host,
+              port: providerConfig.port,
+              tls: providerConfig.tls,
+              authTimeout: 10000,
+              connTimeout: 10000,
+              tlsOptions: {
+                rejectUnauthorized: false,
+                servername: providerConfig.host
+              }
+            },
+          };
+
+          const connection = await Imap.connect(imapConfig);
+          
+          // Determine folder name based on provider and folder type
+          let folderName = 'INBOX';
+          if (email.folder === 'sent') {
+            folderName = provider === 'gmail' ? '[Gmail]/Sent Mail' : 'Sent';
+          } else if (email.folder === 'drafts') {
+            folderName = provider === 'gmail' ? '[Gmail]/Drafts' : 'Drafts';
+          } else if (email.folder === 'trash') {
+            folderName = provider === 'gmail' ? '[Gmail]/Trash' : 'Trash';
+          } else if (email.folder === 'archive') {
+            folderName = provider === 'gmail' ? '[Gmail]/All Mail' : 'Archive';
+          }
+
+          await connection.openBox(folderName);
+          
+          // Remove the \Seen flag to mark as unread
+          await connection.delFlags(email.uid, ['\\Seen']);
+          
+          await connection.end();
+          
+          syncedToIMAP = true;
+          console.log(`✅ [IMAP SYNC] Marked email ${email.emailID} (UID: ${email.uid}) as unread on ${provider}`);
+        } catch (imapError) {
+          console.error(`❌ [IMAP SYNC] Failed to sync email ${email.emailID} with IMAP:`, imapError.message);
+          // Don't fail the request if IMAP sync fails, just log it
+        }
+      }
+    }
+
+    res.status(200).json({ 
+      message: "Email marked as unread.",
+      syncedToIMAP: syncedToIMAP,
+      emailID: emailID
+    });
   } catch (error) {
+    console.error('Error marking email as unread:', error);
     res
       .status(500)
       .json({ message: "Failed to mark as unread.", error: error.message });
@@ -1189,12 +1350,96 @@ exports.markAsRead = async (req, res) => {
       .json({ message: "emailIds must be a non-empty array." });
   }
 
-  const [updatedCount] = await Email.update(
-    { isRead: true },
-    { where: { emailID: emailIds, masterUserID } }
-  );
+  try {
+    // Update database first
+    const [updatedCount] = await Email.update(
+      { isRead: true },
+      { where: { emailID: emailIds, masterUserID } }
+    );
 
-  res.status(200).json({ message: `${updatedCount} email(s) marked as read.` });
+    // Fetch email details to sync with IMAP server
+    const emails = await Email.findAll({
+      where: { emailID: emailIds, masterUserID },
+      attributes: ['emailID', 'uid', 'folder', 'messageId']
+    });
+
+    // Get user credentials for IMAP connection
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID }
+    });
+
+    if (userCredential && userCredential.email && userCredential.appPassword) {
+      // Detect provider from email
+      const emailDomain = userCredential.email.split('@')[1].toLowerCase();
+      let provider = 'gmail'; // default
+      if (emailDomain.includes('yandex')) {
+        provider = 'yandex';
+      }
+
+      const providerConfig = PROVIDER_CONFIG[provider];
+
+      // Sync read status with IMAP server for each email
+      for (const email of emails) {
+        if (email.uid) {
+          try {
+            const imapConfig = {
+              imap: {
+                user: userCredential.email,
+                password: userCredential.appPassword,
+                host: providerConfig.host,
+                port: providerConfig.port,
+                tls: providerConfig.tls,
+                authTimeout: 10000,
+                connTimeout: 10000,
+                tlsOptions: {
+                  rejectUnauthorized: false,
+                  servername: providerConfig.host
+                }
+              },
+            };
+
+            const connection = await Imap.connect(imapConfig);
+            
+            // Determine folder name based on provider and folder type
+            let folderName = 'INBOX';
+            if (email.folder === 'sent') {
+              folderName = provider === 'gmail' ? '[Gmail]/Sent Mail' : 'Sent';
+            } else if (email.folder === 'drafts') {
+              folderName = provider === 'gmail' ? '[Gmail]/Drafts' : 'Drafts';
+            } else if (email.folder === 'trash') {
+              folderName = provider === 'gmail' ? '[Gmail]/Trash' : 'Trash';
+            } else if (email.folder === 'archive') {
+              folderName = provider === 'gmail' ? '[Gmail]/All Mail' : 'Archive';
+            }
+
+            await connection.openBox(folderName);
+            
+            // Add the \Seen flag to mark as read
+            await connection.addFlags(email.uid, ['\\Seen']);
+            
+            await connection.end();
+            
+            console.log(`✅ [IMAP SYNC] Marked email ${email.emailID} (UID: ${email.uid}) as read on ${provider}`);
+          } catch (imapError) {
+            console.error(`❌ [IMAP SYNC] Failed to sync email ${email.emailID} with IMAP:`, imapError.message);
+            // Continue with other emails even if one fails
+          }
+        }
+      }
+    }
+
+    res.status(200).json({ 
+      message: `${updatedCount} email(s) marked as read.`,
+      syncedToIMAP: emails.filter(e => e.uid).length,
+      totalEmails: updatedCount
+    });
+  } catch (error) {
+    console.error('Error marking emails as read:', error);
+    res.status(500).json({ 
+      message: 'Failed to mark emails as read.', 
+      error: error.message 
+    });
+  }
 };
 
 exports.updateEmailSharing = async (req, res) => {
@@ -1443,6 +1688,28 @@ exports.getSignature = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       message: "Failed to fetch signature data.",
+      error: error.message,
+    });
+  }
+};
+exports.deleteSignature = async (req, res) => {
+  const masterUserID = req.adminId;
+  try {
+    const userCredential = await UserCredential.findOne({
+      where: { masterUserID },
+    });
+    if (!userCredential) {
+      return res.status(404).json({ message: "User credentials not found." });
+    }
+    await userCredential.update({
+      signature: null,
+      signatureName: null,
+      signatureImage: null,
+    });
+    res.status(200).json({ message: "Signature deleted successfully." });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to delete signature.",
       error: error.message,
     });
   }

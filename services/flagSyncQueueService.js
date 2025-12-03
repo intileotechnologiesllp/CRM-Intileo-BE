@@ -20,10 +20,16 @@ class FlagSyncQueueService {
       if (this.isInitialized) return;
       
       console.log('🔌 [FLAG SYNC QUEUE] Initializing RabbitMQ connection...');
-      this.connection = await amqp.connect(process.env.RABBITMQ_URL || 'amqp://localhost');
-      // Attach connection-level handlers to avoid unhandled events
-      this.connection.on('error', (err) => {
-        console.error('❌ [FLAG SYNC QUEUE] RabbitMQ connection error:', err && err.message ? err.message : err);
+      this.connection = await amqp.connect(process.env.RABBITMQ_URL ||'amqp://localhost');
+      this.channel = await this.connection.createChannel();
+      
+      // Declare the main flag sync queue with durability
+      // Create the queue directly without checking first
+      console.log('🔧 [FLAG SYNC QUEUE] Ensuring SYNC_FLAGS_QUEUE exists...');
+      
+      // Assert queue with minimal settings to match existing queue
+      await this.channel.assertQueue('SYNC_FLAGS_QUEUE', {
+        durable: true
       });
       this.connection.on('close', () => {
         console.warn('⚠️ [FLAG SYNC QUEUE] RabbitMQ connection closed');
@@ -61,7 +67,7 @@ class FlagSyncQueueService {
     }
   }
 
-  // Queue flag sync job for a specific user
+  // Queue flag sync job for a specific user with smart batching
   async queueFlagSync(userID, emailUIDs = [], priority = 5) {
     return this.publishLimit(async () => {
       try {
@@ -69,30 +75,115 @@ class FlagSyncQueueService {
           await this.initialize();
         }
 
-        const job = {
-          userID,
-          emailUIDs,
-          timestamp: new Date().toISOString(),
-          priority,
-          jobId: `flag_sync_${userID}_${Date.now()}`,
-          retryCount: 0,
-          maxRetries: 3
-        };
+        // 🚀 FIX 1: Smart batching for large email sets
+        const BATCH_SIZE = 200; // Process 200 emails per job
+        
+        if (emailUIDs.length === 0) {
+          // Empty array means process all emails for user - but we'll batch them
+          console.log(`📊 [FLAG SYNC BATCHING] Queuing flag sync for ALL emails of user ${userID}`);
+          
+          const job = {
+            userID,
+            emailUIDs: [],
+            timestamp: new Date().toISOString(),
+            priority,
+            jobId: `flag_sync_${userID}_all_${Date.now()}`,
+            retryCount: 0,
+            maxRetries: 3,
+            batchType: 'all_emails'
+          };
 
-        // Send job to queue with priority
-        await this.channel.sendToQueue(
-          'SYNC_FLAGS_QUEUE',
-          Buffer.from(JSON.stringify(job)),
-          {
-            persistent: true,
-            priority: priority,
-            messageId: job.jobId,
-            timestamp: Date.now()
+          await this.channel.sendToQueue(
+            'SYNC_FLAGS_QUEUE',
+            Buffer.from(JSON.stringify(job)),
+            {
+              persistent: true,
+              priority: priority,
+              messageId: job.jobId,
+              timestamp: Date.now()
+            }
+          );
+
+          console.log(`📤 [FLAG SYNC QUEUE] Queued flag sync for ALL emails of user ${userID} (priority: ${priority})`);
+          return job.jobId;
+          
+        } else if (emailUIDs.length <= BATCH_SIZE) {
+          // Small batch, process as single job
+          const job = {
+            userID,
+            emailUIDs,
+            timestamp: new Date().toISOString(),
+            priority,
+            jobId: `flag_sync_${userID}_${Date.now()}`,
+            retryCount: 0,
+            maxRetries: 3,
+            batchType: 'single_batch'
+          };
+
+          await this.channel.sendToQueue(
+            'SYNC_FLAGS_QUEUE',
+            Buffer.from(JSON.stringify(job)),
+            {
+              persistent: true,
+              priority: priority,
+              messageId: job.jobId,
+              timestamp: Date.now()
+            }
+          );
+
+          console.log(`📤 [FLAG SYNC QUEUE] Queued flag sync for user ${userID} (${emailUIDs.length} emails, priority: ${priority})`);
+          return job.jobId;
+          
+        } else {
+          // 🚀 Large email set - split into batches
+          const totalBatches = Math.ceil(emailUIDs.length / BATCH_SIZE);
+          console.log(`📊 [FLAG SYNC BATCHING] Splitting ${emailUIDs.length} emails into ${totalBatches} batches of ${BATCH_SIZE} for user ${userID}`);
+          
+          const batchJobIds = [];
+          
+          for (let i = 0; i < emailUIDs.length; i += BATCH_SIZE) {
+            const batchUIDs = emailUIDs.slice(i, i + BATCH_SIZE);
+            const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+            
+            const job = {
+              userID,
+              emailUIDs: batchUIDs,
+              timestamp: new Date().toISOString(),
+              priority: priority + (batchNumber === 1 ? 2 : 0), // Higher priority for first batch
+              jobId: `flag_sync_${userID}_batch${batchNumber}_${Date.now()}`,
+              retryCount: 0,
+              maxRetries: 3,
+              batchType: 'multi_batch',
+              batchInfo: {
+                batchNumber,
+                totalBatches,
+                isFirstBatch: batchNumber === 1,
+                isLastBatch: batchNumber === totalBatches
+              }
+            };
+
+            await this.channel.sendToQueue(
+              'SYNC_FLAGS_QUEUE',
+              Buffer.from(JSON.stringify(job)),
+              {
+                persistent: true,
+                priority: job.priority,
+                messageId: job.jobId,
+                timestamp: Date.now()
+              }
+            );
+            
+            batchJobIds.push(job.jobId);
+            
+            // Small delay between batch submissions to spread load
+            if (i + BATCH_SIZE < emailUIDs.length) {
+              await new Promise(resolve => setTimeout(resolve, 10));
+            }
           }
-        );
-
-        console.log(`📤 [FLAG SYNC QUEUE] Queued flag sync for user ${userID} (${emailUIDs.length} emails, priority: ${priority})`);
-        return job.jobId;
+          
+          console.log(`📤 [FLAG SYNC BATCHING] Queued ${totalBatches} batches for user ${userID} (${emailUIDs.length} total emails)`);
+          return batchJobIds; // Return array of job IDs for batched operation
+        }
 
       } catch (error) {
         console.error(`❌ [FLAG SYNC QUEUE] Failed to queue flag sync for user ${userID}:`, error.message);

@@ -3319,124 +3319,149 @@ exports.getAllLeadDetails = async (req, res) => {
   try {
     // Get the user's email address from credentials
     const lead = await Lead.findByPk(leadId);
-    if (!lead || !lead.email) {
+    if (!lead) {
       await logAuditTrail(
         PROGRAMS.LEAD_MANAGEMENT,
         "LEAD_DETAILS_FETCH",
         masterUserID,
-        "Lead details fetch failed: Lead or lead email not found.",
+        "Lead details fetch failed: Lead not found.",
         null
       );
-      return res.status(404).json({ message: "Lead or lead email not found." });
+      return res.status(404).json({ message: "Lead not found." });
     }
-    //     const deal = await Deal.findByPk(dealId);
-    // if (!deal || !deal.email) {
-    //   return res.status(404).json({ message: "Lead or lead email not found." });
-    // }
-    const clientEmail = lead.email;
+
+    // Allow missing lead.email: proceed but skip email-related queries when absent
+    const clientEmail = lead.email || null;
+    if (!clientEmail) {
+      console.warn(`📌 [migrationLead:getAllLeadDetails] Lead ${leadId} exists but has no email; email-related data will be omitted.`);
+      try {
+        await logAuditTrail(
+          PROGRAMS.LEAD_MANAGEMENT,
+          "LEAD_DETAILS_FETCH",
+          masterUserID,
+          `Lead ${leadId} has no email; email-related data will be omitted.`,
+          null
+        );
+      } catch (auditErr) {
+        console.error('Error logging audit trail for missing lead email:', auditErr);
+      }
+    }
 
     // Optimize email fetching with pagination and size limits
     const maxEmailLimit = Math.min(parseInt(emailLimit) || 25, 50); // Cap at 50 emails max
     const maxBodyLength = 1000; // Truncate email bodies to prevent large responses
 
-    let emails = await Email.findAll({
-      where: {
-        [Op.or]: [
-          { sender: clientEmail },
-          { recipient: { [Op.like]: `%${clientEmail}%` } },
-        ],
-      },
-      attributes: [
-        "emailID",
-        "messageId",
-        "inReplyTo",
-        "references",
-        "sender",
-        "recipient",
-        "subject",
-        "createdAt",
-        "folder",
-        // Truncate body to prevent large responses
-        [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
-      ],
-      include: [
-        {
-          model: Attachment,
-          as: "attachments",
-          attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
-        },
-      ],
-      order: [["createdAt", "DESC"]], // Get most recent first
-      limit: maxEmailLimit,
-      offset: emailOffset,
-    });
-
-    // Filter out emails with "RE:" in subject and no inReplyTo or references
-    emails = emails.filter((email) => {
-      const hasRE =
-        email.subject && email.subject.toLowerCase().startsWith("re:");
-      const noThread =
-        (!email.inReplyTo || email.inReplyTo === "") &&
-        (!email.references || email.references === "");
-      return !(hasRE && noThread);
-    });
-
-    let emailsExist = emails.length > 0;
-    if (!emailsExist) {
-      emails = [];
-    }
-
-    // Simplified thread handling - only get direct replies to prevent exponential growth
-    const threadIds = [];
-    emails.forEach((email) => {
-      if (email.messageId) threadIds.push(email.messageId);
-      if (email.inReplyTo) threadIds.push(email.inReplyTo);
-    });
-    const uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
-
-    // Fetch related emails with stricter limits
+    // Prepare defaults in case email is missing
+    let emails = [];
     let relatedEmails = [];
-    if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
-      // Prevent too many thread lookups
-      relatedEmails = await Email.findAll({
+    let emailsExist = false;
+    let uniqueThreadIds = [];
+
+    if (clientEmail) {
+      emails = await Email.findAll({
         where: {
           [Op.or]: [
-            { messageId: { [Op.in]: uniqueThreadIds } },
-            { inReplyTo: { [Op.in]: uniqueThreadIds } },
+            { sender: clientEmail },
+            { recipient: { [Op.like]: `%${clientEmail}%` } },
           ],
         },
         attributes: [
           "emailID",
           "messageId",
           "inReplyTo",
+          "references",
           "sender",
           "recipient",
           "subject",
           "createdAt",
           "folder",
+          // Truncate body to prevent large responses
           [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
         ],
         include: [
           {
             model: Attachment,
             as: "attachments",
-            attributes: ["attachmentID", "filename", "size", "contentType"],
+            attributes: ["attachmentID", "filename", "size", "contentType"], // Exclude file paths to reduce size
           },
         ],
-        order: [["createdAt", "DESC"]],
-        limit: maxEmailLimit, // Use the same limit
+        order: [["createdAt", "DESC"]], // Get most recent first
+        limit: maxEmailLimit,
+        offset: emailOffset,
       });
 
-      // Remove duplicates by messageId
-      const seen = new Set();
-      relatedEmails = relatedEmails.filter((email) => {
-        if (seen.has(email.messageId)) return false;
-        seen.add(email.messageId);
-        return true;
+      // Filter out emails with "RE:" in subject and no inReplyTo or references
+      emails = emails.filter((email) => {
+        const hasRE =
+          email.subject && email.subject.toLowerCase().startsWith("re:");
+        const noThread =
+          (!email.inReplyTo || email.inReplyTo === "") &&
+          (!email.references || email.references === "");
+        return !(hasRE && noThread);
       });
+
+      emailsExist = emails.length > 0;
+      if (!emailsExist) {
+        emails = [];
+      }
+
+      // Simplified thread handling - only get direct replies to prevent exponential growth
+      const threadIds = [];
+      emails.forEach((email) => {
+        if (email.messageId) threadIds.push(email.messageId);
+        if (email.inReplyTo) threadIds.push(email.inReplyTo);
+      });
+      uniqueThreadIds = [...new Set(threadIds.filter(Boolean))];
+
+      // Fetch related emails with stricter limits
+      if (uniqueThreadIds.length > 0 && uniqueThreadIds.length < 20) {
+        // Prevent too many thread lookups
+        relatedEmails = await Email.findAll({
+          where: {
+            [Op.or]: [
+              { messageId: { [Op.in]: uniqueThreadIds } },
+              { inReplyTo: { [Op.in]: uniqueThreadIds } },
+            ],
+          },
+          attributes: [
+            "emailID",
+            "messageId",
+            "inReplyTo",
+            "sender",
+            "recipient",
+            "subject",
+            "createdAt",
+            "folder",
+            [Sequelize.fn("LEFT", Sequelize.col("body"), maxBodyLength), "body"],
+          ],
+          include: [
+            {
+              model: Attachment,
+              as: "attachments",
+              attributes: ["attachmentID", "filename", "size", "contentType"],
+            },
+          ],
+          order: [["createdAt", "DESC"]],
+          limit: maxEmailLimit, // Use the same limit
+        });
+
+        // Remove duplicates by messageId
+        const seen = new Set();
+        relatedEmails = relatedEmails.filter((email) => {
+          if (seen.has(email.messageId)) return false;
+          seen.add(email.messageId);
+          return true;
+        });
+      } else {
+        // If too many threads, just use the original emails
+        relatedEmails = emails;
+      }
     } else {
-      // If too many threads, just use the original emails
-      relatedEmails = emails;
+      // No clientEmail: keep relatedEmails and emails empty
+      emails = [];
+      relatedEmails = [];
+      emailsExist = false;
+      uniqueThreadIds = [];
     }
     const notes = await LeadNote.findAll({
       where: { leadId },

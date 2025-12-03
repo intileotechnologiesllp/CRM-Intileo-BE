@@ -94,6 +94,15 @@ const Activity = require("../../models/activity/activityModel");
 const MasterUser = require("../../models/master/masterUserModel");
 const { Op } = require("sequelize");
 const ReportFolder = require("../../models/insight/reportFolderModel");
+// const {  generateActivityPerformanceDataForSave } = require("./report/activityReportController");
+const LeadPerson = require("../../models/leads/leadPersonModel");
+const { generateActivityPerformanceDataForSave, generateEmailPerformanceDataForSave } = require("../../utils/insight/activityReport");
+const { generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave, generateDealProgressDataForSave } = require("../../utils/insight/dealReport");
+const { generateLeadPerformanceDataForSave, generateLeadConversionDataForSave } = require("../../utils/insight/leadReport.js");
+const { generatePersonPerformanceDataForSave } = require("../../utils/insight/contactperson");
+const { generateOrganizationPerformanceDataForSave } = require("../../utils/insight/organizationReport");
+// const { generateExistingDealPerformanceDataForSave, generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave } = require("./report/dealReportController");
+// const { generatePersonPerformanceDataForSave, generateOrganizationPerformanceDataForSave } = require("./report/contactReportController");
 
 // =============== DASHBOARD MANAGEMENT ===============
 
@@ -2399,6 +2408,7 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
     const role = req.role;
+    const {masterUserId, startDate, endDate} = req.query;
 
     // Validate dashboardId
     if (!dashboardId) {
@@ -2449,10 +2459,48 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
       return goalData;
     });
 
+    const result = []
+    if(masterUserId){
+      for(let i = 0; i< parsedGoals.length; i++){
+        // console.log(parsedGoals[i])
+      const entity = parsedGoals[i]?.entity;
+      const goalType = parsedGoals[i]?.goalType;
+      const ownerId = parsedGoals[i]?.ownerId;
+      const assignee = parsedGoals[i]?.assignee;
+      const assignId = parsedGoals[i]?.assignId;
+      const pipeline = parsedGoals[i]?.pipeline;
+      const pipelineStage = parsedGoals[i]?.pipelineStage;
+      const startDate = parsedGoals[i]?.startDate;
+      const endDate = parsedGoals[i]?.endDate;
+      const trackingMetric = parsedGoals[i]?.trackingMetric;
+      const period = parsedGoals[i]?.period;
+
+      let config = parsedGoals[i]?.config;
+
+      const data = await processGoalData({
+        entity,
+        goalType,
+        assignee,
+        assignId: masterUserId,
+        pipeline,
+        pipelineStage,
+        startDate: startDate,
+        endDate: endDate,
+        trackingMetric
+      }, null, period);
+      
+      // result.push(data)
+      config = {...config, ...data};
+      parsedGoals[i]["config"] = config;
+      // parsedGoals[i]["reportData"] = data
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: `Successfully fetched goals for dashboardId ${dashboardId}`,
       data: parsedGoals,
+      // result: result
     });
   } catch (error) {
     console.error("Error fetching goals:", error);
@@ -3175,7 +3223,6 @@ async function processGoalData(goal, ownerId, periodFilter) {
     endDate,
     trackingMetric,
   } = goal;
-
   // Accept selectedColumns as a new argument (array of columns for this entity)
   let selectedColumns = arguments[3] || [];
 
@@ -4064,7 +4111,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
   );
   console.log(flattened.length, data.length)
   return {
-    goal: goal.toJSON(),
+    goal:  goal,
     records: flattened,
     summary: summary,
     monthlyBreakdown: breakdown,
@@ -6398,7 +6445,11 @@ async function calculateGoalProgress(goal, ownerId) {
     whereClause.masterUserID = assignee;
   } else if (ownerId && !assignId && !assignee) {
     // Fallback to owner ID if no specific assignment
-    whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+    if (entity === "Activity") {
+      whereClause[Op.or] = [{ masterUserID: ownerId }, { assignedTo: ownerId }];
+    } else {
+      whereClause[Op.or] = [{ masterUserID: ownerId }, { ownerId: ownerId }];
+    }
   }
   // If assignId is "everyone" or assignee is "Company (everyone)" or "All", don't add user filter to get all data
 
@@ -7694,6 +7745,11 @@ exports.GetReportsDataReportWise = async (req, res) => {
         yaxis: config.yaxis || [],
       },
       filters: config.filters || [],
+      segmentedBy: config.segmentedBy,
+      durationUnit: config.durationUnit,
+      duration: config.duration,
+      xaxis: config.xaxis,
+      yaxis: config.yaxis
     });
   } catch (error) {
     console.error("Error fetching report data:", error);
@@ -7709,6 +7765,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
+    const {masterUserId, startDate, endDate} = req.query;
     const role = req.role;
 
     // Validate dashboardId
@@ -7734,6 +7791,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       whereCondition.ownerId = ownerId;
     }
 
+    
     whereCondition.isActive = true;
     // Fetch reports for this dashboard
     const reports = await Report.findAll({
@@ -7754,6 +7812,177 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       order: [["createdAt", "ASC"]],
     });
 
+    const obj = {
+      "Deal": Deal,
+      "Activity": Activity,
+      "Contact": LeadPerson
+    }
+    const reportData = [];
+
+    if (masterUserId || (startDate && endDate) ) {
+      for (let i = 0; i < reports.length; i++) {
+        const entity = reports[i].entity;
+        const type = reports[i]?.type;
+        const ownerId = reports[i]?.ownerId;
+        const config = JSON.parse(reports[i]?.config || "{}");
+
+        let data = null;
+        let startDateCondition = {};
+        let endDateCondition = {};
+        if(startDate){
+          startDateCondition = {
+              "column": "startDateTime",
+              "operator": "is",
+              "value": startDate
+          }
+        }
+        if(endDate){
+          endDateCondition = {
+              "column": "startDateTime",
+              "operator": "is",
+              "value": endDate
+          }
+        }
+        const filter = config.filters ? {...config.filters,
+              condition: [
+               startDateCondition,
+               endDateCondition
+              ]
+            } : {
+              condition: [
+                startDateCondition,
+                endDateCondition
+              ]
+            }
+        if (entity === "Activity" && type === "Performance") {
+          data = await generateActivityPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            // {},
+            filter,
+            masterUserId
+          );
+        }
+        else if (entity === "Activity" && type === "Emails") {
+          data = await generateEmailPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        }
+        else if (entity === "Lead" && type === "Performance") {
+          data = await generateLeadPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Lead" && type === "Conversion") {
+          data = await generateLeadConversionDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Deal" && type === "Conversion") {
+          data = await generateDealConversionDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Deal" && type === "Progress") {
+          data = await generateDealProgressDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            "",
+            masterUserId
+          );
+        }
+        else if (entity === "Deal" && type === "Duration") {
+          data = await generateDealDurationData(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.duration,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Deal" && type === "Performance") {
+          data = await generateDealPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Contact" && type === "Person") {
+          data = await generatePersonPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        } 
+        else if (entity === "Contact" && type === "Organization") {
+          data = await generateOrganizationPerformanceDataForSave(
+            ownerId,
+            "",
+            config?.xaxis,
+            config?.yaxis,
+            config?.durationUnit,
+            config?.segmentedBy,
+            filter,
+            masterUserId
+          );
+        }
+
+    // 👇 Attach the result directly to the report object
+        config["reportData"] = data?.data || []
+        reports[i].dataValues.config = config;
+        reports[i].dataValues.reportData = data?.data;
+      }
+    }
     // Filter more precisely to avoid partial matches (e.g., "20" matching "200")
     const preciseFilteredReports = reports.filter((report) => {
       if (!report.dashboardIds) return false;
@@ -7767,6 +7996,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       const data = r.toJSON();
       return {
         ...data,
+        configData: data.data,
         config:
           typeof data.config === "string"
             ? JSON.parse(data.config)
@@ -7782,6 +8012,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
       success: true,
       message: `Successfully fetched reports for dashboardId ${dashboardId}`,
       data: formattedReports,
+      // report: reportData
     });
   } catch (error) {
     console.error("Error getting reports for dashboard:", error);

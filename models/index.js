@@ -21,6 +21,12 @@ const GroupVisibility = require("../models/admin/groupVisibilityModel");
 const LeadOrganization = require("./leads/leadOrganizationModel");
 const DeviceActivity = require("./deviceActivity/deviceActivity");
 const permissionSet = require("./permissionsetModel");
+const Label = require("./admin/masters/labelModel");
+const ContactSyncConfig = require("./contact/contactSyncConfigModel");
+const ContactSyncHistory = require("./contact/contactSyncHistoryModel");
+const ContactChangeLog = require("./contact/contactChangeLogModel");
+const ContactSyncMapping = require("./contact/contactSyncMappingModel");
+const CompanySettings = require("./company/companySettingsModel");
 
 // GroupVisibility.belongsTo(Person, { as: "GroupPerson", foreignKey: "personId" });
 // Person.hasMany(GroupVisibility, { foreignKey: "personId", as: "GroupVisibility" });
@@ -134,6 +140,8 @@ MasterUser.hasMany(CustomField, {
   as: "CreatedCustomFields",
 });
 
+Email.belongsTo(MasterUser, { foreignKey: "masterUserID", as: "MasterUser" });
+
 // Email-Deal associations
 Email.belongsTo(Deal, { foreignKey: "dealId", as: "Deal" });
 Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
@@ -141,6 +149,10 @@ Deal.hasMany(Email, { foreignKey: "dealId", as: "Emails" });
 // Email-Lead associations
 Email.belongsTo(Lead, { foreignKey: "leadId", as: "Lead" });
 Lead.hasMany(Email, { foreignKey: "leadId", as: "Emails" });
+
+// Email-Label associations
+Email.belongsTo(Label, { foreignKey: "labelId", as: "Label" });
+Label.hasMany(Email, { foreignKey: "labelId", as: "Emails" });
 
 // Ensure Deal has the inverse belongsTo associations so includes work correctly
 // (some associations were defined only on the hasMany side previously)
@@ -215,6 +227,46 @@ MasterUser.belongsTo(permissionSet, {
   as: "globalPermissionSet",
 });
 
+// Contact Sync Associations
+ContactSyncConfig.hasMany(ContactSyncHistory, {
+  foreignKey: "syncConfigId",
+  as: "SyncHistory",
+  onDelete: "CASCADE",
+});
+ContactSyncHistory.belongsTo(ContactSyncConfig, {
+  foreignKey: "syncConfigId",
+  as: "SyncConfig",
+});
+
+ContactSyncHistory.hasMany(ContactChangeLog, {
+  foreignKey: "syncHistoryId",
+  as: "ChangeLogs",
+  onDelete: "CASCADE",
+});
+ContactChangeLog.belongsTo(ContactSyncHistory, {
+  foreignKey: "syncHistoryId",
+  as: "SyncHistory",
+});
+
+ContactSyncConfig.belongsTo(MasterUser, {
+  foreignKey: "masterUserID",
+  targetKey: "masterUserID",
+  as: "MasterUser",
+});
+MasterUser.hasMany(ContactSyncConfig, {
+  foreignKey: "masterUserID",
+  as: "ContactSyncConfigs",
+});
+
+ContactSyncMapping.belongsTo(Person, {
+  foreignKey: "personId",
+  as: "Person",
+});
+Person.hasOne(ContactSyncMapping, {
+  foreignKey: "personId",
+  as: "GoogleMapping",
+});
+
 module.exports = {
   Lead,
   LeadDetails,
@@ -236,4 +288,10 @@ module.exports = {
   Goal,
   DeviceActivity,
   permissionSet,
+  Label,
+  ContactSyncConfig,
+  ContactSyncHistory,
+  ContactChangeLog,
+  ContactSyncMapping,
+  CompanySettings,
 };

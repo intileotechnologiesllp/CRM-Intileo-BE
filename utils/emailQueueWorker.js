@@ -380,6 +380,29 @@ async function startUserSpecificScheduledWorkers() {
                 `[ScheduledWorker] Processing scheduled email ${emailID} for user ${email.masterUserID}`
               );
 
+              // Validate email recipients before processing
+              console.log(`[ScheduledWorker] DEBUG: Email data for ${emailID}:`);
+              console.log(`  - recipient: "${email.recipient}"`);
+              console.log(`  - cc: "${email.cc}"`);
+              console.log(`  - bcc: "${email.bcc}"`);
+              console.log(`  - subject: "${email.subject}"`);
+
+              // Check if any recipients are defined
+              const hasRecipients = email.recipient || email.cc || email.bcc;
+              if (!hasRecipients) {
+                console.error(
+                  `[ScheduledWorker] ❌ No recipients defined for email ${emailID}. Recipient: "${email.recipient}", CC: "${email.cc}", BCC: "${email.bcc}"`
+                );
+                
+                // Mark email as failed and move to drafts folder
+                await email.update({
+                  folder: "drafts",
+                  lastError: "No recipients defined - moved to drafts",
+                });
+                
+                return channel.ack(msg);
+              }
+
               // Fetch sender credentials
               const userCredential = await UserCredential.findOne({
                 where: { masterUserID: email.masterUserID },
@@ -432,9 +455,9 @@ async function startUserSpecificScheduledWorkers() {
 
               const info = await transporter.sendMail({
                 from: userCredential.email,
-                to: email.recipient,
-                cc: email.cc,
-                bcc: email.bcc,
+                to: email.recipient || undefined, // Ensure it's undefined if empty
+                cc: email.cc || undefined,
+                bcc: email.bcc || undefined,
                 subject: email.subject,
                 text: email.body,
                 html: email.body,
@@ -443,6 +466,10 @@ async function startUserSpecificScheduledWorkers() {
                   path: att.path,
                 })),
               });
+
+              console.log(
+                `[ScheduledWorker] ✅ Successfully sent email ${emailID} with MessageID: ${info.messageId}`
+              );
 
               // Move email to sent
               await email.update({
@@ -792,16 +819,22 @@ async function sendEmailJob(emailData) {
     };
   }
 
-  const transporter = nodemailer.createTransport(transporterConfig);
-  // const transporter = nodemailer.createTransport({
-  //   service: "gmail",
-  //   auth: {
-  //     user: SENDER_EMAIL,
-  //     pass: SENDER_PASSWORD,
-  //   },
-  // });
+  // If the job was queued after a direct SMTP send (composeEmail), skip sending again.
+  let info = { messageId: emailData.messageId || null };
+  if (!emailData.skipSend) {
+    const transporter = nodemailer.createTransport(transporterConfig);
+    // const transporter = nodemailer.createTransport({
+    //   service: "gmail",
+    //   auth: {
+    //     user: SENDER_EMAIL,
+    //     pass: SENDER_PASSWORD,
+    //   },
+    // });
 
-  const info = await transporter.sendMail(mailOptions);
+    info = await transporter.sendMail(mailOptions);
+  } else {
+    console.log(`[EmailWorker] Skipping SMTP send for queued email (skipSend=true). messageId=${info.messageId}`);
+  }
 
   // --- Save or update email and attachments ---
   if (emailData.draftId) {

@@ -72,8 +72,8 @@ exports.getLostReasons = async (req, res) => {
 
     let whereClause = {
       [Op.or]: [
-        { masterUserID: masterUserID },
-        { isSystemDefault: true } // Include system defaults
+        // { masterUserID: masterUserID },
+        { isSystemDefault: false } // Include system defaults
       ]
     };
 
@@ -95,7 +95,7 @@ exports.getLostReasons = async (req, res) => {
 
     // Get settings
     const settings = await LostReasonSetting.findOne({
-      where: { masterUserID: masterUserID }
+      // where: { masterUserID: masterUserID }
     }) || await LostReasonSetting.findOne({
       where: { isGlobal: true }
     }) || { allowFreeFormReasons: true, requireReasonSelection: true };
@@ -133,8 +133,8 @@ exports.getLostReason = async (req, res) => {
       where: {
         lostReasonId: id,
         [Op.or]: [
-          { masterUserID: masterUserID },
-          { isSystemDefault: true }
+          // { masterUserID: masterUserID },
+          { isSystemDefault: false }
         ]
       }
     });
@@ -171,7 +171,7 @@ exports.updateLostReason = async (req, res) => {
     const lostReason = await LostReason.findOne({
       where: {
         lostReasonId: id,
-        masterUserID: masterUserID // Users can only update their own reasons
+        // masterUserID: masterUserID // Users can only update their own reasons
       }
     });
 
@@ -186,7 +186,7 @@ exports.updateLostReason = async (req, res) => {
       const existingReason = await LostReason.findOne({ 
         where: { 
           reason: reason.trim(),
-          masterUserID: masterUserID,
+          // masterUserID: masterUserID,
           lostReasonId: { [Op.ne]: id }
         } 
       });
@@ -242,7 +242,7 @@ exports.deleteLostReason = async (req, res) => {
     const lostReason = await LostReason.findOne({
       where: {
         lostReasonId: parseInt(id),
-        masterUserID: masterUserID // Users can only delete their own reasons
+        // masterUserID: masterUserID // Users can only delete their own reasons
       }
     });
 

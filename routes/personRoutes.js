@@ -8,10 +8,25 @@ const validatePrivilege = require("../middlewares/validatePrivilege");
 router.use(verifyToken);
 
 // Person CRUD Routes
-router.post("/", verifyToken, validatePrivilege(5, "create"), personController.createPerson);
-router.get("/", verifyToken, validatePrivilege(5, "view"), personController.getAllPersons);
-router.get("/:personId", verifyToken, validatePrivilege(5, "view"), personController.getPersonById);
-router.put("/:personId", verifyToken, validatePrivilege(5, "edit"), personController.updatePerson);
-router.delete("/:personId", verifyToken, validatePrivilege(5, "delete"), personController.deletePerson);
+router.post("/", verifyToken,personController.createPerson);
+router.get("/", verifyToken, personController.getAllPersons);
+router.get("/:personId", verifyToken, personController.getPersonById);
+router.put("/:personId", verifyToken, personController.updatePerson);
+router.delete("/:personId", verifyToken, personController.deletePerson);
+
+// Timeline Routes - Get unified timeline (emails, activities) for a person
+const leadController = require("../controllers/leads/leadController");
+
+router.get(
+  "/timeline/:personId",
+  verifyToken,
+  leadController.getPersonTimeline
+);
+
+router.get(
+  "/emails/:personId",
+  verifyToken,
+  leadController.getPersonTimeline
+);
 
 module.exports = router;

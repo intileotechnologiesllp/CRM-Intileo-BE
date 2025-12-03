@@ -41,22 +41,29 @@ const activityReportRoutes = require("./routes/insight/report/activityReportRout
 const leadReportRoutes = require("./routes/insight/report/leadReportRoutes.js"); // Import insight routes
 const dealReportRoutes = require("./routes/insight/report/dealReportRouter.js"); // Import deal report routes
 const contactReportRoutes = require("./routes/insight/report/contactReportRoutes.js")
+const organizationReportRoutes = require("./routes/insight/report/organizationReportRoutes.js")
 const customFieldRoutes = require("./routes/customFieldRoutes.js"); // Import custom field routes
 const pipelineRoutes = require("./routes/pipelineRoutes.js"); // Import pipeline routes
 const globalSearchRoutes = require("./routes/globalSearchRoutes.js"); // Import global search routes
 const reportFolderRoutes = require("./routes/insight/reportFolderRoutes.js")
+const dashboardCardRoutes = require("./routes/insight/cardRoutes.js")
 const personRoutes = require("./routes/personRoutes.js"); // Import person routes
 const organizationRoutesNew = require("./routes/organizationRoutes.js"); // Import organization routes
 const visibilityGroupRoutes = require("./routes/admin/visibilityGroupRoutes.js"); // Import visibility group routes
+const companySettingsRoutes = require("./routes/companySettingsRoutes.js"); // Import company settings routes
 const groupVisibilityRoutes = require("./routes/admin/groupVisibilityRoutes.js")
 const activitySettingRoutes = require("./routes/activity/activitySettingRoutes.js"); // Import activity setting routes
 const importRoutes = require("./routes/import/importRoutes.js"); // Import data import routes
 const activityTypeRoutes = require('./routes/activity/activityTypeRoutes.js'); // Import activity type routes
+const userSessionRoutes = require("./routes/userSessionRoutes.js"); // Import user session/device management routes
 const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js"); // Import user favorites routes
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
 const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import MongoDB routes
+const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
+const userInterfacePreferencesRoutes = require('./routes/userInterfacePreferencesRoutes.js'); // Import user interface preferences routes
 const { loadPrograms } = require("./utils/programCache");
+const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
 require("./utils/cronJob.js");
@@ -95,6 +102,7 @@ app.use("/api/currencies", currencyRoutes); // Register currency routes
 app.use("/api/countries", countryRoutes); // Register country routes
 app.use("/api/regions", regionRoutes); // Register region routes
 app.use("/api/labels", labelRoutes); // Register label routes
+app.use("/api/company-settings", companySettingsRoutes); // Register company settings routes
 app.use("/api/leads", leadsRoutes);
 app.use("/api/get-auditHistory", auditHistoryRoutes); // Register audit history routes
 app.use("/api/master-user", masterUserRoutes); // Register master user routes
@@ -114,7 +122,9 @@ app.use("/api/activityreport", activityReportRoutes); // Register activity repor
 app.use("/api/leadreport", leadReportRoutes); // Register Lead report routes
 app.use("/api/dealreport", dealReportRoutes);
 app.use("/api/contactreport", contactReportRoutes);
+app.use("/api/organizationreport", organizationReportRoutes);
 app.use("/api/reportFolder", reportFolderRoutes); // Register report folder routes
+app.use("/api/dashboardcards", dashboardCardRoutes); // Register dashboardCard Routes
 app.use("/api/search", globalSearchRoutes); // Register global search routes
 app.use("/api/custom-fields", customFieldRoutes); // Register custom field routes
 app.use("/api/pipelines", pipelineRoutes); // Register pipeline routes
@@ -131,7 +141,13 @@ app.use("/api/favorites", userFavoritesRoutes); // Register user favorites route
 app.use('/api/lost-reasons', lostReasonRoutes); // Register lost reason routescl
 app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
+<<<<<<< HEAD
 app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
+=======
+app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
+app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
+app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
+>>>>>>> e7944d571a124e17249bca3a16f25ad68ec34727
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -197,6 +213,7 @@ sequelize
     await connectRedis();
     
     await loadPrograms();
+<<<<<<< HEAD
     // Start server after loading programs and connecting to databases
     const PORT = process.env.PORT || 3056 ;
     app.listen(PORT, () => {
@@ -205,6 +222,35 @@ sequelize
       console.log(`🍃 MongoDB: Connected via Mongoose`);
       console.log(`🔴 Redis: Connected for caching & sessions`);
       console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
+=======
+    
+    // 🚀 Initialize IMAP IDLE Manager for real-time email sync
+    try {
+      await imapIdleManager.initialize();
+      console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
+      
+      // Set up event handlers for real-time updates
+      imapIdleManager.on('newMail', (data) => {
+        console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
+        // You can emit WebSocket events here for real-time UI updates
+      });
+      
+      imapIdleManager.on('flagChange', (data) => {
+        console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
+        // You can emit WebSocket events here for real-time UI updates
+      });
+      
+    } catch (idleError) {
+      console.warn('⚠️ IMAP IDLE Manager failed to initialize:', idleError.message);
+      console.log('📧 Email functionality will work without real-time sync');
+    }
+    
+    // Start server after loading programs and initializing IMAP IDLE
+    const PORT = process.env.PORT || 3056 ;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
+>>>>>>> e7944d571a124e17249bca3a16f25ad68ec34727
     });
     console.log("Program cache loaded.");
   } catch (err) {

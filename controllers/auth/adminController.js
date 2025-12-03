@@ -11,7 +11,8 @@ const moment = require("moment-timezone");
 const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the audit trail utility
 const PROGRAMS = require("../../utils/programConstants");
 const MiscSettings = require("../../models/miscSettings/miscSettingModel.js");
-const GroupVisibility = require("../../models/admin/groupVisibilityModel.js")
+const GroupVisibility = require("../../models/admin/groupVisibilityModel.js");
+const { google } = require("googleapis")
 
 // exports.signIn = async (req, res) => {
 //   const { email, password, longitude, latitude, ipAddress } = req.body;
@@ -175,17 +176,6 @@ exports.signIn = async (req, res) => {
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        id: user.masterUserID,
-        email: user.email,
-        loginType: user.loginType,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
-
     // Get the current UTC time
     const loginTimeUTC = new Date();
 
@@ -226,7 +216,7 @@ exports.signIn = async (req, res) => {
     const totalSessionDuration = `${totalHours} hours ${totalMinutes} minutes`;
 
     // Save the new login history
-    await LoginHistory.create({
+    const newSession = await LoginHistory.create({
       userId: user.masterUserID,
       loginType: user.loginType,
       ipAddress: ipAddress || null,
@@ -239,6 +229,18 @@ exports.signIn = async (req, res) => {
       device: device,
       location: `${locationInfo?.city}, ${locationInfo?.country}` || null
     });
+
+    // Generate JWT token with sessionId for device management
+    const token = jwt.sign(
+      {
+        id: user.masterUserID,
+        email: user.email,
+        loginType: user.loginType,
+        sessionId: newSession.id, // Include session ID for tracking
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
 
     // Delete any existing records for the user in RecentLoginHistory
     await RecentLoginHistory.destroy({
@@ -507,14 +509,28 @@ exports.resetPassword = async (req, res) => {
 
 exports.logout = async (req, res) => {
   try {
-    // Extract userId (adminId) from the middleware
+    // Extract userId (adminId) and sessionId from the middleware
     const userId = req.adminId;
+    const sessionId = req.sessionId;
 
-    // Find the latest login history entry for the user
-    const loginHistory = await LoginHistory.findOne({
-      where: { userId },
-      order: [["loginTime", "DESC"]],
-    });
+    // Find the specific session from JWT token (preferred) or fall back to latest
+    let loginHistory;
+    if (sessionId) {
+      loginHistory = await LoginHistory.findOne({
+        where: { 
+          id: sessionId,
+          userId: userId 
+        },
+      });
+    }
+    
+    // Fallback to latest session if sessionId not found (backward compatibility)
+    if (!loginHistory) {
+      loginHistory = await LoginHistory.findOne({
+        where: { userId },
+        order: [["loginTime", "DESC"]],
+      });
+    }
 
     if (!loginHistory) {
       return res
@@ -996,6 +1012,274 @@ exports.getPasswordHistory = async (req, res) => {
     console.error("Error fetching password history:", error);
     res.status(500).json({
       message: "Internal server error while fetching password history",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Google OAuth Login - Initiate
+exports.googleAuthLogin = async (req, res) => {
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI // e.g., http://localhost:3000/api/auth/google/callback
+    );
+
+    const scopes = [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile'
+    ];
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: scopes,
+      prompt: 'consent'
+    });
+
+    res.json({ 
+      success: true,
+      authUrl: authUrl 
+    });
+  } catch (error) {
+    console.error("Error generating Google auth URL:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to generate Google authentication URL",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Google OAuth Login - Callback
+exports.googleAuthCallback = async (req, res) => {
+  // Google sends code as query parameter, but frontend can send as body
+  const code = req.query.code || (req.body && req.body.code);
+  const systemInfo = req.body && req.body.systemInfo;
+  const device = req.body && req.body.device;
+  const longitude = req.body && req.body.longitude;
+  const latitude = req.body && req.body.latitude;
+  const ipAddress = req.body && req.body.ipAddress;
+
+  if (!code) {
+    return res.status(400).json({ 
+      success: false,
+      message: "Authorization code is required" 
+    });
+  }
+
+  const locationInfo = systemInfo?.approximateLocation;
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+
+    // Exchange authorization code for tokens
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    // Get user info from Google
+    const oauth2 = google.oauth2({
+      auth: oauth2Client,
+      version: 'v2'
+    });
+
+    const { data } = await oauth2.userinfo.get();
+    const googleEmail = data.email;
+    const googleName = data.name;
+
+    if (!googleEmail) {
+      return res.status(400).json({ 
+        success: false,
+        message: "Failed to retrieve email from Google" 
+      });
+    }
+
+    // Check if user exists in database
+    let user = await MasterUser.findOne({ where: { email: googleEmail } });
+
+    if (!user) {
+      // User doesn't exist, create new user
+      user = await MasterUser.create({
+        email: googleEmail,
+        name: googleName || googleEmail.split('@')[0],
+        loginType: 'google',
+        isActive: true,
+        // No password needed for Google OAuth users
+        password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10) // Random password
+      });
+
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN",
+        "google",
+        "New user registered via Google OAuth",
+        user.masterUserID
+      );
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      await logAuditTrail(
+        PROGRAMS.AUTHENTICATION,
+        "SIGN_IN",
+        "google",
+        "Inactive user attempted login",
+        user.masterUserID
+      );
+      return res.status(403).json({ 
+        success: false,
+        message: "Your account is inactive. Please contact administrator." 
+      });
+    }
+
+    // Get the current UTC time
+    const loginTimeUTC = new Date();
+
+    // Convert login time to IST
+    const loginTimeIST = moment(loginTimeUTC)
+      .tz("Asia/Kolkata")
+      .format("YYYY-MM-DD HH:mm:ss");
+
+    // Fetch the latest login history for the user
+    const latestLoginHistory = await LoginHistory.findOne({
+      where: { userId: user.masterUserID },
+      order: [["loginTime", "DESC"]],
+    });
+
+    // Fetch the previous totalSessionDuration
+    let previousTotalDurationInSeconds = 0;
+    if (latestLoginHistory && latestLoginHistory.totalSessionDuration) {
+      const [hours, minutes] = latestLoginHistory.totalSessionDuration
+        .replace(" hours", "")
+        .replace(" minutes", "")
+        .split(" ")
+        .map(Number);
+      previousTotalDurationInSeconds = (hours || 0) * 3600 + (minutes || 0) * 60;
+    }
+
+    // Create new login history entry
+    await LoginHistory.create({
+      userId: user.masterUserID,
+      name: user.name,
+      email: user.email,
+      loginTime: loginTimeIST,
+      logoutTime: null,
+      sessionDuration: null,
+      totalSessionDuration: latestLoginHistory
+        ? latestLoginHistory.totalSessionDuration
+        : "0 hours 0 minutes",
+      sessionDurationInSeconds: 0,
+      totalSessionDurationInSeconds: previousTotalDurationInSeconds,
+      device: device || null,
+      location: locationInfo || null,
+      latitude: latitude || null,
+      longitude: longitude || null,
+      ipAddress: ipAddress || null,
+    });
+
+    // Update recent login history
+    const existingRecentLogin = await RecentLoginHistory.findOne({
+      where: { userId: user.masterUserID },
+    });
+
+    if (existingRecentLogin) {
+      await existingRecentLogin.update({
+        name: user.name,
+        email: user.email,
+        loginTime: loginTimeIST,
+        logoutTime: null,
+        device: device || null,
+        location: locationInfo || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        ipAddress: ipAddress || null,
+      });
+    } else {
+      await RecentLoginHistory.create({
+        userId: user.masterUserID,
+        name: user.name,
+        email: user.email,
+        loginTime: loginTimeIST,
+        logoutTime: null,
+        device: device || null,
+        location: locationInfo || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        ipAddress: ipAddress || null,
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        id: user.masterUserID, 
+        email: user.email,
+        loginType: 'google'
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    await logAuditTrail(
+      PROGRAMS.AUTHENTICATION,
+      "SIGN_IN",
+      "google",
+      "User signed in successfully via Google OAuth",
+      user.masterUserID
+    );
+
+    // If this is a GET request (direct from Google), redirect to frontend with token
+    if (req.method === 'GET') {
+      // Redirect to a success page with token and user data
+      // Use localhost for development, or FRONTEND_URL for production
+      const frontendUrl = process.env.NODE_ENV === 'production' 
+        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
+        : 'http://localhost:3056';
+      const redirectUrl = `${frontendUrl}/google-login-success.html?token=${encodeURIComponent(token)}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    // If POST request (from frontend), return JSON
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token: token,
+      user: {
+        masterUserID: user.masterUserID,
+        name: user.name,
+        email: user.email,
+        loginType: 'google'
+      },
+    });
+
+  } catch (error) {
+    console.error("Error in Google OAuth callback:", error);
+    
+    await logAuditTrail(
+      PROGRAMS.AUTHENTICATION,
+      "SIGN_IN",
+      "google",
+      `Google OAuth error: ${error.message}`,
+      null
+    );
+
+    // If GET request, redirect to error page
+    if (req.method === 'GET') {
+      // Use localhost for development, or FRONTEND_URL for production
+      const frontendUrl = process.env.NODE_ENV === 'production' 
+        ? (process.env.FRONTEND_URL || 'http://localhost:3056')
+        : 'http://localhost:3056';
+      const redirectUrl = `${frontendUrl}/google-login-error.html?error=${encodeURIComponent(error.message)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Google authentication failed",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

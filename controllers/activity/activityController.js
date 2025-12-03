@@ -14,10 +14,16 @@ const DealColumn = require("../../models/deals/dealColumnModel");
 const sequelize = require("../../config/db");
 const CustomFieldValue = require("../../models/customFieldValueModel");
 const CustomField = require("../../models/customFieldModel");
+const MasterUser = require("../../models/master/masterUserModel"); // Add MasterUser model
 //const Organizations = require("../../models/leads/leadOrganizationModel"); // Adjust path as needed
 
 exports.createActivity = async (req, res) => {
   try {
+    // Helper function to safely check if a string is valid and not empty
+    const isValidString = (str) => {
+      return str && typeof str === 'string' && str.trim() !== '';
+    };
+
     const {
       type,
       subject,
@@ -36,23 +42,99 @@ exports.createActivity = async (req, res) => {
       personId,
       leadOrganizationId,
       isDone,
-      activityTypeFlag
+      activityTypeFlag,
+      contactPersons // New field for multiple contact persons
     } = req.body;
-    // Fetch contact person details
+
+    // Handle case where user sends contactPerson as an array instead of contactPersons
+    let finalContactPersons = contactPersons;
+    if (req.body.contactPerson && Array.isArray(req.body.contactPerson)) {
+      console.log('Converting contactPerson array to contactPersons:', req.body.contactPerson);
+      finalContactPersons = req.body.contactPerson;
+    }
+
+    // Handle Multi-Contact Person Support for creation
     let contactPerson = null;
     let email = null;
-    if (personId) {
-      const person = await Person.findByPk(personId);
-      if (person) {
-        contactPerson = person.contactPerson;
-        email = person.email;
-        console.log(
-          person.contactPerson,
-          person.email,
-          "Contact Person and Email fetched in inside createActivity"
-        );
+    let allContactPersons = [];
+    let finalPersonId = personId;
+
+    if (finalContactPersons && Array.isArray(finalContactPersons)) {
+      console.log('Creating activity with multiple contact persons:', finalContactPersons);
+      
+      for (const personData of finalContactPersons) {
+        let personRecord = null;
+        
+        // Strategy 1: Find by personId if provided
+        if (personData.personId) {
+          personRecord = await Person.findByPk(personData.personId);
+          console.log(`Found person by personId ${personData.personId}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 2: Find by email if no personId but email provided
+        if (!personRecord && personData.email && typeof personData.email === 'string' && personData.email.trim() !== "") {
+          personRecord = await Person.findOne({ where: { email: personData.email } });
+          console.log(`Found person by email ${personData.email}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 3: Create new person if not found
+        if (!personRecord && ((personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") || 
+                               (personData.email && typeof personData.email === 'string' && personData.email.trim() !== ""))) {
+          try {
+            const newPersonData = {
+              contactPerson: personData.contactPerson || null,
+              email: personData.email || null,
+              phone: personData.phone || null,
+              leadOrganizationId: leadOrganizationId || null,
+              masterUserID: req.adminId,
+            };
+            
+            personRecord = await Person.create(newPersonData);
+            console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
+          } catch (personCreateError) {
+            console.error("Error creating new person during activity creation:", personCreateError);
+            continue; // Skip this person and continue with others
+          }
+        }
+        
+        if (personRecord) {
+          allContactPersons.push({
+            personId: personRecord.personId,
+            contactPerson: personRecord.contactPerson,
+            email: personRecord.email,
+            phone: personRecord.phone,
+            isPrimary: personData.isPrimary || false
+          });
+        }
+      }
+      
+      // Set the primary contact person for the activity record
+      const primaryPerson = allContactPersons.find(p => p.isPrimary) || allContactPersons[0];
+      if (primaryPerson) {
+        finalPersonId = primaryPerson.personId;
+        // Ensure contactPerson and email are strings, not arrays or objects
+        contactPerson = typeof primaryPerson.contactPerson === 'string' ? primaryPerson.contactPerson : null;
+        email = typeof primaryPerson.email === 'string' ? primaryPerson.email : null;
+      }
+      
+      console.log(`Processed ${allContactPersons.length} contact persons for new activity`);
+      
+    } else {
+      // Fallback to single contact person logic for backward compatibility
+      if (personId) {
+        const person = await Person.findByPk(personId);
+        if (person) {
+          contactPerson = person.contactPerson;
+          email = person.email;
+          console.log(
+            person.contactPerson,
+            person.email,
+            "Contact Person and Email fetched in inside createActivity"
+          );
+        }
       }
     }
+
     console.log(contactPerson, email, "Contact Person and Email fetched");
 
     // Fetch organization details
@@ -69,8 +151,40 @@ exports.createActivity = async (req, res) => {
     }
     console.log(organization, "Organization fetched");
 
+    // Validate leadId if provided
+    let validatedLeadId = null;
+    if (leadId) {
+      const lead = await Lead.findByPk(leadId);
+      if (!lead) {
+        return res.status(400).json({ 
+          message: "Invalid leadId. Lead not found.",
+          error: "LEAD_NOT_FOUND",
+          leadId: leadId
+        });
+      }
+      validatedLeadId = leadId;
+    }
+
+    // Validate dealId if provided
+    let validatedDealId = null;
+    if (dealId) {
+      const deal = await Deal.findByPk(dealId);
+      if (!deal) {
+        return res.status(400).json({ 
+          message: "Invalid dealId. Deal not found.",
+          error: "DEAL_NOT_FOUND",
+          dealId: dealId
+        });
+      }
+      validatedDealId = dealId;
+    }
+
     // If guests is an array, convert to string for storage
     const guestsValue = Array.isArray(guests) ? JSON.stringify(guests) : guests;
+    
+    // Prepare allContactPersons for storage
+    const allContactPersonsValue = allContactPersons.length > 0 ? JSON.stringify(allContactPersons) : null;
+    
     const activity = await Activity.create({
       type,
       subject,
@@ -84,9 +198,9 @@ exports.createActivity = async (req, res) => {
       status,
       notes,
       assignedTo,
-      dealId,
-      leadId,
-      personId,
+      dealId: validatedDealId,
+      leadId: validatedLeadId,
+      personId: finalPersonId,
       leadOrganizationId,
       isDone,
       masterUserID: req.adminId, // Assuming adminId is the masterUserID
@@ -94,22 +208,41 @@ exports.createActivity = async (req, res) => {
       email,
       organization,
       dueDate: endDateTime,
-      activityTypeFlag
+      activityTypeFlag,
+      allContactPersons: allContactPersonsValue
     });
 
     // Update nextActivity in Lead if leadId is present
-    if (leadId) {
-      await updateNextActivityForLead(leadId);
+    if (validatedLeadId) {
+      await updateNextActivityForLead(validatedLeadId);
     }
 
     // Update nextActivity in Deal if dealId is present
-    if (dealId) {
-      await updateNextActivityForDeal(dealId);
+    if (validatedDealId) {
+      await updateNextActivityForDeal(validatedDealId);
     }
 
-    res
-      .status(201)
-      .json({ message: "Activity created successfully", activity });
+    // Prepare response with contact persons information
+    const responseActivity = activity.get({ plain: true });
+    if (allContactPersons.length > 0) {
+      responseActivity.contactPersons = allContactPersons;
+    } else if (responseActivity.personId) {
+      // Fallback to single contact person for backward compatibility
+      responseActivity.contactPersons = [{
+        personId: responseActivity.personId,
+        contactPerson: responseActivity.contactPerson,
+        email: responseActivity.email,
+        phone: responseActivity.phone || null,
+        isPrimary: true
+      }];
+    }
+
+    res.status(201).json({ 
+      message: "Activity created successfully", 
+      activity: responseActivity,
+      multiContactSupport: true,
+      contactPersonsCount: allContactPersons.length > 0 ? allContactPersons.length : (responseActivity.personId ? 1 : 0)
+    });
   } catch (error) {
     console.error("Error creating activity:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -373,16 +506,16 @@ exports.getActivities = async (req, res) => {
     const alwaysInclude = [
       "dealId",
       "leadId",
-      // "assignedTo",
+      "assignedTo", // Always include assignedTo
       "leadOrganizationId",
       "personId",
       "activityId",
       "type",
       "startDateTime",
       "endDateTime",
-      "activityTypeFlag"
+      "status" // Always include status
+
       // "priority",
-      // "status"
     ];
     if (attributes) {
       alwaysInclude.forEach((field) => {
@@ -441,6 +574,12 @@ exports.getActivities = async (req, res) => {
             (filterWhere[Op.and] || filterWhere[Op.or])
               ? filterWhere
               : undefined,
+        },
+        {
+          model: MasterUser,
+          as: "assignedUser", // Include assigned user details - use correct alias
+          attributes: ["masterUserID", "name", "email"],
+          required: false, // Left join to handle cases where assignedTo might be null
         },
       ],
     });
@@ -725,9 +864,12 @@ exports.getActivities = async (req, res) => {
 
     const activitiesWithTitle = activities.map((activity) => {
       const data = activity.get ? activity.get({ plain: true }) : activity;
-      const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, ...rest } =
+      const { ActivityLead, ActivityDeal, ActivityOrganization, ActivityPerson, assignedUser, ...rest } =
         data;
       let result = { ...rest };
+      
+      // Always add assignedUserName from the assignedUser relationship
+      result.assignedUserName = assignedUser ? assignedUser.name : null;
       
       // Only add title if it's in the selected attributes or no preferences are set
       if (!attributes || attributes.includes('title')) {
@@ -1170,9 +1312,34 @@ exports.getActivityById = async (req, res) => {
       formattedActivity.organization.customFields = customFields.organization;
     }
 
+    // Parse and include multiple contact persons in response
+    let parsedContactPersons = null;
+    if (formattedActivity.allContactPersons) {
+      try {
+        parsedContactPersons = JSON.parse(formattedActivity.allContactPersons);
+      } catch (parseError) {
+        console.error("Error parsing allContactPersons:", parseError);
+      }
+    }
+
+    // Add contact persons array to response
+    if (parsedContactPersons && parsedContactPersons.length > 0) {
+      formattedActivity.contactPersons = parsedContactPersons;
+    } else if (formattedActivity.personId) {
+      // Fallback to single contact person for backward compatibility
+      formattedActivity.contactPersons = [{
+        personId: formattedActivity.personId,
+        contactPerson: formattedActivity.contactPerson,
+        email: formattedActivity.email,
+        isPrimary: true
+      }];
+    }
+
     res.status(200).json({
       message: "Activity retrieved successfully",
-      activity: formattedActivity
+      activity: formattedActivity,
+      multiContactSupport: true,
+      contactPersonsCount: parsedContactPersons ? parsedContactPersons.length : (formattedActivity.personId ? 1 : 0)
     });
 
   } catch (error) {
@@ -1412,6 +1579,18 @@ exports.updateActivity = async (req, res) => {
     const { activityId } = req.params;
     const updateFields = req.body;
 
+    // Helper function to safely check if a string is valid and not empty
+    const isValidString = (str) => {
+      return str && typeof str === 'string' && str.trim() !== '';
+    };
+
+    // Handle case where user sends contactPerson as an array instead of contactPersons
+    if (updateFields.contactPerson && Array.isArray(updateFields.contactPerson)) {
+      console.log('Converting contactPerson array to contactPersons:', updateFields.contactPerson);
+      updateFields.contactPersons = updateFields.contactPerson;
+      updateFields.contactPerson = null; // Clear the original field
+    }
+
     // Fetch the activity to get personId and leadOrganizationId if not provided
     const activity = await Activity.findByPk(activityId);
     if (!activity) {
@@ -1423,28 +1602,217 @@ exports.updateActivity = async (req, res) => {
     if (!updateFields.leadOrganizationId)
       updateFields.leadOrganizationId = activity.leadOrganizationId;
 
-    // Update Person if needed
-    if (
-      updateFields.personId &&
-      (updateFields.contactPerson || updateFields.email)
-    ) {
-      await Person.update(
-        {
-          ...(updateFields.contactPerson && {
-            contactPerson: updateFields.contactPerson,
-          }),
-          ...(updateFields.email && { email: updateFields.email }),
-        },
-        { where: { personId: updateFields.personId } }
-      );
+    // Handle Multi-Contact Person Support
+    let primaryPersonRecord = null;
+    let allContactPersons = [];
+
+    // Check if multiple contact persons are provided
+    if (updateFields.contactPersons && Array.isArray(updateFields.contactPersons)) {
+      console.log('Processing multiple contact persons:', updateFields.contactPersons);
+      
+      for (const personData of updateFields.contactPersons) {
+        let personRecord = null;
+        
+        // Strategy 1: Find by personId if provided
+        if (personData.personId) {
+          personRecord = await Person.findByPk(personData.personId);
+          console.log(`Found person by personId ${personData.personId}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 2: Find by email if no personId but email provided
+        if (!personRecord && personData.email && typeof personData.email === 'string' && personData.email.trim() !== "") {
+          personRecord = await Person.findOne({ where: { email: personData.email } });
+          console.log(`Found person by email ${personData.email}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 3: Find by contactPerson name if no personId or email match
+        if (!personRecord && personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") {
+          personRecord = await Person.findOne({ where: { contactPerson: personData.contactPerson } });
+          console.log(`Found person by contactPerson ${personData.contactPerson}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        if (personRecord) {
+          // Update existing person record if data provided
+          const personUpdateData = {};
+          
+          if (personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") {
+            personUpdateData.contactPerson = personData.contactPerson;
+          }
+          if (personData.email && typeof personData.email === 'string' && personData.email.trim() !== "") {
+            personUpdateData.email = personData.email;
+          }
+          if (personData.phone && typeof personData.phone === 'string' && personData.phone.trim() !== "") {
+            personUpdateData.phone = personData.phone;
+          }
+          
+          if (Object.keys(personUpdateData).length > 0) {
+            await Person.update(personUpdateData, { 
+              where: { personId: personRecord.personId } 
+            });
+            console.log(`Updated existing person ${personRecord.personId} with:`, personUpdateData);
+          }
+          
+          allContactPersons.push({
+            personId: personRecord.personId,
+            contactPerson: personRecord.contactPerson,
+            email: personRecord.email,
+            phone: personRecord.phone,
+            isPrimary: personData.isPrimary || false
+          });
+        } else if ((personData.contactPerson && typeof personData.contactPerson === 'string' && personData.contactPerson.trim() !== "") || 
+                   (personData.email && typeof personData.email === 'string' && personData.email.trim() !== "")) {
+          // Create new person if we have at least contactPerson or email
+          try {
+            const newPersonData = {
+              contactPerson: personData.contactPerson || null,
+              email: personData.email || null,
+              phone: personData.phone || null,
+              leadOrganizationId: updateFields.leadOrganizationId || activity.leadOrganizationId,
+              masterUserID: req.adminId,
+            };
+            
+            personRecord = await Person.create(newPersonData);
+            console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
+            
+            allContactPersons.push({
+              personId: personRecord.personId,
+              contactPerson: personRecord.contactPerson,
+              email: personRecord.email,
+              phone: personRecord.phone,
+              isPrimary: personData.isPrimary || false
+            });
+          } catch (personCreateError) {
+            console.error("Error creating new person during activity update:", personCreateError);
+            // Continue with other persons even if one fails
+          }
+        }
+      }
+      
+      // Set the primary contact person for the activity record
+      const primaryPerson = allContactPersons.find(p => p.isPrimary) || allContactPersons[0];
+      if (primaryPerson) {
+        primaryPersonRecord = primaryPerson;
+        updateFields.personId = primaryPerson.personId;
+        // Ensure contactPerson is a string, not an array or object
+        updateFields.contactPerson = typeof primaryPerson.contactPerson === 'string' ? primaryPerson.contactPerson : null;
+        updateFields.email = typeof primaryPerson.email === 'string' ? primaryPerson.email : null;
+      }
+      
+      // Store all contact persons as JSON in the activity
+      updateFields.allContactPersons = JSON.stringify(allContactPersons);
+      console.log(`Processed ${allContactPersons.length} contact persons for activity`);
+      
+    } else {
+      // Fallback to single contact person logic for backward compatibility
+      if (updateFields.contactPerson || updateFields.email || updateFields.phone) {
+        let personRecord = null;
+        
+        // Strategy 1: Find by personId if provided
+        if (updateFields.personId) {
+          personRecord = await Person.findByPk(updateFields.personId);
+          console.log(`Found person by personId ${updateFields.personId}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 2: Find by email if no personId but email provided
+        if (!personRecord && updateFields.email && typeof updateFields.email === 'string' && updateFields.email.trim() !== "") {
+          personRecord = await Person.findOne({ where: { email: updateFields.email } });
+          console.log(`Found person by email ${updateFields.email}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        // Strategy 3: Find by contactPerson name if no personId or email match
+        if (!personRecord && updateFields.contactPerson && typeof updateFields.contactPerson === 'string' && updateFields.contactPerson.trim() !== "") {
+          personRecord = await Person.findOne({ where: { contactPerson: updateFields.contactPerson } });
+          console.log(`Found person by contactPerson ${updateFields.contactPerson}:`, personRecord ? 'YES' : 'NO');
+        }
+        
+        if (personRecord) {
+          // Update existing person record
+          const personUpdateData = {};
+          
+          if (updateFields.contactPerson && typeof updateFields.contactPerson === 'string' && updateFields.contactPerson.trim() !== "") {
+            personUpdateData.contactPerson = updateFields.contactPerson;
+          }
+          if (updateFields.email && typeof updateFields.email === 'string' && updateFields.email.trim() !== "") {
+            personUpdateData.email = updateFields.email;
+          }
+          if (updateFields.phone && typeof updateFields.phone === 'string' && updateFields.phone.trim() !== "") {
+            personUpdateData.phone = updateFields.phone;
+          }
+          
+          if (Object.keys(personUpdateData).length > 0) {
+            await Person.update(personUpdateData, { 
+              where: { personId: personRecord.personId } 
+            });
+            updateFields.personId = personRecord.personId;
+            console.log(`Updated existing person ${personRecord.personId} with:`, personUpdateData);
+          }
+        } else if ((updateFields.contactPerson && typeof updateFields.contactPerson === 'string' && updateFields.contactPerson.trim() !== "") || 
+                   (updateFields.email && typeof updateFields.email === 'string' && updateFields.email.trim() !== "")) {
+          // Create new person if we have at least contactPerson or email
+          try {
+            const newPersonData = {
+              contactPerson: updateFields.contactPerson || null,
+              email: updateFields.email || null,
+              phone: updateFields.phone || null,
+              leadOrganizationId: updateFields.leadOrganizationId || null,
+              masterUserID: req.adminId,
+            };
+            
+            personRecord = await Person.create(newPersonData);
+            updateFields.personId = personRecord.personId;
+            console.log(`Created new person with ID: ${personRecord.personId}`, newPersonData);
+          } catch (personCreateError) {
+            console.error("Error creating new person during activity update:", personCreateError);
+            // Don't fail the activity update, just log the error
+          }
+        }
+        
+        // Update activity's contact person and email fields from Person record
+        if (personRecord) {
+          primaryPersonRecord = personRecord;
+          // Ensure contactPerson is a string, not an array or object
+          updateFields.contactPerson = typeof personRecord.contactPerson === 'string' ? personRecord.contactPerson : null;
+          updateFields.email = typeof personRecord.email === 'string' ? personRecord.email : null;
+          updateFields.personId = personRecord.personId;
+        }
+      }
     }
 
     // Update Organizations if needed
-    if (updateFields.leadOrganizationId && updateFields.organization) {
-      await Organizations.update(
-        { organization: updateFields.organization },
-        { where: { leadOrganizationId: updateFields.leadOrganizationId } }
-      );
+    if (updateFields.organization && typeof updateFields.organization === 'string' && updateFields.organization.trim() !== "") {
+      let orgRecord = null;
+      
+      if (updateFields.leadOrganizationId) {
+        // Try to find existing organization by leadOrganizationId
+        orgRecord = await Organizations.findByPk(updateFields.leadOrganizationId);
+      } else {
+        // Try to find organization by name
+        orgRecord = await Organizations.findOne({ 
+          where: { organization: updateFields.organization } 
+        });
+      }
+      
+      if (orgRecord) {
+        // Update existing organization
+        await Organizations.update(
+          { organization: updateFields.organization },
+          { where: { leadOrganizationId: orgRecord.leadOrganizationId } }
+        );
+        updateFields.leadOrganizationId = orgRecord.leadOrganizationId;
+      } else {
+        // Create new organization if it doesn't exist
+        try {
+          orgRecord = await Organizations.create({
+            organization: updateFields.organization,
+            masterUserID: req.adminId,
+          });
+          updateFields.leadOrganizationId = orgRecord.leadOrganizationId;
+          console.log(`Created new organization with ID: ${orgRecord.leadOrganizationId} for activity update`);
+        } catch (orgCreateError) {
+          console.error("Error creating new organization during activity update:", orgCreateError);
+          // Don't fail the activity update, just log the error
+        }
+      }
     }
 
     // Update Deal if activity is connected to deal and deal fields are provided
@@ -1496,6 +1864,48 @@ exports.updateActivity = async (req, res) => {
     // If guests is present and is an array, stringify it
     if (updateFields.guests && Array.isArray(updateFields.guests)) {
       updateFields.guests = JSON.stringify(updateFields.guests);
+    }
+
+    // Final safety check: Ensure critical string fields are not arrays or objects
+    if (updateFields.contactPerson && typeof updateFields.contactPerson !== 'string') {
+      console.warn('Warning: contactPerson is not a string, setting to null:', updateFields.contactPerson);
+      updateFields.contactPerson = null;
+    }
+    if (updateFields.email && typeof updateFields.email !== 'string') {
+      console.warn('Warning: email is not a string, setting to null:', updateFields.email);
+      updateFields.email = null;
+    }
+    if (updateFields.organization && typeof updateFields.organization !== 'string') {
+      console.warn('Warning: organization is not a string, setting to null:', updateFields.organization);
+      updateFields.organization = null;
+    }
+
+    // Validate leadId if being changed
+    if (updateFields.leadId !== undefined && updateFields.leadId !== activity.leadId) {
+      if (updateFields.leadId !== null) {
+        const lead = await Lead.findByPk(updateFields.leadId);
+        if (!lead) {
+          return res.status(400).json({ 
+            message: "Invalid leadId. Lead not found.",
+            error: "LEAD_NOT_FOUND",
+            leadId: updateFields.leadId
+          });
+        }
+      }
+    }
+
+    // Validate dealId if being changed
+    if (updateFields.dealId !== undefined && updateFields.dealId !== activity.dealId) {
+      if (updateFields.dealId !== null) {
+        const deal = await Deal.findByPk(updateFields.dealId);
+        if (!deal) {
+          return res.status(400).json({ 
+            message: "Invalid dealId. Deal not found.",
+            error: "DEAL_NOT_FOUND",
+            dealId: updateFields.dealId
+          });
+        }
+      }
     }
 
     await activity.update(updateFields);
@@ -1550,10 +1960,31 @@ exports.updateActivity = async (req, res) => {
       ]
     });
 
+    // Parse and include multiple contact persons in response
+    let parsedContactPersons = null;
+    if (updatedActivity.allContactPersons) {
+      try {
+        parsedContactPersons = JSON.parse(updatedActivity.allContactPersons);
+      } catch (parseError) {
+        console.error("Error parsing allContactPersons:", parseError);
+      }
+    }
+
     res.status(200).json({ 
       message: "Activity updated successfully", 
-      activity: updatedActivity,
-      dealUpdated: !!(activity.dealId || req.body.dealId)
+      activity: {
+        ...updatedActivity.get({ plain: true }),
+        contactPersons: parsedContactPersons || (primaryPersonRecord ? [{
+          personId: primaryPersonRecord.personId,
+          contactPerson: primaryPersonRecord.contactPerson,
+          email: primaryPersonRecord.email,
+          phone: primaryPersonRecord.phone,
+          isPrimary: true
+        }] : [])
+      },
+      dealUpdated: !!(activity.dealId || req.body.dealId),
+      multiContactSupport: true,
+      contactPersonsCount: parsedContactPersons ? parsedContactPersons.length : (primaryPersonRecord ? 1 : 0)
     });
   } catch (error) {
     console.error("Error updating activity:", error);
@@ -2926,6 +3357,307 @@ exports.getActivityFilterFields = async (req, res) => {
     res.status(500).json({ 
       message: "Internal server error", 
       error: error.message 
+    });
+  }
+};
+
+/**
+ * Get connected person and organization data by leadId or dealId
+ * GET /api/activities/connected-data
+ * Query params: leadId OR dealId
+ * 
+ * Returns:
+ * - Lead/Deal title and details
+ * - All connected persons
+ * - All connected organizations
+ */
+exports.getConnectedData = async (req, res) => {
+  try {
+    const { leadId, dealId } = req.query;
+    const masterUserID = req.adminId;
+
+    console.log(`🔍 [CONNECTED-DATA] Request for user ${masterUserID}:`, { leadId, dealId });
+
+    // Validate that at least one ID is provided
+    if (!leadId && !dealId) {
+      return res.status(400).json({
+        message: "Either leadId or dealId must be provided"
+      });
+    }
+
+    let responseData = {
+      type: null,
+      entityId: null,
+      title: null,
+      value: null,
+      status: null,
+      persons: [],
+      organizations: [],
+      entityDetails: null
+    };
+
+    // If leadId is provided, fetch lead data
+    if (leadId) {
+      console.log(`🔍 [CONNECTED-DATA] Fetching lead ${leadId} data...`);
+      
+      const lead = await Lead.findOne({
+        where: { 
+          leadId: leadId,
+          masterUserID: masterUserID 
+        },
+        attributes: [
+          'leadId', 
+          'title', 
+          'value', 
+          'status', 
+          'personId', 
+          'leadOrganizationId',
+          'contactPerson',
+          'organization',
+          'email',
+          'phone',
+          'sourceChannel',
+          'createdAt',
+          'updatedAt'
+        ],
+        include: [
+          {
+            model: Person,
+            as: "LeadPerson",
+            required: false,
+            attributes: [
+              'personId',
+              'contactPerson',
+              'email',
+              'phone',
+              'jobTitle',
+              'leadOrganizationId',
+              'createdAt'
+            ]
+          },
+          {
+            model: Organizations,
+            as: "LeadOrganization",
+            required: false,
+            attributes: [
+              'leadOrganizationId',
+              'organization',
+              'address',
+              'organizationLabels',
+              'createdAt'
+            ]
+          }
+        ]
+      });
+
+      if (!lead) {
+        return res.status(404).json({
+          message: "Lead not found or access denied"
+        });
+      }
+
+      console.log(`✅ [CONNECTED-DATA] Lead found:`, {
+        leadId: lead.leadId,
+        title: lead.title,
+        hasPerson: !!lead.LeadPerson,
+        hasOrg: !!lead.LeadOrganization
+      });
+
+      // Build response data
+      responseData.type = 'lead';
+      responseData.entityId = lead.leadId;
+      responseData.title = lead.title;
+      responseData.value = lead.value;
+      responseData.status = lead.status;
+      responseData.entityDetails = {
+        leadId: lead.leadId,
+        title: lead.title,
+        value: lead.value,
+        status: lead.status,
+        contactPerson: lead.contactPerson,
+        organization: lead.organization,
+        email: lead.email,
+        phone: lead.phone,
+        sourceChannel: lead.sourceChannel,
+        createdAt: lead.createdAt,
+        updatedAt: lead.updatedAt
+      };
+
+      // Add person data if exists
+      if (lead.LeadPerson) {
+        responseData.persons.push({
+          personId: lead.LeadPerson.personId,
+          contactPerson: lead.LeadPerson.contactPerson,
+          email: lead.LeadPerson.email,
+          phone: lead.LeadPerson.phone,
+          jobTitle: lead.LeadPerson.jobTitle,
+          leadOrganizationId: lead.LeadPerson.leadOrganizationId,
+          createdAt: lead.LeadPerson.createdAt,
+          isPrimary: true
+        });
+      }
+
+      // Add organization data if exists
+      if (lead.LeadOrganization) {
+        responseData.organizations.push({
+          leadOrganizationId: lead.LeadOrganization.leadOrganizationId,
+          organization: lead.LeadOrganization.organization,
+          address: lead.LeadOrganization.address,
+          organizationLabels: lead.LeadOrganization.organizationLabels,
+          createdAt: lead.LeadOrganization.createdAt,
+          isPrimary: true
+        });
+      }
+
+      console.log(`📊 [CONNECTED-DATA] Lead data compiled:`, {
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      });
+    }
+
+    // If dealId is provided, fetch deal data
+    if (dealId) {
+      console.log(`🔍 [CONNECTED-DATA] Fetching deal ${dealId} data...`);
+      
+      const deal = await Deal.findOne({
+        where: { 
+          dealId: dealId,
+          masterUserID: masterUserID 
+        },
+        attributes: [
+          'dealId',
+          'title',
+          'value',
+          'status',
+          'personId',
+          'leadOrganizationId',
+          'contactPerson',
+          'organization',
+          'email',
+          'phone',
+          'pipeline',
+          'pipelineStage',
+          'expectedCloseDate',
+          'createdAt',
+          'updatedAt'
+        ],
+        include: [
+          {
+            model: Person,
+            as: "Person",
+            required: false,
+            attributes: [
+              'personId',
+              'contactPerson',
+              'email',
+              'phone',
+              'jobTitle',
+              'leadOrganizationId',
+              'createdAt'
+            ]
+          },
+          {
+            model: Organizations,
+            as: "Organization",
+            required: false,
+            attributes: [
+              'leadOrganizationId',
+              'organization',
+              'address',
+              'organizationLabels',
+              'createdAt'
+            ]
+          }
+        ]
+      });
+
+      if (!deal) {
+        return res.status(404).json({
+          message: "Deal not found or access denied"
+        });
+      }
+
+      console.log(`✅ [CONNECTED-DATA] Deal found:`, {
+        dealId: deal.dealId,
+        title: deal.title,
+        hasPerson: !!deal.Person,
+        hasOrg: !!deal.Organization
+      });
+
+      // Build response data
+      responseData.type = 'deal';
+      responseData.entityId = deal.dealId;
+      responseData.title = deal.title;
+      responseData.value = deal.value;
+      responseData.status = deal.status;
+      responseData.entityDetails = {
+        dealId: deal.dealId,
+        title: deal.title,
+        value: deal.value,
+        status: deal.status,
+        contactPerson: deal.contactPerson,
+        organization: deal.organization,
+        email: deal.email,
+        phone: deal.phone,
+        pipeline: deal.pipeline,
+        pipelineStage: deal.pipelineStage,
+        expectedCloseDate: deal.expectedCloseDate,
+        createdAt: deal.createdAt,
+        updatedAt: deal.updatedAt
+      };
+
+      // Add person data if exists
+      if (deal.Person) {
+        responseData.persons.push({
+          personId: deal.Person.personId,
+          contactPerson: deal.Person.contactPerson,
+          email: deal.Person.email,
+          phone: deal.Person.phone,
+          jobTitle: deal.Person.jobTitle,
+          leadOrganizationId: deal.Person.leadOrganizationId,
+          createdAt: deal.Person.createdAt,
+          isPrimary: true
+        });
+      }
+
+      // Add organization data if exists
+      if (deal.Organization) {
+        responseData.organizations.push({
+          leadOrganizationId: deal.Organization.leadOrganizationId,
+          organization: deal.Organization.organization,
+          address: deal.Organization.address,
+          organizationLabels: deal.Organization.organizationLabels,
+          createdAt: deal.Organization.createdAt,
+          isPrimary: true
+        });
+      }
+
+      console.log(`📊 [CONNECTED-DATA] Deal data compiled:`, {
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      });
+    }
+
+    // Return the response
+    console.log(`✅ [CONNECTED-DATA] Sending response for ${responseData.type} ${responseData.entityId}`);
+    
+    res.status(200).json({
+      message: "Connected data fetched successfully",
+      data: responseData,
+      summary: {
+        type: responseData.type,
+        entityId: responseData.entityId,
+        title: responseData.title,
+        personsCount: responseData.persons.length,
+        organizationsCount: responseData.organizations.length
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ [CONNECTED-DATA] Error:", error);
+    res.status(500).json({
+      message: "Internal server error",
+      error: error.message
     });
   }
 };

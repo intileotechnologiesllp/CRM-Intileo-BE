@@ -3,19 +3,19 @@ const router = express.Router();
 const emailController = require("../../controllers/email/emailController");
 const imapTestController = require("../../controllers/email/imapTestController");
 const { verifyToken } = require("../../middlewares/authMiddleware");
-const validatePrivilege = require("../../middlewares/validatePrivilege");
+// const validatePrivilege = require("../../middlewares/validatePrivilege");
 
 // Fetch inbox emails
 router.post("/fetch-inbox", verifyToken, emailController.queueFetchInboxEmails);
 router.get(
   "/fetch-recent-email",
   verifyToken,
-  validatePrivilege(4, "view"),
   emailController.fetchRecentEmail
 );
 router.get("/fetch-drafts", verifyToken, emailController.fetchDraftEmails);
 router.get("/fetch-archive", verifyToken, emailController.fetchArchiveEmails);
-router.get("/get-emails", verifyToken, emailController.getEmails);
+// router.get("/get-emails", verifyToken, emailController.getEmails);
+router.get("/get-email-labels", verifyToken, emailController.getEmailLabels);
 router.get("/fetch-sent", verifyToken, emailController.fetchSentEmails);
 router.get("/getoneEmail/:emailId", verifyToken, emailController.getOneEmail);
 router.post("/compose", verifyToken, emailController.composeEmail);
@@ -29,13 +29,11 @@ router.get(
 router.delete(
   "/template/:templateID",
   verifyToken,
-  validatePrivilege(4, "delete"),
   emailController.deleteTemplate
 );
 router.delete(
   "/templates/bulk",
   verifyToken,
-  validatePrivilege(4, "delete"),
   emailController.deleteBulkTemplates
 );
 router.get("/unread-counts", verifyToken, emailController.getUnreadCounts);
@@ -58,7 +56,7 @@ router.post("/bulk-mark", verifyToken, emailController.bulkMarkEmails);
 router.post("/bulk-move", verifyToken, emailController.bulkMoveEmails);
 
 // Email visibility (shared/private)
-router.post("/visibility/:emailId", verifyToken, emailController.updateEmailVisibility);
+router.post("/visibility/:emailId", verifyToken,emailController.updateEmailVisibility);
 
 // router.post("/update-draft", verifyToken,emailController.updateDraft);
 
@@ -77,4 +75,15 @@ router.post("/link-to-entity", verifyToken, emailController.linkEmailToEntity);
 router.post("/unlink-from-entity", verifyToken, emailController.unlinkEmailFromEntity);
 router.post("/link-labels", verifyToken, emailController.linkEmailToSaleInboxLabel);
 router.post("/unlink-labels", verifyToken,emailController.unlinkEmailFromSaleInboxLabel);
+
+// 🚀 REAL-TIME EMAIL SYNC WITH IMAP IDLE - Bidirectional CRM ↔ Gmail/Yandex
+router.get("/get-emails", verifyToken, emailController.getEmailsRealtime); // Enhanced getEmails with IMAP IDLE (temp: no auth)
+router.patch("/mark-read-realtime", verifyToken, emailController.markEmailReadRealtime); // Mark read/unread with server sync (temp: no auth)
+router.post("/bulk-mark-realtime", verifyToken, emailController.bulkMarkEmailsRealtime); // Bulk operations with server sync (temp: no auth)
+router.post("/start-realtime-sync", verifyToken, emailController.startRealtimeSync); // Start IMAP IDLE monitoring (temp: no auth)
+router.post("/stop-realtime-sync", verifyToken, emailController.stopRealtimeSync); // Stop IMAP IDLE monitoring (temp: no auth)
+router.get("/realtime-status", verifyToken, emailController.getRealtimeStatus); // Check IDLE connection status (temp: no auth)
+router.get("/realtime-connections", verifyToken, emailController.getAllRealtimeConnections); // Admin: view all connections (temp: no auth)
+router.get("/detailed-connection-status", verifyToken, emailController.getDetailedConnectionStatus); // Detailed Redis locks and backoff status (temp: no auth)
+
 module.exports = router;

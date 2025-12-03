@@ -7,20 +7,18 @@ const leadContactsController = require("../../controllers/leads/leadContactContr
 router.post(
   "/create-organization",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(26, "create_org"),
   leadContactsController.createOrganization
 );
-router.post("/create-person", verifyToken, validatePrivilege(5, "create"), leadContactsController.createPerson);
-router.get("/get-person/:personId", verifyToken, validatePrivilege(5, "view"), leadContactsController.getPerson);
-router.get("/get-contact-timeline", validatePrivilege(5, "view"), leadContactsController.getContactTimeline);
+router.post("/create-person", verifyToken, validatePrivilege(23, "create"), leadContactsController.createPerson);
+router.get("/get-person/:personId",leadContactsController.getPerson);
+router.get("/get-contact-timeline",leadContactsController.getContactTimeline);
 router.get(
   "/get-person-timeline/:personId", verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getPersonTimeline
 );
 router.get(
   "/get-organization-timeline/:organizationId", verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getOrganizationTimeline
 );
 router.get("/get-person-fields", leadContactsController.getPersonFields);
@@ -31,31 +29,29 @@ router.get(
 router.post(
   "/update-person-fields/:personId",
   verifyToken,
-  validatePrivilege(5, "edit"),
   leadContactsController.updatePerson
 );
 router.post(
   "/update-organization-fields/:leadOrganizationId",
   verifyToken,
-  validatePrivilege(5, "edit"),
   leadContactsController.updateOrganization
 );
 router.post(
   "/link-person-organization",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(23, "create"),
   leadContactsController.linkPersonToOrganization
 );
 router.post(
   "/create-person-note/:personId",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(23, "create"),
   leadContactsController.addPersonNote
 );
 router.post(
   "/create-organization-note/:leadOrganizationId",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(26, "create_org"),
   leadContactsController.addOrganizationNote
 );
 
@@ -63,13 +59,11 @@ router.post(
 router.get(
   "/get-person-notes/:personId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getPersonNotes
 );
 router.get(
   "/get-organization-notes/:leadOrganizationId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getOrganizationNotes
 );
 
@@ -77,13 +71,11 @@ router.get(
 router.put(
   "/update-person-note/:personId/:noteId",
   verifyToken,
-  validatePrivilege(5, "edit"),
   leadContactsController.updatePersonNote
 );
 router.put(
   "/update-organization-note/:leadOrganizationId/:noteId",
   verifyToken,
-  validatePrivilege(5, "edit"),
   leadContactsController.updateOrganizationNote
 );
 
@@ -91,40 +83,59 @@ router.put(
 router.delete(
   "/delete-person-note/:personId/:noteId",
   verifyToken,
-  validatePrivilege(5, "delete"),
+  validatePrivilege(25, "delete"),
   leadContactsController.deletePersonNote
 );
 router.delete(
   "/delete-organization-note/:leadOrganizationId/:noteId",
   verifyToken,
-  validatePrivilege(5, "delete"),
+  validatePrivilege(28, "delete_org"),
   leadContactsController.deleteOrganizationNote
 );
-router.get("/get-all-Persons", verifyToken, validatePrivilege(5, "view"), leadContactsController.getAllContactPersons);
+router.get("/get-all-Persons", verifyToken,leadContactsController.getAllContactPersons);
 router.get(
   "/get-all-persons-by-organization/:leadOrganizationId", verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getPersonsByOrganization
 );
 router.get(
   "/get-all-person-organizations",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getPersonsAndOrganizations
 );
-router.get("/get-organization",verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationsAndPersons)
-router.post("/bulk-edit-persons", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdatePersons);
-router.post("/bulk-edit-organizations", verifyToken, validatePrivilege(5, "edit"), leadContactsController.bulkUpdateOrganizations);
-router.delete('/deleteorganization/:leadOrganizationId', verifyToken, leadContactsController.deleteOrganization);
-router.delete('/deleteperson/:personId', verifyToken, leadContactsController.deletePerson);
-router.post("/save-organization-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllOrganizationFieldsWithCheck);
-router.get("/organization-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getOrganizationColumnPreference);
-router.post("/update-organization-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationColumnChecks);
-router.post("/save-person-fields", verifyToken, validatePrivilege(5, "create"), leadContactsController.saveAllPersonFieldsWithCheck);
-router.get("/person-check-columns", verifyToken, validatePrivilege(5, "view"), leadContactsController.getBothColumnPreferences);
-router.post("/update-person-columns", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonColumnChecks);
-router.post("/update-person-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updatePersonOwner);
-router.post("/update-organization-owner", verifyToken, validatePrivilege(5, "edit"), leadContactsController.updateOrganizationOwner);
+// router.get(
+//   "/get-persons-by-ids",
+//   verifyToken,
+//   validatePrivilege(5, "view"),
+//   leadContactsController.getPersonsByIds
+// );
+router.post(
+  "/get-persons-by-ids",
+  verifyToken,
+  leadContactsController.getPersonsByIds
+);
+router.get(
+  "/get-organizations-by-ids",
+  verifyToken,
+  leadContactsController.getOrganizationsByIds
+);
+router.post(
+  "/get-organizations-by-ids",
+  verifyToken,
+  leadContactsController.getOrganizationsByIds
+);
+router.get("/get-organization",verifyToken, leadContactsController.getOrganizationsAndPersons)
+router.post("/bulk-edit-persons", verifyToken, leadContactsController.bulkUpdatePersons);
+router.post("/bulk-edit-organizations", verifyToken,leadContactsController.bulkUpdateOrganizations);
+router.delete('/deleteorganization/:leadOrganizationId', verifyToken, validatePrivilege(28, "delete_org"), leadContactsController.deleteOrganization);
+router.delete('/deleteperson/:personId', verifyToken, validatePrivilege(25, "delete"), leadContactsController.deletePerson);
+router.post("/save-organization-fields", verifyToken, validatePrivilege(26, "create_org"), leadContactsController.saveAllOrganizationFieldsWithCheck);
+router.get("/organization-check-columns", verifyToken,leadContactsController.getOrganizationColumnPreference);
+router.post("/update-organization-columns", verifyToken,leadContactsController.updateOrganizationColumnChecks);
+router.post("/save-person-fields", verifyToken, validatePrivilege(23, "create"), leadContactsController.saveAllPersonFieldsWithCheck);
+router.get("/person-check-columns", verifyToken,leadContactsController.getBothColumnPreferences);
+router.post("/update-person-columns", verifyToken,leadContactsController.updatePersonColumnChecks);
+router.post("/update-person-owner", verifyToken, leadContactsController.updatePersonOwner);
+router.post("/update-organization-owner", verifyToken, leadContactsController.updateOrganizationOwner);
 
 // ===================================================================
 // FILE MANAGEMENT ROUTES FOR PERSONS AND ORGANIZATIONS
@@ -134,25 +145,23 @@ router.post("/update-organization-owner", verifyToken, validatePrivilege(5, "edi
 router.post(
   "/upload-person-files/:personId",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(23, "create"),
   leadContactsController.uploadPersonFiles
 );
 router.get(
   "/get-person-files/:personId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getPersonFiles
 );
 router.get(
   "/download-person-file/:personId/:fileId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.downloadPersonFile
 );
 router.delete(
   "/delete-person-file/:personId/:fileId",
   verifyToken,
-  validatePrivilege(5, "delete"),
+  validatePrivilege(25, "delete"),
   leadContactsController.deletePersonFile
 );
 
@@ -160,26 +169,88 @@ router.delete(
 router.post(
   "/upload-organization-files/:leadOrganizationId",
   verifyToken,
-  validatePrivilege(5, "create"),
+  validatePrivilege(26, "create_org"),
   leadContactsController.uploadOrganizationFiles
 );
 router.get(
   "/get-organization-files/:leadOrganizationId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.getOrganizationFiles
 );
 router.get(
   "/download-organization-file/:leadOrganizationId/:fileId",
   verifyToken,
-  validatePrivilege(5, "view"),
   leadContactsController.downloadOrganizationFile
 );
 router.delete(
   "/delete-organization-file/:leadOrganizationId/:fileId",
   verifyToken,
-  validatePrivilege(5, "delete"),
+  validatePrivilege(28, "delete_org"),
   leadContactsController.deleteOrganizationFile
+);
+
+// ===========================
+// PERSON SIDEBAR MANAGEMENT ROUTES
+// ===========================
+
+// Get person sidebar preferences
+router.get(
+  "/person-sidebar-preferences",
+  verifyToken,
+  leadContactsController.getPersonSidebarPreferences
+);
+
+// Update person sidebar preferences
+router.post(
+  "/person-sidebar-preferences",
+  verifyToken,
+  leadContactsController.updatePersonSidebarPreferences
+);
+
+// Reset person sidebar preferences to default
+router.post(
+  "/person-sidebar-preferences/reset",
+  verifyToken,
+  leadContactsController.resetPersonSidebarPreferences
+);
+
+// Toggle specific sidebar section
+router.post(
+  "/person-sidebar-preferences/toggle",
+  verifyToken,
+  leadContactsController.togglePersonSidebarSection
+);
+
+// ===========================
+// ORGANIZATION SIDEBAR MANAGEMENT ROUTES
+// ===========================
+
+// Get organization sidebar preferences
+router.get(
+  "/organization-sidebar-preferences",
+  verifyToken,
+  leadContactsController.getOrganizationSidebarPreferences
+);
+
+// Update organization sidebar preferences
+router.post(
+  "/organization-sidebar-preferences",
+  verifyToken,
+  leadContactsController.updateOrganizationSidebarPreferences
+);
+
+// Reset organization sidebar preferences to default
+router.post(
+  "/organization-sidebar-preferences/reset",
+  verifyToken,
+  leadContactsController.resetOrganizationSidebarPreferences
+);
+
+// Toggle specific organization sidebar section
+router.post(
+  "/organization-sidebar-preferences/toggle",
+  verifyToken,
+  leadContactsController.toggleOrganizationSidebarSection
 );
 
 

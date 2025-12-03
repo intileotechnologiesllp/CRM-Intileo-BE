@@ -27,21 +27,59 @@ exports.createPermissionSet = async (req, res) => {
   });
 };
 exports.getPermissionSet = async (req, res) => {
-  const findSet = await permissionSet.findAll({
-     include: [{ model: MasterUser, as: "pusers" }],
-  });
+  try {
+    const findSet = await permissionSet.findAll({
+      include: [{ model: MasterUser, as: "pusers" }],
+    });
 
-  if (!findSet) {
-    res.status(400).json({
-      message: "Permission set Not Fount",
-      set: [],
+    // For each permission set, also fetch users where globalPermissionSetId matches
+    const enrichedSets = await Promise.all(
+      findSet.map(async (set) => {
+        const setData = set.toJSON();
+
+        // Fetch users where globalPermissionSetId matches this permission set
+        const globalUsers = await MasterUser.findAll({
+          where: { globalPermissionSetId: setData.permissionSetId },
+          raw: true,
+        });
+
+        // Combine both regular users and global users
+        // Remove duplicates (users who might have both FKs set)
+        const userMap = new Map();
+        
+        // Add regular users from the include
+        if (setData.pusers) {
+          setData.pusers.forEach((user) => {
+            userMap.set(user.masterUserID, user);
+          });
+        }
+
+        // Add global users
+        globalUsers.forEach((user) => {
+          if (!userMap.has(user.masterUserID)) {
+            userMap.set(user.masterUserID, user);
+          }
+        });
+
+        // Replace pusers with combined list
+        setData.pusers = Array.from(userMap.values());
+
+        return setData;
+      })
+    );
+
+    res.status(200).json({
+      message: "permission set fetched successfully.",
+      set: enrichedSets,
+    });
+  } catch (error) {
+    console.error("Error fetching permission sets:", error);
+    res.status(500).json({
+      message: "Error fetching permission sets",
+      success: false,
+      error: error.message,
     });
   }
-
-  res.status(200).json({
-    message: "permission set create successfully.",
-    set: findSet,
-  });
 };
 
 exports.updatePermissionSet = async (req, res) => {

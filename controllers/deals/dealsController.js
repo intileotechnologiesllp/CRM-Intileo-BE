@@ -13,6 +13,7 @@ const DealDetails = require("../../models/deals/dealsDetailModel");
 const DealStageHistory = require("../../models/deals/dealsStageHistoryModel");
 const DealParticipant = require("../../models/deals/dealPartcipentsModel");
 const MasterUser = require("../../models/master/masterUserModel");
+const permissionSet = require("../../models/permissionsetModel");
 const DealNote = require("../../models/deals/delasNoteModel");
 const LeadNote = require("../../models/leads/leadNoteModel");
 const Email = require("../../models/email/emailModel");
@@ -455,11 +456,179 @@ exports.createDeal = async (req, res) => {
 
     if (existingLead) {
       await existingLead.update({ dealId: deal.dealId });
+      
+      // 🎯 AUTOMATIC DATA MIGRATION: Move all related data from Lead to Deal
+      console.log(`🔄 [LEAD-TO-DEAL] Moving data from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+      
+      try {
+        // ✅ 1. Move Activities from Lead to Deal
+        const activitiesUpdateResult = await Activity.update(
+          { dealId: deal.dealId, leadId: null }, // Move to deal, clear lead reference
+          { where: { leadId: existingLead.leadId } }
+        );
+        console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // ✅ 2. Move Notes from Lead to Deal
+        const LeadNote = require("../../models/leads/leadNoteModel");
+        const leadNotes = await LeadNote.findAll({
+          where: { leadId: existingLead.leadId }
+        });
+        
+        // Create corresponding deal notes for each lead note
+        let movedNotesCount = 0;
+        for (const leadNote of leadNotes) {
+          await DealNote.create({
+            dealId: deal.dealId,
+            masterUserID: leadNote.masterUserID,
+            content: leadNote.content,
+            createdBy: leadNote.createdBy,
+            createdAt: leadNote.createdAt,
+            updatedAt: leadNote.updatedAt
+          });
+          // Delete the original lead note
+          await leadNote.destroy();
+          movedNotesCount++;
+        }
+        console.log(`✅ [NOTES] Moved ${movedNotesCount} notes from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // ✅ 3. Move Files from Lead to Deal
+        const LeadFile = require("../../models/leads/leadFileModel");
+        let movedFilesCount = 0;
+        
+        try {
+          const leadFiles = await LeadFile.findAll({
+            where: { leadId: existingLead.leadId }
+          });
+          
+          // Create corresponding deal files for each lead file
+          for (const leadFile of leadFiles) {
+            await DealFile.create({
+              dealId: deal.dealId,
+              fileName: leadFile.fileName,
+              filePath: leadFile.filePath,
+              fileType: leadFile.fileType,
+              fileSize: leadFile.fileSize,
+              uploadedBy: leadFile.uploadedBy,
+              masterUserID: leadFile.masterUserID,
+              createdAt: leadFile.createdAt,
+              updatedAt: leadFile.updatedAt
+            });
+            // Delete the original lead file record
+            await leadFile.destroy();
+            movedFilesCount++;
+          }
+          console.log(`✅ [FILES] Moved ${movedFilesCount} files from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        } catch (fileError) {
+          console.log(`⚠️ [FILES] LeadFile model not available or error moving files:`, fileError.message);
+        }
+        
+        // ✅ 4. Move Emails from Lead to Deal (if any are directly linked)
+        const emailsUpdateResult = await Email.update(
+          { dealId: deal.dealId, leadId: null },
+          { where: { leadId: existingLead.leadId } }
+        );
+        console.log(`✅ [EMAILS] Moved ${emailsUpdateResult[0]} emails from Lead ${existingLead.leadId} to Deal ${deal.dealId}`);
+        
+        // Log the successful data migration
+        await historyLogger(
+          dealProgramId,
+          "LEAD_TO_DEAL_MIGRATION",
+          deal.masterUserID,
+          deal.dealId,
+          req.adminId,
+          `Lead ${existingLead.leadId} converted to Deal ${deal.dealId}. Moved: ${activitiesUpdateResult[0]} activities, ${movedNotesCount} notes, ${movedFilesCount} files, ${emailsUpdateResult[0]} emails`,
+          {
+            leadId: existingLead.leadId,
+            dealId: deal.dealId,
+            migratedData: {
+              activities: activitiesUpdateResult[0],
+              notes: movedNotesCount,
+              files: movedFilesCount,
+              emails: emailsUpdateResult[0]
+            }
+          }
+        );
+        
+      } catch (migrationError) {
+        console.error(`❌ [LEAD-TO-DEAL] Error during data migration:`, migrationError);
+        // Don't fail the deal creation, just log the error
+      }
     } else if (leadId) {
       // If leadId is provided but not from sourceOrgin 2, still update the Lead with dealId
       const leadToUpdate = await Lead.findByPk(leadId);
       if (leadToUpdate) {
         await leadToUpdate.update({ dealId: deal.dealId });
+        
+        // 🎯 Also migrate data for this case
+        console.log(`🔄 [LEAD-TO-DEAL] Moving data from Lead ${leadId} to Deal ${deal.dealId} (non-sourceOrgin 2)`);
+        
+        try {
+          // Move Activities
+          const activitiesUpdateResult = await Activity.update(
+            { dealId: deal.dealId, leadId: null },
+            { where: { leadId: leadId } }
+          );
+          console.log(`✅ [ACTIVITIES] Moved ${activitiesUpdateResult[0]} activities from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+          // Move Notes
+          const LeadNote = require("../../models/leads/leadNoteModel");
+          const leadNotes = await LeadNote.findAll({
+            where: { leadId: leadId }
+          });
+          
+          let movedNotesCount = 0;
+          for (const leadNote of leadNotes) {
+            await DealNote.create({
+              dealId: deal.dealId,
+              masterUserID: leadNote.masterUserID,
+              content: leadNote.content,
+              createdBy: leadNote.createdBy,
+              createdAt: leadNote.createdAt,
+              updatedAt: leadNote.updatedAt
+            });
+            await leadNote.destroy();
+            movedNotesCount++;
+          }
+          console.log(`✅ [NOTES] Moved ${movedNotesCount} notes from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+          // Move Files
+          try {
+            const LeadFile = require("../../models/leads/leadFileModel");
+            const leadFiles = await LeadFile.findAll({
+              where: { leadId: leadId }
+            });
+            
+            let movedFilesCount = 0;
+            for (const leadFile of leadFiles) {
+              await DealFile.create({
+                dealId: deal.dealId,
+                fileName: leadFile.fileName,
+                filePath: leadFile.filePath,
+                fileType: leadFile.fileType,
+                fileSize: leadFile.fileSize,
+                uploadedBy: leadFile.uploadedBy,
+                masterUserID: leadFile.masterUserID,
+                createdAt: leadFile.createdAt,
+                updatedAt: leadFile.updatedAt
+              });
+              await leadFile.destroy();
+              movedFilesCount++;
+            }
+            console.log(`✅ [FILES] Moved ${movedFilesCount} files from Lead ${leadId} to Deal ${deal.dealId}`);
+          } catch (fileError) {
+            console.log(`⚠️ [FILES] LeadFile model not available or error moving files:`, fileError.message);
+          }
+          
+          // Move Emails
+          const emailsUpdateResult = await Email.update(
+            { dealId: deal.dealId, leadId: null },
+            { where: { leadId: leadId } }
+          );
+          console.log(`✅ [EMAILS] Moved ${emailsUpdateResult[0]} emails from Lead ${leadId} to Deal ${deal.dealId}`);
+          
+        } catch (migrationError) {
+          console.error(`❌ [LEAD-TO-DEAL] Error during data migration:`, migrationError);
+        }
       }
     }
 
@@ -665,12 +834,28 @@ exports.createDeal = async (req, res) => {
       customFields: savedCustomFields,
     };
 
+    let migrationMessage = "";
+    let leadToDealdConversion = false;
+    
+    // Check if this was a lead conversion
+    if (existingLead || leadId) {
+      leadToDealdConversion = true;
+      const convertedLeadId = existingLead ? existingLead.leadId : leadId;
+      migrationMessage = ` Lead ${convertedLeadId} converted to Deal with automatic data migration (Activities, Notes, Files, Emails).`;
+    }
+
     const response = {
       message: activityId 
-        ? "Deal created and linked to activity successfully" 
-        : "Deal created successfully",
+        ? "Deal created and linked to activity successfully" + migrationMessage
+        : "Deal created successfully" + migrationMessage,
       deal: dealResponse,
       customFieldsSaved: Object.keys(savedCustomFields).length,
+      leadConversion: {
+        isLeadConversion: leadToDealdConversion,
+        convertedFromLeadId: leadToDealdConversion ? (existingLead ? existingLead.leadId : leadId) : null,
+        dataMigrated: leadToDealdConversion ? ["Activities", "Notes", "Files", "Emails"] : [],
+        migrationNote: leadToDealdConversion ? "All related data automatically moved from Lead to Deal" : null
+      }
     };
 
     // Add activity information to response if activity was linked
@@ -755,6 +940,10 @@ exports.getDeals = async (req, res) => {
       // Always include status column from database
       if (!attributes.includes("status")) {
         attributes.push("status");
+      }
+      // Always include ownerId in the attributes, regardless of preferences
+      if (!attributes.includes("ownerId")) {
+        attributes.push("ownerId");
       }
 
       if (attributes.length === 0) attributes = undefined;
@@ -1237,6 +1426,55 @@ exports.getDeals = async (req, res) => {
     console.log("🔍 All active custom fields template:", Object.keys(allActiveCustomFields));
     console.log("🔍 Deals with custom field data:", Object.keys(customFieldsByDeal));
 
+    // Fetch activity counts and next activity date for all deals
+    const dealActivities = await Activity.findAll({
+      where: {
+        dealId: { [Op.in]: dealIds }
+      },
+      attributes: [
+        'dealId',
+        'activityId',
+        'dueDate',
+        'isDone',
+        'type',
+        'subject'
+      ],
+      order: [['dueDate', 'ASC']],
+      raw: true
+    });
+
+    // Group activities by dealId and calculate counts
+    const activityDataByDeal = {};
+    dealActivities.forEach(activity => {
+      if (!activityDataByDeal[activity.dealId]) {
+        activityDataByDeal[activity.dealId] = {
+          totalActivities: 0,
+          upcomingActivities: 0,
+          completedActivities: 0,
+          nextActivityDate: null,
+          nextActivityType: null,
+          nextActivitySubject: null
+        };
+      }
+      
+      const data = activityDataByDeal[activity.dealId];
+      data.totalActivities++;
+      
+      if (activity.isDone) {
+        data.completedActivities++;
+      } else {
+        data.upcomingActivities++;
+        // Set next activity date if not already set (earliest upcoming activity)
+        if (!data.nextActivityDate && activity.dueDate) {
+          data.nextActivityDate = activity.dueDate;
+          data.nextActivityType = activity.type;
+          data.nextActivitySubject = activity.subject;
+        }
+      }
+    });
+
+    console.log(`📊 Activity data calculated for ${Object.keys(activityDataByDeal).length} deals`);
+
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
 
@@ -1245,7 +1483,13 @@ exports.getDeals = async (req, res) => {
         Object.assign(dealObj, dealObj.details);
         delete dealObj.details;
       }
-      
+
+      // Always include ownerId in the response
+      if (typeof dealObj.ownerId === 'undefined' || dealObj.ownerId === null) {
+        // Try to get from the original deal instance if not present
+        dealObj.ownerId = deal.ownerId || null;
+      }
+
       // For proposal currency - keep both ID and description
       if (dealObj.proposalCurrency) {
         dealObj.proposalCurrencyId = dealObj.proposalCurrency;
@@ -1269,11 +1513,11 @@ exports.getDeals = async (req, res) => {
         console.log(`🔍 Processing first deal ID: ${dealObj.dealId}`);
         console.log(`🔍 Custom fields available for deal ${dealObj.dealId}:`, customFieldsByDeal[dealObj.dealId]);
       }
-      
+
       // Add custom fields directly to the deal object (not wrapped in customFields) - same as getLeads
       const customFieldsData = customFieldsByDeal[dealObj.dealId] || {};
       console.log(`🔍 Deal ${dealObj.dealId} - Custom fields data:`, customFieldsData);
-      
+
       Object.entries(customFieldsData).forEach(([fieldName, fieldData]) => {
         dealObj[fieldName] = fieldData.value;
         console.log(`🔍 Deal ${dealObj.dealId} - Added custom field: ${fieldName} = ${fieldData.value}`);
@@ -1290,7 +1534,7 @@ exports.getDeals = async (req, res) => {
       });
       // Keep the customFields property for backward compatibility (same as getLeads)
       dealObj.customFields = customFieldsForDeal;
-      
+
       console.log(`🔍 Deal ${dealObj.dealId} - Final customFields object:`, dealObj.customFields);
 
       // Ensure status is present (from deal or details)
@@ -1302,7 +1546,7 @@ exports.getDeals = async (req, res) => {
       dealObj.isConvertedToLead = dealObj.isConvertedToLead || false;
       dealObj.convertedToLeadAt = dealObj.convertedToLeadAt || null;
       dealObj.convertedToLeadBy = dealObj.convertedToLeadBy || null;
-      
+
       // Add display flag for UI
       if (dealObj.isConvertedToLead) {
         dealObj.conversionFlag = {
@@ -1312,6 +1556,23 @@ exports.getDeals = async (req, res) => {
           tooltip: `Converted to lead on ${dealObj.convertedToLeadAt ? new Date(dealObj.convertedToLeadAt).toLocaleDateString() : 'Unknown date'}`
         };
       }
+
+      // Add activity information to the deal
+      const activityData = activityDataByDeal[dealObj.dealId] || {
+        totalActivities: 0,
+        upcomingActivities: 0,
+        completedActivities: 0,
+        nextActivityDate: null,
+        nextActivityType: null,
+        nextActivitySubject: null
+      };
+      
+      dealObj.totalActivities = activityData.totalActivities;
+      dealObj.upcomingActivities = activityData.upcomingActivities;
+      dealObj.completedActivities = activityData.completedActivities;
+      dealObj.nextActivityDate = activityData.nextActivityDate;
+      dealObj.nextActivityType = activityData.nextActivityType;
+      dealObj.nextActivitySubject = activityData.nextActivitySubject;
 
       return dealObj;
     });
@@ -3180,15 +3441,103 @@ exports.changeDealOwner = async (req, res) => {
       });
     }
 
-    // Check permissions - only admin or current owner can change ownership
-    const isAdmin = req.role === 'admin';
-    const isCurrentOwner = deal.ownerId === req.adminId;
+    // ===== OWNERSHIP VALIDATION =====
+    // Check if user is the creator of the deal (masterUserID)
+    const isCreator = deal.masterUserID === req.adminId;
     
-    if (!isAdmin && !isCurrentOwner) {
-      return res.status(403).json({
-        message: "You don't have permission to change ownership of this deal",
+    if (!isCreator) {
+      // User is not the creator - check if they have permission "2" (edit_owner)
+      console.log("🔒 User is NOT the creator of this deal. Checking 'edit_owner' permission...");
+      
+      // Fetch user's permission set
+      const user = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'permissionSetId', 'globalPermissionSetId']
       });
+      
+      if (!user) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: User not found.`,
+          req.adminId
+        );
+        return res.status(401).json({ message: "User not found." });
+      }
+      
+      // Prioritize globalPermissionSetId over permissionSetId
+      const permissionSetId = user.globalPermissionSetId || user.permissionSetId;
+      
+      console.log(`🔍 User ${req.adminId} info:`, {
+        permissionSetId: user.permissionSetId,
+        globalPermissionSetId: user.globalPermissionSetId,
+        usingPermissionSet: permissionSetId
+      });
+      
+      if (!permissionSetId) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: No permission set assigned. User ${req.adminId} tried to change owner of deal ${dealId} created by ${deal.masterUserID}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to change the owner of deals you didn't create." 
+        });
+      }
+      
+      // Fetch permission set
+      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      
+      console.log(`🔍 Permission Set ${permissionSetId} details:`, {
+        permissionSetId: userPermissionSet?.permissionSetId,
+        permissionName: userPermissionSet?.permissionName,
+        permissions: userPermissionSet?.permissions
+      });
+      
+      if (!userPermissionSet || !userPermissionSet.permissions) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: Permission set not found. User ${req.adminId} tried to change owner of deal ${dealId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "Permission set not found." 
+        });
+      }
+      
+      // Parse permissions
+      const permissions = typeof userPermissionSet.permissions === 'string' 
+        ? JSON.parse(userPermissionSet.permissions) 
+        : userPermissionSet.permissions;
+      
+      // Check if permission "2" (Edit deal owner) is granted
+      const hasEditOwnerPermission = permissions["2"] === true;
+      
+      console.log("📋 User permissions:", permissions);
+      console.log(`🔑 Permission "2" (edit_owner): ${hasEditOwnerPermission}`);
+      
+      if (!hasEditOwnerPermission) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_OWNER_CHANGE",
+          req.role,
+          `Deal owner change failed: User ${req.adminId} tried to change owner of deal ${dealId} created by user ${deal.masterUserID} without 'edit_owner' permission.`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to change the owner of deals you didn't create. Only the deal creator can change ownership." 
+        });
+      }
+      
+      console.log("✅ User has 'edit_owner' permission - allowing ownership change");
+    } else {
+      console.log("✅ User is the creator of this deal - allowing ownership change");
     }
+    // ===== END OWNERSHIP VALIDATION =====
 
     // Store old owner ID for logging
     const oldOwnerId = deal.ownerId;
@@ -3282,6 +3631,104 @@ exports.updateDeal = async (req, res) => {
       );
       return res.status(404).json({ message: "Deal not found." });
     }
+
+    // ===== OWNERSHIP VALIDATION =====
+    // Check if user owns the deal or has permission to edit others' deals
+    const isOwner = (deal.masterUserID === req.adminId || deal.ownerId === req.adminId);
+    
+    if (!isOwner) {
+      // User doesn't own the deal - check if they have permission "1" (edit_others)
+      console.log("🔒 User is NOT owner of this deal. Checking 'edit_others' permission...");
+      
+      // Fetch user's permission set
+      const user = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'permissionSetId', 'globalPermissionSetId']
+      });
+      
+      if (!user) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: User not found.`,
+          req.adminId
+        );
+        return res.status(401).json({ message: "User not found." });
+      }
+      
+      // Prioritize globalPermissionSetId over permissionSetId
+      const permissionSetId = user.globalPermissionSetId || user.permissionSetId;
+      
+      console.log(`🔍 User ${req.adminId} info:`, {
+        permissionSetId: user.permissionSetId,
+        globalPermissionSetId: user.globalPermissionSetId,
+        usingPermissionSet: permissionSetId
+      });
+      
+      if (!permissionSetId) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: No permission set assigned. User ${req.adminId} tried to edit deal ${dealId} owned by ${deal.ownerId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to edit deals owned by other users." 
+        });
+      }
+      
+      // Fetch permission set
+      const userPermissionSet = await permissionSet.findByPk(permissionSetId);
+      
+      console.log(`🔍 Permission Set ${permissionSetId} details:`, {
+        permissionSetId: userPermissionSet?.permissionSetId,
+        permissionName: userPermissionSet?.permissionName,
+        permissions: userPermissionSet?.permissions
+      });
+      
+      if (!userPermissionSet || !userPermissionSet.permissions) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: Permission set not found. User ${req.adminId} tried to edit deal ${dealId}`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "Permission set not found." 
+        });
+      }
+      
+      // Parse permissions
+      const permissions = typeof userPermissionSet.permissions === 'string' 
+        ? JSON.parse(userPermissionSet.permissions) 
+        : userPermissionSet.permissions;
+      
+      // Check if permission "1" (Edit deals owned by other users) is granted
+      const hasEditOthersPermission = permissions["1"] === true;
+      
+      console.log("📋 User permissions:", permissions);
+      console.log(`🔑 Permission "1" (edit_others): ${hasEditOthersPermission}`);
+      
+      if (!hasEditOthersPermission) {
+        await logAuditTrail(
+          getProgramId("DEALS"),
+          "DEAL_UPDATE",
+          req.role,
+          `Deal update failed: User ${req.adminId} tried to edit deal ${dealId} owned by user ${deal.ownerId} without 'edit_others' permission.`,
+          req.adminId
+        );
+        return res.status(403).json({ 
+          message: "You don't have permission to edit deals owned by other users. Only the deal owner can edit this deal." 
+        });
+      }
+      
+      console.log("✅ User has 'edit_others' permission - allowing edit of other user's deal");
+    } else {
+      console.log("✅ User is owner of this deal - allowing edit");
+    }
+    // ===== END OWNERSHIP VALIDATION =====
 
     // Phone number validation (only numerical values allowed) - if phone is being updated
     if (updateFields.phone && updateFields.phone.trim() !== "") {
@@ -4986,67 +5433,52 @@ exports.getDealDetail = async (req, res) => {
       };
     }
 
-    // Get total email count first with visibility filtering
-    const totalEmailsCount = await Email.count({
-      where: {
-        [Op.and]: [
-          {
-            [Op.or]: [
-              { dealId },
-              ...(deal.email
-                ? [
-                    { sender: deal.email },
-                    { recipient: { [Op.like]: `%${deal.email}%` } },
-                  ]
-                : []),
-            ],
-          },
-          emailVisibilityWhere
-        ]
-      },
-    });
-
-    // Fetch emails linked to this deal with pagination, essential fields, and visibility filtering
-    const emailsByDeal = await Email.findAll({
-      where: {
-        [Op.and]: [
-          { dealId },
-          emailVisibilityWhere
-        ]
-      },
-      attributes: [
-        "emailID",
-        "messageId",
-        "sender",
-        "senderName",
-        "recipient",
-        "cc",
-        "bcc",
-        "subject",
-        "createdAt",
-        "folder",
-        "isRead",
-        "leadId",
-        "dealId",
-        "visibility",
-        "userEmail"
-      ],
-      order: [["createdAt", "DESC"]],
-      limit: Math.ceil(safeEmailLimit / 2),
-      offset: Math.floor(emailOffset / 2),
-    });
-
-    // Fetch emails by address with pagination, essential fields, and visibility filtering
-    let emailsByAddress = [];
+    // NEW APPROACH: Fetch emails through person/organization relationships instead of direct dealId
+    console.log(`🔍 [getDealDetail] Finding emails through person/organization relationships for deal: ${dealId}`);
+    
+    // Collect all email addresses associated with this deal
+    const dealEmailAddresses = new Set();
+    
+    // Add deal's direct email
     if (deal.email) {
-      emailsByAddress = await Email.findAll({
+      dealEmailAddresses.add(deal.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal email: ${deal.email}`);
+    }
+    
+    // Add person emails (from participants and direct person)
+    if (deal.Person && deal.Person.email) {
+      dealEmailAddresses.add(deal.Person.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal person email: ${deal.Person.email}`);
+    }
+    
+    // Add organization email
+    if (deal.Organization && deal.Organization.email) {
+      dealEmailAddresses.add(deal.Organization.email.toLowerCase());
+      console.log(`📧 [getDealDetail] Added deal organization email: ${deal.Organization.email}`);
+    }
+    
+    // Add participant emails
+    participants.forEach(participant => {
+      if (participant.Person && participant.Person.email) {
+        dealEmailAddresses.add(participant.Person.email.toLowerCase());
+        console.log(`📧 [getDealDetail] Added participant email: ${participant.Person.email}`);
+      }
+    });
+    
+    console.log(`📧 [getDealDetail] Total email addresses to search: ${dealEmailAddresses.size}`);
+    
+    // Fetch emails based on these email addresses (relationship-based approach)
+    let emailsByRelationship = [];
+    if (dealEmailAddresses.size > 0) {
+      const emailAddressArray = Array.from(dealEmailAddresses);
+      emailsByRelationship = await Email.findAll({
         where: {
           [Op.and]: [
             {
-              [Op.or]: [
-                { sender: deal.email },
-                { recipient: { [Op.like]: `%${deal.email}%` } },
-              ],
+              [Op.or]: emailAddressArray.flatMap(email => [
+                { sender: email },
+                { recipient: { [Op.like]: `%${email}%` } }
+              ])
             },
             emailVisibilityWhere
           ]
@@ -5063,22 +5495,19 @@ exports.getDealDetail = async (req, res) => {
           "createdAt",
           "folder",
           "isRead",
-          "leadId",
-          "dealId",
           "visibility",
           "userEmail"
         ],
         order: [["createdAt", "DESC"]],
-        limit: Math.ceil(safeEmailLimit / 2),
-        offset: Math.floor(emailOffset / 2),
+        limit: safeEmailLimit,
+        offset: emailOffset,
       });
     }
-
-    // Merge and deduplicate emails
-    const allEmailsMap = new Map();
-    emailsByDeal.forEach((email) => allEmailsMap.set(email.emailID, email));
-    emailsByAddress.forEach((email) => allEmailsMap.set(email.emailID, email));
-    const allEmails = Array.from(allEmailsMap.values());
+    
+    console.log(`📧 [getDealDetail] Found ${emailsByRelationship.length} emails through relationship-based approach`);
+    
+    // Use relationship-based emails
+    const allEmails = emailsByRelationship;
 
     // Log visibility statistics
     const visibilityStats = allEmails.reduce((stats, email) => {
@@ -5949,11 +6378,11 @@ exports.getDealDetail = async (req, res) => {
       userActivityAnalytics: mostActiveUsersAnalytics,
       // Add metadata for debugging and pagination (maintaining response structure)
       _emailMetadata: {
-        totalEmails: totalEmailsCount,
+        totalEmails: allEmails.length,
         returnedEmails: optimizedEmails.length,
         emailPage: parseInt(emailPage),
         emailLimit: safeEmailLimit,
-        hasMoreEmails: totalEmailsCount > emailOffset + optimizedEmails.length,
+        hasMoreEmails: false, // Since we're using relationship-based approach
         truncatedBodies: optimizedEmails.some(
           (e) => e.body && e.body.includes("[truncated]")
         ),
@@ -5967,6 +6396,19 @@ exports.getDealDetail = async (req, res) => {
             "connectedLeads", 
             "connectedDeals"
           ]
+        },
+        // Email fetching approach
+        fetchingMethod: {
+          approach: "relationship-based",
+          description: "Emails are fetched through person/organization relationships rather than direct dealId associations",
+          emailSources: {
+            dealEmail: deal.email || null,
+            personEmails: deal.Person?.email ? [deal.Person.email] : [],
+            organizationEmails: deal.Organization?.email ? [deal.Organization.email] : [],
+            participantEmails: participants.filter(p => p.Person?.email).map(p => p.Person.email)
+          },
+          totalEmailAddresses: dealEmailAddresses.size,
+          searchedAddresses: Array.from(dealEmailAddresses)
         },
         // Email visibility information
         visibilityFiltering: {
@@ -6854,6 +7296,7 @@ exports.updateDealColumnChecks = async (req, res) => {
 exports.markDealAsWon = async (req, res) => {
   try {
     const { dealId } = req.params;
+    const masterUserID = req.masterUserID || req.adminId;
 
     const deal = await Deal.findByPk(dealId);
     if (!deal) {
@@ -6904,18 +7347,38 @@ exports.markDealAsWon = async (req, res) => {
       }
     }
 
-    // --- Activity popup settings logic (for frontend popup) ---
-    const popup = req.activityPopupSettings || {};
-    const activityPopupSettings = {
-      defaultActivityType: popup.defaultActivityType || 'Task',
-      followUpTime: popup.followUpTime || 'in 3 months',
-      allowUserDisable: typeof popup.allowUserDisable === 'boolean' ? popup.allowUserDisable : true,
+    // --- Fetch Deal Won Activity Settings ---
+    const ActivitySetting = require('../../models/activity/activitySettingModel');
+    let dealWonPopupSettings = {
+      showDealWonPopup: true,
+      dealWonActivityType: 'Task',
+      dealWonFollowUpTime: 'in 3 months',
+      allowUserDisableDealWon: true,
     };
+
+    try {
+      const settings = await ActivitySetting.findOne({ 
+        // where: { masterUserID } 
+      });
+      
+      if (settings) {
+        // Use saved settings
+        dealWonPopupSettings = {
+          showDealWonPopup: settings.showDealWonPopup !== undefined ? settings.showDealWonPopup : true,
+          dealWonActivityType: settings.dealWonActivityType || 'Task',
+          dealWonFollowUpTime: settings.dealWonFollowUpTime || 'in 3 months',
+          allowUserDisableDealWon: settings.allowUserDisableDealWon !== undefined ? settings.allowUserDisableDealWon : true,
+        };
+      }
+    } catch (settingsError) {
+      console.log('Error fetching deal won activity settings:', settingsError.message);
+      // Continue with default settings
+    }
 
     res.status(200).json({
       message: "Deal marked as won",
       deal,
-      activityPopupSettings,
+      dealWonPopupSettings,
     });
   } catch (error) {
     console.log(error);
@@ -6931,7 +7394,7 @@ exports.checkDealQuestionSharedStatus = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
       },
       include: [
         {
@@ -6995,7 +7458,7 @@ exports.markDealAsLost = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
       },
       include: [
         {
@@ -7040,7 +7503,7 @@ exports.markDealAsLost = async (req, res) => {
         where: {
           fieldName: "questioner_shared?",
           entityType: "deal",
-          masterUserID: adminId,
+          // masterUserID: adminId,
           isActive: true
         }
       });
@@ -7116,7 +7579,7 @@ exports.markDealAsLost = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId, // Removed to allow global custom field access
       },
       include: [
         {
@@ -7280,21 +7743,21 @@ exports.updateQuestionShared = async (req, res) => {
       return res.status(404).json({ message: "Deal not found." });
     }
 
-    // Check permissions (non-admin users can only update their own deals)
-    if (req.role !== 'admin' && deal.masterUserID !== adminId) {
-      return res.status(403).json({ 
-        message: "Access denied. You can only update deals you own." 
-      });
-    }
+    // // Check permissions (non-admin users can only update their own deals)
+    // if (req.role !== 'admin' && deal.masterUserID !== adminId) {
+    //   return res.status(403).json({ 
+    //     message: "Access denied. You can only update deals you own." 
+    //   });
+    // }
 
     console.log(`[UPDATE_QUESTION] Deal found: ${deal.title}`);
 
     // Find the questionShared custom field definition
     const questionSharedField = await CustomField.findOne({
       where: {
-        fieldName: "questionShared",
-        entityType: "deal",
-        masterUserID: adminId,
+        fieldName: "questioner_shared?",
+        entityType: "lead",
+        // masterUserID: adminId,
         isActive: true
       }
     });
@@ -7313,7 +7776,7 @@ exports.updateQuestionShared = async (req, res) => {
       where: {
         entityId: dealId.toString(),
         entityType: "deal",
-        masterUserID: adminId,
+        // masterUserID: adminId,
         fieldId: questionSharedField.fieldId
       }
     });

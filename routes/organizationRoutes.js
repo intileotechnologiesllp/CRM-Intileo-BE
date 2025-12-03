@@ -8,10 +8,25 @@ const validatePrivilege = require("../middlewares/validatePrivilege");
 // router.use(verifyToken);
 
 // Organization CRUD Routes
-router.post("/", verifyToken, validatePrivilege(5, "create"), organizationController.createOrganization);
-router.get("/", verifyToken, validatePrivilege(5, "view"), organizationController.getAllOrganizations);
-router.get("/:organizationId", verifyToken, validatePrivilege(5, "view"), organizationController.getOrganizationById);
-router.put("/:organizationId", verifyToken, validatePrivilege(5, "edit"), organizationController.updateOrganization);
-router.delete("/:organizationId", verifyToken, validatePrivilege(5, "delete"), organizationController.deleteOrganization);
+router.post("/", verifyToken,organizationController.createOrganization);
+router.get("/", verifyToken, organizationController.getAllOrganizations);
+router.get("/:organizationId", verifyToken, organizationController.getOrganizationById);
+router.put("/:organizationId", verifyToken, organizationController.updateOrganization);
+router.delete("/:organizationId", verifyToken, organizationController.deleteOrganization);
+
+// Timeline Routes - Get unified timeline (emails, activities) for an organization
+const leadController = require("../controllers/leads/leadController");
+
+router.get(
+  "/timeline/:organizationId",
+  verifyToken,
+  leadController.getOrganizationTimeline
+);
+
+router.get(
+  "/emails/:organizationId",
+  verifyToken,
+  leadController.getOrganizationTimeline
+);
 
 module.exports = router;
