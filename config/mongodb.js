@@ -9,7 +9,15 @@ const connectMongoDB = async () => {
   try {
     const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pipedrive_crm';
     
-    await mongoose.connect(mongoURI);
+    // Disable buffering globally to prevent timeout errors when MongoDB is unavailable
+    mongoose.set('bufferCommands', false);
+    mongoose.set('bufferTimeoutMS', 5000); // Reduce buffer timeout to 5 seconds
+    
+    await mongoose.connect(mongoURI, {
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
+      family: 4 // Use IPv4, skip trying IPv6
+    });
 
     console.log('✅ MongoDB Connected Successfully');
     console.log(`📍 MongoDB URI: ${mongoURI}`);
@@ -32,13 +40,22 @@ const connectMongoDB = async () => {
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error.message);
     console.warn('⚠️ Continuing without MongoDB - email body storage will be disabled');
-    // Don't throw - allow app to continue without MongoDB
+    
+    // Disable buffering to prevent timeout errors
+    mongoose.set('bufferCommands', false);
+    
     return false;
   }
+};
+
+// Helper function to check if MongoDB is connected
+const isMongoDBConnected = () => {
+  return mongoose.connection.readyState === 1;
 };
 
 // Export the connection function
 module.exports = {
   connectMongoDB,
+  isMongoDBConnected,
   mongoose
 };
