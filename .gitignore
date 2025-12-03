@@ -13,8 +13,8 @@ logs/
 *.db
 
 # Secrets and configuration
-config/*.json
-config/*.js
+# config/*.json
+# config/*.js
 
 # OS-specific files
 .DS_Store
