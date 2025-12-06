@@ -2126,7 +2126,7 @@ exports.getActivityFields = async (req, res) => {
 
     // Transform the data to include labels for better display
     const fieldsWithLabels = columns.map(column => ({
-      key: column.key,
+      key: column.entityType === 'Deal' ? `deal_${column.key}` : column.key, // Add deal_ prefix for Deal fields
       label: column.key
         .replace(/([A-Z])/g, " $1") // Add space before capital letters
         .replace(/^./, str => str.toUpperCase()), // Capitalize first letter
