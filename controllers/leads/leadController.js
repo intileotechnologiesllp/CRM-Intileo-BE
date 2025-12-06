@@ -2077,11 +2077,14 @@ exports.getLeads = async (req, res) => {
         leadAttributes && leadAttributes.length > 0
           ? leadAttributes
           : undefined,
+      distinct: true, // Ensure accurate counting with complex joins
     });
 
     console.log("==========================================");
     console.log("🎉 QUERY EXECUTED SUCCESSFULLY!");
     console.log("🎉 Total records found:", leads.count);
+    console.log("🎉 Leads array length:", leads.rows.length);
+    console.log("🎉 Count vs Array match:", leads.count === leads.rows.length ? "✅ MATCH (same page)" : `⚠️ DIFFERENT (${leads.count} total vs ${leads.rows.length} on this page)`);
 
     // Debug Activity filtering results
     if (filterId && activityInclude && activityInclude.required) {
@@ -2803,6 +2806,15 @@ exports.getLeads = async (req, res) => {
     const totalLeadCount = await Lead.count({
       where: totalLeadCountWhere,
     });
+
+    // Console logging for debugging leads array length
+    console.log("🔍 === FINAL LEADS RESPONSE DEBUG ===");
+    console.log("🔍 flatLeads array length:", flatLeads.length);
+    console.log("🔍 totalRecords (leads.count):", leads.count);
+    console.log("🔍 totalLeadCount:", totalLeadCount);
+    console.log("🔍 totalPages:", Math.ceil(leads.count / limit));
+    console.log("🔍 currentPage:", parseInt(page));
+    console.log("🔍 === END LEADS RESPONSE DEBUG ===");
 
     res.status(200).json({
       message: "Leads fetched successfully",
