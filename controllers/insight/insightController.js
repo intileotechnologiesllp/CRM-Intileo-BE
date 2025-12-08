@@ -96,11 +96,26 @@ const { Op } = require("sequelize");
 const ReportFolder = require("../../models/insight/reportFolderModel");
 // const {  generateActivityPerformanceDataForSave } = require("./report/activityReportController");
 const LeadPerson = require("../../models/leads/leadPersonModel");
-const { generateActivityPerformanceDataForSave, generateEmailPerformanceDataForSave } = require("../../utils/insight/activityReport");
-const { generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave, generateDealProgressDataForSave } = require("../../utils/insight/dealReport");
-const { generateLeadPerformanceDataForSave, generateLeadConversionDataForSave } = require("../../utils/insight/leadReport.js");
-const { generatePersonPerformanceDataForSave } = require("../../utils/insight/contactperson");
-const { generateOrganizationPerformanceDataForSave } = require("../../utils/insight/organizationReport");
+const {
+  generateActivityPerformanceDataForSave,
+  generateEmailPerformanceDataForSave,
+} = require("../../utils/insight/activityReport");
+const {
+  generateDealConversionDataForSave,
+  generateDealDurationData,
+  generateDealPerformanceDataForSave,
+  generateDealProgressDataForSave,
+} = require("../../utils/insight/dealReport");
+const {
+  generateLeadPerformanceDataForSave,
+  generateLeadConversionDataForSave,
+} = require("../../utils/insight/leadReport.js");
+const {
+  generatePersonPerformanceDataForSave,
+} = require("../../utils/insight/contactperson");
+const {
+  generateOrganizationPerformanceDataForSave,
+} = require("../../utils/insight/organizationReport");
 // const { generateExistingDealPerformanceDataForSave, generateDealConversionDataForSave, generateDealDurationData, generateDealPerformanceDataForSave } = require("./report/dealReportController");
 // const { generatePersonPerformanceDataForSave, generateOrganizationPerformanceDataForSave } = require("./report/contactReportController");
 
@@ -385,14 +400,24 @@ exports.getSingleDashboard = async (req, res) => {
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
+    const role = req.role;
 
     // First, get the dashboard
-    const dashboard = await DASHBOARD.findOne({
-      where: {
-        dashboardId,
-        ownerId,
-      },
-    });
+    let dashboard;
+    if (role === "admin") {
+      dashboard = await DASHBOARD.findOne({
+        where: {
+          dashboardId,
+        },
+      });
+    } else {
+      dashboard = await DASHBOARD.findOne({
+        where: {
+          dashboardId,
+          ownerId,
+        },
+      });
+    }
 
     if (!dashboard) {
       return res.status(404).json({
@@ -1317,7 +1342,8 @@ exports.createGoal = async (req, res) => {
     const ownerId = req.adminId;
 
     // Get periodFilter from query or body
-    const periodFilter = req.query.periodFilter || req.body.periodFilter || "goal_duration";
+    const periodFilter =
+      req.query.periodFilter || req.body.periodFilter || "goal_duration";
 
     // Validate required fields
     if (!entity || !goalType) {
@@ -1470,7 +1496,7 @@ exports.createGoal = async (req, res) => {
     // Set default colors if not provided
     const defaultColors = {
       color1: "#0B7271",
-      color2: "#F6B7D3"
+      color2: "#F6B7D3",
     };
 
     // Set default graph type if not provided
@@ -1479,7 +1505,7 @@ exports.createGoal = async (req, res) => {
     // Function to calculate target per period based on frequency
     const calculatePeriodTarget = (totalTarget, periodType, totalPeriods) => {
       const target = parseFloat(totalTarget);
-      
+
       switch (periodType) {
         case "Weekly":
           return target; // Weekly target remains the same
@@ -1495,11 +1521,16 @@ exports.createGoal = async (req, res) => {
     };
 
     // Function to generate breakdown based on period type
-    const generateBreakdownWithData = async (startDate, endDate, targetValue, periodType) => {
+    const generateBreakdownWithData = async (
+      startDate,
+      endDate,
+      targetValue,
+      periodType
+    ) => {
       const currentDate = new Date();
       const start = new Date(startDate);
       const end = new Date(endDate);
-      
+
       let breakdown = [];
 
       if (periodType === "Monthly") {
@@ -1508,24 +1539,35 @@ exports.createGoal = async (req, res) => {
 
         while (currentMonth <= end) {
           const monthStart = new Date(currentMonth);
-          const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59);
+          const monthEnd = new Date(
+            currentMonth.getFullYear(),
+            currentMonth.getMonth() + 1,
+            0,
+            23,
+            59,
+            59
+          );
 
           // Adjust for actual start and end boundaries
           const actualMonthStart = monthStart < start ? start : monthStart;
           const actualMonthEnd = monthEnd > end ? end : monthEnd;
 
-          const monthName = monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+          const monthName = monthStart.toLocaleDateString("en-US", {
+            month: "short",
+            year: "numeric",
+          });
 
-          const isCurrentMonth = currentMonth.getMonth() === currentDate.getMonth() && 
-                                currentMonth.getFullYear() === currentDate.getFullYear();
+          const isCurrentMonth =
+            currentMonth.getMonth() === currentDate.getMonth() &&
+            currentMonth.getFullYear() === currentDate.getFullYear();
           const isFutureMonth = monthStart > currentDate;
 
           // Calculate actual results for this month period
           const { result, recordCount, records } = await calculatePeriodResults(
-            actualMonthStart, 
-            actualMonthEnd, 
-            entity, 
-            goalType, 
+            actualMonthStart,
+            actualMonthEnd,
+            entity,
+            goalType,
             trackingMetric,
             assignId,
             assignee,
@@ -1534,11 +1576,16 @@ exports.createGoal = async (req, res) => {
             finalActivityType
           );
 
-          const periodTarget = calculatePeriodTarget(targetValue, periodType, 1);
+          const periodTarget = calculatePeriodTarget(
+            targetValue,
+            periodType,
+            1
+          );
           const difference = result - periodTarget;
-          const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
+          const percentage =
+            periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
-           function flattenObject(obj, parentKey = "", res = {}) {
+          function flattenObject(obj, parentKey = "", res = {}) {
             for (let key in obj) {
               const newKey = parentKey ? `${parentKey}_${key}` : key;
 
@@ -1555,8 +1602,8 @@ exports.createGoal = async (req, res) => {
             return res;
           }
 
-          const flattened = JSON.parse(JSON.stringify(records, null, 2)).map((item) =>
-            flattenObject(item)
+          const flattened = JSON.parse(JSON.stringify(records, null, 2)).map(
+            (item) => flattenObject(item)
           );
           breakdown.push({
             period: monthName,
@@ -1569,14 +1616,17 @@ exports.createGoal = async (req, res) => {
             recordCount: recordCount,
             records: flattened,
             isCurrentMonth: isCurrentMonth,
-            isFutureMonth: isFutureMonth
+            isFutureMonth: isFutureMonth,
           });
 
           // Move to next month
-          currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1);
+          currentMonth = new Date(
+            currentMonth.getFullYear(),
+            currentMonth.getMonth() + 1,
+            1
+          );
         }
-      } 
-      else if (periodType === "Quarterly") {
+      } else if (periodType === "Quarterly") {
         // Quarterly breakdown
         const getQuarterStart = (date) => {
           const year = date.getFullYear();
@@ -1600,8 +1650,12 @@ exports.createGoal = async (req, res) => {
           const quarterEnd = getQuarterEnd(currentQuarterStart);
 
           // Adjust quarter boundaries to fit within effective date range
-          const quarterStart = new Date(Math.max(currentQuarterStart.getTime(), start.getTime()));
-          const quarterEndAdjusted = new Date(Math.min(quarterEnd.getTime(), end.getTime()));
+          const quarterStart = new Date(
+            Math.max(currentQuarterStart.getTime(), start.getTime())
+          );
+          const quarterEndAdjusted = new Date(
+            Math.min(quarterEnd.getTime(), end.getTime())
+          );
 
           // Don't process quarters that are entirely in the future beyond effective end date
           if (quarterStart > end) break;
@@ -1610,15 +1664,17 @@ exports.createGoal = async (req, res) => {
           const year = currentQuarterStart.getFullYear();
           const periodDisplay = `Q${quarterNumber} ${year}`;
 
-          const isCurrentQuarter = getQuarterStart(currentDate).getTime() === currentQuarterStart.getTime();
+          const isCurrentQuarter =
+            getQuarterStart(currentDate).getTime() ===
+            currentQuarterStart.getTime();
           const isFutureQuarter = currentQuarterStart > currentDate;
 
           // Calculate actual results for this quarter period
           const { result, recordCount } = await calculatePeriodResults(
-            quarterStart, 
-            quarterEndAdjusted, 
-            entity, 
-            goalType, 
+            quarterStart,
+            quarterEndAdjusted,
+            entity,
+            goalType,
             trackingMetric,
             assignId,
             assignee,
@@ -1627,9 +1683,14 @@ exports.createGoal = async (req, res) => {
             finalActivityType
           );
 
-          const periodTarget = calculatePeriodTarget(targetValue, periodType, 1);
+          const periodTarget = calculatePeriodTarget(
+            targetValue,
+            periodType,
+            1
+          );
           const difference = result - periodTarget;
-          const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
+          const percentage =
+            periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
           breakdown.push({
             period: periodDisplay,
@@ -1643,14 +1704,17 @@ exports.createGoal = async (req, res) => {
             isCurrentQuarter: isCurrentQuarter,
             isFutureQuarter: isFutureQuarter,
             quarterNumber: quarterNumber,
-            year: year
+            year: year,
           });
 
           // Move to next quarter
-          currentQuarterStart = new Date(currentQuarterStart.getFullYear(), currentQuarterStart.getMonth() + 3, 1);
+          currentQuarterStart = new Date(
+            currentQuarterStart.getFullYear(),
+            currentQuarterStart.getMonth() + 3,
+            1
+          );
         }
-      }
-      else if (periodType === "Weekly") {
+      } else if (periodType === "Weekly") {
         // Weekly breakdown
         const getStartOfWeek = (date) => {
           const d = new Date(date);
@@ -1668,7 +1732,9 @@ exports.createGoal = async (req, res) => {
         };
 
         const getWeekNumber = (date) => {
-          const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+          const d = new Date(
+            Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+          );
           const dayNum = d.getUTCDay() || 7;
           d.setUTCDate(d.getUTCDate() + 4 - dayNum);
           const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -1699,15 +1765,16 @@ exports.createGoal = async (req, res) => {
           const periodDisplay = `W${weekNumber} ${year}`;
 
           const currentWeekStart_check = getStartOfWeek(currentDate);
-          const isCurrentWeek = currentWeekStart.getTime() === currentWeekStart_check.getTime();
+          const isCurrentWeek =
+            currentWeekStart.getTime() === currentWeekStart_check.getTime();
           const isFutureWeek = currentWeekStart > currentDate;
 
           // Calculate actual results for this week period
           const { result, recordCount } = await calculatePeriodResults(
-            weekStart, 
-            weekEnd, 
-            entity, 
-            goalType, 
+            weekStart,
+            weekEnd,
+            entity,
+            goalType,
             trackingMetric,
             assignId,
             assignee,
@@ -1716,9 +1783,14 @@ exports.createGoal = async (req, res) => {
             finalActivityType
           );
 
-          const periodTarget = calculatePeriodTarget(targetValue, periodType, 1);
+          const periodTarget = calculatePeriodTarget(
+            targetValue,
+            periodType,
+            1
+          );
           const difference = result - periodTarget;
-          const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
+          const percentage =
+            periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
           breakdown.push({
             period: periodDisplay,
@@ -1732,20 +1804,26 @@ exports.createGoal = async (req, res) => {
             isCurrentWeek: isCurrentWeek,
             isFutureWeek: isFutureWeek,
             weekNumber: weekNumber,
-            year: year
+            year: year,
           });
 
           // Move to next week
           currentWeekStart.setDate(currentWeekStart.getDate() + 7);
         }
-      }
-      else if (periodType === "Yearly") {
+      } else if (periodType === "Yearly") {
         // Yearly breakdown
         let currentYear = new Date(start.getFullYear(), 0, 1);
 
         while (currentYear <= end) {
           const yearStart = new Date(currentYear);
-          const yearEnd = new Date(currentYear.getFullYear(), 11, 31, 23, 59, 59);
+          const yearEnd = new Date(
+            currentYear.getFullYear(),
+            11,
+            31,
+            23,
+            59,
+            59
+          );
 
           // Adjust year boundaries to fit within effective date range
           const actualYearStart = yearStart < start ? start : yearStart;
@@ -1754,15 +1832,16 @@ exports.createGoal = async (req, res) => {
           const year = currentYear.getFullYear();
           const periodDisplay = `${year}`;
 
-          const isCurrentYear = currentYear.getFullYear() === currentDate.getFullYear();
+          const isCurrentYear =
+            currentYear.getFullYear() === currentDate.getFullYear();
           const isFutureYear = currentYear > currentDate;
 
           // Calculate actual results for this year period
           const { result, recordCount } = await calculatePeriodResults(
-            actualYearStart, 
-            actualYearEnd, 
-            entity, 
-            goalType, 
+            actualYearStart,
+            actualYearEnd,
+            entity,
+            goalType,
             trackingMetric,
             assignId,
             assignee,
@@ -1771,9 +1850,14 @@ exports.createGoal = async (req, res) => {
             finalActivityType
           );
 
-          const periodTarget = calculatePeriodTarget(targetValue, periodType, 1);
+          const periodTarget = calculatePeriodTarget(
+            targetValue,
+            periodType,
+            1
+          );
           const difference = result - periodTarget;
-          const percentage = periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
+          const percentage =
+            periodTarget > 0 ? Math.round((result / periodTarget) * 100) : 0;
 
           breakdown.push({
             period: periodDisplay,
@@ -1786,7 +1870,7 @@ exports.createGoal = async (req, res) => {
             recordCount: recordCount,
             isCurrentYear: isCurrentYear,
             isFutureYear: isFutureYear,
-            year: year
+            year: year,
           });
 
           // Move to next year
@@ -1798,7 +1882,18 @@ exports.createGoal = async (req, res) => {
     };
 
     // Function to calculate actual results for a period
-    const calculatePeriodResults = async (periodStart, periodEnd, entity, goalType, trackingMetric, assignId, assignee, pipeline, pipelineStage, activityType) => {
+    const calculatePeriodResults = async (
+      periodStart,
+      periodEnd,
+      entity,
+      goalType,
+      trackingMetric,
+      assignId,
+      assignee,
+      pipeline,
+      pipelineStage,
+      activityType
+    ) => {
       let result = 0;
       let recordCount = 0;
 
@@ -1819,7 +1914,10 @@ exports.createGoal = async (req, res) => {
       // Add pipeline filter for deals
       if (pipeline && entity === "Deal") {
         if (pipeline.includes(",")) {
-          const pipelines = pipeline.split(",").map(p => p.trim()).filter(p => p !== "");
+          const pipelines = pipeline
+            .split(",")
+            .map((p) => p.trim())
+            .filter((p) => p !== "");
           whereClause.pipeline = { [Op.in]: pipelines };
         } else {
           whereClause.pipeline = pipeline;
@@ -1831,9 +1929,12 @@ exports.createGoal = async (req, res) => {
           if (goalType === "Added") {
             const addedDeals = await Deal.findAll({ where: whereClause });
             recordCount = addedDeals.length;
-            
+
             if (trackingMetric === "Value") {
-              result = addedDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0);
+              result = addedDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              );
             } else {
               result = recordCount;
             }
@@ -1842,13 +1943,16 @@ exports.createGoal = async (req, res) => {
             const wonWhereClause = {
               ...whereClause,
               status: "won",
-              updatedAt: { [Op.between]: [periodStart, periodEnd] }
+              updatedAt: { [Op.between]: [periodStart, periodEnd] },
             };
             const wonDeals = await Deal.findAll({ where: wonWhereClause });
             recordCount = wonDeals.length;
-            
+
             if (trackingMetric === "Value") {
-              result = wonDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0);
+              result = wonDeals.reduce(
+                (sum, deal) => sum + parseFloat(deal.value || 0),
+                0
+              );
             } else {
               result = recordCount;
             }
@@ -1857,17 +1961,22 @@ exports.createGoal = async (req, res) => {
             // Use DealStageHistory for progressed goals
             const stageWhere = {
               stageName: pipelineStage,
-              enteredAt: { [Op.between]: [periodStart, periodEnd] }
+              enteredAt: { [Op.between]: [periodStart, periodEnd] },
             };
-            
-            const progressedStages = await DealStageHistory.findAll({ where: stageWhere });
-            const progressedDealIds = progressedStages.map(s => s.dealId);
-            
+
+            const progressedStages = await DealStageHistory.findAll({
+              where: stageWhere,
+            });
+            const progressedDealIds = progressedStages.map((s) => s.dealId);
+
             if (progressedDealIds.length > 0) {
               const dealWhere = {};
               if (pipeline) {
                 if (pipeline.includes(",")) {
-                  const pipelines = pipeline.split(",").map(p => p.trim()).filter(p => p !== "");
+                  const pipelines = pipeline
+                    .split(",")
+                    .map((p) => p.trim())
+                    .filter((p) => p !== "");
                   dealWhere.pipeline = { [Op.in]: pipelines };
                 } else {
                   dealWhere.pipeline = pipeline;
@@ -1875,17 +1984,24 @@ exports.createGoal = async (req, res) => {
               }
               if (assignId && assignId !== "everyone") {
                 dealWhere.masterUserID = assignId;
-              } else if (assignee && assignee !== "All" && assignee !== "everyone") {
+              } else if (
+                assignee &&
+                assignee !== "All" &&
+                assignee !== "everyone"
+              ) {
                 dealWhere.masterUserID = assignee;
               }
 
               const progressedDeals = await Deal.findAll({
-                where: { dealId: { [Op.in]: progressedDealIds }, ...dealWhere }
+                where: { dealId: { [Op.in]: progressedDealIds }, ...dealWhere },
               });
-              
+
               recordCount = progressedDeals.length;
               if (trackingMetric === "Value") {
-                result = progressedDeals.reduce((sum, deal) => sum + parseFloat(deal.value || 0), 0);
+                result = progressedDeals.reduce(
+                  (sum, deal) => sum + parseFloat(deal.value || 0),
+                  0
+                );
               } else {
                 result = recordCount;
               }
@@ -1894,11 +2010,13 @@ exports.createGoal = async (req, res) => {
           }
         } else if (entity === "Activity") {
           const activityWhereClause = { ...whereClause };
-          
+
           // Add activity type filter
           if (activityType) {
             if (activityType.includes(",")) {
-              const activityTypes = activityType.split(",").map(type => type.trim());
+              const activityTypes = activityType
+                .split(",")
+                .map((type) => type.trim());
               activityWhereClause.type = { [Op.in]: activityTypes };
             } else {
               activityWhereClause.type = activityType;
@@ -1910,13 +2028,18 @@ exports.createGoal = async (req, res) => {
             activityWhereClause.isDone = true;
           }
 
-          const activities = await Activity.findAll({ where: activityWhereClause });
+          const activities = await Activity.findAll({
+            where: activityWhereClause,
+          });
           recordCount = activities.length;
           result = recordCount;
           records = activities;
         }
       } catch (error) {
-        console.error(`Error calculating results for period ${periodStart} to ${periodEnd}:`, error);
+        console.error(
+          `Error calculating results for period ${periodStart} to ${periodEnd}:`,
+          error
+        );
         // Continue with default values if there's an error
       }
 
@@ -1940,7 +2063,10 @@ exports.createGoal = async (req, res) => {
         yaxis = "no of deals";
         if (goalType === "Added") {
           xaxis = "Deal created on";
-        } else if (goalType === "Progressed" || goalType === "Date of entering stage") {
+        } else if (
+          goalType === "Progressed" ||
+          goalType === "Date of entering stage"
+        ) {
           xaxis = "Deal created on";
         } else if (goalType === "Won") {
           xaxis = "Won time";
@@ -1948,7 +2074,12 @@ exports.createGoal = async (req, res) => {
       }
 
       // Generate breakdown based on period type
-      const breakdown = await generateBreakdownWithData(defaultStartDate, defaultEndDate, finalTargetValue, period || "Monthly");
+      const breakdown = await generateBreakdownWithData(
+        defaultStartDate,
+        defaultEndDate,
+        finalTargetValue,
+        period || "Monthly"
+      );
 
       // Base config structure
       const baseConfig = {
@@ -1959,17 +2090,17 @@ exports.createGoal = async (req, res) => {
           assignId: assignId || null,
           pipeline: pipeline || null,
           pipelineStage: pipelineStage || null,
-          activityType: finalActivityType || null
+          activityType: finalActivityType || null,
         },
         entity: entity,
         goalType: goalType,
         yaxis: yaxis,
         xaxis: xaxis,
-        period: period || "Monthly" // Store the period type in config
+        period: period || "Monthly", // Store the period type in config
       };
 
       // If custom config is provided, merge it with base config
-      if (config && typeof config === 'object') {
+      if (config && typeof config === "object") {
         return {
           ...baseConfig,
           ...config,
@@ -1977,13 +2108,13 @@ exports.createGoal = async (req, res) => {
           monthlyBreakdown: config.monthlyBreakdown || breakdown,
           filters: {
             ...baseConfig.filters,
-            ...(config.filters || {})
+            ...(config.filters || {}),
           },
           entity: entity,
           goalType: goalType,
           yaxis: yaxis,
           xaxis: xaxis,
-          period: period || "Monthly"
+          period: period || "Monthly",
         };
       }
 
@@ -2008,7 +2139,8 @@ exports.createGoal = async (req, res) => {
       entity,
       goalType,
       targetValue: finalTargetValue,
-      targetType: targetType || (trackingMetric === "Value" ? "currency" : "number"),
+      targetType:
+        targetType || (trackingMetric === "Value" ? "currency" : "number"),
       period: period || "Monthly",
       startDate: defaultStartDate,
       endDate: defaultEndDate,
@@ -2026,7 +2158,7 @@ exports.createGoal = async (req, res) => {
       // New fields
       colors: colors || defaultColors,
       graphType: graphType || defaultGraphType,
-      config: await generateConfig()
+      config: await generateConfig(),
     });
 
     res.status(201).json({
@@ -2326,7 +2458,7 @@ exports.getAllGoals = async (req, res) => {
     const goalsWithProgress = await Promise.all(
       goals.map(async (goal) => {
         const progress = await calculateGoalProgress(goal, ownerId);
-        
+
         // Parse JSON strings back to objects
         const parsedGoal = {
           ...goal.toJSON(),
@@ -2334,21 +2466,21 @@ exports.getAllGoals = async (req, res) => {
         };
 
         // Parse colors if it's a string
-        if (typeof parsedGoal.colors === 'string') {
+        if (typeof parsedGoal.colors === "string") {
           try {
             parsedGoal.colors = JSON.parse(parsedGoal.colors);
           } catch (error) {
-            console.error('Error parsing colors:', error);
+            console.error("Error parsing colors:", error);
             parsedGoal.colors = { color1: "#0B7271", color2: "#F6B7D3" }; // Default fallback
           }
         }
 
         // Parse config if it's a string
-        if (typeof parsedGoal.config === 'string') {
+        if (typeof parsedGoal.config === "string") {
           try {
             parsedGoal.config = JSON.parse(parsedGoal.config);
           } catch (error) {
-            console.error('Error parsing config:', error);
+            console.error("Error parsing config:", error);
             parsedGoal.config = {
               monthlyBreakdown: [],
               filters: {},
@@ -2356,7 +2488,7 @@ exports.getAllGoals = async (req, res) => {
               goalType: parsedGoal.goalType,
               yaxis: "",
               xaxis: "",
-              period: parsedGoal.period
+              period: parsedGoal.period,
             };
           }
         }
@@ -2403,12 +2535,12 @@ exports.getAllGoals = async (req, res) => {
   }
 };
 
-exports.getAllGoalsDashboardWsie = async (req, res) => {
+exports.getAllGoalsDashboardWise = async (req, res) => {
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
     const role = req.role;
-    const {masterUserId, startDate, endDate} = req.query;
+    const { masterUserId, startDate, endDate } = req.query;
 
     // Validate dashboardId
     if (!dashboardId) {
@@ -2421,13 +2553,13 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
     // Build where condition
     const whereCondition = {
       isActive: true,
-      dashboardId: dashboardId
+      dashboardId: dashboardId,
     };
 
     // Add owner filter for non-admin users
-    if (role !== "admin") {
-      whereCondition.ownerId = ownerId;
-    }
+    // if (role !== "admin") {
+    //   whereCondition.ownerId = ownerId;
+    // }
 
     const goals = await Goal.findAll({
       where: whereCondition,
@@ -2435,23 +2567,29 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
     });
 
     // Parse JSON fields (config & colors)
-    const parsedGoals = goals.map(goal => {
+    const parsedGoals = goals.map((goal) => {
       const goalData = goal.get({ plain: true });
 
-      if (goalData.config && typeof goalData.config === 'string') {
+      if (goalData.config && typeof goalData.config === "string") {
         try {
           goalData.config = JSON.parse(goalData.config);
         } catch (e) {
-          console.error(`Error parsing config for goalId ${goalData.goalId}:`, e);
+          console.error(
+            `Error parsing config for goalId ${goalData.goalId}:`,
+            e
+          );
           // Handle parsing error if necessary
         }
       }
 
-      if (goalData.colors && typeof goalData.colors === 'string') {
+      if (goalData.colors && typeof goalData.colors === "string") {
         try {
           goalData.colors = JSON.parse(goalData.colors);
         } catch (e) {
-          console.error(`Error parsing colors for goalId ${goalData.goalId}:`, e);
+          console.error(
+            `Error parsing colors for goalId ${goalData.goalId}:`,
+            e
+          );
           // Handle parsing error
         }
       }
@@ -2459,40 +2597,124 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
       return goalData;
     });
 
-    const result = []
-    if(masterUserId){
-      for(let i = 0; i< parsedGoals.length; i++){
-        // console.log(parsedGoals[i])
-      const entity = parsedGoals[i]?.entity;
-      const goalType = parsedGoals[i]?.goalType;
-      const ownerId = parsedGoals[i]?.ownerId;
-      const assignee = parsedGoals[i]?.assignee;
-      const assignId = parsedGoals[i]?.assignId;
-      const pipeline = parsedGoals[i]?.pipeline;
-      const pipelineStage = parsedGoals[i]?.pipelineStage;
-      const startDate = parsedGoals[i]?.startDate;
-      const endDate = parsedGoals[i]?.endDate;
-      const trackingMetric = parsedGoals[i]?.trackingMetric;
-      const period = parsedGoals[i]?.period;
+    const result = [];
+    
+    // Apply masterUserId filter if provided
+    if (masterUserId) {
+      for (let i = 0; i < parsedGoals.length; i++) {
+        const entity = parsedGoals[i]?.entity;
+        const goalType = parsedGoals[i]?.goalType;
+        const ownerId = parsedGoals[i]?.ownerId;
+        const assignee = parsedGoals[i]?.assignee;
+        const assignId = parsedGoals[i]?.assignId;
+        const pipeline = parsedGoals[i]?.pipeline;
+        const pipelineStage = parsedGoals[i]?.pipelineStage;
+        const goalStartDate = parsedGoals[i]?.startDate;
+        const goalEndDate = parsedGoals[i]?.endDate;
+        const trackingMetric = parsedGoals[i]?.trackingMetric;
+        const period = parsedGoals[i]?.period;
 
-      let config = parsedGoals[i]?.config;
+        let config = parsedGoals[i]?.config;
 
-      const data = await processGoalData({
-        entity,
-        goalType,
-        assignee,
-        assignId: masterUserId,
-        pipeline,
-        pipelineStage,
-        startDate: startDate,
-        endDate: endDate,
-        trackingMetric
-      }, null, period);
-      
-      // result.push(data)
-      config = {...config, ...data};
-      parsedGoals[i]["config"] = config;
-      // parsedGoals[i]["reportData"] = data
+        // Create date conditions based on query parameters
+        let dateFilters = {};
+        
+        // Use query startDate/endDate if provided, otherwise use goal's dates
+        const effectiveStartDate = startDate || goalStartDate;
+        const effectiveEndDate = endDate || goalEndDate;
+        
+        // Add date conditions to the processGoalData call
+        const data = await processGoalData(
+          {
+            entity,
+            goalType,
+            assignee,
+            assignId: masterUserId, // Use the masterUserId from query
+            pipeline,
+            pipelineStage,
+            startDate: effectiveStartDate,
+            endDate: effectiveEndDate,
+            trackingMetric,
+          },
+          null,
+          period
+        );
+
+        config = { ...config, ...data };
+        parsedGoals[i]["config"] = config;
+      }
+    } else if (startDate && endDate) {
+      // Handle only date filters without masterUserId
+      for (let i = 0; i < parsedGoals.length; i++) {
+        const entity = parsedGoals[i]?.entity;
+        const goalType = parsedGoals[i]?.goalType;
+        const ownerId = parsedGoals[i]?.ownerId;
+        const assignee = parsedGoals[i]?.assignee;
+        const assignId = parsedGoals[i]?.assignId;
+        const pipeline = parsedGoals[i]?.pipeline;
+        const pipelineStage = parsedGoals[i]?.pipelineStage;
+        const goalStartDate = parsedGoals[i]?.startDate;
+        const goalEndDate = parsedGoals[i]?.endDate;
+        const trackingMetric = parsedGoals[i]?.trackingMetric;
+        const period = parsedGoals[i]?.period;
+
+        let config = parsedGoals[i]?.config;
+
+        // Use query dates
+        const data = await processGoalData(
+          {
+            entity,
+            goalType,
+            assignee,
+            assignId: assignId || ownerId, // Use existing assignId or ownerId
+            pipeline,
+            pipelineStage,
+            startDate: startDate,
+            endDate: endDate,
+            trackingMetric,
+          },
+          null,
+          period
+        );
+
+        config = { ...config, ...data };
+        parsedGoals[i]["config"] = config;
+      }
+    } else {
+      // No filters applied - use original goal data
+      for (let i = 0; i < parsedGoals.length; i++) {
+        const entity = parsedGoals[i]?.entity;
+        const goalType = parsedGoals[i]?.goalType;
+        const ownerId = parsedGoals[i]?.ownerId;
+        const assignee = parsedGoals[i]?.assignee;
+        const assignId = parsedGoals[i]?.assignId;
+        const pipeline = parsedGoals[i]?.pipeline;
+        const pipelineStage = parsedGoals[i]?.pipelineStage;
+        const goalStartDate = parsedGoals[i]?.startDate;
+        const goalEndDate = parsedGoals[i]?.endDate;
+        const trackingMetric = parsedGoals[i]?.trackingMetric;
+        const period = parsedGoals[i]?.period;
+
+        let config = parsedGoals[i]?.config;
+
+        const data = await processGoalData(
+          {
+            entity,
+            goalType,
+            assignee,
+            assignId: assignId || ownerId,
+            pipeline,
+            pipelineStage,
+            startDate: goalStartDate,
+            endDate: goalEndDate,
+            trackingMetric,
+          },
+          null,
+          period
+        );
+
+        config = { ...config, ...data };
+        parsedGoals[i]["config"] = config;
       }
     }
 
@@ -2500,7 +2722,6 @@ exports.getAllGoalsDashboardWsie = async (req, res) => {
       success: true,
       message: `Successfully fetched goals for dashboardId ${dashboardId}`,
       data: parsedGoals,
-      // result: result
     });
   } catch (error) {
     console.error("Error fetching goals:", error);
@@ -2859,7 +3080,7 @@ exports.removeGoalFromDashboard = async (req, res) => {
 
     // Remove the dashboard association by setting dashboardId to null
     await goal.update({
-      dashboardId: null
+      dashboardId: null,
     });
 
     res.status(200).json({
@@ -2869,8 +3090,8 @@ exports.removeGoalFromDashboard = async (req, res) => {
         goalId,
         goalDescription: goal.description,
         removedFromDashboard: dashboardId,
-        remainingDashboard: null
-      }
+        remainingDashboard: null,
+      },
     });
   } catch (error) {
     console.error("Error removing goal from dashboard:", error);
@@ -2903,7 +3124,7 @@ exports.softDeleteGoal = async (req, res) => {
 
     // Soft delete by setting isActive to false
     await goal.update({
-      isActive: false
+      isActive: false,
     });
 
     res.status(200).json({
@@ -2964,7 +3185,7 @@ exports.getGoalProgress = async (req, res) => {
       where: {
         goalId,
         ownerId,
-        isActive: true
+        isActive: true,
       },
     });
 
@@ -3011,7 +3232,7 @@ exports.getGoalData = async (req, res) => {
         where: {
           goalId,
           ownerId,
-          isActive: true
+          isActive: true,
         },
       });
 
@@ -3211,7 +3432,7 @@ exports.getGoalData = async (req, res) => {
 };
 
 // Helper function to process individual goal data (extracted from original getGoalData)
-async function processGoalData(goal, ownerId, periodFilter) {
+async function processGoalData(goal, ownerId, periodFilter, startDateFilter = null, endDateFilter = null) {
   const {
     entity,
     goalType,
@@ -3224,7 +3445,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
     trackingMetric,
   } = goal;
   // Accept selectedColumns as a new argument (array of columns for this entity)
-  let selectedColumns = arguments[3] || [];
+  let selectedColumns = arguments[4] || [];
 
   // Helper function to get date range for period filters
   function getPeriodRange(filter) {
@@ -3410,9 +3631,14 @@ async function processGoalData(goal, ownerId, periodFilter) {
         break;
       case "goal_duration":
       default:
-        // Use goal's startDate and endDate (or current date if indefinite)
-        start = startDate;
-        end = endDate || now;
+        // Use provided date filters or goal's startDate and endDate
+        if (startDateFilter && endDateFilter) {
+          start = new Date(startDateFilter);
+          end = new Date(endDateFilter);
+        } else {
+          start = startDate;
+          end = endDate || now;
+        }
     }
     return { start, end };
   }
@@ -3421,20 +3647,30 @@ async function processGoalData(goal, ownerId, periodFilter) {
   let start, end;
   try {
     ({ start, end } = getPeriodRange(periodFilter));
-    // If start or end is invalid, fallback to goal duration
+    // If start or end is invalid, fallback to provided dates or goal duration
     if (
       !start ||
       !end ||
       isNaN(new Date(start).getTime()) ||
       isNaN(new Date(end).getTime())
     ) {
+      if (startDateFilter && endDateFilter) {
+        start = new Date(startDateFilter);
+        end = new Date(endDateFilter);
+      } else {
+        start = startDate;
+        end = endDate || new Date();
+      }
+    }
+  } catch (e) {
+    // Fallback to provided dates or goal duration
+    if (startDateFilter && endDateFilter) {
+      start = new Date(startDateFilter);
+      end = new Date(endDateFilter);
+    } else {
       start = startDate;
       end = endDate || new Date();
     }
-  } catch (e) {
-    // Fallback to goal duration if getPeriodRange fails
-    start = startDate;
-    end = endDate || new Date();
   }
 
   const whereClause = {
@@ -3501,27 +3737,42 @@ async function processGoalData(goal, ownerId, periodFilter) {
             .map((col) => col.replace("organization.", "")),
         });
       }
+      
+      // Fix: Ensure we always select some columns
       const dealAttributes = selectedColumns.filter(
         (col) => !col.includes(".")
       );
+      
+      // If no columns specified, select all columns or at least the essential ones
+      if (dealAttributes.length === 0 && selectedColumns.length === 0) {
+        // Select essential columns for Deal goals
+        dealAttributes.push("dealId", "title", "value", "pipeline", "pipelineStage", "status", "masterUserID", "createdAt");
+      }
+
       const addedDeals = await Deal.findAll({
         where: whereClause,
-        attributes: dealAttributes,
+        attributes: dealAttributes.length > 0 ? dealAttributes : undefined, // Use undefined to select all columns
         order: [["createdAt", "DESC"]],
-        include,
+        include: include.length > 0 ? include : undefined,
       });
 
-      // Assign fetched deals to data array for records, only include selected columns
+      // Assign fetched deals to data array for records
       data = addedDeals.map((deal) => {
         const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
+        // Only map if we have selectedColumns
+        if (selectedColumns.length > 0) {
+          selectedColumns.forEach((col) => {
+            if (col.includes(".")) {
+              const [relation, field] = col.split(".");
+              record[col] = deal[relation] ? deal[relation][field] : null;
+            } else {
+              record[col] = deal[col];
+            }
+          });
+        } else {
+          // If no selectedColumns, return the whole deal object
+          return deal.toJSON();
+        }
         return record;
       });
 
@@ -3626,25 +3877,41 @@ async function processGoalData(goal, ownerId, periodFilter) {
             .map((col) => col.replace("organization.", "")),
         });
       }
+      
+      // Fix: Ensure we always select some columns
       const dealAttributes = selectedColumns.filter(
         (col) => !col.includes(".")
       );
+      
+      // If no columns specified, select all columns or at least the essential ones
+      if (dealAttributes.length === 0 && selectedColumns.length === 0) {
+        // Select essential columns for Deal goals
+        dealAttributes.push("dealId", "title", "value", "pipeline", "pipelineStage", "status", "masterUserID", "createdAt", "updatedAt");
+      }
+      
       const wonDeals = await Deal.findAll({
         where: wonWhereClause,
-        attributes: dealAttributes,
+        attributes: dealAttributes.length > 0 ? dealAttributes : undefined,
         order: [["updatedAt", "DESC"]],
-        include,
+        include: include.length > 0 ? include : undefined,
       });
+      
       data = wonDeals.map((deal) => {
         const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
+        // Only map if we have selectedColumns
+        if (selectedColumns.length > 0) {
+          selectedColumns.forEach((col) => {
+            if (col.includes(".")) {
+              const [relation, field] = col.split(".");
+              record[col] = deal[relation] ? deal[relation][field] : null;
+            } else {
+              record[col] = deal[col];
+            }
+          });
+        } else {
+          // If no selectedColumns, return the whole deal object
+          return deal.toJSON();
+        }
         return record;
       });
 
@@ -3782,16 +4049,25 @@ async function processGoalData(goal, ownerId, periodFilter) {
               .map((col) => col.replace("organization.", "")),
           });
         }
+        
+        // Fix: Ensure we always select some columns
         const dealAttributes = selectedColumns.filter(
           (col) => !col.includes(".")
         );
+        
+        // If no columns specified, select all columns or at least the essential ones
+        if (dealAttributes.length === 0 && selectedColumns.length === 0) {
+          // Select essential columns for Deal goals
+          dealAttributes.push("dealId", "title", "value", "pipeline", "pipelineStage", "status", "masterUserID", "createdAt");
+        }
+        
         progressedDeals = await Deal.findAll({
           where: {
             dealId: { [Op.in]: progressedDealIds },
             ...dealWhere,
           },
-          attributes: dealAttributes,
-          include,
+          attributes: dealAttributes.length > 0 ? dealAttributes : undefined,
+          include: include.length > 0 ? include : undefined,
         });
       }
 
@@ -3800,16 +4076,23 @@ async function processGoalData(goal, ownerId, periodFilter) {
       progressedDeals.forEach((deal) => {
         uniqueDealsMap.set(deal.dealId, deal);
       });
+      
       data = Array.from(uniqueDealsMap.values()).map((deal) => {
         const record = {};
-        selectedColumns.forEach((col) => {
-          if (col.includes(".")) {
-            const [relation, field] = col.split(".");
-            record[col] = deal[relation] ? deal[relation][field] : null;
-          } else {
-            record[col] = deal[col];
-          }
-        });
+        // Only map if we have selectedColumns
+        if (selectedColumns.length > 0) {
+          selectedColumns.forEach((col) => {
+            if (col.includes(".")) {
+              const [relation, field] = col.split(".");
+              record[col] = deal[relation] ? deal[relation][field] : null;
+            } else {
+              record[col] = deal[col];
+            }
+          });
+        } else {
+          // If no selectedColumns, return the whole deal object
+          return deal.toJSON();
+        }
         return record;
       });
 
@@ -3911,20 +4194,11 @@ async function processGoalData(goal, ownerId, periodFilter) {
       activityWhereClause.isDone = true;
     }
 
-    const tableName = Activity
+    const tableName = Activity;
     const columnNames = Object.keys(tableName.rawAttributes);
     const activities = await Activity.findAll({
       where: activityWhereClause,
-      attributes: [
-        ...columnNames
-        // "activityId",
-        // "type",
-        // "subject",
-        // "isDone",
-        // "createdAt",
-        // "assignedTo",
-        // "markedAsDoneTime",
-      ],
+      attributes: columnNames.length > 0 ? columnNames : undefined, // Ensure we always select columns
       order: [["createdAt", "DESC"]],
       include: [
         {
@@ -3937,7 +4211,7 @@ async function processGoalData(goal, ownerId, periodFilter) {
     });
 
     // Assign fetched activities to data array for records
-    data = activities;
+    data = activities.map(activity => activity.toJSON());
 
     summary = {
       totalCount: activities.length,
@@ -4001,12 +4275,12 @@ async function processGoalData(goal, ownerId, periodFilter) {
   } else if (entity === "Lead") {
     const leads = await Lead.findAll({
       where: whereClause,
-      attributes: ["leadId", "firstName", "lastName", "status", "createdAt"],
+      attributes: ["leadId", "firstName", "lastName", "status", "createdAt"], // Always select some columns
       order: [["createdAt", "DESC"]],
     });
 
     // Assign fetched leads to data array for records
-    data = leads;
+    data = leads.map(lead => lead.toJSON());
 
     summary = {
       totalCount: leads.length,
@@ -4089,9 +4363,9 @@ async function processGoalData(goal, ownerId, periodFilter) {
       : "expired",
   };
 
-   function flattenObject(obj, parentKey = "", res = {}) {
+  function flattenObject(obj, parentKey = "", res = {}) {
     for (let key in obj) {
-      const newKey =  key; 
+      const newKey = key;
 
       if (
         typeof obj[key] === "object" &&
@@ -4109,9 +4383,9 @@ async function processGoalData(goal, ownerId, periodFilter) {
   const flattened = JSON.parse(JSON.stringify(data, null, 2)).map((item) =>
     flattenObject(item)
   );
-  console.log(flattened.length, data.length)
+  console.log(flattened.length, data.length);
   return {
-    goal:  goal,
+    goal: goal,
     records: flattened,
     summary: summary,
     monthlyBreakdown: breakdown,
@@ -6254,13 +6528,13 @@ async function generateGoalBreakdownData(
       }
 
       if (goalType === "Added") {
-        const tableName = Activity
+        const tableName = Activity;
         const columnNames = Object.keys(tableName.rawAttributes);
         const addedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            ...columnNames
+            ...columnNames,
             // "activityId",
             // "type",
             // "isDone",
@@ -6317,13 +6591,13 @@ async function generateGoalBreakdownData(
               );
       } else if (goalType === "Completed") {
         activityWhereClause.isDone = true;
-        const tableName = Activity
+        const tableName = Activity;
         const columnNames = Object.keys(tableName.rawAttributes);
         const completedActivities = await Activity.findAll({
           where: activityWhereClause,
           include: includeClause,
           attributes: [
-            ...columnNames
+            ...columnNames,
             // "activityId",
             // "type",
             // "isDone",
@@ -6701,7 +6975,7 @@ function generateMonthlyBreakdown(
       monthNames[currentMonth.getMonth()]
     } ${currentMonth.getFullYear()}`;
 
-     function flattenObject(obj, parentKey = "", res = {}) {
+    function flattenObject(obj, parentKey = "", res = {}) {
       for (let key in obj) {
         const newKey = parentKey ? `${parentKey}_${key}` : key;
 
@@ -6718,8 +6992,8 @@ function generateMonthlyBreakdown(
       return res;
     }
 
-    const flattened = JSON.parse(JSON.stringify(monthRecords, null, 2)).map((item) =>
-      flattenObject(item)
+    const flattened = JSON.parse(JSON.stringify(monthRecords, null, 2)).map(
+      (item) => flattenObject(item)
     );
     monthlyBreakdown.push({
       period: periodDisplay,
@@ -7016,26 +7290,26 @@ function generateQuarterlyBreakdown(
     const isCurrentQuarter =
       currentQuarterStart.getTime() === currentQuarterStart_check.getTime();
 
-       function flattenObject(obj, parentKey = "", res = {}) {
-    for (let key in obj) {
-      const newKey = parentKey ? `${parentKey}_${key}` : key;
+    function flattenObject(obj, parentKey = "", res = {}) {
+      for (let key in obj) {
+        const newKey = parentKey ? `${parentKey}_${key}` : key;
 
-      if (
-        typeof obj[key] === "object" &&
-        obj[key] !== null &&
-        !Array.isArray(obj[key])
-      ) {
-        flattenObject(obj[key], newKey, res);
-      } else {
-        res[newKey] = obj[key];
+        if (
+          typeof obj[key] === "object" &&
+          obj[key] !== null &&
+          !Array.isArray(obj[key])
+        ) {
+          flattenObject(obj[key], newKey, res);
+        } else {
+          res[newKey] = obj[key];
+        }
       }
+      return res;
     }
-    return res;
-  }
 
-  const flattened = JSON.parse(JSON.stringify(quarterRecords, null, 2)).map((item) =>
-    flattenObject(item)
-  );
+    const flattened = JSON.parse(JSON.stringify(quarterRecords, null, 2)).map(
+      (item) => flattenObject(item)
+    );
     quarterlyBreakdown.push({
       period: periodDisplay,
       goal: quarterlyTarget, // Keep the actual quarterly target
@@ -7188,26 +7462,26 @@ function generateWeeklyBreakdown(
     const isCurrentWeek =
       currentWeekStart.getTime() === currentWeekStart_check.getTime();
 
-       function flattenObject(obj, parentKey = "", res = {}) {
-    for (let key in obj) {
-      const newKey = parentKey ? `${parentKey}_${key}` : key;
+    function flattenObject(obj, parentKey = "", res = {}) {
+      for (let key in obj) {
+        const newKey = parentKey ? `${parentKey}_${key}` : key;
 
-      if (
-        typeof obj[key] === "object" &&
-        obj[key] !== null &&
-        !Array.isArray(obj[key])
-      ) {
-        flattenObject(obj[key], newKey, res);
-      } else {
-        res[newKey] = obj[key];
+        if (
+          typeof obj[key] === "object" &&
+          obj[key] !== null &&
+          !Array.isArray(obj[key])
+        ) {
+          flattenObject(obj[key], newKey, res);
+        } else {
+          res[newKey] = obj[key];
+        }
       }
+      return res;
     }
-    return res;
-  }
 
-  const flattened = JSON.parse(JSON.stringify(weekRecords, null, 2)).map((item) =>
-    flattenObject(item)
-  );
+    const flattened = JSON.parse(JSON.stringify(weekRecords, null, 2)).map(
+      (item) => flattenObject(item)
+    );
     weeklyBreakdown.push({
       period: periodDisplay,
       goal: weeklyTarget, // Keep the actual weekly target (with decimals)
@@ -7604,7 +7878,7 @@ exports.GetAllReports = async (req, res) => {
 
     // Get all reports for the user
     const reports = await Report.findAll({
-      where: {...whereCondition, isActive : true},
+      where: { ...whereCondition, isActive: true },
       attributes: [
         "reportId",
         "ownerId",
@@ -7749,7 +8023,7 @@ exports.GetReportsDataReportWise = async (req, res) => {
       durationUnit: config.durationUnit,
       duration: config.duration,
       xaxis: config.xaxis,
-      yaxis: config.yaxis
+      yaxis: config.yaxis,
     });
   } catch (error) {
     console.error("Error fetching report data:", error);
@@ -7765,7 +8039,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
   try {
     const { dashboardId } = req.params;
     const ownerId = req.adminId;
-    const {masterUserId, startDate, endDate} = req.query;
+    const { masterUserId, startDate, endDate } = req.query;
     const role = req.role;
 
     // Validate dashboardId
@@ -7787,11 +8061,10 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     };
 
     // Add owner filter for non-admin users
-    if (role !== "admin") {
-      whereCondition.ownerId = ownerId;
-    }
+    // if (role !== "admin") {
+    //   whereCondition.ownerId = ownerId;
+    // }
 
-    
     whereCondition.isActive = true;
     // Fetch reports for this dashboard
     const reports = await Report.findAll({
@@ -7813,13 +8086,14 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
     });
 
     const obj = {
-      "Deal": Deal,
-      "Activity": Activity,
-      "Contact": LeadPerson
-    }
+      Deal: Deal,
+      Activity: Activity,
+      Contact: LeadPerson,
+    };
     const reportData = [];
 
-    if (masterUserId || (startDate && endDate) ) {
+    if (masterUserId || (startDate && endDate)) {
+      console.log("Generating report data with params...");
       for (let i = 0; i < reports.length; i++) {
         const entity = reports[i].entity;
         const type = reports[i]?.type;
@@ -7829,31 +8103,29 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
         let data = null;
         let startDateCondition = {};
         let endDateCondition = {};
-        if(startDate){
+        if (startDate) {
           startDateCondition = {
-              "column": "startDateTime",
-              "operator": "is",
-              "value": startDate
-          }
+            column: "createdAt",
+            operator: "is",
+            value: startDate,
+          };
         }
-        if(endDate){
+        if (endDate) {
           endDateCondition = {
-              "column": "startDateTime",
-              "operator": "is",
-              "value": endDate
-          }
+            column: "createdAt",
+            operator: "is",
+            value: endDate,
+          };
         }
-        const filter = config.filters ? {...config.filters,
-              condition: [
-               startDateCondition,
-               endDateCondition
-              ]
-            } : {
-              condition: [
-                startDateCondition,
-                endDateCondition
-              ]
+        const filter = config.filters
+          ? {
+              ...config.filters,
+              condition: [startDateCondition, endDateCondition],
             }
+          : {
+              condition: [startDateCondition, endDateCondition],
+            };
+            console.log("filter", filter);
         if (entity === "Activity" && type === "Performance") {
           data = await generateActivityPerformanceDataForSave(
             ownerId,
@@ -7866,8 +8138,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        }
-        else if (entity === "Activity" && type === "Emails") {
+        } else if (entity === "Activity" && type === "Emails") {
           data = await generateEmailPerformanceDataForSave(
             ownerId,
             "",
@@ -7877,8 +8148,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        }
-        else if (entity === "Lead" && type === "Performance") {
+        } else if (entity === "Lead" && type === "Performance") {
           data = await generateLeadPerformanceDataForSave(
             ownerId,
             "",
@@ -7889,8 +8159,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Lead" && type === "Conversion") {
+        } else if (entity === "Lead" && type === "Conversion") {
           data = await generateLeadConversionDataForSave(
             ownerId,
             "",
@@ -7901,8 +8170,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Deal" && type === "Conversion") {
+        } else if (entity === "Deal" && type === "Conversion") {
           data = await generateDealConversionDataForSave(
             ownerId,
             "",
@@ -7913,8 +8181,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Deal" && type === "Progress") {
+        } else if (entity === "Deal" && type === "Progress") {
           data = await generateDealProgressDataForSave(
             ownerId,
             "",
@@ -7926,8 +8193,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             "",
             masterUserId
           );
-        }
-        else if (entity === "Deal" && type === "Duration") {
+        } else if (entity === "Deal" && type === "Duration") {
           data = await generateDealDurationData(
             ownerId,
             "",
@@ -7939,8 +8205,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Deal" && type === "Performance") {
+        } else if (entity === "Deal" && type === "Performance") {
           data = await generateDealPerformanceDataForSave(
             ownerId,
             "",
@@ -7951,8 +8216,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Contact" && type === "Person") {
+        } else if (entity === "Contact" && type === "Person") {
           data = await generatePersonPerformanceDataForSave(
             ownerId,
             "",
@@ -7963,8 +8227,7 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
             filter,
             masterUserId
           );
-        } 
-        else if (entity === "Contact" && type === "Organization") {
+        } else if (entity === "Contact" && type === "Organization") {
           data = await generateOrganizationPerformanceDataForSave(
             ownerId,
             "",
@@ -7977,8 +8240,9 @@ exports.GetReportsDataDashboardWise = async (req, res) => {
           );
         }
 
-    // 👇 Attach the result directly to the report object
-        config["reportData"] = data?.data || []
+        console.log("data generated for report:", data?.data);
+        // 👇 Attach the result directly to the report object
+        config["reportData"] = data?.data || [];
         reports[i].dataValues.config = config;
         reports[i].dataValues.reportData = data?.data;
       }
@@ -8062,8 +8326,8 @@ exports.removeReportFromDashboard = async (req, res) => {
 
     // Convert dashboardIds to array
     let dashboardIdsArray = [];
-    if (typeof report.dashboardIds === 'string') {
-      dashboardIdsArray = report.dashboardIds.split(',').map(id => id.trim());
+    if (typeof report.dashboardIds === "string") {
+      dashboardIdsArray = report.dashboardIds.split(",").map((id) => id.trim());
     } else if (Array.isArray(report.dashboardIds)) {
       dashboardIdsArray = report.dashboardIds;
     }
@@ -8077,17 +8341,19 @@ exports.removeReportFromDashboard = async (req, res) => {
     }
 
     // Remove the specific dashboardId
-    const updatedDashboardIds = dashboardIdsArray.filter(id => id !== dashboardId.toString());
-    
+    const updatedDashboardIds = dashboardIdsArray.filter(
+      (id) => id !== dashboardId.toString()
+    );
+
     // Prepare new dashboardIds value
     let newDashboardIds = null;
     if (updatedDashboardIds.length > 0) {
-      newDashboardIds = updatedDashboardIds.join(',');
+      newDashboardIds = updatedDashboardIds.join(",");
     }
 
     // Update the report
     await report.update({
-      dashboardIds: newDashboardIds
+      dashboardIds: newDashboardIds,
     });
 
     res.status(200).json({
@@ -8097,8 +8363,9 @@ exports.removeReportFromDashboard = async (req, res) => {
         reportId,
         reportName: report.name,
         removedFromDashboard: dashboardId,
-        remainingDashboards: updatedDashboardIds.length > 0 ? updatedDashboardIds : 'None'
-      }
+        remainingDashboards:
+          updatedDashboardIds.length > 0 ? updatedDashboardIds : "None",
+      },
     });
   } catch (error) {
     console.error("Error removing report from dashboard:", error);
@@ -8130,7 +8397,7 @@ exports.softDeleteSingleReport = async (req, res) => {
     }
 
     await report.update({
-      isActive: false
+      isActive: false,
     });
 
     res.status(200).json({

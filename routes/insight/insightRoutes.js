@@ -82,7 +82,7 @@ router.delete(
 router.get("/goal-types", insightController.getGoalTypes);
 router.post("/create-goals", verifyToken, insightController.createGoal);
 router.get("/get-goals", verifyToken, insightController.getAllGoals);
-router.get("/get-goalsdashboardwise/:dashboardId", verifyToken, insightController.getAllGoalsDashboardWsie);
+router.get("/get-goalsdashboardwise/:dashboardId", verifyToken, insightController.getAllGoalsDashboardWise);
 router.get(
   "/dashboards/:dashboardId/goals",
   verifyToken,
