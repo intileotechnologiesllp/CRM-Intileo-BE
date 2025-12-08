@@ -1654,6 +1654,8 @@ exports.getOrganizationsAndPersons = async (req, res) => {
     let leadWhere = {};
     let dealWhere = {};
     let activityWhere = {};
+    let productWhere = {};
+    let dealProductWhere = {};
 
     const { Op } = require("sequelize");
     const Sequelize = require("sequelize");
@@ -1816,6 +1818,17 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       console.log("[DEBUG] Activity model not available:", e.message);
     }
 
+    let productFields = [];
+    let dealProductFields = [];
+    try {
+      const Product = require("../../models/product/productModel");
+      const DealProduct = require("../../models/product/dealProductModel");
+      productFields = Object.keys(Product.rawAttributes);
+      dealProductFields = Object.keys(DealProduct.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Product models not available:", e.message);
+    }
+
     console.log("[DEBUG] Available fields:");
     console.log("- Person fields:", personFields.slice(0, 5), "...");
     console.log("- Lead fields:", leadFields.slice(0, 5), "...");
@@ -1826,6 +1839,8 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       "..."
     );
     console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+    console.log("- Product fields:", productFields.slice(0, 5), "...");
+    console.log("- DealProduct fields:", dealProductFields.slice(0, 5), "...");
 
     // If filterConfig is provided, build AND/OR logic for all entities
     if (filterConfig && typeof filterConfig === "object") {
@@ -1882,6 +1897,24 @@ exports.getOrganizationsAndPersons = async (req, res) => {
                   activityWhere[Op.and].push(buildCondition(cond));
                   console.log(
                     `[DEBUG] Added Activity AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "product":
+                if (productFields.includes(cond.field)) {
+                  if (!productWhere[Op.and]) productWhere[Op.and] = [];
+                  productWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Product AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "dealproduct":
+                if (dealProductFields.includes(cond.field)) {
+                  if (!dealProductWhere[Op.and]) dealProductWhere[Op.and] = [];
+                  dealProductWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added DealProduct AND condition for field: ${cond.field}`
                   );
                 }
                 break;
@@ -2459,6 +2492,109 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       console.log("[DEBUG] Organization-filtered org IDs:", orgFilteredOrgIds);
     }
 
+    // Apply Product filters to get relevant organization IDs (through deals)
+    let productFilteredOrgIds = [];
+    const hasProductFilters =
+      productWhere[Op.and]?.length > 0 ||
+      productWhere[Op.or]?.length > 0 ||
+      Object.keys(productWhere).some((key) => typeof key === "string");
+    const hasDealProductFilters =
+      dealProductWhere[Op.and]?.length > 0 ||
+      dealProductWhere[Op.or]?.length > 0 ||
+      Object.keys(dealProductWhere).some((key) => typeof key === "string");
+
+    if (hasProductFilters || hasDealProductFilters) {
+      console.log("[DEBUG] Applying Product filters to find organizations through deals");
+      console.log("[DEBUG] productWhere:", JSON.stringify(productWhere, null, 2));
+      console.log("[DEBUG] dealProductWhere:", JSON.stringify(dealProductWhere, null, 2));
+
+      try {
+        const Product = require("../../models/product/productModel");
+        const DealProduct = require("../../models/product/dealProductModel");
+        
+        // Build the include chain: Deal -> DealProduct -> Product
+        const dealInclude = [];
+        
+        if (hasProductFilters || hasDealProductFilters) {
+          const dealProductInclude = {
+            model: DealProduct,
+            as: "dealProducts",
+            required: true,
+            attributes: []
+          };
+          
+          // Add DealProduct WHERE conditions if they exist
+          if (hasDealProductFilters) {
+            dealProductInclude.where = dealProductWhere;
+          }
+          
+          // Add Product include with WHERE conditions if they exist
+          if (hasProductFilters) {
+            dealProductInclude.include = [{
+              model: Product,
+              as: "product",
+              where: productWhere,
+              required: true,
+              attributes: []
+            }];
+          } else {
+            // Just include product without filter
+            dealProductInclude.include = [{
+              model: Product,
+              as: "product",
+              required: true,
+              attributes: []
+            }];
+          }
+          
+          dealInclude.push(dealProductInclude);
+        }
+        
+        // Query deals that have matching products
+        let dealsWithProducts = [];
+        if (req.role === "admin") {
+          dealsWithProducts = await Deal.findAll({
+            include: dealInclude,
+            attributes: ["leadOrganizationId"],
+            raw: false
+          });
+        } else {
+          dealsWithProducts = await Deal.findAll({
+            where: {
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId }
+              ]
+            },
+            include: dealInclude,
+            attributes: ["leadOrganizationId"],
+            raw: false
+          });
+        }
+        
+        console.log(
+          "[DEBUG] Product filter results:",
+          dealsWithProducts.length,
+          "deals found with matching products"
+        );
+        
+        // Get organization IDs directly from deals
+        productFilteredOrgIds = dealsWithProducts
+          .map((deal) => deal.leadOrganizationId)
+          .filter(Boolean);
+        
+        productFilteredOrgIds = [...new Set(productFilteredOrgIds)];
+        
+        console.log(
+          "[DEBUG] Product-filtered org IDs:",
+          productFilteredOrgIds.length
+        );
+      } catch (e) {
+        console.log("[DEBUG] Error applying Product filters:", e.message);
+        console.error("[DEBUG] Full error:", e);
+      }
+    }
+
     // Role-based filtering logic for organizations - same as getLeads API
     let orgWhere = {};
     if (orgSearch) {
@@ -2491,6 +2627,7 @@ exports.getOrganizationsAndPersons = async (req, res) => {
         ...personFilteredOrgIds,
         ...dealFilteredOrgIds,
         ...orgFilteredOrgIds,
+        ...productFilteredOrgIds,
       ]),
     ];
 
@@ -2542,7 +2679,9 @@ exports.getOrganizationsAndPersons = async (req, res) => {
       hasActivityFilters ||
       hasPersonFilters ||
       hasDealFilters ||
-      hasOrgFilters
+      hasOrgFilters ||
+      hasProductFilters ||
+      hasDealProductFilters
     ) {
       // If entity filters were applied but no matching organizations found, return empty results
       console.log(
@@ -6429,6 +6568,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     let dealWhere = {};
     let organizationWhere = {};
     let activityWhere = {};
+    let productWhere = {};
+    let dealProductWhere = {};
     // Debug: print filterConfig
     console.log("[DEBUG] filterConfig:", JSON.stringify(filterConfig, null, 2));
     const ops = {
@@ -6593,6 +6734,17 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       console.log("[DEBUG] Activity model not available:", e.message);
     }
 
+    let productFields = [];
+    let dealProductFields = [];
+    try {
+      const Product = require("../../models/product/productModel");
+      const DealProduct = require("../../models/product/dealProductModel");
+      productFields = Object.keys(Product.rawAttributes);
+      dealProductFields = Object.keys(DealProduct.rawAttributes);
+    } catch (e) {
+      console.log("[DEBUG] Product models not available:", e.message);
+    }
+
     console.log("[DEBUG] Available fields:");
     console.log("- Person fields:", personFields.slice(0, 5), "...");
     console.log("- Lead fields:", leadFields.slice(0, 5), "...");
@@ -6603,6 +6755,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       "..."
     );
     console.log("- Activity fields:", activityFields.slice(0, 5), "...");
+    console.log("- Product fields:", productFields.slice(0, 5), "...");
+    console.log("- DealProduct fields:", dealProductFields.slice(0, 5), "...");
 
     // If filterConfig is provided, build AND/OR logic for all entities
     if (filterConfig && typeof filterConfig === "object") {
@@ -6685,6 +6839,24 @@ exports.getPersonsAndOrganizations = async (req, res) => {
                   console.log(
                     `[DEBUG] Field '${cond.field}' NOT found in activity fields:`,
                     activityFields
+                  );
+                }
+                break;
+              case "product":
+                if (productFields.includes(cond.field)) {
+                  if (!productWhere[Op.and]) productWhere[Op.and] = [];
+                  productWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added Product AND condition for field: ${cond.field}`
+                  );
+                }
+                break;
+              case "dealproduct":
+                if (dealProductFields.includes(cond.field)) {
+                  if (!dealProductWhere[Op.and]) dealProductWhere[Op.and] = [];
+                  dealProductWhere[Op.and].push(buildCondition(cond));
+                  console.log(
+                    `[DEBUG] Added DealProduct AND condition for field: ${cond.field}`
                   );
                 }
                 break;
@@ -6877,6 +7049,8 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       JSON.stringify(organizationWhere, null, 2)
     );
     console.log("- activityWhere:", JSON.stringify(activityWhere, null, 2));
+    console.log("- productWhere:", JSON.stringify(productWhere, null, 2));
+    console.log("- dealProductWhere:", JSON.stringify(dealProductWhere, null, 2));
 
     // Additional debug for contactPerson filtering
     if (filterConfig && filterConfig.all && filterConfig.all.length > 0) {
@@ -6916,12 +7090,22 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     const hasOrgFilters =
       Object.keys(organizationWhere).length > 0 ||
       (organizationWhere[Op.and] && organizationWhere[Op.and].length > 0);
+    const hasProductFilters =
+      Object.keys(productWhere).length > 0 ||
+      (productWhere[Op.and] && productWhere[Op.and].length > 0) ||
+      (productWhere[Op.or] && productWhere[Op.or].length > 0);
+    const hasDealProductFilters =
+      Object.keys(dealProductWhere).length > 0 ||
+      (dealProductWhere[Op.and] && dealProductWhere[Op.and].length > 0) ||
+      (dealProductWhere[Op.or] && dealProductWhere[Op.or].length > 0);
 
     console.log("[DEBUG] Filter detection:");
     console.log("- hasActivityFilters:", hasActivityFilters);
     console.log("- hasLeadFilters:", hasLeadFilters);
     console.log("- hasDealFilters:", hasDealFilters);
     console.log("- hasOrgFilters:", hasOrgFilters);
+    console.log("- hasProductFilters:", hasProductFilters);
+    console.log("- hasDealProductFilters:", hasDealProductFilters);
 
     if (hasActivityFilters) {
       console.log(
@@ -7275,6 +7459,109 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       );
     }
 
+    // Apply Product filters to get relevant person IDs (through deals)
+    let productFilteredPersonIds = [];
+    const hasProductFiltersSymbol =
+      productWhere[Op.and]?.length > 0 ||
+      productWhere[Op.or]?.length > 0 ||
+      Object.keys(productWhere).some((key) => typeof key === "string");
+    const hasDealProductFiltersSymbol =
+      dealProductWhere[Op.and]?.length > 0 ||
+      dealProductWhere[Op.or]?.length > 0 ||
+      Object.keys(dealProductWhere).some((key) => typeof key === "string");
+
+    if (hasProductFiltersSymbol || hasDealProductFiltersSymbol) {
+      console.log("[DEBUG] Applying Product filters to find persons through deals");
+      console.log("[DEBUG] productWhere:", JSON.stringify(productWhere, null, 2));
+      console.log("[DEBUG] dealProductWhere:", JSON.stringify(dealProductWhere, null, 2));
+
+      try {
+        const Product = require("../../models/product/productModel");
+        const DealProduct = require("../../models/product/dealProductModel");
+        
+        // Build the include chain: Deal -> DealProduct -> Product
+        const dealInclude = [];
+        
+        if (hasProductFiltersSymbol || hasDealProductFiltersSymbol) {
+          const dealProductInclude = {
+            model: DealProduct,
+            as: "dealProducts",
+            required: true,
+            attributes: []
+          };
+          
+          // Add DealProduct WHERE conditions if they exist
+          if (hasDealProductFiltersSymbol) {
+            dealProductInclude.where = dealProductWhere;
+          }
+          
+          // Add Product include with WHERE conditions if they exist
+          if (hasProductFiltersSymbol) {
+            dealProductInclude.include = [{
+              model: Product,
+              as: "product",
+              where: productWhere,
+              required: true,
+              attributes: []
+            }];
+          } else {
+            // Just include product without filter
+            dealProductInclude.include = [{
+              model: Product,
+              as: "product",
+              required: true,
+              attributes: []
+            }];
+          }
+          
+          dealInclude.push(dealProductInclude);
+        }
+        
+        // Query deals that have matching products
+        let dealsWithProducts = [];
+        if (req.role === "admin") {
+          dealsWithProducts = await Deal.findAll({
+            include: dealInclude,
+            attributes: ["personId", "leadOrganizationId"],
+            raw: false
+          });
+        } else {
+          dealsWithProducts = await Deal.findAll({
+            where: {
+              [Op.or]: [
+                { masterUserID: req.adminId },
+                { ownerId: req.adminId }
+              ]
+            },
+            include: dealInclude,
+            attributes: ["personId", "leadOrganizationId"],
+            raw: false
+          });
+        }
+        
+        console.log(
+          "[DEBUG] Product filter results:",
+          dealsWithProducts.length,
+          "deals found with matching products"
+        );
+        
+        // Get person IDs directly from deals (only direct connections, not organization members)
+        const directPersonIds = dealsWithProducts
+          .map((deal) => deal.personId)
+          .filter(Boolean);
+        
+        productFilteredPersonIds = [...new Set(directPersonIds)];
+        
+        console.log(
+          "[DEBUG] Product-filtered person IDs:",
+          productFilteredPersonIds.length
+        );
+      } catch (e) {
+        console.log("[DEBUG] Error applying Product filters:", e.message);
+        console.error("[DEBUG] Full error:", e);
+      }
+    }
+
     // Role-based filtering logic for organizations
     let orgWhere = orgSearch
       ? {
@@ -7316,7 +7603,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
     console.log("[DEBUG] organizations count:", organizations.length);
     console.log("[DEBUG] total organizations count from DB:", totalOrganizationsCount);
 
-    // Apply Lead, Activity, Deal, Organization, and Person filters by restricting to persons found in those entities
+    // Apply Lead, Activity, Deal, Organization, Person, and Product filters by restricting to persons found in those entities
     const allFilteredPersonIds = [
       ...new Set([
         ...leadFilteredPersonIds,
@@ -7324,6 +7611,7 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         ...dealFilteredPersonIds,
         ...orgFilteredPersonIds,
         ...personFilteredPersonIds,
+        ...productFilteredPersonIds, // Include persons from product filters
         ...specificPersonIds, // Include specific person IDs requested
       ]),
     ];
@@ -7381,6 +7669,11 @@ exports.getPersonsAndOrganizations = async (req, res) => {
         personFilteredPersonIds.length,
         "person IDs"
       );
+      console.log(
+        "[DEBUG] - From products:",
+        productFilteredPersonIds.length,
+        "person IDs"
+      );
 
       if (Object.keys(finalPersonWhere).length > 0) {
         // Combine with existing filters using AND
@@ -7399,7 +7692,9 @@ exports.getPersonsAndOrganizations = async (req, res) => {
       hasActivityFiltersSymbol ||
       hasDealFiltersSymbol ||
       hasOrgFiltersSymbol ||
-      hasPersonFiltersSymbol
+      hasPersonFiltersSymbol ||
+      hasProductFiltersSymbol ||
+      hasDealProductFiltersSymbol
     ) {
       // If entity filters were applied but no matching persons found, return empty results
       console.log(

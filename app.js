@@ -58,6 +58,7 @@ const userFavoritesRoutes = require("./routes/favorites/userFavoritesRoutes.js")
 const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Import lost reason routes
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
 const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
+const productRoutes = require('./routes/product/productRoutes.js'); // Import product routes
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
@@ -139,6 +140,7 @@ app.use('/api/permissions', permissionRoutes); // Register lost reason routescl
 app.use('/api/import', importRoutes); // Register data import routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
+app.use('/api/products', productRoutes); // Register product routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 

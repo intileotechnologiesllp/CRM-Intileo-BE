@@ -9,6 +9,8 @@ const { convertRelativeDate } = require("../../utils/helper"); // Import the uti
 const LeadDetails = require("../../models/leads/leadDetailsModel"); // Import your LeadDetails model
 const { Person } = require("../../models");
 const Organization = require("../../models/leads/leadOrganizationModel");
+const Product = require("../../models/product/productModel");
+const DealProduct = require("../../models/product/dealProductModel");
 exports.saveLeadFilter = async (req, res) => {
   const {
     filterName,
@@ -26,7 +28,7 @@ exports.saveLeadFilter = async (req, res) => {
   }
 
   // Validate filterEntityType
-  const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+  const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity', 'product'];
   if (!validEntityTypes.includes(filterEntityType)) {
     return res
       .status(400)
@@ -132,7 +134,7 @@ exports.getLeadFilters = async (req, res) => {
     res.status(200).json({ 
       filters: formattedFilters,
       totalFilters: formattedFilters.length,
-      availableEntityTypes: ['lead', 'deal', 'person', 'organization', 'activity']
+      availableEntityTypes: ['lead', 'deal', 'person', 'organization', 'activity', 'product']
     });
   } catch (error) {
     console.error("Error fetching filters:", error);
@@ -346,7 +348,7 @@ exports.updateLeadFilter = async (req, res) => {
 
     // Validate filterEntityType if provided
     if (filterEntityType) {
-      const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity'];
+      const validEntityTypes = ['lead', 'deal', 'person', 'organization', 'activity', 'product'];
       if (!validEntityTypes.includes(filterEntityType)) {
         return res
           .status(400)
@@ -548,6 +550,212 @@ exports.getAllLeadContactPersons = async (req, res) => {
   } catch (error) {
     console.error("Error fetching contact persons:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * Get product fields for filtering
+ * Similar to getLeadFields but for Product and DealProduct entities
+ */
+exports.getProductFields = async (req, res) => {
+  try {
+    const fields = [];
+    
+    // Helper function to convert Sequelize data types to readable format
+    const getFieldType = (sequelizeType) => {
+      if (!sequelizeType || !sequelizeType.key) return 'text';
+      
+      switch (sequelizeType.key) {
+        case 'STRING':
+        case 'TEXT':
+          return 'text';
+        case 'INTEGER':
+        case 'BIGINT':
+        case 'FLOAT':
+        case 'DECIMAL':
+        case 'DOUBLE':
+          return 'number';
+        case 'DATE':
+        case 'DATEONLY':
+          return 'date';
+        case 'BOOLEAN':
+          return 'boolean';
+        case 'JSON':
+        case 'JSONB':
+          return 'json';
+        case 'ENUM':
+          return 'select';
+        default:
+          return 'text';
+      }
+    };
+
+    // Helper function to format field labels
+    const formatLabel = (fieldName) => {
+      return fieldName
+        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+        .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+        .replace(/_/g, ' ') // Replace underscores with spaces
+        .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize each word
+    };
+
+    // Get Product model fields
+    const productAttributes = Product.rawAttributes;
+    
+    // Process Product model fields
+    Object.entries(productAttributes).forEach(([fieldName, fieldConfig]) => {
+      const fieldType = getFieldType(fieldConfig.type);
+      const label = formatLabel(fieldName);
+      
+      // Get enum values if it's an ENUM field
+      let enumValues = null;
+      if (fieldConfig.type && fieldConfig.type.key === 'ENUM' && fieldConfig.type.values) {
+        enumValues = fieldConfig.type.values;
+      }
+      
+      fields.push({
+        value: fieldName,
+        label: label,
+        type: fieldType,
+        entity: 'Product',
+        entityTable: 'products',
+        isCustomField: false,
+        enumValues: enumValues,
+        comment: fieldConfig.comment || null
+      });
+    });
+
+    // Get DealProduct model fields (for deal-specific product data)
+    const dealProductAttributes = DealProduct.rawAttributes;
+    
+    // Process DealProduct model fields
+    Object.entries(dealProductAttributes).forEach(([fieldName, fieldConfig]) => {
+      const fieldType = getFieldType(fieldConfig.type);
+      const label = `Deal ${formatLabel(fieldName)}`;
+      
+      // Get enum values if it's an ENUM field
+      let enumValues = null;
+      if (fieldConfig.type && fieldConfig.type.key === 'ENUM' && fieldConfig.type.values) {
+        enumValues = fieldConfig.type.values;
+      }
+      
+      fields.push({
+        value: fieldName,
+        label: label,
+        type: fieldType,
+        entity: 'DealProduct',
+        entityTable: 'deal_products',
+        isCustomField: false,
+        enumValues: enumValues,
+        comment: fieldConfig.comment || null
+      });
+    });
+
+    // Get custom fields for product entity
+    const productCustomFields = await CustomField.findAll({
+      where: {
+        entityType: { [Op.in]: ['product', 'both'] },
+        isActive: true
+      },
+      attributes: ['fieldId', 'fieldName', 'fieldLabel', 'fieldType', 'fieldSource']
+    });
+
+    // Process custom fields
+    productCustomFields.forEach(customField => {
+      // Convert custom field type to standard type
+      let fieldType = 'text'; // default
+      switch (customField.fieldType) {
+        case 'text':
+        case 'textarea':
+          fieldType = 'text';
+          break;
+        case 'number':
+        case 'monetary':
+          fieldType = 'number';
+          break;
+        case 'date':
+        case 'datetime':
+          fieldType = 'date';
+          break;
+        case 'singleselect':
+        case 'multiselect':
+          fieldType = 'select';
+          break;
+        case 'boolean':
+        case 'checkbox':
+          fieldType = 'boolean';
+          break;
+        default:
+          fieldType = 'text';
+      }
+
+      fields.push({
+        value: customField.fieldName,
+        label: customField.fieldLabel || formatLabel(customField.fieldName),
+        type: fieldType,
+        entity: 'Product',
+        entityTable: 'custom_fields',
+        isCustomField: true,
+        fieldId: customField.fieldId,
+        fieldSource: customField.fieldSource
+      });
+    });
+
+    // Sort fields by entity type and then by label
+    fields.sort((a, b) => {
+      // First sort by entity (Product, then DealProduct, then custom)
+      if (a.entity !== b.entity) {
+        const entityOrder = { 'Product': 1, 'DealProduct': 2 };
+        return (entityOrder[a.entity] || 3) - (entityOrder[b.entity] || 3);
+      }
+      // Then by custom field status
+      if (a.isCustomField !== b.isCustomField) {
+        return a.isCustomField ? 1 : -1;
+      }
+      // Then sort by label
+      return a.label.localeCompare(b.label);
+    });
+
+    // Group fields by entity for easier consumption
+    const groupedFields = {
+      product: fields.filter(f => f.entity === 'Product' && !f.isCustomField),
+      dealProduct: fields.filter(f => f.entity === 'DealProduct'),
+      customFields: fields.filter(f => f.isCustomField)
+    };
+
+    res.status(200).json({ 
+      success: true,
+      fields,
+      groupedFields,
+      totalFields: fields.length,
+      productFields: groupedFields.product.length,
+      dealProductFields: groupedFields.dealProduct.length,
+      customFields: groupedFields.customFields.length,
+      entities: {
+        Product: {
+          description: 'Master product data (name, code, category, pricing, etc.)',
+          table: 'products',
+          fieldCount: groupedFields.product.length
+        },
+        DealProduct: {
+          description: 'Deal-specific product data (quantity, total, discount, tax, etc.)',
+          table: 'deal_products',
+          fieldCount: groupedFields.dealProduct.length
+        },
+        CustomFields: {
+          description: 'Custom product fields',
+          table: 'custom_field_values',
+          fieldCount: groupedFields.customFields.length
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching product fields:", error);
+    res.status(500).json({ 
+      success: false,
+      message: "Error fetching product fields",
+      error: error.message 
+    });
   }
 };
 

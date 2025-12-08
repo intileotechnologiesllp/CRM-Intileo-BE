@@ -307,6 +307,12 @@ exports.getActivities = async (req, res) => {
 
     const where = {};
     let filterWhere = {};
+    
+    // Initialize Product and DealProduct WHERE clauses (outside filterId block)
+    let productWhere = {};
+    let dealProductWhere = {};
+    let productFields = [];
+    let dealProductFields = [];
 
     if (filterId) {
       const filter = await LeadFilter.findByPk(filterId);
@@ -340,6 +346,18 @@ exports.getActivities = async (req, res) => {
       const activityFields = Object.keys(Activity.rawAttributes);
       console.log(activityFields, "Activity Fields in getActivities");
 
+      // Load Product and DealProduct model fields
+      try {
+        const Product = require("../../models/product/productModel");
+        const DealProduct = require("../../models/product/dealProductModel");
+        productFields = Object.keys(Product.rawAttributes);
+        dealProductFields = Object.keys(DealProduct.rawAttributes);
+        console.log("- Product fields:", productFields);
+        console.log("- DealProduct fields:", dealProductFields);
+      } catch (e) {
+        console.log("[DEBUG] Product models not available:", e.message);
+      }
+
       if (all.length > 0) {
         filterWhere[Op.and] = [];
         all.forEach((cond) => {
@@ -359,6 +377,24 @@ exports.getActivities = async (req, res) => {
             filterWhere[Op.and].push({
               [`$ActivityOrganization.${cond.field}$`]: { [Op.eq]: cond.value },
             });
+          } else if (cond.entity === "product") {
+            if (productFields.includes(cond.field)) {
+              if (!productWhere[Op.and]) productWhere[Op.and] = [];
+              const condition = buildCondition(cond);
+              if (condition && Object.keys(condition).length > 0) {
+                productWhere[Op.and].push(condition);
+                console.log(`[DEBUG] Added Product AND condition for field: ${cond.field}`);
+              }
+            }
+          } else if (cond.entity === "dealproduct") {
+            if (dealProductFields.includes(cond.field)) {
+              if (!dealProductWhere[Op.and]) dealProductWhere[Op.and] = [];
+              const condition = buildCondition(cond);
+              if (condition && Object.keys(condition).length > 0) {
+                dealProductWhere[Op.and].push(condition);
+                console.log(`[DEBUG] Added DealProduct AND condition for field: ${cond.field}`);
+              }
+            }
           } else if (activityFields.includes(cond.field)) {
             const condition = buildCondition(cond);
             if (condition && Object.keys(condition).length > 0) {
@@ -388,6 +424,24 @@ exports.getActivities = async (req, res) => {
             filterWhere[Op.or].push({
               [`$ActivityOrganization.${cond.field}$`]: { [Op.eq]: cond.value },
             });
+          } else if (cond.entity === "product") {
+            if (productFields.includes(cond.field)) {
+              if (!productWhere[Op.or]) productWhere[Op.or] = [];
+              const condition = buildCondition(cond);
+              if (condition && Object.keys(condition).length > 0) {
+                productWhere[Op.or].push(condition);
+                console.log(`[DEBUG] Added Product OR condition for field: ${cond.field}`);
+              }
+            }
+          } else if (cond.entity === "dealproduct") {
+            if (dealProductFields.includes(cond.field)) {
+              if (!dealProductWhere[Op.or]) dealProductWhere[Op.or] = [];
+              const condition = buildCondition(cond);
+              if (condition && Object.keys(condition).length > 0) {
+                dealProductWhere[Op.or].push(condition);
+                console.log(`[DEBUG] Added DealProduct OR condition for field: ${cond.field}`);
+              }
+            }
           } else if (activityFields.includes(cond.field)) {
             const condition = buildCondition(cond);
             if (condition && Object.keys(condition).length > 0) {
@@ -501,8 +555,122 @@ exports.getActivities = async (req, res) => {
       ];
     }
 
-    const finalWhere = { ...filterWhere, ...where };
+    let finalWhere = { ...filterWhere, ...where };
     console.log(JSON.stringify(finalWhere, null, 2));
+
+    // Apply Product filters to get relevant activity IDs (through deals)
+    let productFilteredActivityIds = [];
+    const hasProductFilters = filterId && (
+      productWhere[Op.and]?.length > 0 ||
+      productWhere[Op.or]?.length > 0 ||
+      dealProductWhere[Op.and]?.length > 0 ||
+      dealProductWhere[Op.or]?.length > 0 ||
+      Object.keys(productWhere).some((key) => typeof key === "string") ||
+      Object.keys(dealProductWhere).some((key) => typeof key === "string")
+    );
+
+    console.log("[DEBUG] hasProductFilters:", hasProductFilters);
+
+    if (hasProductFilters) {
+      try {
+        console.log("[DEBUG] Applying Product filters to find activities through deals");
+        console.log("[DEBUG] productWhere:", JSON.stringify(productWhere));
+        console.log("[DEBUG] dealProductWhere:", JSON.stringify(dealProductWhere));
+        
+        const Product = require("../../models/product/productModel");
+        const DealProduct = require("../../models/product/dealProductModel");
+        
+        // Build include array for product filtering
+        let productInclude = [];
+        
+        // Add DealProduct include
+        const dealProductInclude = {
+          model: DealProduct,
+          as: "dealProducts",
+          required: true,
+          attributes: []
+        };
+        
+        // Add Product include if we have product conditions
+        if (Object.keys(productWhere).length > 0) {
+          dealProductInclude.include = [{
+            model: Product,
+            as: "product",
+            where: productWhere,
+            required: true,
+            attributes: []
+          }];
+        }
+        
+        // Add dealProduct where if we have dealProduct conditions
+        if (Object.keys(dealProductWhere).length > 0) {
+          dealProductInclude.where = dealProductWhere;
+        }
+        
+        productInclude.push(dealProductInclude);
+        
+        // Query deals that match product criteria
+        const dealsWithProducts = await Deal.findAll({
+          attributes: ["dealId"],
+          include: productInclude,
+          raw: true
+        });
+        
+        console.log(`[DEBUG] Product filter results: ${dealsWithProducts.length} deals found with matching products`);
+        
+        if (dealsWithProducts.length > 0) {
+          const dealIds = dealsWithProducts.map((deal) => deal.dealId).filter(Boolean);
+          console.log(`[DEBUG] Deal IDs with matching products: ${dealIds.length}`);
+          
+          // Find activities connected to these deals
+          const activitiesWithProducts = await Activity.findAll({
+            where: {
+              dealId: { [Op.in]: dealIds }
+            },
+            attributes: ["activityId"],
+            raw: true
+          });
+          
+          productFilteredActivityIds = activitiesWithProducts.map((a) => a.activityId).filter(Boolean);
+          console.log(`[DEBUG] Product-filtered activity IDs: ${productFilteredActivityIds.length}`);
+          
+        } else {
+          console.log("[DEBUG] No deals found with matching products - will return empty result");
+          productFilteredActivityIds = [-1]; // No matching activities
+        }
+      } catch (e) {
+        console.log("[DEBUG] Error applying Product filters:", e.message);
+        console.error("[DEBUG] Full error:", e);
+      }
+    }
+
+    // Merge product filter with main query
+    if (hasProductFilters && productFilteredActivityIds.length > 0) {
+      if (!finalWhere[Op.and]) finalWhere[Op.and] = [];
+      
+      // Convert finalWhere[Op.and] to array if it's not already
+      if (!Array.isArray(finalWhere[Op.and])) {
+        const existingConditions = finalWhere[Op.and];
+        finalWhere[Op.and] = [existingConditions];
+      }
+      
+      finalWhere[Op.and].push({
+        activityId: { [Op.in]: productFilteredActivityIds }
+      });
+      console.log(`[DEBUG] Added ${productFilteredActivityIds.length} product-filtered activity IDs to main query`);
+    }
+
+    // Handle empty results case
+    if (hasProductFilters && productFilteredActivityIds.length === 1 && productFilteredActivityIds[0] === -1) {
+      console.log("[DEBUG] Product filters resulted in no matches - returning empty result");
+      return res.status(200).json({
+        total: 0,
+        totalPages: 0,
+        currentPage: parseInt(page),
+        activities: [],
+      });
+    }
+
     const alwaysInclude = [
       "dealId",
       "leadId",

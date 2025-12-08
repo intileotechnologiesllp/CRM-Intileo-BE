@@ -28,7 +28,7 @@ const LeadFilter = sequelize.define("LeadFilter", {
     allowNull: true,
   },
   filterEntityType: {
-    type: DataTypes.ENUM('lead', 'deal', 'person', 'organization', 'activity'),
+    type: DataTypes.ENUM('lead', 'deal', 'person', 'organization', 'activity', 'product'),
     allowNull: false,
     defaultValue: 'lead',
     comment: 'Indicates which entity type this filter is designed for'

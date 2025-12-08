@@ -30,6 +30,8 @@ const { getProgramId } = require("../../utils/programCache");
 const PipelineStage = require("../../models/deals/pipelineStageModel");
 const Currency = require("../../models/admin/masters/currencyModel");
 const DealFile = require("../../models/deals/dealFileModel");
+const DealProduct = require("../../models/product/dealProductModel");
+const Product = require("../../models/product/productModel");
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
@@ -975,12 +977,18 @@ exports.getDeals = async (req, res) => {
       const { all = [], any = [] } = filterConfig;
       const dealFields = Object.keys(Deal.rawAttributes);
       const dealDetailsFields = Object.keys(DealDetails.rawAttributes);
+      const dealProductFields = DealProduct ? Object.keys(DealProduct.rawAttributes) : [];
+      const productFields = Product ? Object.keys(Product.rawAttributes) : [];
 
       let filterWhere = {};
       let dealDetailsWhere = {};
+      let dealProductWhere = {};
+      let productWhere = {};
 
       console.log("Available deal fields:", dealFields);
       console.log("Available dealDetails fields:", dealDetailsFields);
+      console.log("Available dealProduct fields:", dealProductFields);
+      console.log("Available product fields:", productFields);
 
       // Process 'all' conditions (AND logic)
       if (all.length > 0) {
@@ -988,6 +996,8 @@ exports.getDeals = async (req, res) => {
 
         filterWhere[Op.and] = [];
         dealDetailsWhere[Op.and] = [];
+        dealProductWhere[Op.and] = [];
+        productWhere[Op.and] = [];
 
         all.forEach((cond) => {
           console.log("Processing condition:", cond);
@@ -998,6 +1008,12 @@ exports.getDeals = async (req, res) => {
           } else if (dealDetailsFields.includes(cond.field)) {
             console.log(`Field '${cond.field}' found in DealDetails fields`);
             dealDetailsWhere[Op.and].push(buildCondition(cond));
+          } else if (dealProductFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in DealProduct fields`);
+            dealProductWhere[Op.and].push(buildCondition(cond));
+          } else if (productFields.includes(cond.field)) {
+            console.log(`Field '${cond.field}' found in Product fields`);
+            productWhere[Op.and].push(buildCondition(cond));
           } else {
             console.log(
               `Field '${cond.field}' NOT found in standard fields, treating as custom field`
@@ -1010,6 +1026,10 @@ exports.getDeals = async (req, res) => {
         if (filterWhere[Op.and].length === 0) delete filterWhere[Op.and];
         if (dealDetailsWhere[Op.and].length === 0)
           delete dealDetailsWhere[Op.and];
+        if (dealProductWhere[Op.and].length === 0)
+          delete dealProductWhere[Op.and];
+        if (productWhere[Op.and].length === 0)
+          delete productWhere[Op.and];
       }
 
       // Process 'any' conditions (OR logic)
@@ -1018,12 +1038,18 @@ exports.getDeals = async (req, res) => {
 
         filterWhere[Op.or] = [];
         dealDetailsWhere[Op.or] = [];
+        dealProductWhere[Op.or] = [];
+        productWhere[Op.or] = [];
 
         any.forEach((cond) => {
           if (dealFields.includes(cond.field)) {
             filterWhere[Op.or].push(buildCondition(cond));
           } else if (dealDetailsFields.includes(cond.field)) {
             dealDetailsWhere[Op.or].push(buildCondition(cond));
+          } else if (dealProductFields.includes(cond.field)) {
+            dealProductWhere[Op.or].push(buildCondition(cond));
+          } else if (productFields.includes(cond.field)) {
+            productWhere[Op.or].push(buildCondition(cond));
           } else {
             // Handle custom fields
             customFieldsConditions.any.push(cond);
@@ -1033,6 +1059,10 @@ exports.getDeals = async (req, res) => {
         if (filterWhere[Op.or].length === 0) delete filterWhere[Op.or];
         if (dealDetailsWhere[Op.or].length === 0)
           delete dealDetailsWhere[Op.or];
+        if (dealProductWhere[Op.or].length === 0)
+          delete dealProductWhere[Op.or];
+        if (productWhere[Op.or].length === 0)
+          delete productWhere[Op.or];
       }
 
       // Apply masterUserID filtering logic for filters
@@ -1091,6 +1121,65 @@ exports.getDeals = async (req, res) => {
           required: false,
           attributes: dealDetailsAttributes,
         });
+      }
+
+      // Add DealProduct and Product includes with filtering
+      // Check if WHERE objects have any conditions (including Symbol keys like Op.and, Op.or)
+      const hasDealProductWhereConditions = Object.getOwnPropertySymbols(dealProductWhere).length > 0 || Object.keys(dealProductWhere).length > 0;
+      const hasProductWhereConditions = Object.getOwnPropertySymbols(productWhere).length > 0 || Object.keys(productWhere).length > 0;
+      
+      console.log("🔍 [PRODUCT FILTER] hasDealProductWhereConditions:", hasDealProductWhereConditions);
+      console.log("🔍 [PRODUCT FILTER] hasProductWhereConditions:", hasProductWhereConditions);
+      console.log("🔍 [PRODUCT FILTER] dealProductWhere Symbol keys:", Object.getOwnPropertySymbols(dealProductWhere).map(s => s.toString()));
+      console.log("🔍 [PRODUCT FILTER] productWhere Symbol keys:", Object.getOwnPropertySymbols(productWhere).map(s => s.toString()));
+      if (hasProductWhereConditions) {
+        const symbols = Object.getOwnPropertySymbols(productWhere);
+        symbols.forEach(sym => {
+          console.log("🔍 [PRODUCT FILTER] productWhere condition:", productWhere[sym]);
+        });
+      }
+      
+      if (hasDealProductWhereConditions || hasProductWhereConditions) {
+        const dealProductInclude = {
+          model: DealProduct,
+          as: "dealProducts",
+          required: true, // INNER JOIN when filtering
+        };
+
+        // Add DealProduct WHERE conditions if any (use flag instead of Object.keys for Symbol support)
+        if (hasDealProductWhereConditions) {
+          dealProductInclude.where = dealProductWhere;
+          console.log("🔍 [PRODUCT FILTER] Added dealProduct WHERE clause");
+        }
+
+        // Add nested Product include if filtering on Product fields (use flag instead of Object.keys for Symbol support)
+        if (hasProductWhereConditions) {
+          dealProductInclude.include = [
+            {
+              model: Product,
+              as: "product",
+              where: productWhere,
+              required: true,
+            },
+          ];
+          console.log("🔍 [PRODUCT FILTER] Added nested Product WHERE clause with required: true");
+        } else {
+          // Include product data without filtering
+          dealProductInclude.include = [
+            {
+              model: Product,
+              as: "product",
+              required: false,
+            },
+          ];
+          console.log("🔍 [PRODUCT FILTER] Added nested Product without filtering (required: false)");
+        }
+
+        include.push(dealProductInclude);
+        
+        console.log("🔍 [PRODUCT FILTER] Added product filtering to include (note: Symbol keys don't show in JSON.stringify)");
+      } else {
+        console.log("🔍 [PRODUCT FILTER] ⚠️ No product filtering applied - both WHERE objects are empty!");
       }
 
       // Handle custom field filtering
@@ -1179,7 +1268,9 @@ exports.getDeals = async (req, res) => {
         }
       }
 
-      where = filterWhere;
+      // Merge filterWhere with the base where clause (don't replace it)
+      // This preserves filters like isConvertedToLead that were set earlier
+      where = { ...where, ...filterWhere };
     } else {
       // --- Standard filtering without filterId ---
       // Handle masterUserID filtering based on role
@@ -1245,6 +1336,8 @@ exports.getDeals = async (req, res) => {
       order: [[sortBy, order.toUpperCase()]],
       attributes,
       include,
+      subQuery: false, // Disable subquery to allow proper nested joins with product filtering
+      distinct: true, // Count distinct deals to avoid duplicates from INNER JOINs
     });
 
     console.log("→ Query executed. Total records:", total);
@@ -1596,8 +1689,13 @@ exports.getDeals = async (req, res) => {
       summary,
     });
   } catch (error) {
-    console.error("Error fetching deals:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("❌ Error fetching deals:", error);
+    console.error("❌ Error stack:", error.stack);
+    console.error("❌ Error message:", error.message);
+    res.status(500).json({ 
+      message: "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 // exports.getDeals = async (req, res) => {
@@ -3253,7 +3351,24 @@ function buildCondition(cond) {
     .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
     .map(([key]) => key);
 
-  const allDateFields = [...dealDateFields, ...dealDetailsDateFields];
+  const dealProductDateFields = DealProduct 
+    ? Object.entries(DealProduct.rawAttributes)
+        .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+        .map(([key]) => key)
+    : [];
+
+  const productDateFields = Product 
+    ? Object.entries(Product.rawAttributes)
+        .filter(([_, attr]) => attr.type && attr.type.key === "DATE")
+        .map(([key]) => key)
+    : [];
+
+  const allDateFields = [
+    ...dealDateFields, 
+    ...dealDetailsDateFields, 
+    ...dealProductDateFields, 
+    ...productDateFields
+  ];
 
   if (allDateFields.includes(cond.field)) {
     // Support new date operators

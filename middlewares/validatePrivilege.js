@@ -35,6 +35,13 @@ const PERMISSION_MAPPING = {
   // Filter permissions (programId: 6)
   "18": { programId: 6, requestType: "share_filters" },      // Share filters with other users
   "19": { programId: 6, requestType: "edit_shared_filters" }, // Edit shared filters of other users
+  
+  // Products permissions (programId: 7)
+  "29": { programId: 7, requestType: "create" },            // Add products
+  "30": { programId: 7, requestType: "edit_others" },       // Edit products owned by other users
+  "31": { programId: 7, requestType: "edit_owner" },        // Edit the owner on a product owned by other users
+  "32": { programId: 7, requestType: "delete" },            // Delete products
+  "33": { programId: 7, requestType: "delete_variations" }, // Delete product price variations
 };
 
 const validatePrivilege = (permissionIdOrProgramId, requestType, options = {}) => async (req, res, next) => {

@@ -9,6 +9,7 @@ router.get("/get-filters",verifyToken,leadFilterController.getLeadFilters);
 router.get("/use-filter/:filterId",verifyToken,leadFilterController.useFilters);
 router.post("/update-filters/:filterId",verifyToken, validatePrivilege(19, "edit_shared_filters"), leadFilterController.updateLeadFilter);
 router.get("/get-lead-fields", verifyToken,leadFilterController.getLeadFields);
+router.get("/get-product-fields", verifyToken,leadFilterController.getProductFields);
 router.get("/get-all-contacts-persons", verifyToken,leadFilterController.getAllLeadContactPersons);
 
 // Favorite filter routes
