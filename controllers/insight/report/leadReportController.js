@@ -390,8 +390,7 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
       }
-    } 
-     else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+    } else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -425,51 +424,51 @@ exports.createLeadPerformReport = async (req, res) => {
           });
         }
 
-          // Generate data with pagination
-          const result = await generateExistingLeadPerformanceData(
-            ownerId,
-            role,
-            existingxaxis,
-            existingyaxis,
-            existingDurationUnit,
-            existingSegmentedBy,
-            existingfilters,
-            page,
-            limit
+        // Generate data with pagination
+        const result = await generateExistingLeadPerformanceData(
+          ownerId,
+          role,
+          existingxaxis,
+          existingyaxis,
+          existingDurationUnit,
+          existingSegmentedBy,
+          existingfilters,
+          page,
+          limit
+        );
+        reportData = result.data;
+        paginationInfo = result.pagination;
+        totalValue = result.totalValue;
+        reportConfig = {
+          reportId,
+          entity: existingentity,
+          type: existingtype,
+          xaxis: existingxaxis,
+          yaxis: existingyaxis,
+          durationUnit: existingDurationUnit,
+          segmentedBy: existingSegmentedBy,
+          filters: existingfilters || {},
+          graphtype: existinggraphtype,
+          colors: colors,
+          reportData,
+        };
+        if (reportData.length > 0) {
+          const avgValue = totalValue / reportData.length;
+          const maxValue = Math.max(
+            ...reportData.map((item) => item.value || 0)
           );
-          reportData = result.data;
-          paginationInfo = result.pagination;
-          totalValue = result.totalValue;
-          reportConfig = {
-            reportId,
-            entity: existingentity,
-            type: existingtype,
-            xaxis: existingxaxis,
-            yaxis: existingyaxis,
-            durationUnit: existingDurationUnit,
-            segmentedBy: existingSegmentedBy,
-            filters: existingfilters || {},
-            graphtype: existinggraphtype,
-            colors: colors,
-            reportData,
-          };
-          if (reportData.length > 0) {
-            const avgValue = totalValue / reportData.length;
-            const maxValue = Math.max(
-              ...reportData.map((item) => item.value || 0)
-            );
-            const minValue = Math.min(
-              ...reportData.map((item) => item.value || 0)
-            );
+          const minValue = Math.min(
+            ...reportData.map((item) => item.value || 0)
+          );
 
-            summary = {
-              totalCategories: reportData.length,
-              totalValue: totalValue,
-              avgValue: parseFloat(avgValue.toFixed(2)),
-              maxValue: maxValue,
-              minValue: minValue,
-            };
-          }
+          summary = {
+            totalCategories: reportData.length,
+            totalValue: totalValue,
+            avgValue: parseFloat(avgValue.toFixed(2)),
+            maxValue: maxValue,
+            minValue: minValue,
+          };
+        }
       }
     }
     return res.status(200).json({
@@ -520,31 +519,42 @@ async function generateExistingLeadPerformanceData(
     baseWhere.masterUserID = ownerId;
   }
 
-   let xaxisNullExcludeCondition = {};
-  
-    // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(existingxaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+  let xaxisNullExcludeCondition = {};
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "contactPerson") {
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "organization") {
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
@@ -668,7 +678,7 @@ async function generateExistingLeadPerformanceData(
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-     // Check if segmentedBy is also a date field
+    // Check if segmentedBy is also a date field
     const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
@@ -683,10 +693,10 @@ async function generateExistingLeadPerformanceData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    }
-    else if (
+    } else if (
       (existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo")  && !assignedUserIncludeExists
+        existingSegmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
@@ -745,7 +755,7 @@ async function generateExistingLeadPerformanceData(
   }
 
   // Get total count for pagination
-let totalCountResult;
+  let totalCountResult;
   if (shouldGroupByDuration) {
     totalCountResult = await Lead.findAll({
       where: baseWhere,
@@ -791,7 +801,7 @@ let totalCountResult;
 
   let results;
 
-   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+  if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // For segmented queries
     const paginationAttributes = [];
     let groupColumn;
@@ -819,7 +829,7 @@ let totalCountResult;
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
@@ -863,7 +873,7 @@ let totalCountResult;
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: isDateFieldX 
+        order: isDateFieldX
           ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
           : getOrderClause(existingyaxis, existingxaxis),
       });
@@ -875,7 +885,7 @@ let totalCountResult;
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
@@ -892,8 +902,9 @@ let totalCountResult;
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-       const segmentValue =
+      let xValue =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
@@ -951,7 +962,9 @@ let totalCountResult;
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
@@ -962,7 +975,8 @@ let totalCountResult;
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let label =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
@@ -1024,36 +1038,47 @@ async function generateLeadPerformanceData(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-     // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(xaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && durationUnit && durationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping, we'll handle this differently
-      // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-      // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Team") {
-      // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "contactPerson") {
-      // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "organization") {
-      // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(xaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && durationUnit && durationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping, we'll handle this differently
+    // since we're grouping by date expressions
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+    // For Owner/assignedTo, exclude where assignedUser is null
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "Team") {
+    // For Team, exclude where assignedUser.team is null
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "contactPerson") {
+    // For contactPerson, exclude where ActivityPerson.contactPerson is null
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "organization") {
+    // For organization, exclude where ActivityOrganization.organization is null
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    // For regular Activity columns, exclude where the column value is null
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
@@ -1185,7 +1210,10 @@ async function generateLeadPerformanceData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if ((segmentedBy === "Owner" || segmentedBy === "assignedTo") && !assignedUserIncludeExists) {
+    } else if (
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
+    ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
@@ -1238,7 +1266,7 @@ async function generateLeadPerformanceData(
   }
 
   // Get total count for pagination
- let totalCountResult;
+  let totalCountResult;
   if (shouldGroupByDuration) {
     totalCountResult = await Lead.findAll({
       where: baseWhere,
@@ -1285,44 +1313,43 @@ async function generateLeadPerformanceData(
   let results;
 
   if (segmentedBy && segmentedBy !== "none") {
-
     // For segmented queries, we need a different approach
-        const paginationAttributes = [];
-    
-        // Determine the correct group column for pagination
-        let groupColumn;
-        if (shouldGroupByDuration) {
-          groupColumn = getDateGroupExpression(xaxis, durationUnit);
-          paginationAttributes.push([groupColumn, "groupKey"]);
-        } else {
-          // Handle special cases for Owner, contactPerson, organization
-          if (xaxis === "Owner" || xaxis === "assignedTo") {
-            groupColumn = Sequelize.col("assignedUser.name");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else if (xaxis === "contactPerson") {
-            groupColumn = Sequelize.col("Lead.personId");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else if (xaxis === "organization") {
-            groupColumn = Sequelize.col("Lead.leadOrganizationId");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else {
-            groupColumn = Sequelize.col(`Lead.${xaxis}`);
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          }
-        }
+    const paginationAttributes = [];
+
+    // Determine the correct group column for pagination
+    let groupColumn;
+    if (shouldGroupByDuration) {
+      groupColumn = getDateGroupExpression(xaxis, durationUnit);
+      paginationAttributes.push([groupColumn, "groupKey"]);
+    } else {
+      // Handle special cases for Owner, contactPerson, organization
+      if (xaxis === "Owner" || xaxis === "assignedTo") {
+        groupColumn = Sequelize.col("assignedUser.name");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (xaxis === "contactPerson") {
+        groupColumn = Sequelize.col("Lead.personId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (xaxis === "organization") {
+        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else {
+        groupColumn = Sequelize.col(`Lead.${xaxis}`);
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      }
+    }
 
     const paginatedGroups = await Lead.findAll({
-          attributes: paginationAttributes,
-          where: baseWhere,
-          include: includeModels,
-          group: [groupColumn],
-          order: isDateFieldX 
-            ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-            : getOrderClause(yaxis, xaxis),
-          limit: limit,
-          offset: offset,
-          raw: true,
-        });
+      attributes: paginationAttributes,
+      where: baseWhere,
+      include: includeModels,
+      group: [groupColumn],
+      order: isDateFieldX
+        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        : getOrderClause(yaxis, xaxis),
+      limit: limit,
+      offset: offset,
+      raw: true,
+    });
 
     const groupKeys = paginatedGroups.map((g) => g.groupKey);
 
@@ -1331,31 +1358,31 @@ async function generateLeadPerformanceData(
     } else {
       const finalWhere = { ...baseWhere };
       // Build condition for the specific group keys - FIXED for related tables
-            let groupCondition;
-      
-            if (shouldGroupByDuration) {
-              // For date grouping
-              const groupExpression = getDateGroupExpression(xaxis, durationUnit);
-              groupCondition = Sequelize.where(groupExpression, {
-                [Op.in]: groupKeys,
-              });
-            } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-              // For Owner/assignedTo - use proper Sequelize syntax for related table
-              groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
-            } else if (xaxis === "contactPerson") {
-              // For contactPerson - use proper column reference
-              groupCondition = { personId: { [Op.in]: groupKeys } };
-            } else if (xaxis === "organization") {
-              // For organization - use proper column reference
-              groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
-            } else {
-              // For regular Activity columns
-              groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
-            }
-      
-            finalWhere[Op.and] = finalWhere[Op.and]
-              ? [...finalWhere[Op.and], groupCondition]
-              : [groupCondition];
+      let groupCondition;
+
+      if (shouldGroupByDuration) {
+        // For date grouping
+        const groupExpression = getDateGroupExpression(xaxis, durationUnit);
+        groupCondition = Sequelize.where(groupExpression, {
+          [Op.in]: groupKeys,
+        });
+      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+        // For Owner/assignedTo - use proper Sequelize syntax for related table
+        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
+      } else if (xaxis === "contactPerson") {
+        // For contactPerson - use proper column reference
+        groupCondition = { personId: { [Op.in]: groupKeys } };
+      } else if (xaxis === "organization") {
+        // For organization - use proper column reference
+        groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
+      } else {
+        // For regular Activity columns
+        groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
+      }
+
+      finalWhere[Op.and] = finalWhere[Op.and]
+        ? [...finalWhere[Op.and], groupCondition]
+        : [groupCondition];
 
       results = await Lead.findAll({
         where: finalWhere,
@@ -1364,7 +1391,7 @@ async function generateLeadPerformanceData(
         // group: [...groupBy],
         group: groupBy,
         raw: true,
-        order: isDateFieldX 
+        order: isDateFieldX
           ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
           : getOrderClause(yaxis, xaxis),
       });
@@ -1376,7 +1403,7 @@ async function generateLeadPerformanceData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
@@ -1394,7 +1421,7 @@ async function generateLeadPerformanceData(
 
     results.forEach((item) => {
       let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
-       const segmentValue =
+      const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
@@ -1441,7 +1468,9 @@ async function generateLeadPerformanceData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     totalValue = formattedResults.reduce(
@@ -1451,7 +1480,7 @@ async function generateLeadPerformanceData(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
@@ -1680,7 +1709,7 @@ function getDateGroupExpression(dateField, durationUnit) {
           ' ',
           YEAR(${field})
         )
-     `); 
+     `);
 
     case "quarterly":
       return Sequelize.literal(
@@ -1722,7 +1751,7 @@ function getOrderClause(yaxis, xaxis) {
     // For date fields, order by the date field itself to maintain chronological order
     return [[Sequelize.col(`Lead.${xaxis}`), "ASC"]];
   }
-  
+
   if (yaxis === "no of leads") {
     return [[Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]];
   } else {
@@ -1753,7 +1782,7 @@ function getConditionObject(column, operator, value, includeModels = []) {
     fieldName === "updatedAt" ||
     fieldName === "expectedCloseDate" ||
     fieldName === "proposalSentDate" ||
-    fieldName ===  "conversionDate";
+    fieldName === "conversionDate";
 
   // Handle date range filtering for "Add on" (daterange type)
   const isDateRangeFilter = fieldName === "daterange";
@@ -2047,30 +2076,41 @@ async function generateExistingLeadPerformanceDataForSave(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-    // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(existingxaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "contactPerson") {
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "organization") {
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -2191,7 +2231,7 @@ async function generateExistingLeadPerformanceDataForSave(
     const assignedUserIncludeExists = includeModels.some(
       (inc) => inc.as === "assignedUser"
     );
-     // Check if segmentedBy is also a date field
+    // Check if segmentedBy is also a date field
     const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
@@ -2206,10 +2246,10 @@ async function generateExistingLeadPerformanceDataForSave(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    }
-    else if (
+    } else if (
       (existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo")  && !assignedUserIncludeExists
+        existingSegmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
       groupBy.push("assignedUser.name");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
@@ -2277,7 +2317,7 @@ async function generateExistingLeadPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
@@ -2289,50 +2329,84 @@ async function generateExistingLeadPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
-  // Format the results for the frontend
+ // Format the results based on whether segmentedBy is used
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    // Group the results properly
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-       const segmentValue =
+      // Determine grouping key based on xaxis type
+      let groupKey;
+
+      if (existingxaxis === "contactPerson" && item.personId) {
+        // Group by personId for contactPerson
+        groupKey = `person_${item.personId}`;
+      } else if (existingxaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (existingxaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-
-      if (!groupedData[xValue]) {
+      if (!groupedData[groupKey]) {
         // Set id based on xaxis type
         let id = null;
         if (existingxaxis === "contactPerson") {
           id = item.personId;
         } else if (existingxaxis === "organization") {
           id = item.leadOrganizationId;
+        } else if (
+          existingxaxis === "Owner" ||
+          existingxaxis === "assignedTo" ||
+          existingxaxis === "creator"
+        ) {
+          id = item.assignedUserId;
+        } else if (existingxaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-       // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-     // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -2342,8 +2416,9 @@ async function generateExistingLeadPerformanceDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -2353,10 +2428,11 @@ async function generateExistingLeadPerformanceDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
-    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
@@ -2364,14 +2440,22 @@ async function generateExistingLeadPerformanceDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
       if (existingxaxis === "contactPerson") {
-        id = item.personId;
+        id = item.personId || null;
       } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId;
+        id = item.leadOrganizationId || null;
+      } else if (
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator"
+      ) {
+        id = item.assignedUserId || null;
+      } else if (existingxaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -2381,7 +2465,32 @@ async function generateExistingLeadPerformanceDataForSave(
       };
     });
 
-    // Calculate the grand total
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      (existingxaxis === "contactPerson" ||
+        existingxaxis === "organization" ||
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator" ||
+        existingxaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -2410,37 +2519,52 @@ async function generateLeadPerformanceDataForSave(
     baseWhere.masterUserID = ownerId;
   }
 
-   let xaxisNullExcludeCondition = {};
-  
-     // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(xaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && durationUnit && durationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping, we'll handle this differently
-      // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-      // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Team") {
-      // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "contactPerson") {
-      // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "organization") {
-      // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+  let xaxisNullExcludeCondition = {};
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(xaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && durationUnit && durationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping, we'll handle this differently
+    // since we're grouping by date expressions
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (
+    xaxis === "Owner" ||
+    xaxis === "assignedTo" ||
+    xaxis === "creator"
+  ) {
+    // For Owner/assignedTo/creator, exclude where assignedUser is null
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "Team") {
+    // For Team, exclude where assignedUser.team is null
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "contactPerson") {
+    // For contactPerson, exclude where ActivityPerson.contactPerson is null
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "organization") {
+    // For organization, exclude where ActivityOrganization.organization is null
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    // For regular Activity columns, exclude where the column value is null
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -2495,7 +2619,6 @@ async function generateLeadPerformanceDataForSave(
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
 
-
   // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
@@ -2505,17 +2628,21 @@ async function generateLeadPerformanceDataForSave(
   } else if (xaxis === "creator") {
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "name"],
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
+    attributes.push([
+      Sequelize.col("assignedUser.masterUserID"),
+      "assignedUserId",
+    ]);
     attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
   } else if (xaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
       model: MasterUser,
-      as: "assignedUser", // Use the correct alias
+      as: "assignedUser",
       attributes: ["masterUserID", "creatorstatus"],
       required: true,
     });
@@ -2546,8 +2673,33 @@ async function generateLeadPerformanceDataForSave(
       "leadOrganizationId",
     ]);
     attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
+  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+    // Handle Owner/assignedTo - join with MasterUser table
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "name"],
+      required: true,
+    });
+    groupBy.push("assignedUser.masterUserID");
+    attributes.push([
+      Sequelize.col("assignedUser.masterUserID"),
+      "assignedUserId",
+    ]);
+    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+  } else if (xaxis === "Team") {
+    // Handle Team - join with MasterUser table
+    includeModels.push({
+      model: MasterUser,
+      as: "assignedUser",
+      attributes: ["masterUserID", "team", "teamId"],
+      required: true,
+    });
+    groupBy.push("assignedUser.teamId");
+    attributes.push([Sequelize.col("assignedUser.teamId"), "teamId"]);
+    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
   } else {
-    // For regular columns, explicitly specify the Activity table
+    // For regular columns, explicitly specify the Lead table
     groupBy.push(`Lead.${xaxis}`);
     attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
   }
@@ -2570,10 +2722,25 @@ async function generateLeadPerformanceDataForSave(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } else if ((segmentedBy === "Owner" || segmentedBy === "assignedTo") && !assignedUserIncludeExists) {
-      groupBy.push("assignedUser.name");
+    } else if (
+      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
+    ) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "name"],
+        required: true,
+      });
+      groupBy.push("assignedUser.masterUserID");
       attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
+      includeModels.push({
+        model: MasterUser,
+        as: "assignedUser",
+        attributes: ["masterUserID", "team"],
+        required: true,
+      });
       groupBy.push("assignedUser.team");
       attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
@@ -2614,8 +2781,10 @@ async function generateLeadPerformanceDataForSave(
       Sequelize.fn("SUM", Sequelize.col("proposalValue")),
       "yValue",
     ]);
+  }  else if (yaxis === "value") {
+    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
   } else {
-    // For other yaxis values, explicitly specify the Activity table
+    // For other yaxis values, explicitly specify the Lead table
     attributes.push([
       Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)),
       "yValue",
@@ -2632,7 +2801,7 @@ async function generateLeadPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
     });
@@ -2644,7 +2813,7 @@ async function generateLeadPerformanceDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
     });
@@ -2655,38 +2824,73 @@ async function generateLeadPerformanceDataForSave(
   let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    // Group the results properly
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
-       const segmentValue =
+      // Determine grouping key based on xaxis type
+      let groupKey;
+
+      if (xaxis === "contactPerson" && item.personId) {
+        // Group by personId for contactPerson
+        groupKey = `person_${item.personId}`;
+      } else if (xaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (xaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
+        formatDateValue(item.xValue, durationUnit) || "Unknown";
+      const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[xValue]) {
+      if (!groupedData[groupKey]) {
         // Set id based on xaxis type
         let id = null;
         if (xaxis === "contactPerson") {
           id = item.personId;
         } else if (xaxis === "organization") {
           id = item.leadOrganizationId;
+        } else if (
+          xaxis === "Owner" ||
+          xaxis === "assignedTo" ||
+          xaxis === "creator"
+        ) {
+          id = item.assignedUserId;
+        } else if (xaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-      // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -2696,8 +2900,9 @@ async function generateLeadPerformanceDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -2707,7 +2912,9 @@ async function generateLeadPerformanceDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     totalValue = formattedResults.reduce(
@@ -2717,7 +2924,7 @@ async function generateLeadPerformanceDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
@@ -2725,8 +2932,14 @@ async function generateLeadPerformanceDataForSave(
         id = item.personId || null;
       } else if (xaxis === "organization") {
         id = item.leadOrganizationId || null;
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      } else if (
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator"
+      ) {
         id = item.assignedUserId || null;
+      } else if (xaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -2735,6 +2948,33 @@ async function generateLeadPerformanceDataForSave(
         id: id,
       };
     });
+
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      (xaxis === "contactPerson" ||
+        xaxis === "organization" ||
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator" ||
+        xaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -3581,7 +3821,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 exports.createLeadConversionReport = async (req, res) => {
   try {
     const {
-      reportId, 
+      reportId,
       entity,
       type,
       xaxis,
@@ -3802,7 +4042,7 @@ exports.createLeadConversionReport = async (req, res) => {
             durationUnit,
             segmentedBy,
             filters: filters || {},
-            reportData
+            reportData,
           };
           if (reportData.length > 0) {
             const avgValue = totalValue / reportData.length;
@@ -3830,8 +4070,7 @@ exports.createLeadConversionReport = async (req, res) => {
           });
         }
       }
-    }
-    else if ((entity && type && reportId) || (!entity && !type && reportId)) {
+    } else if ((entity && type && reportId) || (!entity && !type && reportId)) {
       const existingReports = await Report.findOne({
         where: { reportId },
       });
@@ -3972,32 +4211,42 @@ async function generateExistingLeadConversionData(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-    // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(existingxaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
 
-    
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "contactPerson") {
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "organization") {
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
+
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
   if (filters && filters.conditions) {
@@ -4054,7 +4303,7 @@ async function generateExistingLeadConversionData(
   let groupBy = [];
   let attributes = [];
 
-    // Attribute and GroupBy setup with durationUnit support
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(
@@ -4063,8 +4312,7 @@ async function generateExistingLeadConversionData(
     );
     attributes.push([dateGroupExpression, "xValue"]);
     groupBy.push(dateGroupExpression);
-  }
-  else if (existingxaxis === "creator") {
+  } else if (existingxaxis === "creator") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -4121,7 +4369,7 @@ async function generateExistingLeadConversionData(
     );
 
     // Check if segmentedBy is also a date field
-   const isSegmentedByDate = isDateField(existingSegmentedBy);
+    const isSegmentedByDate = isDateField(existingSegmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate &&
@@ -4135,10 +4383,10 @@ async function generateExistingLeadConversionData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    } 
-    else if (
+    } else if (
       (existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo") && !assignedUserIncludeExists
+        existingSegmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
       includeModels.push({
         model: MasterUser,
@@ -4270,61 +4518,62 @@ async function generateExistingLeadConversionData(
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
     // For segmented queries
-        const paginationAttributes = [];
-        let groupColumn;
-        if (shouldGroupByDuration) {
-          groupColumn = getDateGroupExpression(existingxaxis, existingDurationUnit);
-          paginationAttributes.push([groupColumn, "groupKey"]);
-        } else {
-          if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-            groupColumn = Sequelize.col("assignedUser.name");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else if (existingxaxis === "contactPerson") {
-            groupColumn = Sequelize.col("Lead.personId");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else if (existingxaxis === "organization") {
-            groupColumn = Sequelize.col("Lead.leadOrganizationId");
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          } else {
-            groupColumn = Sequelize.col(`Lead.${existingxaxis}`);
-            paginationAttributes.push([groupColumn, "groupKey"]);
-          }
-  }
+    const paginationAttributes = [];
+    let groupColumn;
+    if (shouldGroupByDuration) {
+      groupColumn = getDateGroupExpression(existingxaxis, existingDurationUnit);
+      paginationAttributes.push([groupColumn, "groupKey"]);
+    } else {
+      if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+        groupColumn = Sequelize.col("assignedUser.name");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (existingxaxis === "contactPerson") {
+        groupColumn = Sequelize.col("Lead.personId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else if (existingxaxis === "organization") {
+        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      } else {
+        groupColumn = Sequelize.col(`Lead.${existingxaxis}`);
+        paginationAttributes.push([groupColumn, "groupKey"]);
+      }
+    }
 
     const paginatedGroups = await Lead.findAll({
       attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
       where: baseWhere,
       include: includeModels,
       group: groupBy[0],
-      order: isDateFieldX 
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]] : [
-        existingyaxis === "no of leads"
-          ? [
-              Sequelize.literal(`(
+      order: isDateFieldX
+        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        : [
+            existingyaxis === "no of leads"
+              ? [
+                  Sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
-              "DESC",
-            ]
-          : existingyaxis === "proposalValue"
-          ? [
-              Sequelize.literal(
-                `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
-              ),
-              "DESC",
-            ]
-          : existingyaxis === "value"
-          ? [
-              Sequelize.literal(
-                `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
-              ),
-              "DESC",
-            ]
-          : [
-              Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
-              "DESC",
-            ],
-      ],
+                  "DESC",
+                ]
+              : existingyaxis === "proposalValue"
+              ? [
+                  Sequelize.literal(
+                    `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
+                  ),
+                  "DESC",
+                ]
+              : existingyaxis === "value"
+              ? [
+                  Sequelize.literal(
+                    `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
+                  ),
+                  "DESC",
+                ]
+              : [
+                  Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+                  "DESC",
+                ],
+          ],
       limit: limit,
       offset: offset,
       raw: true,
@@ -4332,7 +4581,6 @@ async function generateExistingLeadConversionData(
 
     const groupKeys = paginatedGroups.map((g) => g.groupKey);
 
-    
     if (groupKeys.length === 0) {
       results = [];
     } else {
@@ -4367,7 +4615,7 @@ async function generateExistingLeadConversionData(
         include: includeModels,
         group: groupBy,
         raw: true,
-         order: isDateFieldX 
+        order: isDateFieldX
           ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
           : getOrderClause(existingyaxis, existingxaxis),
       });
@@ -4379,7 +4627,7 @@ async function generateExistingLeadConversionData(
       include: includeModels,
       group: groupBy,
       raw: true,
-       order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
@@ -4444,9 +4692,11 @@ async function generateExistingLeadConversionData(
       };
     });
 
-   // Only sort for non-date fields
+    // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     // Calculate the grand total
@@ -4519,36 +4769,47 @@ async function generateLeadConversionData(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-     // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(xaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && durationUnit && durationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping, we'll handle this differently
-      // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-      // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Team") {
-      // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "contactPerson") {
-      // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "organization") {
-      // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(xaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && durationUnit && durationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping, we'll handle this differently
+    // since we're grouping by date expressions
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+    // For Owner/assignedTo, exclude where assignedUser is null
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "Team") {
+    // For Team, exclude where assignedUser.team is null
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "contactPerson") {
+    // For contactPerson, exclude where ActivityPerson.contactPerson is null
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "organization") {
+    // For organization, exclude where ActivityOrganization.organization is null
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    // For regular Activity columns, exclude where the column value is null
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   // In your generateActivityPerformanceData function, modify the filter handling:
@@ -4606,15 +4867,13 @@ async function generateLeadConversionData(
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
 
-  
-   // Attribute and GroupBy setup with durationUnit support
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
     attributes.push([dateGroupExpression, "xValue"]);
     groupBy.push(dateGroupExpression);
-  }
-  else if (xaxis === "creator") {
+  } else if (xaxis === "creator") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -4671,7 +4930,7 @@ async function generateLeadConversionData(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(segmentedBy); 
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -4683,8 +4942,7 @@ async function generateLeadConversionData(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    }
-    else if (
+    } else if (
       (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
@@ -4767,7 +5025,7 @@ async function generateLeadConversionData(
   }
 
   // Get total count for pagination
- let totalCountResult;
+  let totalCountResult;
   if (shouldGroupByDuration) {
     totalCountResult = await Lead.findAll({
       where: baseWhere,
@@ -4844,7 +5102,7 @@ async function generateLeadConversionData(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
@@ -4892,7 +5150,7 @@ async function generateLeadConversionData(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: isDateFieldX 
+        order: isDateFieldX
           ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
           : getOrderClause(yaxis, xaxis),
       });
@@ -4904,7 +5162,7 @@ async function generateLeadConversionData(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
@@ -4970,7 +5228,9 @@ async function generateLeadConversionData(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     totalValue = formattedResults.reduce(
@@ -4980,7 +5240,7 @@ async function generateLeadConversionData(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
@@ -5032,30 +5292,41 @@ async function generateExistingLeadConversionDataForSave(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-    // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(existingxaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "Team") {
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "contactPerson") {
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (existingxaxis === "organization") {
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(existingxaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "Team") {
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "contactPerson") {
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (existingxaxis === "organization") {
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -5192,7 +5463,8 @@ async function generateExistingLeadConversionDataForSave(
       groupBy.push(segmentDateExpression);
     } else if (
       (existingSegmentedBy === "Owner" ||
-      existingSegmentedBy === "assignedTo") && !assignedUserIncludeExists
+        existingSegmentedBy === "assignedTo") &&
+      !assignedUserIncludeExists
     ) {
       includeModels.push({
         model: MasterUser,
@@ -5285,7 +5557,7 @@ async function generateExistingLeadConversionDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
@@ -5297,51 +5569,84 @@ async function generateExistingLeadConversionDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   }
 
-  // Format the results for the frontend
+  // Format the results based on whether segmentedBy is used
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    // Group the results properly
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue =
-        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      // Determine grouping key based on xaxis type
+      let groupKey;
 
+      if (existingxaxis === "contactPerson" && item.personId) {
+        // Group by personId for contactPerson
+        groupKey = `person_${item.personId}`;
+      } else if (existingxaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (existingxaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
+        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[xValue]) {
+      if (!groupedData[groupKey]) {
         // Set id based on xaxis type
         let id = null;
         if (existingxaxis === "contactPerson") {
           id = item.personId;
         } else if (existingxaxis === "organization") {
           id = item.leadOrganizationId;
+        } else if (
+          existingxaxis === "Owner" ||
+          existingxaxis === "assignedTo" ||
+          existingxaxis === "creator"
+        ) {
+          id = item.assignedUserId;
+        } else if (existingxaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-      // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-     // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -5351,8 +5656,9 @@ async function generateExistingLeadConversionDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -5362,10 +5668,11 @@ async function generateExistingLeadConversionDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
-    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
@@ -5373,14 +5680,22 @@ async function generateExistingLeadConversionDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
       if (existingxaxis === "contactPerson") {
-        id = item.personId;
+        id = item.personId || null;
       } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId;
+        id = item.leadOrganizationId || null;
+      } else if (
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator"
+      ) {
+        id = item.assignedUserId || null;
+      } else if (existingxaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -5390,7 +5705,32 @@ async function generateExistingLeadConversionDataForSave(
       };
     });
 
-    // Calculate the grand total
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      (existingxaxis === "contactPerson" ||
+        existingxaxis === "organization" ||
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator" ||
+        existingxaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -5422,36 +5762,47 @@ async function generateLeadConversionDataForSave(
   }
 
   let xaxisNullExcludeCondition = {};
-  
-     // Check if xaxis is a date field and durationUnit is provided
-    const isDateFieldX = isDateField(xaxis);
-    const shouldGroupByDuration =
-      isDateFieldX && durationUnit && durationUnit !== "none";
-  
-  
-    if (shouldGroupByDuration) {
-      // For date fields with duration grouping, we'll handle this differently
-      // since we're grouping by date expressions
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-      // For Owner/assignedTo, exclude where assignedUser is null
-      xaxisNullExcludeCondition['$assignedUser.name$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "Team") {
-      // For Team, exclude where assignedUser.team is null
-      xaxisNullExcludeCondition['$assignedUser.team$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "contactPerson") {
-      // For contactPerson, exclude where ActivityPerson.contactPerson is null
-      xaxisNullExcludeCondition['$LeadPerson.contactPerson$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else if (xaxis === "organization") {
-      // For organization, exclude where ActivityOrganization.organization is null
-      xaxisNullExcludeCondition['$LeadOrganization.organization$'] = { [Op.ne]: null,  [Op.ne]: "" };
-    } else {
-      // For regular Activity columns, exclude where the column value is null
-      xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null,  [Op.ne]: "" };
-    }
-  
-    // Add the null exclusion condition to baseWhere
-    Object.assign(baseWhere, xaxisNullExcludeCondition);
+
+  // Check if xaxis is a date field and durationUnit is provided
+  const isDateFieldX = isDateField(xaxis);
+  const shouldGroupByDuration =
+    isDateFieldX && durationUnit && durationUnit !== "none";
+
+  if (shouldGroupByDuration) {
+    // For date fields with duration grouping, we'll handle this differently
+    // since we're grouping by date expressions
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+    // For Owner/assignedTo, exclude where assignedUser is null
+    xaxisNullExcludeCondition["$assignedUser.name$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "Team") {
+    // For Team, exclude where assignedUser.team is null
+    xaxisNullExcludeCondition["$assignedUser.team$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "contactPerson") {
+    // For contactPerson, exclude where ActivityPerson.contactPerson is null
+    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else if (xaxis === "organization") {
+    // For organization, exclude where ActivityOrganization.organization is null
+    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
+      [Op.ne]: null,
+      [Op.ne]: "",
+    };
+  } else {
+    // For regular Activity columns, exclude where the column value is null
+    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  }
+
+  // Add the null exclusion condition to baseWhere
+  Object.assign(baseWhere, xaxisNullExcludeCondition);
 
   // Handle filters if provided
   if (filters && filters.conditions) {
@@ -5507,15 +5858,14 @@ async function generateLeadConversionDataForSave(
 
   let groupBy = [];
   let attributes = ["personId", "leadOrganizationId"];
-  
-   // Attribute and GroupBy setup with durationUnit support
+
+  // Attribute and GroupBy setup with durationUnit support
   if (shouldGroupByDuration) {
     // Handle date grouping based on durationUnit
     const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
     attributes.push([dateGroupExpression, "xValue"]);
     groupBy.push(dateGroupExpression);
-  }
-  else if (xaxis === "creator") {
+  } else if (xaxis === "creator") {
     includeModels.push({
       model: MasterUser,
       as: "assignedUser", // Use the correct alias
@@ -5572,7 +5922,7 @@ async function generateLeadConversionDataForSave(
     );
 
     // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(segmentedBy); 
+    const isSegmentedByDate = isDateField(segmentedBy);
 
     const shouldSegmentByDuration =
       isSegmentedByDate && durationUnit && durationUnit !== "none";
@@ -5584,8 +5934,7 @@ async function generateLeadConversionDataForSave(
       );
       attributes.push([segmentDateExpression, "segmentValue"]);
       groupBy.push(segmentDateExpression);
-    }
-    else if (
+    } else if (
       (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
       !assignedUserIncludeExists
     ) {
@@ -5700,7 +6049,7 @@ async function generateLeadConversionDataForSave(
       where: baseWhere,
       include: includeModels,
       group: [groupColumn],
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       raw: true,
@@ -5746,9 +6095,9 @@ async function generateLeadConversionDataForSave(
         include: includeModels,
         group: groupBy,
         raw: true,
-        order: isDateFieldX 
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-        : getOrderClause(yaxis, xaxis),
+        order: isDateFieldX
+          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+          : getOrderClause(yaxis, xaxis),
       });
     }
   } else {
@@ -5758,7 +6107,7 @@ async function generateLeadConversionDataForSave(
       include: includeModels,
       group: groupBy,
       raw: true,
-      order: isDateFieldX 
+      order: isDateFieldX
         ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
     });
@@ -5769,39 +6118,73 @@ async function generateLeadConversionDataForSave(
   let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    // Group the results properly
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      // Determine grouping key based on xaxis type
+      let groupKey;
 
+      if (xaxis === "contactPerson" && item.personId) {
+        // Group by personId for contactPerson
+        groupKey = `person_${item.personId}`;
+      } else if (xaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (xaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
+        formatDateValue(item.xValue, durationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[xValue]) {
+      if (!groupedData[groupKey]) {
         // Set id based on xaxis type
         let id = null;
         if (xaxis === "contactPerson") {
           id = item.personId;
         } else if (xaxis === "organization") {
           id = item.leadOrganizationId;
+        } else if (
+          xaxis === "Owner" ||
+          xaxis === "assignedTo" ||
+          xaxis === "creator"
+        ) {
+          id = item.assignedUserId;
+        } else if (xaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-      // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-     // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -5811,8 +6194,9 @@ async function generateLeadConversionDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -5822,7 +6206,9 @@ async function generateLeadConversionDataForSave(
 
     // Only sort for non-date fields
     if (!isDateFieldX) {
-      formattedResults.sort((a, b) => b.totalSegmentValue - a.totalSegmentValue);
+      formattedResults.sort(
+        (a, b) => b.totalSegmentValue - a.totalSegmentValue
+      );
     }
 
     totalValue = formattedResults.reduce(
@@ -5832,14 +6218,22 @@ async function generateLeadConversionDataForSave(
   } else {
     // Original format for non-segmented data
     formattedResults = results.map((item) => {
-       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
       // Set id based on xaxis type
       let id = null;
       if (xaxis === "contactPerson") {
-        id = item.personId;
+        id = item.personId || null;
       } else if (xaxis === "organization") {
-        id = item.leadOrganizationId;
+        id = item.leadOrganizationId || null;
+      } else if (
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator"
+      ) {
+        id = item.assignedUserId || null;
+      } else if (xaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -5848,13 +6242,40 @@ async function generateLeadConversionDataForSave(
         id: id,
       };
     });
+
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      (xaxis === "contactPerson" ||
+        xaxis === "organization" ||
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator" ||
+        xaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
   // Return data without pagination info
   return {
     data: formattedResults,
-    totalValue: totalValue
+    totalValue: totalValue,
   };
 }
 
