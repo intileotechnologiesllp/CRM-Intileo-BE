@@ -2,6 +2,8 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const sequelize = require("./config/db"); // Import Sequelize instance
+const { connectMongoDB } = require("./config/mongodb"); // Import MongoDB connection
+const { connectRedis } = require("./config/redis"); // Import Redis connection
 const LoginHistory = require("./models/reports/loginHistoryModel"); // Import models
 const Admin = require("./models/adminModel"); // Import models
 const MasterUser = require("./models/master/masterUserModel"); // Import MasterUser model
@@ -59,6 +61,9 @@ const lostReasonRoutes = require('./routes/lostReason/lostReasonRoutes'); // Imp
 const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import lost reason routes
 const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const productRoutes = require('./routes/product/productRoutes.js'); // Import product routes
+const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import MongoDB routes
+const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
+const userInterfacePreferencesRoutes = require('./routes/userInterfacePreferencesRoutes.js'); // Import user interface preferences routes
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
@@ -141,6 +146,10 @@ app.use('/api/import', importRoutes); // Register data import routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
 app.use('/api/products', productRoutes); // Register product routes
+app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
+app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
+app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
+app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -197,23 +206,36 @@ sequelize
 // Start server
 (async () => {
   try {
-    await loadPrograms();
+    // Initialize MongoDB connection
+    console.log("🔄 Initializing MongoDB connection...");
+    const mongoConnected = await connectMongoDB();
     
-    // 🚀 Initialize IMAP IDLE Manager for real-time email sync
+    // Initialize Redis connection
+    console.log("🔄 Initializing Redis connection...");
+    const redisConnected = await connectRedis();
+    
+    await loadPrograms();
+    console.log("Program cache loaded.");
+    
+    // 🚀 Initialize IMAP IDLE Manager for real-time email sync (only if MongoDB is available)
     try {
-      await imapIdleManager.initialize();
-      console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
-      
-      // Set up event handlers for real-time updates
-      imapIdleManager.on('newMail', (data) => {
-        console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
-        // You can emit WebSocket events here for real-time UI updates
-      });
-      
-      imapIdleManager.on('flagChange', (data) => {
-        console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
-        // You can emit WebSocket events here for real-time UI updates
-      });
+      if (mongoConnected) {
+        await imapIdleManager.initialize();
+        console.log('✅ IMAP IDLE Manager initialized for real-time email sync');
+        
+        // Set up event handlers for real-time updates
+        imapIdleManager.on('newMail', (data) => {
+          console.log(`📬 [IMAP-IDLE] New mail for user ${data.userID}: ${data.messageCount} messages`);
+          // You can emit WebSocket events here for real-time UI updates
+        });
+        
+        imapIdleManager.on('flagChange', (data) => {
+          console.log(`🔄 [IMAP-IDLE] Flag change for user ${data.userID}: UID ${data.uid} isRead=${data.isRead}`);
+          // You can emit WebSocket events here for real-time UI updates
+        });
+      } else {
+        console.log('⚠️ Skipping IMAP IDLE Manager - MongoDB not available');
+      }
       
     } catch (idleError) {
       console.warn('⚠️ IMAP IDLE Manager failed to initialize:', idleError.message);
@@ -221,14 +243,17 @@ sequelize
     }
     
     // Start server after loading programs and initializing IMAP IDLE
-    const PORT = process.env.PORT || 3056 ;
+    const PORT = process.env.PORT || 3056;
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📊 MySQL Database: Connected via Sequelize`);
+      console.log(`🍃 MongoDB: ${mongoConnected ? 'Connected' : 'Unavailable'}`);
+      console.log(`🔴 Redis: ${redisConnected ? 'Connected' : 'Unavailable'}`);
+      console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
       console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
     });
-    console.log("Program cache loaded.");
   } catch (err) {
-    console.error("Failed to load program cache:", err);
+    console.error("Failed to initialize application:", err);
     process.exit(1);
   }
 })();

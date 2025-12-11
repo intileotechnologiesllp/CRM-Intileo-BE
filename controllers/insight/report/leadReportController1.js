@@ -6,7 +6,10 @@ const Organization = require("../../../models/leads/leadOrganizationModel");
 const Person = require("../../../models/leads/leadPersonModel");
 const MasterUser = require("../../../models/master/masterUserModel");
 const ReportFolder = require("../../../models/insight/reportFolderModel");
-const { Op, Sequelize } = require("sequelize");
+const { Op } = require("sequelize");
+const sequelize = require("../../../config/db");
+const CustomField = require("../../../models/customFieldModel");
+const CustomFieldValue = require("../../../models/customFieldValueModel");
 
 exports.createLeadPerformReport = async (req, res) => {
   try {
@@ -25,69 +28,252 @@ exports.createLeadPerformReport = async (req, res) => {
     const ownerId = req.adminId;
     const role = req.role;
 
-    // Define available options for xaxis and yaxis
-    const xaxisArray = [
-      { label: "ESPL Proposal No", value: "esplProposalNo", type: "Lead" },
+    // Fetch custom fields for lead entity and related entities
+    const leadCustomFields = await CustomField.findAll({
+      where: {
+        entityType: "lead",
+        masterUserID: role === "admin" ? { [Op.ne]: null } : ownerId,
+        isActive: true,
+      },
+      order: [
+        ["displayOrder", "ASC"],
+        ["fieldLabel", "ASC"],
+      ],
+    });
+
+    // Fetch custom fields for related entities
+    const relatedCustomFields = await CustomField.findAll({
+      where: {
+        entityType: {
+          [Op.in]: ["organization", "person", "deal"],
+        },
+        masterUserID: role === "admin" ? { [Op.ne]: null } : ownerId,
+        isActive: true,
+      },
+      order: [
+        ["entityType", "ASC"],
+        ["displayOrder", "ASC"],
+      ],
+    });
+
+    // Helper function to map custom field type to category
+    const getFieldTypeCategory = (fieldType) => {
+      const dateTypes = ["date", "datetime", "daterange", "timerange"];
+      if (dateTypes.includes(fieldType)) {
+        return "Date";
+      }
+      return "Lead";
+    };
+
+    // Helper function to map custom field type to filter type
+    const mapCustomFieldTypeToFilterType = (fieldType) => {
+      const typeMap = {
+        text: "text",
+        textarea: "text",
+        number: "number",
+        decimal: "number",
+        email: "text",
+        phone: "text",
+        url: "text",
+        date: "date",
+        datetime: "date",
+        daterange: "daterange",
+        timerange: "daterange",
+        time: "text",
+        select: "text",
+        singleselect: "text",
+        multiselect: "text",
+        checkbox: "text",
+        radio: "text",
+        file: "text",
+        currency: "text",
+        organization: "text",
+        person: "text",
+        address: "text",
+        largetext: "text",
+        autocomplete: "text",
+      };
+      return typeMap[fieldType] || "text";
+    };
+
+    // Build xaxis options with custom fields
+    const standardXaxisOptions = [
+    //   {
+    //     label: "ESPL Proposal No",
+    //     value: "esplProposalNo",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
+    //   {
+    //     label: "No of reports prepared",
+    //     value: "numberOfReportsPrepared",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
+    //   {
+    //     label: "Organization Country",
+    //     value: "organizationCountry",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
+    //   {
+    //     label: "Project Location",
+    //     value: "projectLocation",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
       {
-        label: "No of reports prepared",
-        value: "numberOfReportsPrepared",
+        label: "Owner Name",
+        value: "ownerName",
         type: "Lead",
+        isCustom: false,
+      },
+    //   { label: "SBU Class", value: "SBUClass", type: "Lead", isCustom: false },
+    //   { label: "Status", value: "status", type: "Lead", isCustom: false },
+    //   {
+    //     label: "Scope of Service Type",
+    //     value: "scopeOfServiceType",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
+    //   {
+    //     label: "Service Type",
+    //     value: "serviceType",
+    //     type: "Lead",
+    //     isCustom: false,
+    //   },
+      {
+        label: "Source Channel",
+        value: "sourceChannel",
+        type: "Lead",
+        isCustom: false,
       },
       {
-        label: "Organization Country",
-        value: "organizationCountry",
+        label: "Source Channel Id",
+        value: "sourceChannelID",
         type: "Lead",
+        isCustom: false,
       },
-      { label: "Project Location", value: "projectLocation", type: "Lead" },
-      { label: "Owner Name", value: "ownerName", type: "Lead" },
-      { label: "SBU Class", value: "SBUClass", type: "Lead" },
-      { label: "Status", value: "status", type: "Lead" },
       {
-        label: "Scope of Service Type",
-        value: "scopeOfServiceType",
+        label: "Source Origin",
+        value: "sourceOrigin",
         type: "Lead",
+        isCustom: false,
       },
-      { label: "Service Type", value: "serviceType", type: "Lead" },
-      { label: "Source Channel", value: "sourceChannel", type: "Lead" },
-      { label: "Source Channel Id", value: "sourceChannelID", type: "Lead" },
-      { label: "Source Origin", value: "sourceOrigin", type: "Lead" },
-      { label: "Source Origin Id", value: "sourceOriginID", type: "Lead" },
-      { label: "Contact Person", value: "contactPerson", type: "Lead" },
-      { label: "Organization", value: "organization", type: "Lead" },
+      {
+        label: "Source Origin Id",
+        value: "sourceOriginID",
+        type: "Lead",
+        isCustom: false,
+      },
+      {
+        label: "Contact Person",
+        value: "contactPerson",
+        type: "Lead",
+        isCustom: false,
+      },
+      {
+        label: "Organization",
+        value: "organization",
+        type: "Lead",
+        isCustom: false,
+      },
       {
         label: "Proposal Value Currency",
         value: "proposalValueCurrency",
         type: "Lead",
+        isCustom: false,
       },
-      { label: "Creator", value: "creator", type: "Lead" },
-      { label: "Creator Status", value: "creatorstatus", type: "Lead" },
-      { label: "Proposal Sent Date", value: "proposalSentDate", type: "Date" },
-      { label: "Conversion Date", value: "conversionDate", type: "Date" },
-      { label: "Add on", value: "createdAt", type: "Date" },
-      { label: "Update on", value: "updatedAt", type: "Date" },
+      { label: "Creator", value: "creator", type: "Lead", isCustom: false },
+      {
+        label: "Creator Status",
+        value: "creatorstatus",
+        type: "Lead",
+        isCustom: false,
+      },
+      {
+        label: "Proposal Sent Date",
+        value: "proposalSentDate",
+        type: "Date",
+        isCustom: false,
+      },
+      {
+        label: "Conversion Date",
+        value: "conversionDate",
+        type: "Date",
+        isCustom: false,
+      },
+      { label: "Add on", value: "createdAt", type: "Date", isCustom: false },
+      { label: "Update on", value: "updatedAt", type: "Date", isCustom: false },
     ];
 
-    const segmentedByOptions = [
-      { label: "None", value: "none" },
-      { label: "ESPL Proposal No", value: "esplProposalNo" },
-      { label: "No of reports prepared", value: "numberOfReportsPrepared" },
-      { label: "Organization Country", value: "organizationCountry" },
-      { label: "Project Location", value: "projectLocation" },
-      { label: "Owner Name", value: "ownerName" },
-      { label: "SBU Class", value: "SBUClass" },
-      { label: "Status", value: "status" },
-      { label: "Scope of Service Type", value: "scopeOfServiceType" },
-      { label: "Service Type", value: "serviceType" },
-      { label: "Source Channel", value: "sourceChannel" },
-      { label: "Source Channel Id", value: "sourceChannelID" },
-      { label: "Source Origin", value: "sourceOrigin" },
-      { label: "Source Origin Id", value: "sourceOriginID" },
-      { label: "Contact Person", value: "contactPerson" },
-      { label: "Organization", value: "organization" },
-      { label: "Proposal Value Currency", value: "proposalValueCurrency" },
-      { label: "Creator", value: "creator" },
-      { label: "Creator Status", value: "creatorstatus" },
+    const xaxisArray = [...standardXaxisOptions];
+
+    // Add lead custom fields to xaxis options
+    leadCustomFields.forEach((field) => {
+      xaxisArray.push({
+        label: field.fieldLabel,
+        value: `custom_${field.fieldId}`,
+        type: getFieldTypeCategory(field.fieldType),
+        isCustom: true,
+        customFieldId: field.fieldId,
+        customFieldType: field.fieldType,
+        fieldName: field.fieldName,
+      });
+    });
+
+    // Build segmentedBy options
+    const standardSegmentedByOptions = [
+      { label: "None", value: "none", isCustom: false },
+    //   { label: "ESPL Proposal No", value: "esplProposalNo", isCustom: false },
+    //   {
+    //     label: "No of reports prepared",
+    //     value: "numberOfReportsPrepared",
+    //     isCustom: false,
+    //   },
+    //   {
+    //     label: "Organization Country",
+    //     value: "organizationCountry",
+    //     isCustom: false,
+    //   },
+    //   { label: "Project Location", value: "projectLocation", isCustom: false },
+      { label: "Owner Name", value: "ownerName", isCustom: false },
+    //   { label: "SBU Class", value: "SBUClass", isCustom: false },
+      { label: "Status", value: "status", isCustom: false },
+    //   {
+    //     label: "Scope of Service Type",
+    //     value: "scopeOfServiceType",
+    //     isCustom: false,
+    //   },
+    //   { label: "Service Type", value: "serviceType", isCustom: false },
+      { label: "Source Channel", value: "sourceChannel", isCustom: false },
+      { label: "Source Channel Id", value: "sourceChannelID", isCustom: false },
+      { label: "Source Origin", value: "sourceOrigin", isCustom: false },
+      { label: "Source Origin Id", value: "sourceOriginID", isCustom: false },
+      { label: "Contact Person", value: "contactPerson", isCustom: false },
+      { label: "Organization", value: "organization", isCustom: false },
+      {
+        label: "Proposal Value Currency",
+        value: "proposalValueCurrency",
+        isCustom: false,
+      },
+      { label: "Creator", value: "creator", isCustom: false },
+      { label: "Creator Status", value: "creatorstatus", isCustom: false },
     ];
+
+    const segmentedByOptions = [...standardSegmentedByOptions];
+
+    // Add lead custom fields to segmentedBy options
+    leadCustomFields.forEach((field) => {
+      segmentedByOptions.push({
+        label: field.fieldLabel,
+        value: `custom_${field.fieldId}`,
+        isCustom: true,
+        customFieldId: field.fieldId,
+        customFieldType: field.fieldType,
+        fieldName: field.fieldName,
+      });
+    });
 
     const yaxisArray = [
       { label: "No of Leads", value: "no of leads", type: "Lead" },
@@ -95,35 +281,36 @@ exports.createLeadPerformReport = async (req, res) => {
       { label: "Value", value: "value", type: "Lead" },
     ];
 
-    // Add this to your createActivityReport function or make it available globally
+    // Build available filter columns with custom fields
     const availableFilterColumns = {
       Lead: [
-        { label: "ESPL Proposal No", value: "esplProposalNo", type: "number" },
-        {
-          label: "No of Reports",
-          value: "numberOfReportsPrepared",
-          type: "number",
-        },
-        {
-          label: "Organization Country",
-          value: "organizationCountry",
-          type: "text",
-        },
-        { label: "Project Location", value: "projectLocation", type: "text" },
+        // Standard Lead fields
+        // { label: "ESPL Proposal No", value: "esplProposalNo", type: "number" },
+        // {
+        //   label: "No of Reports",
+        //   value: "numberOfReportsPrepared",
+        //   type: "number",
+        // },
+        // {
+        //   label: "Organization Country",
+        //   value: "organizationCountry",
+        //   type: "text",
+        // },
+        // { label: "Project Location", value: "projectLocation", type: "text" },
         {
           label: "Proposal Sent Date",
           value: "proposalSentDate",
           type: "date",
         },
         { label: "Owner Name", value: "ownerName", type: "text" },
-        { label: "SBU Class", value: "SBUClass", type: "text" },
+        // { label: "SBU Class", value: "SBUClass", type: "text" },
         { label: "Status", value: "status", type: "text" },
-        {
-          label: "Scope Of Service Type",
-          value: "scopeOfServiceType",
-          type: "text",
-        },
-        { label: "Service Type", value: "serviceType", type: "text" },
+        // {
+        //   label: "Scope Of Service Type",
+        //   value: "scopeOfServiceType",
+        //   type: "text",
+        // },
+        // { label: "Service Type", value: "serviceType", type: "text" },
         { label: "Source Channel", value: "sourceChannel", type: "text" },
         {
           label: "Source Channel ID",
@@ -154,115 +341,21 @@ exports.createLeadPerformReport = async (req, res) => {
         { label: "Created At", value: "createdAt", type: "date" },
         { label: "Updated At", value: "updatedAt", type: "date" },
         { label: "Add on", value: "daterange", type: "daterange" },
+
+        // Lead custom fields
+        ...leadCustomFields.map((field) => ({
+          label: field.fieldLabel,
+          value: `custom_${field.fieldId}`,
+          type: mapCustomFieldTypeToFilterType(field.fieldType),
+          isCustom: true,
+          customFieldId: field.fieldId,
+          customFieldType: field.fieldType,
+          fieldName: field.fieldName,
+          options: field.options || null,
+        })),
       ],
-      // Deal: [
-      //   { label: "Title", value: "LeadDeals.title", type: "text" },
-      //   { label: "Value", value: "LeadDeals.value", type: "text" },
-      //   { label: "Currency", value: "LeadDeals.currency", type: "text" },
-      //   { label: "Pipeline", value: "LeadDeals.pipeline", type: "text" },
-      //   {
-      //     label: "Pipeline Stage",
-      //     value: "LeadDeals.pipelineStage",
-      //     type: "text",
-      //   },
-      //   { label: "Label", value: "LeadDeals.label", type: "text" },
-      //   {
-      //     label: "Expected Close Date",
-      //     value: "LeadDeals.expectedCloseDate",
-      //     type: "date",
-      //   },
-      //   {
-      //     label: "Source Channel",
-      //     value: "LeadDeals.sourceChannel",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Service Type",
-      //     value: "LeadDeals.serviceType",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Proposal Value",
-      //     value: "LeadDeals.proposalValue",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Proposal Currency",
-      //     value: "LeadDeals.proposalCurrency",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "ESPL Proposal No",
-      //     value: "LeadDeals.esplProposalNo",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Project Location",
-      //     value: "LeadDeals.projectLocation",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Organization Country",
-      //     value: "LeadDeals.organizationCountry",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Proposal Sent Date",
-      //     value: "LeadDeals.proposalSentDate",
-      //     type: "date",
-      //   },
-      //   {
-      //     label: "Source Required",
-      //     value: "LeadDeals.sourceRequired",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Questioner Shared",
-      //     value: "LeadDeals.questionerShared",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Sectorial Sector",
-      //     value: "LeadDeals.sectorialSector",
-      //     type: "text",
-      //   },
-      //   { label: "SBU Class", value: "LeadDeals.sbuClass", type: "text" },
-      //   { label: "Phone", value: "LeadDeals.phone", type: "number" },
-      //   { label: "Email", value: "LeadDeals.email", type: "text" },
-      //   {
-      //     label: "Source Origin",
-      //     value: "LeadDeals.sourceOrgin",
-      //     type: "text",
-      //   },
-      //   { label: "Status", value: "LeadDeals.status", type: "number" },
-      //   {
-      //     label: "Product Name",
-      //     value: "LeadDeals.productName",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Weighted Value",
-      //     value: "LeadDeals.weightedValue",
-      //     type: "number",
-      //   },
-      //   {
-      //     label: "Probability",
-      //     value: "LeadDeals.probability",
-      //     type: "text",
-      //   },
-      //   { label: "Stage", value: "LeadDeals.stage", type: "text" },
-      //   {
-      //     label: "Lost Reason",
-      //     value: "LeadDeals.lostReason",
-      //     type: "text",
-      //   },
-      //   {
-      //     label: "Archive Status",
-      //     value: "LeadDeals.archiveStatus",
-      //     type: "number",
-      //   },
-      // ],
       Organization: [
+        // Standard Organization fields
         {
           label: "Organization",
           value: "LeadOrganization.organization",
@@ -291,6 +384,7 @@ exports.createLeadPerformReport = async (req, res) => {
         },
       ],
       Person: [
+        // Standard Person fields
         {
           label: "Contact Person",
           value: "LeadPerson.contactPerson",
@@ -349,7 +443,8 @@ exports.createLeadPerformReport = async (req, res) => {
             segmentedBy,
             filters,
             page,
-            limit
+            limit,
+            leadCustomFields
           );
           reportData = result.data;
           paginationInfo = result.pagination;
@@ -434,7 +529,8 @@ exports.createLeadPerformReport = async (req, res) => {
           existingSegmentedBy,
           existingfilters,
           page,
-          limit
+          limit,
+          leadCustomFields
         );
         reportData = result.data;
         paginationInfo = result.pagination;
@@ -496,6 +592,8 @@ exports.createLeadPerformReport = async (req, res) => {
   }
 };
 
+// =============== HELPER FUNCTIONS ===============
+
 async function generateExistingLeadPerformanceData(
   ownerId,
   role,
@@ -505,395 +603,116 @@ async function generateExistingLeadPerformanceData(
   existingSegmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  leadCustomFields = []
 ) {
-  let includeModels = [];
   // Calculate offset for pagination
   const offset = (page - 1) * limit;
 
-  // Base where condition - only show activities owned by the user if not admin
-  const baseWhere = {};
-
-  // If user is not admin, filter by ownerId
-  if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
+  // Check if xaxis is a custom field
+  const isCustomFieldX = existingxaxis.startsWith("custom_");
+  let customFieldX = null;
+  if (isCustomFieldX) {
+    const fieldId = parseInt(existingxaxis.replace("custom_", ""));
+    customFieldX = leadCustomFields.find((f) => f.fieldId === fieldId);
   }
 
-  let xaxisNullExcludeCondition = {};
+  // Check if segmentedBy is a custom field
+  const isSegmentedByCustom =
+    existingSegmentedBy && existingSegmentedBy.startsWith("custom_");
+  let customFieldSegmentedBy = null;
+  if (isSegmentedByCustom) {
+    const fieldId = parseInt(existingSegmentedBy.replace("custom_", ""));
+    customFieldSegmentedBy = leadCustomFields.find(
+      (f) => f.fieldId === fieldId
+    );
+  }
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
+  const isDateFieldX =
+    isDateField(existingxaxis) ||
+    (customFieldX && isCustomDateField(customFieldX));
   const shouldGroupByDuration =
     isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "organization") {
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  // Build base query
+  let baseQuery = buildBaseQuery(
+    existingxaxis,
+    existingyaxis,
+    existingSegmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
+
+  // Add where conditions
+  let whereConditions = buildWhereConditions(
+    ownerId,
+    role,
+    existingxaxis,
+    isCustomFieldX,
+    existingSegmentedBy,
+    isSegmentedByCustom,
+    filters,
+    leadCustomFields
+  );
+
+  // Add where clause if conditions exist
+  if (whereConditions.length > 0) {
+    baseQuery += ` WHERE ` + whereConditions.join(" AND ");
   }
 
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
+  // Build group by clause
+  let groupByClause = buildGroupByClause(
+    existingxaxis,
+    existingSegmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy,
+    shouldGroupByDuration,
+    existingDurationUnit
+  );
 
-  // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
-      (cond) => cond.value !== undefined && cond.value !== ""
-    );
+  // Build order by clause
+  let orderByClause = buildOrderByClause(
+    existingxaxis,
+    existingyaxis,
+    isDateFieldX,
+    isCustomFieldX
+  );
 
-    if (validConditions.length > 0) {
-      // Array to track include models for filtering
-      const filterIncludeModels = [];
+  // Get total count
+  const countQuery = buildCountQuery(
+    existingxaxis,
+    isCustomFieldX,
+    customFieldX,
+    whereConditions,
+    existingSegmentedBy,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
 
-      // Process all conditions first to collect include models
-      const conditions = validConditions.map((cond) => {
-        return getConditionObject(
-          cond.column,
-          cond.operator,
-          cond.value,
-          filterIncludeModels
-        );
-      });
-
-      // Build combined condition with logical operators
-      let combinedCondition = conditions[0];
-
-      for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
-        ).toUpperCase();
-
-        if (logicalOp === "AND") {
-          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
-        } else {
-          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
-        }
-      }
-
-      Object.assign(baseWhere, combinedCondition);
-
-      // Add filter-related include models to the main includeModels array
-      // Avoid duplicates
-      filterIncludeModels.forEach((newInclude) => {
-        const exists = includeModels.some(
-          (existingInclude) => existingInclude.as === newInclude.as
-        );
-        if (!exists) {
-          includeModels.push(newInclude);
-        }
-      });
-    }
-  }
-
-  // Handle special cases for xaxis (like Owner which needs join)
-
-  let groupBy = [];
-  let attributes = [];
-
-  // Handle existingxaxis special cases
-  // Attribute and GroupBy setup with durationUnit support
-  if (shouldGroupByDuration) {
-    // Handle date grouping based on durationUnit
-    const dateGroupExpression = getDateGroupExpression(
-      existingxaxis,
-      existingDurationUnit
-    );
-    attributes.push([dateGroupExpression, "xValue"]);
-    groupBy.push(dateGroupExpression);
-  } else if (existingxaxis === "creator") {
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("Lead.masterUserID"), "assignedUserId"]);
-  } else if (existingxaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
-      required: true,
-    });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else if (existingxaxis === "contactPerson") {
-    // Special handling for contactPerson - join with Person table
-    includeModels.push({
-      model: Person,
-      as: "LeadPerson",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
-  } else if (existingxaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
-  } else {
-    // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
-  }
-
-  // Handle segmentedBy if not "none"
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    const assignedUserIncludeExists = includeModels.some(
-      (inc) => inc.as === "assignedUser"
-    );
-    // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(existingSegmentedBy);
-
-    const shouldSegmentByDuration =
-      isSegmentedByDate &&
-      existingDurationUnit &&
-      existingDurationUnit !== "none";
-
-    if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(
-        existingSegmentedBy,
-        existingDurationUnit
-      );
-      attributes.push([segmentDateExpression, "segmentValue"]);
-      groupBy.push(segmentDateExpression);
-    } else if (
-      (existingSegmentedBy === "Owner" ||
-        existingSegmentedBy === "assignedTo") &&
-      !assignedUserIncludeExists
-    ) {
-      groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team") {
-      groupBy.push("assignedUser.team" && !assignedUserIncludeExists);
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (existingSegmentedBy === "contactPerson") {
-      includeModels.push({
-        model: Person,
-        as: "LeadPerson",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.personId");
-      attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
-        "segmentValue",
-      ]);
-    } else if (existingSegmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
-    } else {
-      groupBy.push(`Lead.${existingSegmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Lead.${existingSegmentedBy}`),
-        "segmentValue",
-      ]);
-    }
-  }
-
-  // Handle existingyaxis
-  if (existingyaxis === "no of leads") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("leadId")), "yValue"]);
-  } else if (existingyaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
-      "yValue",
-    ]);
-  } else if (existingyaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
-  } else {
-    // For other yaxis values, explicitly specify the Activity table
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
-      "yValue",
-    ]);
-  }
-
-  // Get total count for pagination
-  let totalCountResult;
-  if (shouldGroupByDuration) {
-    totalCountResult = await Lead.findAll({
-      where: baseWhere,
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn(
-              "DISTINCT",
-              getDateGroupExpression(existingxaxis, existingDurationUnit)
-            )
-          ),
-          "total",
-        ],
-      ],
-      include: includeModels,
-      raw: true,
-    });
-  } else {
-    let countColumn;
-    if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      countColumn = Sequelize.col("assignedUser.name");
-    } else if (existingxaxis === "contactPerson") {
-      countColumn = Sequelize.col("Lead.personId");
-    } else if (existingxaxis === "organization") {
-      countColumn = Sequelize.col("Lead.leadOrganizationId");
-    } else {
-      countColumn = Sequelize.col(`Lead.${existingxaxis}`);
-    }
-
-    totalCountResult = await Lead.findAll({
-      where: baseWhere,
-      attributes: [
-        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
-      ],
-      include: includeModels,
-      raw: true,
-    });
-  }
-
-  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  // Execute count query
+  const countResult = await sequelize.query(countQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
+  const totalCount = parseInt(countResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  let results;
+  // Build final query with pagination
+  let finalQuery = baseQuery + " " + groupByClause + " " + orderByClause;
 
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // For segmented queries
-    const paginationAttributes = [];
-    let groupColumn;
-    if (shouldGroupByDuration) {
-      groupColumn = getDateGroupExpression(existingxaxis, existingDurationUnit);
-      paginationAttributes.push([groupColumn, "groupKey"]);
-    } else {
-      if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-        groupColumn = Sequelize.col("assignedUser.name");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (existingxaxis === "contactPerson") {
-        groupColumn = Sequelize.col("Lead.personId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (existingxaxis === "organization") {
-        groupColumn = Sequelize.col("Lead.leadOrganizationId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else {
-        groupColumn = Sequelize.col(`Lead.${existingxaxis}`);
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      }
-    }
+  // Add pagination
+  finalQuery += ` LIMIT ${limit} OFFSET ${offset}`;
 
-    const paginatedGroups = await Lead.findAll({
-      attributes: paginationAttributes,
-      where: baseWhere,
-      include: includeModels,
-      group: [groupColumn],
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
-        : getOrderClause(existingyaxis, existingxaxis),
-      limit: limit,
-      offset: offset,
-      raw: true,
-    });
+  // Execute main query
+  const results = await sequelize.query(finalQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
 
-    const groupKeys = paginatedGroups.map((g) => g.groupKey);
-
-    if (groupKeys.length === 0) {
-      results = [];
-    } else {
-      const finalWhere = { ...baseWhere };
-
-      let groupCondition;
-      if (shouldGroupByDuration) {
-        const groupExpression = getDateGroupExpression(
-          existingxaxis,
-          existingDurationUnit
-        );
-        groupCondition = Sequelize.where(groupExpression, {
-          [Op.in]: groupKeys,
-        });
-      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
-      } else if (existingxaxis === "contactPerson") {
-        groupCondition = { personId: { [Op.in]: groupKeys } };
-      } else if (existingxaxis === "organization") {
-        groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
-      } else {
-        groupCondition = { [existingxaxis]: { [Op.in]: groupKeys } };
-      }
-
-      finalWhere[Op.and] = finalWhere[Op.and]
-        ? [...finalWhere[Op.and], groupCondition]
-        : [groupCondition];
-
-      results = await Lead.findAll({
-        where: finalWhere,
-        attributes: attributes,
-        include: includeModels,
-        group: groupBy,
-        raw: true,
-        order: isDateFieldX
-          ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
-          : getOrderClause(existingyaxis, existingxaxis),
-      });
-    }
-  } else {
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
-        : getOrderClause(existingyaxis, existingxaxis),
-      limit: limit,
-      offset: offset,
-    });
-  }
-
-  // Format the results for the frontend
+  // Format the results
   let formattedResults = [];
   let totalValue = 0;
 
@@ -904,34 +723,16 @@ async function generateExistingLeadPerformanceData(
     results.forEach((item) => {
       let xValue =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-      const segmentValue =
-        formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
+      const segmentValue = item.segmentValue ? 
+        formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown" : 
+        "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      // Handle null values for special cases
-      if (existingxaxis === "contactPerson" && !item.xValue && item.personId) {
-        xValue = "Unknown Contact";
-      } else if (
-        existingxaxis === "organization" &&
-        !item.xValue &&
-        item.leadOrganizationId
-      ) {
-        xValue = "Unknown Organization";
-      }
-
       if (!groupedData[xValue]) {
-        // Set id based on xaxis type
-        let id = null;
-        if (existingxaxis === "contactPerson") {
-          id = item.personId;
-        } else if (existingxaxis === "organization") {
-          id = item.leadOrganizationId;
-        }
-
         groupedData[xValue] = {
           label: xValue,
-          segments: [],
-          id: id,
+          segments: {},
+          id: null,
         };
       }
       // Merge segments with the same labeltype
@@ -978,18 +779,10 @@ async function generateExistingLeadPerformanceData(
       let label =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
 
-      // Set id based on xaxis type
-      let id = null;
-      if (existingxaxis === "contactPerson") {
-        id = item.personId;
-      } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId;
-      }
-
       return {
         label: label,
         value: Number(item.yValue) || 0,
-        id: id,
+        id: null,
       };
     });
 
@@ -1012,7 +805,6 @@ async function generateExistingLeadPerformanceData(
   };
 }
 
-// Helper function to generate activity performance data with pagination
 async function generateLeadPerformanceData(
   ownerId,
   role,
@@ -1022,396 +814,114 @@ async function generateLeadPerformanceData(
   segmentedBy,
   filters,
   page = 1,
-  limit = 8
+  limit = 8,
+  leadCustomFields = []
 ) {
-  let includeModels = [];
-
   // Calculate offset for pagination
   const offset = (page - 1) * limit;
 
-  // Base where condition - only show activities owned by the user if not admin
-  const baseWhere = {};
-
-  // If user is not admin, filter by ownerId
-  if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
+  // Check if xaxis is a custom field
+  const isCustomFieldX = xaxis.startsWith("custom_");
+  let customFieldX = null;
+  if (isCustomFieldX) {
+    const fieldId = parseInt(xaxis.replace("custom_", ""));
+    customFieldX = leadCustomFields.find((f) => f.fieldId === fieldId);
   }
 
-  let xaxisNullExcludeCondition = {};
+  // Check if segmentedBy is a custom field
+  const isSegmentedByCustom = segmentedBy && segmentedBy.startsWith("custom_");
+  let customFieldSegmentedBy = null;
+  if (isSegmentedByCustom) {
+    const fieldId = parseInt(segmentedBy.replace("custom_", ""));
+    customFieldSegmentedBy = leadCustomFields.find(
+      (f) => f.fieldId === fieldId
+    );
+  }
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
+  const isDateFieldX =
+    isDateField(xaxis) || (customFieldX && isCustomDateField(customFieldX));
   const shouldGroupByDuration =
     isDateFieldX && durationUnit && durationUnit !== "none";
 
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping, we'll handle this differently
-    // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-    // For Owner/assignedTo, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "Team") {
-    // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "contactPerson") {
-    // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "organization") {
-    // For organization, exclude where ActivityOrganization.organization is null
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  // Build base query
+  let baseQuery = buildBaseQuery(
+    xaxis,
+    yaxis,
+    segmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
+
+  // Add where conditions
+  let whereConditions = buildWhereConditions(
+    ownerId,
+    role,
+    xaxis,
+    isCustomFieldX,
+    segmentedBy,
+    isSegmentedByCustom,
+    filters,
+    leadCustomFields
+  );
+
+  // Add where clause if conditions exist
+  if (whereConditions.length > 0) {
+    baseQuery += ` WHERE ` + whereConditions.join(" AND ");
   }
 
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
+  // Build group by clause
+  let groupByClause = buildGroupByClause(
+    xaxis,
+    segmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy,
+    shouldGroupByDuration,
+    durationUnit
+  );
 
-  // Handle filters if provided
-  // In your generateActivityPerformanceData function, modify the filter handling:
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
-      (cond) => cond.value !== undefined && cond.value !== ""
-    );
+  // Build order by clause
+  let orderByClause = buildOrderByClause(
+    xaxis,
+    yaxis,
+    isDateFieldX,
+    isCustomFieldX
+  );
 
-    if (validConditions.length > 0) {
-      // Array to track include models for filtering
-      const filterIncludeModels = [];
+  // Get total count
+  const countQuery = buildCountQuery(
+    xaxis,
+    isCustomFieldX,
+    customFieldX,
+    whereConditions,
+    segmentedBy,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
 
-      // Process all conditions first to collect include models
-      const conditions = validConditions.map((cond) => {
-        return getConditionObject(
-          cond.column,
-          cond.operator,
-          cond.value,
-          filterIncludeModels
-        );
-      });
-
-      // Build combined condition with logical operators
-      let combinedCondition = conditions[0];
-
-      for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
-        ).toUpperCase();
-
-        if (logicalOp === "AND") {
-          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
-        } else {
-          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
-        }
-      }
-
-      Object.assign(baseWhere, combinedCondition);
-
-      // Add filter-related include models to the main includeModels array
-      // Avoid duplicates
-      filterIncludeModels.forEach((newInclude) => {
-        const exists = includeModels.some(
-          (existingInclude) => existingInclude.as === newInclude.as
-        );
-        if (!exists) {
-          includeModels.push(newInclude);
-        }
-      });
-    }
-  }
-
-  // Handle special cases for xaxis (like Owner which needs join)
-
-  let groupBy = [];
-  let attributes = ["personId", "leadOrganizationId"];
-
-  // Attribute and GroupBy setup with durationUnit support
-  if (shouldGroupByDuration) {
-    // Handle date grouping based on durationUnit
-    const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
-    attributes.push([dateGroupExpression, "xValue"]);
-    groupBy.push(dateGroupExpression);
-  } else if (xaxis === "creator") {
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
-      required: true,
-    });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else if (xaxis === "contactPerson") {
-    // Special handling for contactPerson - join with Person table
-    includeModels.push({
-      model: Person,
-      as: "LeadPerson",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
-  } else if (xaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
-  } else {
-    // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
-  }
-
-  if (segmentedBy && segmentedBy !== "none") {
-    const assignedUserIncludeExists = includeModels.some(
-      (inc) => inc.as === "assignedUser"
-    );
-
-    // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(segmentedBy);
-
-    const shouldSegmentByDuration =
-      isSegmentedByDate && durationUnit && durationUnit !== "none";
-
-    if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(
-        segmentedBy,
-        durationUnit
-      );
-      attributes.push([segmentDateExpression, "segmentValue"]);
-      groupBy.push(segmentDateExpression);
-    } else if (
-      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
-      !assignedUserIncludeExists
-    ) {
-      groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
-      groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (segmentedBy === "contactPerson") {
-      includeModels.push({
-        model: Person,
-        as: "LeadPerson",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.personId");
-      attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
-        "segmentValue",
-      ]);
-    } else if (segmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
-    } else {
-      groupBy.push(`Lead.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
-    }
-  }
-
-  // Handle existingyaxis
-  if (yaxis === "no of leads") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("leadId")), "yValue"]);
-  } else if (yaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
-      "yValue",
-    ]);
-  } else {
-    // For other yaxis values, explicitly specify the Activity table
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)),
-      "yValue",
-    ]);
-  }
-
-  // Get total count for pagination
-  let totalCountResult;
-  if (shouldGroupByDuration) {
-    totalCountResult = await Lead.findAll({
-      where: baseWhere,
-      attributes: [
-        [
-          Sequelize.fn(
-            "COUNT",
-            Sequelize.fn(
-              "DISTINCT",
-              getDateGroupExpression(xaxis, durationUnit)
-            )
-          ),
-          "total",
-        ],
-      ],
-      include: includeModels,
-      raw: true,
-    });
-  } else {
-    let countColumn;
-    if (xaxis === "Owner" || xaxis === "assignedTo") {
-      countColumn = Sequelize.col("assignedUser.name");
-    } else if (xaxis === "contactPerson") {
-      countColumn = Sequelize.col("Lead.personId");
-    } else if (xaxis === "organization") {
-      countColumn = Sequelize.col("Lead.leadOrganizationId");
-    } else {
-      countColumn = Sequelize.col(`Lead.${xaxis}`);
-    }
-
-    totalCountResult = await Lead.findAll({
-      where: baseWhere,
-      attributes: [
-        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
-      ],
-      include: includeModels,
-      raw: true,
-    });
-  }
-
-  const totalCount = parseInt(totalCountResult[0]?.total || 0);
+  // Execute count query
+  const countResult = await sequelize.query(countQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
+  const totalCount = parseInt(countResult[0]?.total || 0);
   const totalPages = Math.ceil(totalCount / limit);
 
-  let results;
+  // Build final query with pagination
+  let finalQuery = baseQuery + " " + groupByClause + " " + orderByClause;
 
-  if (segmentedBy && segmentedBy !== "none") {
-    // For segmented queries, we need a different approach
-    const paginationAttributes = [];
+  // Add pagination
+  finalQuery += ` LIMIT ${limit} OFFSET ${offset}`;
 
-    // Determine the correct group column for pagination
-    let groupColumn;
-    if (shouldGroupByDuration) {
-      groupColumn = getDateGroupExpression(xaxis, durationUnit);
-      paginationAttributes.push([groupColumn, "groupKey"]);
-    } else {
-      // Handle special cases for Owner, contactPerson, organization
-      if (xaxis === "Owner" || xaxis === "assignedTo") {
-        groupColumn = Sequelize.col("assignedUser.name");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (xaxis === "contactPerson") {
-        groupColumn = Sequelize.col("Lead.personId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else if (xaxis === "organization") {
-        groupColumn = Sequelize.col("Lead.leadOrganizationId");
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      } else {
-        groupColumn = Sequelize.col(`Lead.${xaxis}`);
-        paginationAttributes.push([groupColumn, "groupKey"]);
-      }
-    }
+  // Execute main query
+  const results = await sequelize.query(finalQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
 
-    const paginatedGroups = await Lead.findAll({
-      attributes: paginationAttributes,
-      where: baseWhere,
-      include: includeModels,
-      group: [groupColumn],
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-        : getOrderClause(yaxis, xaxis),
-      limit: limit,
-      offset: offset,
-      raw: true,
-    });
-
-    const groupKeys = paginatedGroups.map((g) => g.groupKey);
-
-    if (groupKeys.length === 0) {
-      results = [];
-    } else {
-      const finalWhere = { ...baseWhere };
-      // Build condition for the specific group keys - FIXED for related tables
-      let groupCondition;
-
-      if (shouldGroupByDuration) {
-        // For date grouping
-        const groupExpression = getDateGroupExpression(xaxis, durationUnit);
-        groupCondition = Sequelize.where(groupExpression, {
-          [Op.in]: groupKeys,
-        });
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-        // For Owner/assignedTo - use proper Sequelize syntax for related table
-        groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
-      } else if (xaxis === "contactPerson") {
-        // For contactPerson - use proper column reference
-        groupCondition = { personId: { [Op.in]: groupKeys } };
-      } else if (xaxis === "organization") {
-        // For organization - use proper column reference
-        groupCondition = { leadOrganizationId: { [Op.in]: groupKeys } };
-      } else {
-        // For regular Activity columns
-        groupCondition = { [xaxis]: { [Op.in]: groupKeys } };
-      }
-
-      finalWhere[Op.and] = finalWhere[Op.and]
-        ? [...finalWhere[Op.and], groupCondition]
-        : [groupCondition];
-
-      results = await Lead.findAll({
-        where: finalWhere,
-        attributes: attributes,
-        include: includeModels,
-        // group: [...groupBy],
-        group: groupBy,
-        raw: true,
-        order: isDateFieldX
-          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-          : getOrderClause(yaxis, xaxis),
-      });
-    }
-  } else {
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-        : getOrderClause(yaxis, xaxis),
-      limit: limit,
-      offset: offset,
-    });
-  }
-
-  // Format the results based on whether segmentedBy is used
+  // Format the results
   let formattedResults = [];
   let totalValue = 0;
 
@@ -1421,23 +931,16 @@ async function generateLeadPerformanceData(
 
     results.forEach((item) => {
       let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
-      const segmentValue =
-        formatDateValue(item.segmentValue, durationUnit) || "Unknown";
+      const segmentValue = item.segmentValue ? 
+        formatDateValue(item.segmentValue, durationUnit) || "Unknown" : 
+        "Unknown";
       const yValue = Number(item.yValue) || 0;
 
       if (!groupedData[xValue]) {
-        // Set id based on xaxis type
-        let id = null;
-        if (xaxis === "contactPerson") {
-          id = item.personId;
-        } else if (xaxis === "organization") {
-          id = item.leadOrganizationId;
-        }
-
         groupedData[xValue] = {
           label: xValue,
-          segments: [],
-          id: id,
+          segments: {},
+          id: null,
         };
       }
       // Merge segments with the same labeltype
@@ -1482,20 +985,10 @@ async function generateLeadPerformanceData(
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
-      // Set id based on xaxis type
-      let id = null;
-      if (xaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (xaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-        id = item.assignedUserId || null;
-      }
-
       return {
         label: label,
         value: Number(item.yValue) || 0,
-        id: id,
+        id: null,
       };
     });
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -1516,215 +1009,469 @@ async function generateLeadPerformanceData(
   };
 }
 
+// =============== SQL QUERY BUILDING FUNCTIONS ===============
+
+function buildBaseQuery(
+  xaxis,
+  yaxis,
+  segmentedBy,
+  isCustomFieldX,
+  customFieldX,
+  isSegmentedByCustom,
+  customFieldSegmentedBy
+) {
+  let baseQuery = `
+    SELECT 
+      leadId,
+      ${
+        isCustomFieldX && customFieldX
+          ? `cfx.value as xValue`
+          : `Lead.${xaxis} as xValue`
+      },
+      ${
+        isSegmentedByCustom && customFieldSegmentedBy && segmentedBy !== "none"
+          ? `cfs.value as segmentValue`
+          : segmentedBy !== "none"
+          ? `Lead.${segmentedBy} as segmentValue`
+          : "NULL as segmentValue"
+      },
+      ${getYAxisSelect(yaxis)}
+    FROM Leads as Lead
+  `;
+
+  // Add custom field joins if needed
+  if (isCustomFieldX && customFieldX) {
+    baseQuery += `
+      LEFT JOIN CustomFieldValues as cfx ON Lead.leadId = cfx.entityId 
+        AND cfx.fieldId = ${customFieldX.fieldId} 
+        AND cfx.entityType = 'lead'
+    `;
+  }
+
+  if (isSegmentedByCustom && customFieldSegmentedBy && segmentedBy !== "none") {
+    // Only add this join if it's not already added for xaxis
+    if (!(isCustomFieldX && customFieldX && customFieldX.fieldId === customFieldSegmentedBy.fieldId)) {
+      baseQuery += `
+        LEFT JOIN CustomFieldValues as cfs ON Lead.leadId = cfs.entityId 
+          AND cfs.fieldId = ${customFieldSegmentedBy.fieldId} 
+          AND cfs.entityType = 'lead'
+      `;
+    } else {
+      // If it's the same field for both xaxis and segmentedBy, use the same alias
+      baseQuery = baseQuery.replace(/cfs.value as segmentValue/, `cfx.value as segmentValue`);
+    }
+  }
+
+  return baseQuery;
+}
+
+function buildWhereConditions(
+  ownerId,
+  role,
+  xaxis,
+  isCustomFieldX,
+  segmentedBy,
+  isSegmentedByCustom,
+  filters,
+  leadCustomFields
+) {
+  let whereConditions = [];
+
+  // Owner filter
+  if (role !== "admin") {
+    whereConditions.push(`Lead.masterUserID = ${ownerId}`);
+  }
+
+  // Exclude null values for xaxis ONLY (not for segmentedBy)
+  if (isCustomFieldX) {
+    whereConditions.push(`cfx.value IS NOT NULL AND cfx.value != ''`);
+  } else if (xaxis === "contactPerson") {
+    whereConditions.push(`Lead.personId IS NOT NULL`);
+  } else if (xaxis === "organization") {
+    whereConditions.push(`Lead.leadOrganizationId IS NOT NULL`);
+  } else if (isDateField(xaxis)) {
+    // For date fields, ensure they're not null
+    whereConditions.push(`Lead.${xaxis} IS NOT NULL`);
+  } else if (xaxis) {
+    // Only exclude null/empty for xaxis, not for segmentedBy
+    whereConditions.push(`Lead.${xaxis} IS NOT NULL AND Lead.${xaxis} != ''`);
+  }
+
+  // Handle filters
+  if (filters && filters.conditions) {
+    const validConditions = filters.conditions.filter(
+      (cond) => cond.value !== undefined && cond.value !== ""
+    );
+
+    // Build filter joins and conditions
+    const filterJoins = new Set();
+    validConditions.forEach((cond, index) => {
+      const filterCondition = getFilterCondition(cond, leadCustomFields, index);
+      if (filterCondition.condition) {
+        whereConditions.push(filterCondition.condition);
+      }
+      if (filterCondition.join) {
+        filterJoins.add(filterCondition.join);
+      }
+    });
+
+    // Add filter joins to the base query (handled separately)
+  }
+
+  return whereConditions;
+}
+
+function buildGroupByClause(
+  xaxis,
+  segmentedBy,
+  isCustomFieldX,
+  customFieldX,
+  isSegmentedByCustom,
+  customFieldSegmentedBy,
+  shouldGroupByDuration,
+  durationUnit
+) {
+  let groupByClause = "";
+
+  if (shouldGroupByDuration) {
+    if (isCustomFieldX && customFieldX) {
+      groupByClause = `GROUP BY ${getCustomDateGroupExpressionSQL(
+        "cfx.value",
+        durationUnit
+      )}`;
+    } else {
+      groupByClause = `GROUP BY ${getDateGroupExpressionSQL(
+        `Lead.${xaxis}`,
+        durationUnit
+      )}`;
+    }
+  } else {
+    if (isCustomFieldX && customFieldX) {
+      groupByClause = `GROUP BY cfx.value`;
+    } else {
+      groupByClause = `GROUP BY Lead.${xaxis}`;
+    }
+  }
+
+  // Add segmentedBy to group by if needed
+  if (segmentedBy && segmentedBy !== "none") {
+    if (
+      shouldGroupByDuration &&
+      isSegmentedByCustom &&
+      customFieldSegmentedBy
+    ) {
+      groupByClause += `, ${getCustomDateGroupExpressionSQL(
+        "cfs.value",
+        durationUnit
+      )}`;
+    } else if (shouldGroupByDuration) {
+      groupByClause += `, ${getDateGroupExpressionSQL(
+        `Lead.${segmentedBy}`,
+        durationUnit
+      )}`;
+    } else if (isSegmentedByCustom && customFieldSegmentedBy) {
+      // Check if it's the same field as xaxis
+      if (isCustomFieldX && customFieldX && customFieldX.fieldId === customFieldSegmentedBy.fieldId) {
+        groupByClause += `, cfx.value`;
+      } else {
+        groupByClause += `, cfs.value`;
+      }
+    } else {
+      groupByClause += `, Lead.${segmentedBy}`;
+    }
+  }
+
+  return groupByClause;
+}
+
+function buildOrderByClause(xaxis, yaxis, isDateFieldX, isCustomFieldX) {
+  let orderByClause = "";
+
+  if (isDateFieldX) {
+    if (isCustomFieldX) {
+      orderByClause = `ORDER BY cfx.value ASC`;
+    } else {
+      orderByClause = `ORDER BY Lead.${xaxis} ASC`;
+    }
+  } else {
+    if (yaxis === "no of leads") {
+      orderByClause = `ORDER BY COUNT(leadId) DESC`;
+    } else if (yaxis === "proposalValue") {
+      orderByClause = `ORDER BY SUM(proposalValue) DESC`;
+    } else if (yaxis === "value") {
+      orderByClause = `ORDER BY SUM(value) DESC`;
+    } else {
+      orderByClause = `ORDER BY SUM(Lead.${yaxis}) DESC`;
+    }
+  }
+
+  return orderByClause;
+}
+
+function buildCountQuery(
+  xaxis,
+  isCustomFieldX,
+  customFieldX,
+  whereConditions,
+  segmentedBy,
+  isSegmentedByCustom,
+  customFieldSegmentedBy
+) {
+  let countQuery = `
+    SELECT COUNT(DISTINCT 
+      CASE 
+        WHEN ${isCustomFieldX && customFieldX ? "cfx.value" : `Lead.${xaxis}`} IS NOT NULL 
+        AND ${isCustomFieldX && customFieldX ? "cfx.value" : `Lead.${xaxis}`} != ''
+        THEN ${isCustomFieldX && customFieldX ? "cfx.value" : `Lead.${xaxis}`}
+        ELSE NULL
+      END
+    ) as total
+    FROM Leads as Lead
+  `;
+
+  if (isCustomFieldX && customFieldX) {
+    countQuery += `
+      LEFT JOIN CustomFieldValues as cfx ON Lead.leadId = cfx.entityId 
+        AND cfx.fieldId = ${customFieldX.fieldId} 
+        AND cfx.entityType = 'lead'
+    `;
+  }
+
+  // Add segmentedBy custom field join if different from xaxis
+  if (isSegmentedByCustom && customFieldSegmentedBy) {
+    if (!(isCustomFieldX && customFieldX && customFieldX.fieldId === customFieldSegmentedBy.fieldId)) {
+      countQuery += `
+        LEFT JOIN CustomFieldValues as cfs ON Lead.leadId = cfs.entityId 
+          AND cfs.fieldId = ${customFieldSegmentedBy.fieldId} 
+          AND cfs.entityType = 'lead'
+      `;
+    }
+  }
+
+  if (whereConditions.length > 0) {
+    countQuery += " WHERE " + whereConditions.join(" AND ");
+  }
+
+  return countQuery;
+}
+
+// =============== HELPER FUNCTIONS FOR SQL ===============
+
+function getYAxisSelect(yaxis) {
+  switch (yaxis) {
+    case "no of leads":
+      return "COUNT(leadId) as yValue";
+    case "proposalValue":
+      return "SUM(proposalValue) as yValue";
+    case "value":
+      return "SUM(value) as yValue";
+    default:
+      return `SUM(Lead.${yaxis}) as yValue`;
+  }
+}
+
+function getDateGroupExpressionSQL(field, durationUnit) {
+  if (!durationUnit || durationUnit === "none") {
+    return field;
+  }
+
+  switch (durationUnit.toLowerCase()) {
+    case "daily":
+      return `DATE_FORMAT(${field}, '%d/%m/%Y')`;
+    case "weekly":
+      return `CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`;
+    case "monthly":
+      return `CONCAT(ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'), ' ', YEAR(${field}))`;
+    case "quarterly":
+      return `CONCAT('Q', QUARTER(${field}), ' ', YEAR(${field}))`;
+    case "yearly":
+      return `YEAR(${field})`;
+    default:
+      return `DATE_FORMAT(${field}, '%d/%m/%Y')`;
+  }
+}
+
+function getCustomDateGroupExpressionSQL(field, durationUnit) {
+  // Use the same function as regular date grouping
+  return getDateGroupExpressionSQL(field, durationUnit);
+}
+
+function getFilterCondition(cond, leadCustomFields, index = 0) {
+  const { column, operator, value } = cond;
+
+  // Check if it's a custom field
+  if (column.startsWith("custom_")) {
+    const fieldId = parseInt(column.replace("custom_", ""));
+    const customField = leadCustomFields.find((f) => f.fieldId === fieldId);
+
+    if (!customField) return { condition: null, join: null };
+
+    const alias = `cf_filter_${fieldId}_${index}`;
+    let condition = "";
+
+    // Handle date filtering for custom date fields
+    if (isCustomDateField(customField)) {
+      switch (operator) {
+        case "=":
+        case "is":
+          condition = `${alias}.value = '${value}'`;
+          break;
+        case "≠":
+        case "is not":
+          condition = `${alias}.value != '${value}'`;
+          break;
+        case ">":
+          condition = `${alias}.value > '${value}'`;
+          break;
+        case "<":
+          condition = `${alias}.value < '${value}'`;
+          break;
+        case "between":
+          if (Array.isArray(value) && value.length === 2) {
+            condition = `${alias}.value BETWEEN '${value[0]}' AND '${value[1]}'`;
+          }
+          break;
+        case "notBetween":
+          if (Array.isArray(value) && value.length === 2) {
+            condition = `${alias}.value NOT BETWEEN '${value[0]}' AND '${value[1]}'`;
+          }
+          break;
+        case "isEmpty":
+          condition = `(${alias}.value IS NULL OR ${alias}.value = '')`;
+          break;
+        case "isNotEmpty":
+          condition = `(${alias}.value IS NOT NULL AND ${alias}.value != '')`;
+          break;
+        default:
+          condition = `${alias}.value = '${value}'`;
+      }
+    } else {
+      // Handle non-date custom fields
+      switch (operator) {
+        case "=":
+        case "is":
+          condition = `${alias}.value = '${escapeSQLValue(value)}'`;
+          break;
+        case "≠":
+        case "is not":
+          condition = `${alias}.value != '${escapeSQLValue(value)}'`;
+          break;
+        case "contains":
+          condition = `${alias}.value LIKE '%${escapeSQLValue(value)}%'`;
+          break;
+        case "startsWith":
+          condition = `${alias}.value LIKE '${escapeSQLValue(value)}%'`;
+          break;
+        case "endsWith":
+          condition = `${alias}.value LIKE '%${escapeSQLValue(value)}'`;
+          break;
+        case ">":
+          condition = `${alias}.value > '${escapeSQLValue(value)}'`;
+          break;
+        case "<":
+          condition = `${alias}.value < '${escapeSQLValue(value)}'`;
+          break;
+        case "isEmpty":
+          condition = `(${alias}.value IS NULL OR ${alias}.value = '')`;
+          break;
+        case "isNotEmpty":
+          condition = `(${alias}.value IS NOT NULL AND ${alias}.value != '')`;
+          break;
+        default:
+          condition = `${alias}.value = '${escapeSQLValue(value)}'`;
+      }
+    }
+
+    const joinClause = `
+      LEFT JOIN CustomFieldValues as ${alias} ON Lead.leadId = ${alias}.entityId 
+        AND ${alias}.fieldId = ${fieldId} 
+        AND ${alias}.entityType = 'lead'
+    `;
+
+    return { condition, join: joinClause };
+  }
+
+  // Handle standard fields
+  let condition = "";
+  let fieldName = column;
+
+  // Check if it's a related table field
+  if (column.includes(".")) {
+    const [tableAlias, field] = column.split(".");
+    fieldName = `${tableAlias}.${field}`;
+  }
+
+  switch (operator) {
+    case "=":
+    case "is":
+      condition = `${fieldName} = '${escapeSQLValue(value)}'`;
+      break;
+    case "≠":
+    case "is not":
+      condition = `${fieldName} != '${escapeSQLValue(value)}'`;
+      break;
+    case "contains":
+      condition = `${fieldName} LIKE '%${escapeSQLValue(value)}%'`;
+      break;
+    case "startsWith":
+      condition = `${fieldName} LIKE '${escapeSQLValue(value)}%'`;
+      break;
+    case "endsWith":
+      condition = `${fieldName} LIKE '%${escapeSQLValue(value)}'`;
+      break;
+    case ">":
+      condition = `${fieldName} > '${escapeSQLValue(value)}'`;
+      break;
+    case "<":
+      condition = `${fieldName} < '${escapeSQLValue(value)}'`;
+      break;
+    case "isEmpty":
+      condition = `(${fieldName} IS NULL OR ${fieldName} = '')`;
+      break;
+    case "isNotEmpty":
+      condition = `(${fieldName} IS NOT NULL AND ${fieldName} != '')`;
+      break;
+    case "between":
+      if (Array.isArray(value) && value.length === 2) {
+        condition = `${fieldName} BETWEEN '${value[0]}' AND '${value[1]}'`;
+      }
+      break;
+    case "notBetween":
+      if (Array.isArray(value) && value.length === 2) {
+        condition = `${fieldName} NOT BETWEEN '${value[0]}' AND '${value[1]}'`;
+      }
+      break;
+    default:
+      condition = `${fieldName} = '${escapeSQLValue(value)}'`;
+  }
+
+  return { condition, join: null };
+}
+
+function escapeSQLValue(value) {
+  if (typeof value !== "string") return value;
+  return value.replace(/'/g, "''");
+}
+
+// =============== GENERAL HELPER FUNCTIONS ===============
+
 function isDateField(xaxis) {
   const dateFields = [
     "proposalSentDate",
     "conversionDate",
     "createdAt",
     "updatedAt",
+    "expectedCloseDate",
   ];
   return dateFields.includes(xaxis);
 }
 
-// function getConditionObject(column, operator, value, includeModels = []) {
-//   let conditionValue = value;
-
-//   // Check if column contains a dot (indicating a related table field)
-//   const hasRelation = column.includes(".");
-//   let tableAlias = "Lead";
-//   let fieldName = column;
-
-//   if (hasRelation) {
-//     [tableAlias, fieldName] = column.split(".");
-//   }
-
-//   // Handle date filtering for specific date columns
-//   const isDateColumn =
-//     fieldName.includes("Date") ||
-//     fieldName.includes("Time") ||
-//     fieldName === "expectedCloseDate" ||
-//     fieldName === "proposalSentDate" ||
-//     fieldName === "createdAt" ||
-//     fieldName === "updatedAt";
-
-//   // Handle date range filtering for "Add on" (daterange type)
-//   const isDateRangeFilter = fieldName === "daterange";
-
-//   if (isDateRangeFilter && Array.isArray(value)) {
-//     // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
-//     const [fromDate, toDate] = value;
-
-//     if (operator === "between" || operator === "=" || operator === "is") {
-//       // Include records within the date range
-//       return {
-//         [Op.and]: [
-//           { createdAt: { [Op.gte]: new Date(fromDate + " 00:00:00") } },
-//           { createdAt: { [Op.lte]: new Date(toDate + " 23:59:59") } },
-//         ],
-//       };
-//     } else if (operator === "notBetween" || operator === "≠" || operator === "is not") {
-//       // Exclude records within the date range (records NOT between the dates)
-//       return {
-//         [Op.or]: [
-//           { createdAt: { [Op.lt]: new Date(fromDate + " 00:00:00") } },
-//           { createdAt: { [Op.gt]: new Date(toDate + " 23:59:59") } },
-//         ],
-//       };
-//     }
-//   } else if (isDateColumn) {
-//     // Handle single date filtering (e.g., "2025-06-23")
-//     if (operator === "=" || operator === "is") {
-//       // For exact date match, create a range for the entire day
-//       const startOfDay = new Date(value + " 00:00:00");
-//       const endOfDay = new Date(value + " 23:59:59");
-
-//       return {
-//         [column]: {
-//           [Op.between]: [startOfDay, endOfDay],
-//         },
-//       };
-//     } else if (operator === ">") {
-//       conditionValue = new Date(value + " 23:59:59");
-//     } else if (operator === "<") {
-//       conditionValue = new Date(value + " 00:00:00");
-//     } else if (operator === "≠" || operator === "is not") {
-//       // For not equal, exclude the entire day
-//       const startOfDay = new Date(value + " 00:00:00");
-//       const endOfDay = new Date(value + " 23:59:59");
-
-//       return {
-//         [column]: {
-//           [Op.notBetween]: [startOfDay, endOfDay],
-//         },
-//       };
-//     } else {
-//       conditionValue = new Date(value);
-//     }
-//   }
-//   // Handle other data types
-//   else if (fieldName === "isDone") {
-//     conditionValue = value === "true" || value === true;
-//   } else if (!isNaN(value) && value !== "" && typeof value === "string") {
-//     conditionValue = parseFloat(value);
-//   }
-
-//   // Handle related table joins
-//   if (hasRelation) {
-//     let modelConfig;
-
-//     switch (tableAlias) {
-//       case "DealLeads":
-//         modelConfig = {
-//           model: Deal,
-//           as: "DealLeads",
-//           required: false, // Use false to avoid INNER JOIN issues
-//           attributes: [],
-//         };
-//         break;
-//       case "LeadOrganization":
-//         modelConfig = {
-//           model: Organization,
-//           as: "LeadOrganization",
-//           required: false,
-//           attributes: [],
-//         };
-//         break;
-//       case "LeadPerson":
-//         modelConfig = {
-//           model: Person,
-//           as: "LeadPerson",
-//           required: false,
-//           attributes: [],
-//         };
-//         break;
-//       default:
-//         // If it's not a recognized table, treat it as Activity column
-//         return getOperatorCondition(column, operator, conditionValue);
-//     }
-
-//     // Check if this include already exists to avoid duplicates
-//     const existingInclude = includeModels.find(
-//       (inc) => inc.as === modelConfig.as
-//     );
-//     if (!existingInclude) {
-//       includeModels.push(modelConfig);
-//     }
-
-//     // FIX: Return a plain object instead of Sequelize.where()
-//     // This creates a condition object that can be properly combined
-//     const op = getSequelizeOperator(operator);
-
-//     // Handle special operators for related tables
-//     switch (operator) {
-//       case "contains":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}%` } };
-//       case "startsWith":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `${conditionValue}%` } };
-//       case "endsWith":
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: `%${conditionValue}` } };
-//       case "isEmpty":
-//         return {
-//           [Op.or]: [
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.is]: null } },
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.eq]: "" } },
-//           ],
-//         };
-//       case "isNotEmpty":
-//         return {
-//           [Op.and]: [
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.not]: null } },
-//             { [`$${modelConfig.as}.${fieldName}$`]: { [Op.ne]: "" } },
-//           ],
-//         };
-//       default:
-//         return { [`$${modelConfig.as}.${fieldName}$`]: { [op]: conditionValue } };
-//     }
-//   } else {
-//     // Regular activity table column
-//     return getOperatorCondition(column, operator, conditionValue);
-//   }
-// }
-
-// Helper function to get date group expression based on durationUnit
-function getDateGroupExpression(dateField, durationUnit) {
-  const field = `Lead.${dateField}`;
-
-  if (!durationUnit || durationUnit === "none") {
-    return Sequelize.col(field);
-  }
-
-  switch (durationUnit.toLowerCase()) {
-    case "daily":
-      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%d/%m/%Y");
-
-    case "weekly":
-      return Sequelize.literal(
-        `CONCAT('w', WEEK(${field}), ' ', YEAR(${field}))`
-      );
-
-    case "monthly":
-      return Sequelize.literal(`
-        CONCAT(
-          ELT(MONTH(${field}), 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'),
-          ' ',
-          YEAR(${field})
-        )
-     `);
-
-    case "quarterly":
-      return Sequelize.literal(
-        `CONCAT('Q', QUARTER(${field}), ' ', YEAR(${field}))`
-      );
-
-    case "yearly":
-      return Sequelize.fn("YEAR", Sequelize.col(field));
-
-    default:
-      return Sequelize.fn("DATE_FORMAT", Sequelize.col(field), "%d/%m/%Y");
-  }
+function isCustomDateField(customField) {
+  if (!customField) return false;
+  const dateTypes = ["date", "datetime", "daterange", "timerange"];
+  return dateTypes.includes(customField.fieldType);
 }
 
-// Helper function to format date values for display
 function formatDateValue(value, durationUnit) {
   if (!value) return value;
 
@@ -1735,325 +1482,22 @@ function formatDateValue(value, durationUnit) {
     return value.toString();
   }
   if (durationUnit.toLowerCase() === "monthly" && value) {
-    // If you want to ensure proper formatting, you can parse and reformat
-    // But typically the SQL function already returns "Jan 2025" format
     return value;
   }
 
-  // For other cases, return the value as is (already formatted by SQL)
   return value;
 }
 
-// Helper function for order clause
+// This function is kept for compatibility with older code
 function getOrderClause(yaxis, xaxis) {
-  // If xaxis is a date field, return natural order (no sorting by value)
   if (isDateField(xaxis)) {
-    // For date fields, order by the date field itself to maintain chronological order
-    return [[Sequelize.col(`Lead.${xaxis}`), "ASC"]];
+    return [[sequelize.col(`Lead.${xaxis}`), "ASC"]];
   }
+
   if (yaxis === "no of leads") {
-    return [[Sequelize.fn("COUNT", Sequelize.col("leadId")), "DESC"]];
+    return [[sequelize.fn("COUNT", sequelize.col("leadId")), "DESC"]];
   } else {
-    return [[Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)), "DESC"]];
-  }
-}
-
-function getConditionObject(column, operator, value, includeModels = []) {
-  let conditionValue = value;
-
-  // Check if column contains a dot (indicating a related table field)
-  const hasRelation = column.includes(".");
-  let tableAlias = "Lead";
-  let fieldName = column;
-
-  if (hasRelation) {
-    [tableAlias, fieldName] = column.split(".");
-  }
-
-  // Handle date filtering for specific date columns
-  const isDateColumn =
-    fieldName.includes("Date") ||
-    fieldName.includes("Time") ||
-    fieldName === "startDateTime" ||
-    fieldName === "endDateTime" ||
-    fieldName === "dueDate" ||
-    fieldName === "createdAt" ||
-    fieldName === "updatedAt" ||
-    fieldName === "expectedCloseDate" ||
-    fieldName === "proposalSentDate" ||
-    fieldName === "conversionDate";
-
-  // Handle date range filtering for "Add on" (daterange type)
-  const isDateRangeFilter = fieldName === "daterange";
-
-  if (isDateRangeFilter && Array.isArray(value)) {
-    // Handle date range filter (from frontend: ["2025-06-23", "2025-06-25"])
-    const [fromDate, toDate] = value;
-
-    // Determine which date field to filter based on the table alias
-    let dateField;
-    switch (tableAlias) {
-      case "LeadOrganization":
-      case "LeadPerson":
-        dateField = "createdAt";
-        break;
-      default:
-        dateField = "createdAt";
-    }
-
-    // For related tables, use the proper Sequelize syntax
-    if (tableAlias !== "Lead") {
-      // Add the required include model
-      addIncludeModel(tableAlias, includeModels);
-
-      // Return the condition with proper nested syntax
-      if (operator === "between" || operator === "=" || operator === "is") {
-        return {
-          [`$${tableAlias}.${dateField}$`]: {
-            [Op.between]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      } else if (
-        operator === "notBetween" ||
-        operator === "≠" ||
-        operator === "is not"
-      ) {
-        return {
-          [`$${tableAlias}.${dateField}$`]: {
-            [Op.notBetween]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      }
-    } else {
-      // For Activity table
-      if (operator === "between" || operator === "=" || operator === "is") {
-        return {
-          [dateField]: {
-            [Op.between]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      } else if (
-        operator === "notBetween" ||
-        operator === "≠" ||
-        operator === "is not"
-      ) {
-        return {
-          [dateField]: {
-            [Op.notBetween]: [
-              new Date(fromDate + " 00:00:00"),
-              new Date(toDate + " 23:59:59"),
-            ],
-          },
-        };
-      }
-    }
-  } else if (isDateColumn) {
-    // Handle single date filtering (e.g., "2025-06-23")
-    if (operator === "=" || operator === "is") {
-      // For exact date match, create a range for the entire day
-      const startOfDay = new Date(value + " 00:00:00");
-      const endOfDay = new Date(value + " 23:59:59");
-
-      // For related tables
-      if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
-        return {
-          [`$${tableAlias}.${fieldName}$`]: {
-            [Op.between]: [startOfDay, endOfDay],
-          },
-        };
-      } else {
-        return {
-          [fieldName]: {
-            [Op.between]: [startOfDay, endOfDay],
-          },
-        };
-      }
-    } else if (operator === ">") {
-      conditionValue = new Date(value + " 23:59:59");
-    } else if (operator === "<") {
-      conditionValue = new Date(value + " 00:00:00");
-    } else if (operator === "≠" || operator === "is not") {
-      // For not equal, exclude the entire day
-      const startOfDay = new Date(value + " 00:00:00");
-      const endOfDay = new Date(value + " 23:59:59");
-
-      // For related tables
-      if (hasRelation) {
-        addIncludeModel(tableAlias, includeModels);
-        return {
-          [`$${tableAlias}.${fieldName}$`]: {
-            [Op.notBetween]: [startOfDay, endOfDay],
-          },
-        };
-      } else {
-        return {
-          [fieldName]: {
-            [Op.notBetween]: [startOfDay, endOfDay],
-          },
-        };
-      }
-    } else {
-      conditionValue = new Date(value);
-    }
-  }
-  // Handle other data types
-  else if (fieldName === "isDone") {
-    conditionValue = value === "true" || value === true;
-  } else if (!isNaN(value) && value !== "" && typeof value === "string") {
-    conditionValue = parseFloat(value);
-  }
-
-  // Handle related table joins
-  if (hasRelation) {
-    addIncludeModel(tableAlias, includeModels);
-
-    const op = getSequelizeOperator(operator);
-
-    // Use proper Sequelize syntax for related table conditions
-    switch (operator) {
-      case "contains":
-        return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}%` },
-        };
-      case "startsWith":
-        return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `${conditionValue}%` },
-        };
-      case "endsWith":
-        return {
-          [`$${tableAlias}.${fieldName}$`]: { [op]: `%${conditionValue}` },
-        };
-      case "isEmpty":
-        return {
-          [Op.or]: [
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.is]: null } },
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.eq]: "" } },
-          ],
-        };
-      case "isNotEmpty":
-        return {
-          [Op.and]: [
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.not]: null } },
-            { [`$${tableAlias}.${fieldName}$`]: { [Op.ne]: "" } },
-          ],
-        };
-      default:
-        return { [`$${tableAlias}.${fieldName}$`]: { [op]: conditionValue } };
-    }
-  } else {
-    // Regular activity table column
-    return getOperatorCondition(column, operator, conditionValue);
-  }
-}
-
-// Helper function to add include models
-function addIncludeModel(tableAlias, includeModels) {
-  let modelConfig;
-
-  switch (tableAlias) {
-    case "LeadOrganization":
-      modelConfig = {
-        model: Organization,
-        as: "LeadOrganization",
-        required: false,
-        attributes: [],
-      };
-      break;
-    case "LeadPerson":
-      modelConfig = {
-        model: Person,
-        as: "LeadPerson",
-        required: false,
-        attributes: [],
-      };
-      break;
-    default:
-      return; // No include needed for Activity table
-  }
-
-  // Check if this include already exists to avoid duplicates
-  const existingInclude = includeModels.find(
-    (inc) => inc.as === modelConfig.as
-  );
-  if (!existingInclude) {
-    includeModels.push(modelConfig);
-  }
-}
-
-// Helper function for operator conditions
-function getOperatorCondition(column, operator, value) {
-  const op = getSequelizeOperator(operator);
-
-  switch (operator) {
-    case "contains":
-      return { [column]: { [op]: `%${value}%` } };
-    case "startsWith":
-      return { [column]: { [op]: `${value}%` } };
-    case "endsWith":
-      return { [column]: { [op]: `%${value}` } };
-    case "isEmpty":
-      return {
-        [Op.or]: [
-          { [column]: { [Op.is]: null } },
-          { [column]: { [Op.eq]: "" } },
-        ],
-      };
-    case "isNotEmpty":
-      return {
-        [Op.and]: [
-          { [column]: { [Op.not]: null } },
-          { [column]: { [Op.ne]: "" } },
-        ],
-      };
-    case "between":
-    case "notBetween":
-      return value; // Return the pre-built condition
-    default:
-      return { [column]: { [op]: value } };
-  }
-}
-
-// Helper function to convert operator strings to Sequelize operators
-function getSequelizeOperator(operator) {
-  switch (operator) {
-    case ">":
-      return Op.gt;
-    case "<":
-      return Op.lt;
-    case "=":
-      return Op.eq;
-    case "is":
-      return Op.eq;
-    case "≠":
-      return Op.ne;
-    case "is not":
-      return Op.ne;
-    case "contains":
-      return Op.like;
-    case "startsWith":
-      return Op.like;
-    case "endsWith":
-      return Op.like;
-    case "isEmpty":
-      return Op.or;
-    case "isNotEmpty":
-      return Op.and;
-    case "between":
-      return Op.between;
-    case "notBetween":
-      return Op.notBetween;
-    default:
-      return Op.eq;
+    return [[sequelize.fn("SUM", sequelize.col(`Lead.${yaxis}`)), "DESC"]];
   }
 }
 
@@ -2064,348 +1508,145 @@ async function generateExistingLeadPerformanceDataForSave(
   existingyaxis,
   existingDurationUnit,
   existingSegmentedBy,
-  filters
+  filters,
+  leadCustomFields = []
 ) {
-  let includeModels = [];
-  const baseWhere = {};
-
-  // If user is not admin, filter by ownerId
-  if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
+  // Check if xaxis is a custom field
+  const isCustomFieldX = existingxaxis.startsWith("custom_");
+  let customFieldX = null;
+  if (isCustomFieldX) {
+    const fieldId = parseInt(existingxaxis.replace("custom_", ""));
+    customFieldX = leadCustomFields.find((f) => f.fieldId === fieldId);
   }
 
-  let xaxisNullExcludeCondition = {};
+  // Check if segmentedBy is a custom field
+  const isSegmentedByCustom =
+    existingSegmentedBy && existingSegmentedBy.startsWith("custom_");
+  let customFieldSegmentedBy = null;
+  if (isSegmentedByCustom) {
+    const fieldId = parseInt(existingSegmentedBy.replace("custom_", ""));
+    customFieldSegmentedBy = leadCustomFields.find(
+      (f) => f.fieldId === fieldId
+    );
+  }
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(existingxaxis);
+  const isDateFieldX =
+    isDateField(existingxaxis) ||
+    (customFieldX && isCustomDateField(customFieldX));
   const shouldGroupByDuration =
     isDateFieldX && existingDurationUnit && existingDurationUnit !== "none";
 
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "Team") {
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "contactPerson") {
-    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (existingxaxis === "organization") {
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    xaxisNullExcludeCondition[existingxaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  // Build base query
+  let baseQuery = buildBaseQuery(
+    existingxaxis,
+    existingyaxis,
+    existingSegmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
+
+  // Add where conditions
+  let whereConditions = buildWhereConditions(
+    ownerId,
+    role,
+    existingxaxis,
+    isCustomFieldX,
+    filters,
+    leadCustomFields
+  );
+
+  // Add where clause if conditions exist
+  if (whereConditions.length > 0) {
+    baseQuery += ` WHERE ` + whereConditions.join(" AND ");
   }
 
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
+  // Build group by clause
+  let groupByClause = buildGroupByClause(
+    existingxaxis,
+    existingSegmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy,
+    shouldGroupByDuration,
+    existingDurationUnit
+  );
 
-  // Handle filters if provided
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
-      (cond) => cond.value !== undefined && cond.value !== ""
-    );
+  // Build order by clause
+  let orderByClause = buildOrderByClause(
+    existingxaxis,
+    existingyaxis,
+    isDateFieldX,
+    isCustomFieldX
+  );
 
-    if (validConditions.length > 0) {
-      // Array to track include models for filtering
-      const filterIncludeModels = [];
+  // Build final query WITHOUT pagination
+  let finalQuery = baseQuery + " " + groupByClause + " " + orderByClause;
 
-      // Process all conditions first to collect include models
-      const conditions = validConditions.map((cond) => {
-        return getConditionObject(
-          cond.column,
-          cond.operator,
-          cond.value,
-          filterIncludeModels
-        );
-      });
+  // Execute main query (no LIMIT/OFFSET)
+  const results = await sequelize.query(finalQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
 
-      // Build combined condition with logical operators
-      let combinedCondition = conditions[0];
-
-      for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
-        ).toUpperCase();
-
-        if (logicalOp === "AND") {
-          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
-        } else {
-          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
-        }
-      }
-
-      Object.assign(baseWhere, combinedCondition);
-
-      // Add filter-related include models to the main includeModels array
-      // Avoid duplicates
-      filterIncludeModels.forEach((newInclude) => {
-        const exists = includeModels.some(
-          (existingInclude) => existingInclude.as === newInclude.as
-        );
-        if (!exists) {
-          includeModels.push(newInclude);
-        }
-      });
-    }
-  }
-
-  let groupBy = [];
-  let attributes = [];
-
-  // Handle existingxaxis special cases
-  // Attribute and GroupBy setup with durationUnit support
-  if (shouldGroupByDuration) {
-    // Handle date grouping based on durationUnit
-    const dateGroupExpression = getDateGroupExpression(
-      existingxaxis,
-      existingDurationUnit
-    );
-    attributes.push([dateGroupExpression, "xValue"]);
-    groupBy.push(dateGroupExpression);
-  } else if (existingxaxis === "creator") {
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("Lead.masterUserID"), "assignedUserId"]);
-  } else if (existingxaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser", // Use the correct alias
-      attributes: ["masterUserID", "creatorstatus"],
-      required: true,
-    });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else if (existingxaxis === "contactPerson") {
-    // Special handling for contactPerson - join with Person table
-    includeModels.push({
-      model: Person,
-      as: "LeadPerson",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
-  } else if (existingxaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
-  } else {
-    // For regular columns, explicitly specify the Activity table
-    groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
-  }
-
-  // Handle segmentedBy if not "none"
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    const assignedUserIncludeExists = includeModels.some(
-      (inc) => inc.as === "assignedUser"
-    );
-    // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(existingSegmentedBy);
-
-    const shouldSegmentByDuration =
-      isSegmentedByDate &&
-      existingDurationUnit &&
-      existingDurationUnit !== "none";
-
-    if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(
-        existingSegmentedBy,
-        existingDurationUnit
-      );
-      attributes.push([segmentDateExpression, "segmentValue"]);
-      groupBy.push(segmentDateExpression);
-    } else if (
-      (existingSegmentedBy === "Owner" ||
-        existingSegmentedBy === "assignedTo") &&
-      !assignedUserIncludeExists
-    ) {
-      groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (existingSegmentedBy === "Team") {
-      groupBy.push("assignedUser.team" && !assignedUserIncludeExists);
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (existingSegmentedBy === "contactPerson") {
-      includeModels.push({
-        model: Person,
-        as: "LeadPerson",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.personId");
-      attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
-        "segmentValue",
-      ]);
-    } else if (existingSegmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
-    } else {
-      groupBy.push(`Lead.${existingSegmentedBy}`);
-      attributes.push([
-        Sequelize.col(`Lead.${existingSegmentedBy}`),
-        "segmentValue",
-      ]);
-    }
-  }
-
-  // Handle existingyaxis
-  if (existingyaxis === "no of leads") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("leadId")), "yValue"]);
-  } else if (existingyaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
-      "yValue",
-    ]);
-  } else if (existingyaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
-  } else {
-    // For other yaxis values, explicitly specify the Activity table
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
-      "yValue",
-    ]);
-  }
-
-  let results;
-
-  if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // For segmented queries - get all results without pagination
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
-        : getOrderClause(existingyaxis, existingxaxis),
-    });
-  } else {
-    // Get all results without pagination
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
-        : getOrderClause(existingyaxis, existingxaxis),
-    });
-  }
-
- // Format the results based on whether segmentedBy is used
+  // Format the results
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
-    // Group the results properly
+    // Group by xValue and then by segmentValue using groupKey logic
     const groupedData = {};
 
     results.forEach((item) => {
-      // Determine grouping key based on xaxis type
+      // Determine grouping key based on xaxis type and values
       let groupKey;
-
-      if (existingxaxis === "contactPerson" && item.personId) {
-        // Group by personId for contactPerson
-        groupKey = `person_${item.personId}`;
-      } else if (existingxaxis === "organization" && item.leadOrganizationId) {
-        // Group by leadOrganizationId for organization
-        groupKey = `org_${item.leadOrganizationId}`;
-      } else if (
-        (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") &&
-        item.assignedUserId
-      ) {
-        // Group by assignedUserId for Owner/assignedTo/creator
-        groupKey = `user_${item.assignedUserId}`;
-      } else if (existingxaxis === "Team" && item.teamId) {
-        // Group by teamId for Team
-        groupKey = `team_${item.teamId}`;
-      } else {
-        // For all other cases, group by the raw xValue
-        groupKey = `label_${item.xValue || "Unknown"}`;
-      }
-
-      // Format display values
-      const displayXValue =
-        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
-      const segmentValue =
-        formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
+      
+      // Get raw values for ID-based grouping
+      const rawXValue = item.xValue;
+      const segmentValue = formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
+
+      // Format display value
+      const displayXValue = formatDateValue(rawXValue, existingDurationUnit) || "Unknown";
+
+      // Create group key based on xaxis type and ID logic
+      if (existingxaxis === "contactPerson") {
+        groupKey = `person_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "organization") {
+        groupKey = `org_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") {
+        groupKey = `user_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "Team") {
+        groupKey = `team_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "creatorstatus") {
+        groupKey = `creatorstatus_${rawXValue || "Unknown"}`;
+      } else {
+        // For all other cases, use the display value as key
+        groupKey = `label_${displayXValue}`;
+      }
 
       if (!groupedData[groupKey]) {
         // Set id based on xaxis type
         let id = null;
-        if (existingxaxis === "contactPerson") {
-          id = item.personId;
-        } else if (existingxaxis === "organization") {
-          id = item.leadOrganizationId;
-        } else if (
-          existingxaxis === "Owner" ||
-          existingxaxis === "assignedTo" ||
-          existingxaxis === "creator"
-        ) {
-          id = item.assignedUserId;
-        } else if (existingxaxis === "Team") {
-          id = item.teamId;
-        }
-
+        
         groupedData[groupKey] = {
           label: displayXValue,
           segments: {},
           id: id,
-          rawXValue: item.xValue,
+          rawXValue: rawXValue,
         };
       }
 
-      // Accumulate segment values
+      // Merge segments with the same labeltype
       if (!groupedData[groupKey].segments[segmentValue]) {
         groupedData[groupKey].segments[segmentValue] = 0;
       }
       groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array and create final array
+    // Convert segments object to array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -2415,9 +1656,8 @@ async function generateExistingLeadPerformanceDataForSave(
       );
 
       return {
-        label: group.label,
+        ...group,
         segments: segmentsArray,
-        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -2432,64 +1672,59 @@ async function generateExistingLeadPerformanceDataForSave(
       );
     }
 
+    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
     );
   } else {
-    // Original format for non-segmented data
-    formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+    // Original format for non-segmented data with groupKey logic
+    const groupedData = {};
 
-      // Set id based on xaxis type
+    results.forEach((item) => {
+      const rawXValue = item.xValue;
+      const yValue = Number(item.yValue) || 0;
+      const displayLabel = formatDateValue(rawXValue, existingDurationUnit) || "Unknown";
+
+      // Determine grouping key based on xaxis type
+      let groupKey;
       let id = null;
+
       if (existingxaxis === "contactPerson") {
-        id = item.personId || null;
+        groupKey = `person_${rawXValue || "Unknown"}`;
       } else if (existingxaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (
-        existingxaxis === "Owner" ||
-        existingxaxis === "assignedTo" ||
-        existingxaxis === "creator"
-      ) {
-        id = item.assignedUserId || null;
+        groupKey = `org_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") {
+        groupKey = `user_${rawXValue || "Unknown"}`;
       } else if (existingxaxis === "Team") {
-        id = item.teamId || null;
+        groupKey = `team_${rawXValue || "Unknown"}`;
+      } else if (existingxaxis === "creatorstatus") {
+        groupKey = `creatorstatus_${rawXValue || "Unknown"}`;
+      } else {
+        groupKey = `label_${displayLabel}`;
       }
 
-      return {
-        label: label,
-        value: Number(item.yValue) || 0,
-        id: id,
-      };
+      if (!groupedData[groupKey]) {
+        groupedData[groupKey] = {
+          label: displayLabel,
+          value: 0,
+          id: id,
+          rawXValue: rawXValue,
+        };
+      }
+      
+      groupedData[groupKey].value += yValue;
     });
 
-    // For non-date fields, ensure proper grouping by ID if available
-    if (
-      !isDateFieldX &&
-      (existingxaxis === "contactPerson" ||
-        existingxaxis === "organization" ||
-        existingxaxis === "Owner" ||
-        existingxaxis === "assignedTo" ||
-        existingxaxis === "creator" ||
-        existingxaxis === "Team")
-    ) {
-      // Group by ID to combine items with same ID
-      const groupedById = {};
+    // Convert grouped data to array
+    formattedResults = Object.values(groupedData);
 
-      formattedResults.forEach((item) => {
-        const key = item.id || item.label;
-        if (!groupedById[key]) {
-          groupedById[key] = { ...item };
-        } else {
-          // Sum values for same ID
-          groupedById[key].value += item.value;
-        }
-      });
-
-      formattedResults = Object.values(groupedById);
+    // For non-date fields, sort by value descending
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.value - a.value);
     }
 
+    // Calculate the grand total
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -2508,388 +1743,147 @@ async function generateLeadPerformanceDataForSave(
   yaxis,
   durationUnit,
   segmentedBy,
-  filters
+  filters,
+  leadCustomFields = []
 ) {
-  let includeModels = [];
-  const baseWhere = {};
-
-  // If user is not admin, filter by ownerId
-  if (role !== "admin") {
-    baseWhere.masterUserID = ownerId;
+  // Check if xaxis is a custom field
+  const isCustomFieldX = xaxis.startsWith("custom_");
+  let customFieldX = null;
+  if (isCustomFieldX) {
+    const fieldId = parseInt(xaxis.replace("custom_", ""));
+    customFieldX = leadCustomFields.find((f) => f.fieldId === fieldId);
   }
 
-  let xaxisNullExcludeCondition = {};
+  // Check if segmentedBy is a custom field
+  const isSegmentedByCustom = segmentedBy && segmentedBy.startsWith("custom_");
+  let customFieldSegmentedBy = null;
+  if (isSegmentedByCustom) {
+    const fieldId = parseInt(segmentedBy.replace("custom_", ""));
+    customFieldSegmentedBy = leadCustomFields.find(
+      (f) => f.fieldId === fieldId
+    );
+  }
 
   // Check if xaxis is a date field and durationUnit is provided
-  const isDateFieldX = isDateField(xaxis);
+  const isDateFieldX =
+    isDateField(xaxis) || (customFieldX && isCustomDateField(customFieldX));
   const shouldGroupByDuration =
     isDateFieldX && durationUnit && durationUnit !== "none";
 
-  if (shouldGroupByDuration) {
-    // For date fields with duration grouping, we'll handle this differently
-    // since we're grouping by date expressions
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
-  } else if (
-    xaxis === "Owner" ||
-    xaxis === "assignedTo" ||
-    xaxis === "creator"
-  ) {
-    // For Owner/assignedTo/creator, exclude where assignedUser is null
-    xaxisNullExcludeCondition["$assignedUser.name$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "Team") {
-    // For Team, exclude where assignedUser.team is null
-    xaxisNullExcludeCondition["$assignedUser.team$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "contactPerson") {
-    // For contactPerson, exclude where ActivityPerson.contactPerson is null
-    xaxisNullExcludeCondition["$LeadPerson.contactPerson$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else if (xaxis === "organization") {
-    // For organization, exclude where ActivityOrganization.organization is null
-    xaxisNullExcludeCondition["$LeadOrganization.organization$"] = {
-      [Op.ne]: null,
-      [Op.ne]: "",
-    };
-  } else {
-    // For regular Activity columns, exclude where the column value is null
-    xaxisNullExcludeCondition[xaxis] = { [Op.ne]: null, [Op.ne]: "" };
+  // Build base query
+  let baseQuery = buildBaseQuery(
+    xaxis,
+    yaxis,
+    segmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy
+  );
+
+  // Add where conditions
+  let whereConditions = buildWhereConditions(
+    ownerId,
+    role,
+    xaxis,
+    isCustomFieldX,
+    filters,
+    leadCustomFields
+  );
+
+  // Add where clause if conditions exist
+  if (whereConditions.length > 0) {
+    baseQuery += ` WHERE ` + whereConditions.join(" AND ");
   }
 
-  // Add the null exclusion condition to baseWhere
-  Object.assign(baseWhere, xaxisNullExcludeCondition);
+  // Build group by clause
+  let groupByClause = buildGroupByClause(
+    xaxis,
+    segmentedBy,
+    isCustomFieldX,
+    customFieldX,
+    isSegmentedByCustom,
+    customFieldSegmentedBy,
+    shouldGroupByDuration,
+    durationUnit
+  );
 
-  // Handle filters if provided
-  if (filters && filters.conditions) {
-    const validConditions = filters.conditions.filter(
-      (cond) => cond.value !== undefined && cond.value !== ""
-    );
+  // Build order by clause
+  let orderByClause = buildOrderByClause(
+    xaxis,
+    yaxis,
+    isDateFieldX,
+    isCustomFieldX
+  );
 
-    if (validConditions.length > 0) {
-      // Array to track include models for filtering
-      const filterIncludeModels = [];
+  // Build final query WITHOUT pagination
+  let finalQuery = baseQuery + " " + groupByClause + " " + orderByClause;
 
-      // Process all conditions first to collect include models
-      const conditions = validConditions.map((cond) => {
-        return getConditionObject(
-          cond.column,
-          cond.operator,
-          cond.value,
-          filterIncludeModels
-        );
-      });
+  // Execute main query (no LIMIT/OFFSET)
+  const results = await sequelize.query(finalQuery, {
+    type: sequelize.QueryTypes.SELECT,
+  });
 
-      // Build combined condition with logical operators
-      let combinedCondition = conditions[0];
-
-      for (let i = 1; i < conditions.length; i++) {
-        const logicalOp = (
-          filters.logicalOperators[i - 1] || "AND"
-        ).toUpperCase();
-
-        if (logicalOp === "AND") {
-          combinedCondition = { [Op.and]: [combinedCondition, conditions[i]] };
-        } else {
-          combinedCondition = { [Op.or]: [combinedCondition, conditions[i]] };
-        }
-      }
-
-      Object.assign(baseWhere, combinedCondition);
-
-      // Add filter-related include models to the main includeModels array
-      // Avoid duplicates
-      filterIncludeModels.forEach((newInclude) => {
-        const exists = includeModels.some(
-          (existingInclude) => existingInclude.as === newInclude.as
-        );
-        if (!exists) {
-          includeModels.push(newInclude);
-        }
-      });
-    }
-  }
-
-  let groupBy = [];
-  let attributes = ["personId", "leadOrganizationId"];
-
-  // Attribute and GroupBy setup with durationUnit support
-  if (shouldGroupByDuration) {
-    // Handle date grouping based on durationUnit
-    const dateGroupExpression = getDateGroupExpression(xaxis, durationUnit);
-    attributes.push([dateGroupExpression, "xValue"]);
-    groupBy.push(dateGroupExpression);
-  } else if (xaxis === "creator") {
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser",
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([
-      Sequelize.col("assignedUser.masterUserID"),
-      "assignedUserId",
-    ]);
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "creatorstatus") {
-    // Assuming team information is stored in MasterUser model
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser",
-      attributes: ["masterUserID", "creatorstatus"],
-      required: true,
-    });
-    groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
-  } else if (xaxis === "contactPerson") {
-    // Special handling for contactPerson - join with Person table
-    includeModels.push({
-      model: Person,
-      as: "LeadPerson",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
-  } else if (xaxis === "organization") {
-    // Special handling for organization - join with Organization table
-    includeModels.push({
-      model: Organization,
-      as: "LeadOrganization",
-      attributes: [],
-      required: false,
-    });
-    groupBy.push("Lead.leadOrganizationId");
-    attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
-      "leadOrganizationId",
-    ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
-  } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-    // Handle Owner/assignedTo - join with MasterUser table
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser",
-      attributes: ["masterUserID", "name"],
-      required: true,
-    });
-    groupBy.push("assignedUser.masterUserID");
-    attributes.push([
-      Sequelize.col("assignedUser.masterUserID"),
-      "assignedUserId",
-    ]);
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-  } else if (xaxis === "Team") {
-    // Handle Team - join with MasterUser table
-    includeModels.push({
-      model: MasterUser,
-      as: "assignedUser",
-      attributes: ["masterUserID", "team", "teamId"],
-      required: true,
-    });
-    groupBy.push("assignedUser.teamId");
-    attributes.push([Sequelize.col("assignedUser.teamId"), "teamId"]);
-    attributes.push([Sequelize.col("assignedUser.team"), "xValue"]);
-  } else {
-    // For regular columns, explicitly specify the Lead table
-    groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
-  }
-
-  if (segmentedBy && segmentedBy !== "none") {
-    const assignedUserIncludeExists = includeModels.some(
-      (inc) => inc.as === "assignedUser"
-    );
-
-    // Check if segmentedBy is also a date field
-    const isSegmentedByDate = isDateField(segmentedBy);
-
-    const shouldSegmentByDuration =
-      isSegmentedByDate && durationUnit && durationUnit !== "none";
-
-    if (shouldSegmentByDuration) {
-      const segmentDateExpression = getDateGroupExpression(
-        segmentedBy,
-        durationUnit
-      );
-      attributes.push([segmentDateExpression, "segmentValue"]);
-      groupBy.push(segmentDateExpression);
-    } else if (
-      (segmentedBy === "Owner" || segmentedBy === "assignedTo") &&
-      !assignedUserIncludeExists
-    ) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "name"],
-        required: true,
-      });
-      groupBy.push("assignedUser.masterUserID");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
-    } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
-      includeModels.push({
-        model: MasterUser,
-        as: "assignedUser",
-        attributes: ["masterUserID", "team"],
-        required: true,
-      });
-      groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
-    } else if (segmentedBy === "contactPerson") {
-      includeModels.push({
-        model: Person,
-        as: "LeadPerson",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.personId");
-      attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
-        "segmentValue",
-      ]);
-    } else if (segmentedBy === "organization") {
-      includeModels.push({
-        model: Organization,
-        as: "LeadOrganization",
-        attributes: [],
-        required: false,
-      });
-      groupBy.push("Lead.leadOrganizationId");
-      attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
-        "segmentValue",
-      ]);
-    } else {
-      groupBy.push(`Lead.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
-    }
-  }
-
-  // Handle yaxis
-  if (yaxis === "no of leads") {
-    attributes.push([Sequelize.fn("COUNT", Sequelize.col("leadId")), "yValue"]);
-  } else if (yaxis === "proposalValue") {
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col("proposalValue")),
-      "yValue",
-    ]);
-  }  else if (yaxis === "value") {
-    attributes.push([Sequelize.fn("SUM", Sequelize.col("value")), "yValue"]);
-  } else {
-    // For other yaxis values, explicitly specify the Lead table
-    attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${yaxis}`)),
-      "yValue",
-    ]);
-  }
-
-  let results;
-
-  if (segmentedBy && segmentedBy !== "none") {
-    // For segmented queries - get all results without pagination
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-        : getOrderClause(yaxis, xaxis),
-    });
-  } else {
-    // Get all results without pagination
-    results = await Lead.findAll({
-      where: baseWhere,
-      attributes: attributes,
-      include: includeModels,
-      group: groupBy,
-      raw: true,
-      order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
-        : getOrderClause(yaxis, xaxis),
-    });
-  }
-
-  // Format the results based on whether segmentedBy is used
+  // Format the results
   let formattedResults = [];
   let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // Group the results properly
+    // Group by xValue and then by segmentValue using groupKey logic
     const groupedData = {};
 
     results.forEach((item) => {
-      // Determine grouping key based on xaxis type
+      // Determine grouping key based on xaxis type and values
       let groupKey;
-
-      if (xaxis === "contactPerson" && item.personId) {
-        // Group by personId for contactPerson
-        groupKey = `person_${item.personId}`;
-      } else if (xaxis === "organization" && item.leadOrganizationId) {
-        // Group by leadOrganizationId for organization
-        groupKey = `org_${item.leadOrganizationId}`;
-      } else if (
-        (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") &&
-        item.assignedUserId
-      ) {
-        // Group by assignedUserId for Owner/assignedTo/creator
-        groupKey = `user_${item.assignedUserId}`;
-      } else if (xaxis === "Team" && item.teamId) {
-        // Group by teamId for Team
-        groupKey = `team_${item.teamId}`;
-      } else {
-        // For all other cases, group by the raw xValue
-        groupKey = `label_${item.xValue || "Unknown"}`;
-      }
-
-      // Format display values
-      const displayXValue =
-        formatDateValue(item.xValue, durationUnit) || "Unknown";
-      const segmentValue =
-        formatDateValue(item.segmentValue, durationUnit) || "Unknown";
+      
+      // Get raw values for ID-based grouping
+      const rawXValue = item.xValue;
+      const segmentValue = formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[groupKey]) {
-        // Set id based on xaxis type
-        let id = null;
-        if (xaxis === "contactPerson") {
-          id = item.personId;
-        } else if (xaxis === "organization") {
-          id = item.leadOrganizationId;
-        } else if (
-          xaxis === "Owner" ||
-          xaxis === "assignedTo" ||
-          xaxis === "creator"
-        ) {
-          id = item.assignedUserId;
-        } else if (xaxis === "Team") {
-          id = item.teamId;
-        }
+      // Format display value
+      const displayXValue = formatDateValue(rawXValue, durationUnit) || "Unknown";
 
+      // Create group key based on xaxis type and ID logic
+      // For standard fields, use the raw value as key
+      if (xaxis === "contactPerson") {
+        // For contactPerson, we need to group by personId (if available)
+        // In SQL query, we can't get personId directly, so use raw value
+        groupKey = `person_${rawXValue || "Unknown"}`;
+      } else if (xaxis === "organization") {
+        // For organization, we need to group by leadOrganizationId (if available)
+        groupKey = `org_${rawXValue || "Unknown"}`;
+      } else if (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") {
+        // For user fields, use raw value as key
+        groupKey = `user_${rawXValue || "Unknown"}`;
+      } else if (xaxis === "Team") {
+        // For team, use raw value as key
+        groupKey = `team_${rawXValue || "Unknown"}`;
+      } else {
+        // For all other cases, use the display value as key
+        groupKey = `label_${displayXValue}`;
+      }
+
+      if (!groupedData[groupKey]) {
+        // Set id based on xaxis type (if we had ID information)
+        let id = null;
+        
         groupedData[groupKey] = {
           label: displayXValue,
           segments: {},
           id: id,
-          rawXValue: item.xValue,
+          rawXValue: rawXValue,
         };
       }
 
-      // Accumulate segment values
+      // Merge segments with the same labeltype
       if (!groupedData[groupKey].segments[segmentValue]) {
         groupedData[groupKey].segments[segmentValue] = 0;
       }
       groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array and create final array
+    // Convert segments object to array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -2899,9 +1893,8 @@ async function generateLeadPerformanceDataForSave(
       );
 
       return {
-        label: group.label,
+        ...group,
         segments: segmentsArray,
-        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -2921,57 +1914,48 @@ async function generateLeadPerformanceDataForSave(
       0
     );
   } else {
-    // Original format for non-segmented data
-    formattedResults = results.map((item) => {
-      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
+    // Original format for non-segmented data with groupKey logic
+    const groupedData = {};
 
-      // Set id based on xaxis type
+    results.forEach((item) => {
+      const rawXValue = item.xValue;
+      const yValue = Number(item.yValue) || 0;
+      const displayLabel = formatDateValue(rawXValue, durationUnit) || "Unknown";
+
+      // Determine grouping key based on xaxis type
+      let groupKey;
       let id = null;
+
       if (xaxis === "contactPerson") {
-        id = item.personId || null;
+        groupKey = `person_${rawXValue || "Unknown"}`;
       } else if (xaxis === "organization") {
-        id = item.leadOrganizationId || null;
-      } else if (
-        xaxis === "Owner" ||
-        xaxis === "assignedTo" ||
-        xaxis === "creator"
-      ) {
-        id = item.assignedUserId || null;
+        groupKey = `org_${rawXValue || "Unknown"}`;
+      } else if (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") {
+        groupKey = `user_${rawXValue || "Unknown"}`;
       } else if (xaxis === "Team") {
-        id = item.teamId || null;
+        groupKey = `team_${rawXValue || "Unknown"}`;
+      } else {
+        groupKey = `label_${displayLabel}`;
       }
 
-      return {
-        label: label,
-        value: Number(item.yValue) || 0,
-        id: id,
-      };
+      if (!groupedData[groupKey]) {
+        groupedData[groupKey] = {
+          label: displayLabel,
+          value: 0,
+          id: id,
+          rawXValue: rawXValue,
+        };
+      }
+      
+      groupedData[groupKey].value += yValue;
     });
 
-    // For non-date fields, ensure proper grouping by ID if available
-    if (
-      !isDateFieldX &&
-      (xaxis === "contactPerson" ||
-        xaxis === "organization" ||
-        xaxis === "Owner" ||
-        xaxis === "assignedTo" ||
-        xaxis === "creator" ||
-        xaxis === "Team")
-    ) {
-      // Group by ID to combine items with same ID
-      const groupedById = {};
+    // Convert grouped data to array
+    formattedResults = Object.values(groupedData);
 
-      formattedResults.forEach((item) => {
-        const key = item.id || item.label;
-        if (!groupedById[key]) {
-          groupedById[key] = { ...item };
-        } else {
-          // Sum values for same ID
-          groupedById[key].value += item.value;
-        }
-      });
-
-      formattedResults = Object.values(groupedById);
+    // For non-date fields, sort by value descending
+    if (!isDateFieldX) {
+      formattedResults.sort((a, b) => b.value - a.value);
     }
 
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
@@ -3005,9 +1989,30 @@ exports.saveLeadPerformReport = async (req, res) => {
 
     const ownerId = req.adminId;
     const role = req.role;
+    
+    // Fetch custom fields for lead entity (similar to createLeadPerformReport)
+    const leadCustomFields = await CustomField.findAll({
+      where: {
+        entityType: "lead",
+        masterUserID: role === "admin" ? { [Op.ne]: null } : ownerId,
+        isActive: true,
+      },
+      order: [
+        ["displayOrder", "ASC"],
+        ["fieldLabel", "ASC"],
+      ],
+      raw: true,
+    }).then(fields => 
+      fields.map(field => ({
+        fieldId: field.fieldId,
+        fieldLabel: field.fieldLabel,
+        fieldType: field.fieldType,
+        fieldName: field.fieldName,
+        entityType: field.entityType
+      }))
+    );
 
     let reportData = null;
-    let paginationInfo = null;
     let totalValue = null;
     let reportConfig = null;
 
@@ -3023,7 +2028,7 @@ exports.saveLeadPerformReport = async (req, res) => {
         }
 
         try {
-          // Generate data with pagination
+          // Generate data WITHOUT pagination (ForSave functions don't have pagination)
           const result = await generateLeadPerformanceDataForSave(
             ownerId,
             role,
@@ -3031,11 +2036,12 @@ exports.saveLeadPerformReport = async (req, res) => {
             yaxis,
             durationUnit,
             segmentedBy,
-            filters
+            filters,
+            leadCustomFields // Pass fetched leadCustomFields
           );
           reportData = result.data;
-          paginationInfo = result.pagination;
           totalValue = result.totalValue;
+          // No paginationInfo for ForSave functions
           reportConfig = {
             entity,
             type,
@@ -3061,6 +2067,13 @@ exports.saveLeadPerformReport = async (req, res) => {
         where: { reportId },
       });
 
+      if (!existingReports) {
+        return res.status(404).json({
+          success: false,
+          message: "Report not found",
+        });
+      }
+
       const {
         entity: existingentity,
         type: existingtype,
@@ -3069,8 +2082,8 @@ exports.saveLeadPerformReport = async (req, res) => {
         colors: existingcolors,
       } = existingReports.dataValues;
 
-      const colorsParsed = JSON.parse(existingcolors);
-      const config = JSON.parse(configString);
+      const colorsParsed = existingcolors ? JSON.parse(existingcolors) : {};
+      const config = configString ? JSON.parse(configString) : {};
 
       const {
         xaxis: existingxaxis,
@@ -3098,11 +2111,12 @@ exports.saveLeadPerformReport = async (req, res) => {
             existingyaxis,
             existingDurationUnit,
             existingSegmentedBy,
-            existingfilters
+            existingfilters,
+            leadCustomFields // Pass fetched leadCustomFields
           );
           reportData = result.data;
-          paginationInfo = result.pagination;
           totalValue = result.totalValue;
+          // No paginationInfo for ForSave functions
           reportConfig = {
             reportId,
             entity: existingentity,
@@ -3155,6 +2169,12 @@ exports.saveLeadPerformReport = async (req, res) => {
         });
       }
 
+      // Parse existing config safely
+      const existingConfig = existingReport.config ? 
+        (typeof existingReport.config === 'string' ? 
+          JSON.parse(existingReport.config) : existingReport.config) : 
+        {};
+
       const updateData = {
         ...(folderId !== undefined && { folderId }),
         ...(name !== undefined && { name }),
@@ -3163,21 +2183,21 @@ exports.saveLeadPerformReport = async (req, res) => {
         ...(description !== undefined && { description }),
         ...(xaxis !== undefined ||
         yaxis !== undefined ||
+        durationUnit !== undefined ||
         filters !== undefined ||
         segmentedBy !== undefined ||
         reportData !== undefined ||
         totalValue !== undefined
           ? {
-              config: {
-                xaxis: xaxis ?? existingReport.config?.xaxis,
-                yaxis: yaxis ?? existingReport.config?.yaxis,
-                durationUnit:
-                  durationUnit ?? existingReport.config?.durationUnit,
-                segmentedBy: segmentedBy ?? existingReport.config?.segmentedBy,
-                filters: filters ?? existingReport.config?.filters,
-                reportData: reportData ?? existingReport.config?.reportData,
-                totalValue: totalValue ?? existingReport.config?.totalValue,
-              },
+              config: JSON.stringify({
+                xaxis: xaxis ?? existingConfig?.xaxis,
+                yaxis: yaxis ?? existingConfig?.yaxis,
+                durationUnit: durationUnit ?? existingConfig?.durationUnit,
+                segmentedBy: segmentedBy ?? existingConfig?.segmentedBy,
+                filters: filters ?? existingConfig?.filters,
+                reportData: reportData ?? existingConfig?.reportData,
+                totalValue: totalValue ?? existingConfig?.totalValue,
+              }),
             }
           : {}),
         ...(graphtype !== undefined && { graphtype }),
@@ -3226,7 +2246,7 @@ exports.saveLeadPerformReport = async (req, res) => {
       where: { ownerId },
       order: [["position", "DESC"]],
     });
-    const nextPosition = lastReport ? lastReport.position || 0 : 0;
+    const nextPosition = lastReport ? (lastReport.position || 0) + 1 : 1; // Fixed: increment position
 
     const configObj = {
       xaxis,
@@ -3238,20 +2258,20 @@ exports.saveLeadPerformReport = async (req, res) => {
       totalValue,
     };
 
-    const reportName = description || `${entity} ${type}`;
+    const reportName = name || description || `${entity} ${type}`;
 
     const newReport = await Report.create({
       dashboardIds: dashboardIdsArray.join(","),
       folderId: folderId || null,
       entity,
       type,
-      description: reportName,
-      name: name || reportName,
+      description: description || reportName,
+      name: reportName,
       position: nextPosition,
-      config: configObj,
+      config: JSON.stringify(configObj), // Stringify config for storage
       ownerId,
-      graphtype,
-      colors,
+      graphtype: graphtype || "bar",
+      colors: colors || JSON.stringify({}),
     });
 
     reports.push(newReport);
@@ -3455,7 +2475,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
       segmentedBy = "none",
       filters,
       page = 1,
-      limit = 500,
+      limit = 5000,
       search = "",
       sortBy = "createdAt",
       sortOrder = "DESC",
@@ -3463,6 +2483,16 @@ exports.getLeadPerformReportSummary = async (req, res) => {
 
     const ownerId = req.adminId;
     const role = req.role;
+
+    // Fetch custom fields for lead entity (same as in createLeadPerformReport)
+    const leadCustomFields = await CustomField.findAll({
+      where: {
+        entityType: "lead",
+        masterUserID: role === "admin" ? { [Op.ne]: null } : ownerId,
+        isActive: true
+      },
+      order: [['displayOrder', 'ASC'], ['fieldLabel', 'ASC']]
+    });
 
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
@@ -3613,6 +2643,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
     let summary = {};
 
     if (xaxis && yaxis && !reportId) {
+      // FIX: Pass leadCustomFields parameter which was missing
       const reportResult = await generateLeadPerformanceData(
         ownerId,
         role,
@@ -3622,29 +2653,12 @@ exports.getLeadPerformReportSummary = async (req, res) => {
         segmentedBy,
         filters,
         page,
-        limit
+        limit,
+        leadCustomFields  // Added this parameter
       );
       reportData = reportResult.data;
 
       // Calculate summary statistics
-      if (reportData.length > 0) {
-        const totalValue = reportData.reduce(
-          (sum, item) => sum + (item.value || 0),
-          0
-        );
-        const avgValue = totalValue / reportData.length;
-        const maxValue = Math.max(...reportData.map((item) => item.value || 0));
-        const minValue = Math.min(...reportData.map((item) => item.value || 0));
-
-        summary = {
-          totalRecords: totalCount,
-          totalCategories: reportData.length,
-          totalValue: totalValue,
-          avgValue: parseFloat(avgValue.toFixed(2)),
-          maxValue: maxValue,
-          minValue: minValue,
-        };
-      }
       if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
@@ -3699,6 +2713,7 @@ exports.getLeadPerformReportSummary = async (req, res) => {
         filters: existingfilters,
       } = config;
 
+      // FIX: Pass leadCustomFields parameter which was missing
       const reportResult = await generateExistingLeadPerformanceData(
         ownerId,
         role,
@@ -3708,14 +2723,15 @@ exports.getLeadPerformReportSummary = async (req, res) => {
         existingSegmentedBy,
         existingfilters,
         page,
-        limit
+        limit,
+        leadCustomFields  // Added this parameter
       );
       reportData = reportResult.data;
 
       if (reportData.length > 0) {
         let totalValue, avgValue, maxValue, minValue;
 
-        if (segmentedBy === "none") {
+        if (existingSegmentedBy === "none") {
           // Non-segmented data structure
           const values = reportData.map((item) => item.value || 0);
           totalValue = values.reduce((sum, value) => sum + value, 0);
@@ -4319,7 +3335,7 @@ async function generateExistingLeadConversionData(
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.name"), "xValue"]);
   } else if (existingxaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -4329,7 +3345,7 @@ async function generateExistingLeadConversionData(
       required: true,
     });
     groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (existingxaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
@@ -4339,8 +3355,8 @@ async function generateExistingLeadConversionData(
       required: false,
     });
     groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+    attributes.push([sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([sequelize.col("LeadPerson.contactPerson"), "xValue"]);
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
@@ -4351,14 +3367,14 @@ async function generateExistingLeadConversionData(
     });
     groupBy.push("Lead.leadOrganizationId");
     attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
+      sequelize.col("Lead.leadOrganizationId"),
       "leadOrganizationId",
     ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
+    attributes.push([sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
+    attributes.push([sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
   }
 
   // Handle segmentedBy if not "none"
@@ -4394,7 +3410,7 @@ async function generateExistingLeadConversionData(
         required: true,
       });
       groupBy.push("assignedUser.masterUserID");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
       includeModels.push({
         model: MasterUser,
@@ -4403,7 +3419,7 @@ async function generateExistingLeadConversionData(
         required: true,
       });
       groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
         model: Person,
@@ -4413,7 +3429,7 @@ async function generateExistingLeadConversionData(
       });
       groupBy.push("Lead.personId");
       attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
+        sequelize.col("LeadPerson.contactPerson"),
         "segmentValue",
       ]);
     } else if (existingSegmentedBy === "organization") {
@@ -4425,13 +3441,13 @@ async function generateExistingLeadConversionData(
       });
       groupBy.push("Lead.leadOrganizationId");
       attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
+        sequelize.col("LeadOrganization.organization"),
         "segmentValue",
       ]);
     } else {
       groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`Lead.${existingSegmentedBy}`),
+        sequelize.col(`Lead.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
@@ -4440,7 +3456,7 @@ async function generateExistingLeadConversionData(
   // Handle existingyaxis
   if (existingyaxis === "no of leads") {
     attributes.push([
-      Sequelize.literal(`(
+      sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
@@ -4448,14 +3464,14 @@ async function generateExistingLeadConversionData(
     ]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
       ),
       "yValue",
     ]);
   } else if (existingyaxis === "value") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
       ),
       "yValue",
@@ -4463,7 +3479,7 @@ async function generateExistingLeadConversionData(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+      sequelize.fn("SUM", sequelize.col(`Lead.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -4475,9 +3491,9 @@ async function generateExistingLeadConversionData(
       where: baseWhere,
       attributes: [
         [
-          Sequelize.fn(
+          sequelize.fn(
             "COUNT",
-            Sequelize.fn(
+            sequelize.fn(
               "DISTINCT",
               getDateGroupExpression(existingxaxis, existingDurationUnit)
             )
@@ -4491,19 +3507,19 @@ async function generateExistingLeadConversionData(
   } else {
     let countColumn;
     if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-      countColumn = Sequelize.col("assignedUser.name");
+      countColumn = sequelize.col("assignedUser.name");
     } else if (existingxaxis === "contactPerson") {
-      countColumn = Sequelize.col("Lead.personId");
+      countColumn = sequelize.col("Lead.personId");
     } else if (existingxaxis === "organization") {
-      countColumn = Sequelize.col("Lead.leadOrganizationId");
+      countColumn = sequelize.col("Lead.leadOrganizationId");
     } else {
-      countColumn = Sequelize.col(`Lead.${existingxaxis}`);
+      countColumn = sequelize.col(`Lead.${existingxaxis}`);
     }
 
     totalCountResult = await Lead.findAll({
       where: baseWhere,
       attributes: [
-        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
+        [sequelize.fn("COUNT", sequelize.fn("DISTINCT", countColumn)), "total"],
       ],
       include: includeModels,
       raw: true,
@@ -4524,31 +3540,31 @@ async function generateExistingLeadConversionData(
       paginationAttributes.push([groupColumn, "groupKey"]);
     } else {
       if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
-        groupColumn = Sequelize.col("assignedUser.name");
+        groupColumn = sequelize.col("assignedUser.name");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (existingxaxis === "contactPerson") {
-        groupColumn = Sequelize.col("Lead.personId");
+        groupColumn = sequelize.col("Lead.personId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (existingxaxis === "organization") {
-        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        groupColumn = sequelize.col("Lead.leadOrganizationId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else {
-        groupColumn = Sequelize.col(`Lead.${existingxaxis}`);
+        groupColumn = sequelize.col(`Lead.${existingxaxis}`);
         paginationAttributes.push([groupColumn, "groupKey"]);
       }
     }
 
     const paginatedGroups = await Lead.findAll({
-      attributes: [[Sequelize.col(groupBy[0]), "groupKey"]],
+      attributes: [[sequelize.col(groupBy[0]), "groupKey"]],
       where: baseWhere,
       include: includeModels,
       group: groupBy[0],
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : [
             existingyaxis === "no of leads"
               ? [
-                  Sequelize.literal(`(
+                  sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
@@ -4556,20 +3572,20 @@ async function generateExistingLeadConversionData(
                 ]
               : existingyaxis === "proposalValue"
               ? [
-                  Sequelize.literal(
+                  sequelize.literal(
                     `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
                   ),
                   "DESC",
                 ]
               : existingyaxis === "value"
               ? [
-                  Sequelize.literal(
+                  sequelize.literal(
                     `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
                   ),
                   "DESC",
                 ]
               : [
-                  Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+                  sequelize.fn("SUM", sequelize.col(`Lead.${existingyaxis}`)),
                   "DESC",
                 ],
           ],
@@ -4591,7 +3607,7 @@ async function generateExistingLeadConversionData(
           existingxaxis,
           existingDurationUnit
         );
-        groupCondition = Sequelize.where(groupExpression, {
+        groupCondition = sequelize.where(groupExpression, {
           [Op.in]: groupKeys,
         });
       } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
@@ -4615,7 +3631,7 @@ async function generateExistingLeadConversionData(
         group: groupBy,
         raw: true,
         order: isDateFieldX
-          ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+          ? [[sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
           : getOrderClause(existingyaxis, existingxaxis),
       });
     }
@@ -4627,7 +3643,7 @@ async function generateExistingLeadConversionData(
       group: groupBy,
       raw: true,
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
       limit: limit,
       offset: offset,
@@ -4880,8 +3896,8 @@ async function generateLeadConversionData(
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("Activity.masterUserID"), "assignedUserId"]);
+    attributes.push([sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([sequelize.col("Activity.masterUserID"), "assignedUserId"]);
   } else if (xaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -4891,7 +3907,7 @@ async function generateLeadConversionData(
       required: true,
     });
     groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
@@ -4901,8 +3917,8 @@ async function generateLeadConversionData(
       required: false,
     });
     groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+    attributes.push([sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([sequelize.col("LeadPerson.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
@@ -4913,14 +3929,14 @@ async function generateLeadConversionData(
     });
     groupBy.push("Lead.leadOrganizationId");
     attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
+      sequelize.col("Lead.leadOrganizationId"),
       "leadOrganizationId",
     ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
+    attributes.push([sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the lead table
     groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
+    attributes.push([sequelize.col(`Lead.${xaxis}`), "xValue"]);
   }
 
   if (segmentedBy && segmentedBy !== "none") {
@@ -4951,7 +3967,7 @@ async function generateLeadConversionData(
         attributes: [],
       });
       groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
       includeModels.push({
         model: MasterUser,
@@ -4959,7 +3975,7 @@ async function generateLeadConversionData(
         attributes: [],
       });
       groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
         model: Person,
@@ -4969,7 +3985,7 @@ async function generateLeadConversionData(
       });
       groupBy.push("Lead.personId");
       attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
+        sequelize.col("LeadPerson.contactPerson"),
         "segmentValue",
       ]);
     } else if (segmentedBy === "organization") {
@@ -4981,19 +3997,19 @@ async function generateLeadConversionData(
       });
       groupBy.push("Lead.leadOrganizationId");
       attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
+        sequelize.col("LeadOrganization.organization"),
         "segmentValue",
       ]);
     } else {
       groupBy.push(`Lead.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
+      attributes.push([sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
     }
   }
 
   // Handle existingyaxis
   if (yaxis === "no of leads") {
     attributes.push([
-      Sequelize.literal(`(
+      sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
@@ -5001,14 +4017,14 @@ async function generateLeadConversionData(
     ]);
   } else if (yaxis === "proposalValue") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
       ),
       "yValue",
     ]);
   } else if (yaxis === "value") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
       ),
       "yValue",
@@ -5016,7 +4032,7 @@ async function generateLeadConversionData(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`
       ),
       "yValue",
@@ -5030,9 +4046,9 @@ async function generateLeadConversionData(
       where: baseWhere,
       attributes: [
         [
-          Sequelize.fn(
+          sequelize.fn(
             "COUNT",
-            Sequelize.fn(
+            sequelize.fn(
               "DISTINCT",
               getDateGroupExpression(xaxis, durationUnit)
             )
@@ -5046,19 +4062,19 @@ async function generateLeadConversionData(
   } else {
     let countColumn;
     if (xaxis === "Owner" || xaxis === "assignedTo") {
-      countColumn = Sequelize.col("assignedUser.name");
+      countColumn = sequelize.col("assignedUser.name");
     } else if (xaxis === "contactPerson") {
-      countColumn = Sequelize.col("Lead.personId");
+      countColumn = sequelize.col("Lead.personId");
     } else if (xaxis === "organization") {
-      countColumn = Sequelize.col("Lead.leadOrganizationId");
+      countColumn = sequelize.col("Lead.leadOrganizationId");
     } else {
-      countColumn = Sequelize.col(`Lead.${xaxis}`);
+      countColumn = sequelize.col(`Lead.${xaxis}`);
     }
 
     totalCountResult = await Lead.findAll({
       where: baseWhere,
       attributes: [
-        [Sequelize.fn("COUNT", Sequelize.fn("DISTINCT", countColumn)), "total"],
+        [sequelize.fn("COUNT", sequelize.fn("DISTINCT", countColumn)), "total"],
       ],
       include: includeModels,
       raw: true,
@@ -5082,16 +4098,16 @@ async function generateLeadConversionData(
     } else {
       // Handle special cases for Owner, contactPerson, organization
       if (xaxis === "Owner" || xaxis === "assignedTo") {
-        groupColumn = Sequelize.col("assignedUser.name");
+        groupColumn = sequelize.col("assignedUser.name");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (xaxis === "contactPerson") {
-        groupColumn = Sequelize.col("Lead.personId");
+        groupColumn = sequelize.col("Lead.personId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (xaxis === "organization") {
-        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        groupColumn = sequelize.col("Lead.leadOrganizationId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else {
-        groupColumn = Sequelize.col(`Lead.${xaxis}`);
+        groupColumn = sequelize.col(`Lead.${xaxis}`);
         paginationAttributes.push([groupColumn, "groupKey"]);
       }
     }
@@ -5102,7 +4118,7 @@ async function generateLeadConversionData(
       include: includeModels,
       group: [groupColumn],
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
@@ -5122,11 +4138,11 @@ async function generateLeadConversionData(
       if (shouldGroupByDuration) {
         // For date grouping
         const groupExpression = getDateGroupExpression(xaxis, durationUnit);
-        groupCondition = Sequelize.where(groupExpression, {
+        groupCondition = sequelize.where(groupExpression, {
           [Op.in]: groupKeys,
         });
       } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-        // For Owner/assignedTo - use proper Sequelize syntax for related table
+        // For Owner/assignedTo - use proper sequelize syntax for related table
         groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
       } else if (xaxis === "contactPerson") {
         // For contactPerson - use proper column reference
@@ -5150,7 +4166,7 @@ async function generateLeadConversionData(
         group: groupBy,
         raw: true,
         order: isDateFieldX
-          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+          ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
           : getOrderClause(yaxis, xaxis),
       });
     }
@@ -5162,7 +4178,7 @@ async function generateLeadConversionData(
       group: groupBy,
       raw: true,
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       limit: limit,
       offset: offset,
@@ -5397,7 +4413,7 @@ async function generateExistingLeadConversionDataForSave(
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.name"), "xValue"]);
   } else if (existingxaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -5407,7 +4423,7 @@ async function generateExistingLeadConversionDataForSave(
       required: true,
     });
     groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (existingxaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
@@ -5417,8 +4433,8 @@ async function generateExistingLeadConversionDataForSave(
       required: false,
     });
     groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+    attributes.push([sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([sequelize.col("LeadPerson.contactPerson"), "xValue"]);
   } else if (existingxaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
@@ -5429,14 +4445,14 @@ async function generateExistingLeadConversionDataForSave(
     });
     groupBy.push("Lead.leadOrganizationId");
     attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
+      sequelize.col("Lead.leadOrganizationId"),
       "leadOrganizationId",
     ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
+    attributes.push([sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the Activity table
     groupBy.push(`Lead.${existingxaxis}`);
-    attributes.push([Sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
+    attributes.push([sequelize.col(`Lead.${existingxaxis}`), "xValue"]);
   }
 
   // Handle segmentedBy if not "none"
@@ -5472,7 +4488,7 @@ async function generateExistingLeadConversionDataForSave(
         required: true,
       });
       groupBy.push("assignedUser.masterUserID");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (existingSegmentedBy === "Team" && !assignedUserIncludeExists) {
       includeModels.push({
         model: MasterUser,
@@ -5481,7 +4497,7 @@ async function generateExistingLeadConversionDataForSave(
         required: true,
       });
       groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (existingSegmentedBy === "contactPerson") {
       includeModels.push({
         model: Person,
@@ -5491,7 +4507,7 @@ async function generateExistingLeadConversionDataForSave(
       });
       groupBy.push("Lead.personId");
       attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
+        sequelize.col("LeadPerson.contactPerson"),
         "segmentValue",
       ]);
     } else if (existingSegmentedBy === "organization") {
@@ -5503,13 +4519,13 @@ async function generateExistingLeadConversionDataForSave(
       });
       groupBy.push("Lead.leadOrganizationId");
       attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
+        sequelize.col("LeadOrganization.organization"),
         "segmentValue",
       ]);
     } else {
       groupBy.push(`Lead.${existingSegmentedBy}`);
       attributes.push([
-        Sequelize.col(`Lead.${existingSegmentedBy}`),
+        sequelize.col(`Lead.${existingSegmentedBy}`),
         "segmentValue",
       ]);
     }
@@ -5518,7 +4534,7 @@ async function generateExistingLeadConversionDataForSave(
   // Handle existingyaxis
   if (existingyaxis === "no of leads") {
     attributes.push([
-      Sequelize.literal(`(
+      sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
@@ -5526,14 +4542,14 @@ async function generateExistingLeadConversionDataForSave(
     ]);
   } else if (existingyaxis === "proposalValue") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
       ),
       "yValue",
     ]);
   } else if (existingyaxis === "value") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
       ),
       "yValue",
@@ -5541,7 +4557,7 @@ async function generateExistingLeadConversionDataForSave(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.fn("SUM", Sequelize.col(`Lead.${existingyaxis}`)),
+      sequelize.fn("SUM", sequelize.col(`Lead.${existingyaxis}`)),
       "yValue",
     ]);
   }
@@ -5557,7 +4573,7 @@ async function generateExistingLeadConversionDataForSave(
       group: groupBy,
       raw: true,
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   } else {
@@ -5569,7 +4585,7 @@ async function generateExistingLeadConversionDataForSave(
       group: groupBy,
       raw: true,
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${existingxaxis}`), "ASC"]]
         : getOrderClause(existingyaxis, existingxaxis),
     });
   }
@@ -5593,7 +4609,9 @@ async function generateExistingLeadConversionDataForSave(
         // Group by leadOrganizationId for organization
         groupKey = `org_${item.leadOrganizationId}`;
       } else if (
-        (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") &&
+        (existingxaxis === "Owner" ||
+          existingxaxis === "assignedTo" ||
+          existingxaxis === "creator") &&
         item.assignedUserId
       ) {
         // Group by assignedUserId for Owner/assignedTo/creator
@@ -5872,8 +4890,8 @@ async function generateLeadConversionDataForSave(
       required: true,
     });
     groupBy.push("assignedUser.masterUserID");
-    attributes.push([Sequelize.col("assignedUser.name"), "xValue"]);
-    attributes.push([Sequelize.col("Activity.masterUserID"), "assignedUserId"]);
+    attributes.push([sequelize.col("assignedUser.name"), "xValue"]);
+    attributes.push([sequelize.col("Activity.masterUserID"), "assignedUserId"]);
   } else if (xaxis === "creatorstatus") {
     // Assuming team information is stored in MasterUser model
     includeModels.push({
@@ -5883,7 +4901,7 @@ async function generateLeadConversionDataForSave(
       required: true,
     });
     groupBy.push("assignedUser.creatorstatus");
-    attributes.push([Sequelize.col("assignedUser.creatorstatus"), "xValue"]);
+    attributes.push([sequelize.col("assignedUser.creatorstatus"), "xValue"]);
   } else if (xaxis === "contactPerson") {
     // Special handling for contactPerson - join with Person table
     includeModels.push({
@@ -5893,8 +4911,8 @@ async function generateLeadConversionDataForSave(
       required: false,
     });
     groupBy.push("Lead.personId");
-    attributes.push([Sequelize.col("Lead.personId"), "personId"]);
-    attributes.push([Sequelize.col("LeadPerson.contactPerson"), "xValue"]);
+    attributes.push([sequelize.col("Lead.personId"), "personId"]);
+    attributes.push([sequelize.col("LeadPerson.contactPerson"), "xValue"]);
   } else if (xaxis === "organization") {
     // Special handling for organization - join with Organization table
     includeModels.push({
@@ -5905,14 +4923,14 @@ async function generateLeadConversionDataForSave(
     });
     groupBy.push("Lead.leadOrganizationId");
     attributes.push([
-      Sequelize.col("Lead.leadOrganizationId"),
+      sequelize.col("Lead.leadOrganizationId"),
       "leadOrganizationId",
     ]);
-    attributes.push([Sequelize.col("LeadOrganization.organization"), "xValue"]);
+    attributes.push([sequelize.col("LeadOrganization.organization"), "xValue"]);
   } else {
     // For regular columns, explicitly specify the lead table
     groupBy.push(`Lead.${xaxis}`);
-    attributes.push([Sequelize.col(`Lead.${xaxis}`), "xValue"]);
+    attributes.push([sequelize.col(`Lead.${xaxis}`), "xValue"]);
   }
 
   if (segmentedBy && segmentedBy !== "none") {
@@ -5943,7 +4961,7 @@ async function generateLeadConversionDataForSave(
         attributes: [],
       });
       groupBy.push("assignedUser.name");
-      attributes.push([Sequelize.col("assignedUser.name"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.name"), "segmentValue"]);
     } else if (segmentedBy === "Team" && !assignedUserIncludeExists) {
       includeModels.push({
         model: MasterUser,
@@ -5951,7 +4969,7 @@ async function generateLeadConversionDataForSave(
         attributes: [],
       });
       groupBy.push("assignedUser.team");
-      attributes.push([Sequelize.col("assignedUser.team"), "segmentValue"]);
+      attributes.push([sequelize.col("assignedUser.team"), "segmentValue"]);
     } else if (segmentedBy === "contactPerson") {
       includeModels.push({
         model: Person,
@@ -5961,7 +4979,7 @@ async function generateLeadConversionDataForSave(
       });
       groupBy.push("Lead.personId");
       attributes.push([
-        Sequelize.col("LeadPerson.contactPerson"),
+        sequelize.col("LeadPerson.contactPerson"),
         "segmentValue",
       ]);
     } else if (segmentedBy === "organization") {
@@ -5973,19 +4991,19 @@ async function generateLeadConversionDataForSave(
       });
       groupBy.push("Lead.leadOrganizationId");
       attributes.push([
-        Sequelize.col("LeadOrganization.organization"),
+        sequelize.col("LeadOrganization.organization"),
         "segmentValue",
       ]);
     } else {
       groupBy.push(`Lead.${segmentedBy}`);
-      attributes.push([Sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
+      attributes.push([sequelize.col(`Lead.${segmentedBy}`), "segmentValue"]);
     }
   }
 
   // Handle existingyaxis
   if (yaxis === "no of leads") {
     attributes.push([
-      Sequelize.literal(`(
+      sequelize.literal(`(
       COUNT(CASE WHEN dealId IS NOT NULL THEN 1 END) * 100.0 / 
       COUNT(*)
     )`),
@@ -5993,14 +5011,14 @@ async function generateLeadConversionDataForSave(
     ]);
   } else if (yaxis === "proposalValue") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN proposalValue ELSE 0 END) * 100.0/ SUM(proposalValue)`
       ),
       "yValue",
     ]);
   } else if (yaxis === "value") {
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END) * 100.0/ SUM(value)`
       ),
       "yValue",
@@ -6008,7 +5026,7 @@ async function generateLeadConversionDataForSave(
   } else {
     // For other yaxis values, explicitly specify the Activity table
     attributes.push([
-      Sequelize.literal(
+      sequelize.literal(
         `SUM(CASE WHEN dealId IS NOT NULL THEN value ELSE 0 END)`
       ),
       "yValue",
@@ -6029,16 +5047,16 @@ async function generateLeadConversionDataForSave(
     } else {
       // Handle special cases for Owner, contactPerson, organization
       if (xaxis === "Owner" || xaxis === "assignedTo") {
-        groupColumn = Sequelize.col("assignedUser.name");
+        groupColumn = sequelize.col("assignedUser.name");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (xaxis === "contactPerson") {
-        groupColumn = Sequelize.col("Lead.personId");
+        groupColumn = sequelize.col("Lead.personId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else if (xaxis === "organization") {
-        groupColumn = Sequelize.col("Lead.leadOrganizationId");
+        groupColumn = sequelize.col("Lead.leadOrganizationId");
         paginationAttributes.push([groupColumn, "groupKey"]);
       } else {
-        groupColumn = Sequelize.col(`Lead.${xaxis}`);
+        groupColumn = sequelize.col(`Lead.${xaxis}`);
         paginationAttributes.push([groupColumn, "groupKey"]);
       }
     }
@@ -6049,7 +5067,7 @@ async function generateLeadConversionDataForSave(
       include: includeModels,
       group: [groupColumn],
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
       raw: true,
     });
@@ -6067,11 +5085,11 @@ async function generateLeadConversionDataForSave(
       if (shouldGroupByDuration) {
         // For date grouping
         const groupExpression = getDateGroupExpression(xaxis, durationUnit);
-        groupCondition = Sequelize.where(groupExpression, {
+        groupCondition = sequelize.where(groupExpression, {
           [Op.in]: groupKeys,
         });
       } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-        // For Owner/assignedTo - use proper Sequelize syntax for related table
+        // For Owner/assignedTo - use proper sequelize syntax for related table
         groupCondition = { "$assignedUser.name$": { [Op.in]: groupKeys } };
       } else if (xaxis === "contactPerson") {
         // For contactPerson - use proper column reference
@@ -6095,7 +5113,7 @@ async function generateLeadConversionDataForSave(
         group: groupBy,
         raw: true,
         order: isDateFieldX
-          ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+          ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
           : getOrderClause(yaxis, xaxis),
       });
     }
@@ -6107,7 +5125,7 @@ async function generateLeadConversionDataForSave(
       group: groupBy,
       raw: true,
       order: isDateFieldX
-        ? [[Sequelize.col(`Lead.${xaxis}`), "ASC"]]
+        ? [[sequelize.col(`Lead.${xaxis}`), "ASC"]]
         : getOrderClause(yaxis, xaxis),
     });
   }

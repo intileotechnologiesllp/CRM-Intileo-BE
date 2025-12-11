@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Login Success</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .success-container {
+            background: white;
+            border-radius: 20px;
+            padding: 60px 40px;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            background: #4caf50;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 30px;
+            animation: scaleIn 0.5s ease-out;
+        }
+
+        .success-icon svg {
+            width: 50px;
+            height: 50px;
+            fill: white;
+        }
+
+        @keyframes scaleIn {
+            0% {
+                transform: scale(0);
+            }
+            50% {
+                transform: scale(1.1);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        h1 {
+            color: #1a1a1a;
+            margin-bottom: 15px;
+            font-size: 28px;
+        }
+
+        .user-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .user-info p {
+            color: #666;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+
+        .user-info strong {
+            color: #333;
+        }
+
+        p {
+            color: #666;
+            font-size: 16px;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .redirect-info {
+            color: #667eea;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container">
+        <div class="success-icon">
+            <svg viewBox="0 0 24 24">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+            </svg>
+        </div>
+        
+        <h1>Login Successful!</h1>
+        <p>You've successfully logged in with Google.</p>
+        
+        <div class="user-info" id="userInfo">
+            <p><strong>Loading user information...</strong></p>
+        </div>
+        
+        <p class="redirect-info">
+            Redirecting to dashboard<span class="spinner"></span>
+        </p>
+    </div>
+
+    <script>
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const name = urlParams.get('name');
+        const email = urlParams.get('email');
+
+        if (token && name && email) {
+            // Store token and user info
+            localStorage.setItem('token', token);
+            localStorage.setItem('user', JSON.stringify({
+                name: decodeURIComponent(name),
+                email: decodeURIComponent(email),
+                loginType: 'google'
+            }));
+
+            // Display user info
+            document.getElementById('userInfo').innerHTML = `
+                <p><strong>Name:</strong> ${decodeURIComponent(name)}</p>
+                <p><strong>Email:</strong> ${decodeURIComponent(email)}</p>
+            `;
+
+            // Redirect to dashboard after 2 seconds
+            setTimeout(() => {
+                // Change this URL to your actual dashboard page
+                window.location.href = '/dashboard.html';
+            }, 2000);
+        } else {
+            document.getElementById('userInfo').innerHTML = `
+                <p style="color: #c33;">Error: Missing authentication data</p>
+            `;
+            document.querySelector('.redirect-info').innerHTML = 
+                'Redirecting to login page...';
+            
+            setTimeout(() => {
+                window.location.href = '/login-google-oauth.html';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

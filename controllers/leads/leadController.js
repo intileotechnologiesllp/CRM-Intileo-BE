@@ -2804,6 +2804,15 @@ exports.getLeads = async (req, res) => {
       where: totalLeadCountWhere,
     });
 
+    // Console logging for debugging leads array length
+    console.log("🔍 === FINAL LEADS RESPONSE DEBUG ===");
+    console.log("🔍 flatLeads array length:", flatLeads.length);
+    console.log("🔍 totalRecords (leads.count):", leads.count);
+    console.log("🔍 totalLeadCount:", totalLeadCount);
+    console.log("🔍 totalPages:", Math.ceil(leads.count / limit));
+    console.log("🔍 currentPage:", parseInt(page));
+    console.log("🔍 === END LEADS RESPONSE DEBUG ===");
+
     res.status(200).json({
       message: "Leads fetched successfully",
       totalRecords: leads.count,

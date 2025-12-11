@@ -27,21 +27,59 @@ exports.createPermissionSet = async (req, res) => {
   });
 };
 exports.getPermissionSet = async (req, res) => {
-  const findSet = await permissionSet.findAll({
-     include: [{ model: MasterUser, as: "pusers" }],
-  });
+  try {
+    const findSet = await permissionSet.findAll({
+      include: [{ model: MasterUser, as: "pusers" }],
+    });
 
-  if (!findSet) {
-    res.status(400).json({
-      message: "Permission set Not Fount",
-      set: [],
+    // For each permission set, also fetch users where globalPermissionSetId matches
+    const enrichedSets = await Promise.all(
+      findSet.map(async (set) => {
+        const setData = set.toJSON();
+
+        // Fetch users where globalPermissionSetId matches this permission set
+        const globalUsers = await MasterUser.findAll({
+          where: { globalPermissionSetId: setData.permissionSetId },
+          raw: true,
+        });
+
+        // Combine both regular users and global users
+        // Remove duplicates (users who might have both FKs set)
+        const userMap = new Map();
+        
+        // Add regular users from the include
+        if (setData.pusers) {
+          setData.pusers.forEach((user) => {
+            userMap.set(user.masterUserID, user);
+          });
+        }
+
+        // Add global users
+        globalUsers.forEach((user) => {
+          if (!userMap.has(user.masterUserID)) {
+            userMap.set(user.masterUserID, user);
+          }
+        });
+
+        // Replace pusers with combined list
+        setData.pusers = Array.from(userMap.values());
+
+        return setData;
+      })
+    );
+
+    res.status(200).json({
+      message: "permission set fetched successfully.",
+      set: enrichedSets,
+    });
+  } catch (error) {
+    console.error("Error fetching permission sets:", error);
+    res.status(500).json({
+      message: "Error fetching permission sets",
+      success: false,
+      error: error.message,
     });
   }
-
-  res.status(200).json({
-    message: "permission set create successfully.",
-    set: findSet,
-  });
 };
 
 exports.updatePermissionSet = async (req, res) => {
@@ -81,45 +119,18 @@ exports.updatePermissionSet = async (req, res) => {
   }
 };
 
-// Permission Configuration Structure:
 // config = {
-//     // Deals permissions (programId: 1)
-//     0: true,  // Add deals
-//     1: true,  // Edit deals owned by other users
-//     2: true,  // Edit the owner on a deal owned by other users
-//     3: true,  // Delete deals
-//     4: true,  // Convert deals to leads
-//     5: true,  // Merge deals
-//     6: true,  // Edit a deal's won/lost time
-//     
-//     // Leads permissions (programId: 2)
-//     7: true,  // Add lead
-//     8: true,  // Edit leads owned by other users
-//     9: true,  // Edit the owner on a lead owned by other users
+//     0: true,//AddDeals: true,
+//     1: true, // Edit deals owned by other users
+//     2: true, // Edit the owner on a deal owned by other users
+//     3: true, // Delete deals
+//     4: true, // Convert deals to leads
+//     5: true, // Merge deals
+//     6: true, // Edit a deal's won/lost time
+//     7: true, // Add lead
+//     8: true, // Edit leads owned by other users
+//     9: true, // Edit the owner on a lead owned by other users
 //     10: true, // Delete leads
 //     11: true, // Merge leads
-//     
-//     // Analytics/Views permissions (programId: 3)
 //     12: true, // See the number of deals and value sum in pipelines and deal list views
-//     
-//     // Activities permissions (programId: 4)
-//     21: true, // Edit the owner on an activity owned by other users
-//     22: true, // Delete activities
-//     
-//     // People/Organization permissions (programId: 5)
-//     23: true, // Add people
-//     25: true, // Delete people
-//     26: true, // Add organizations
-//     28: true, // Delete organizations
-//     
-//     // Filter permissions (programId: 6)
-//     18: true, // Share filters with other users
-//     19: true, // Edit shared filters of other users
-//     
-//     // Products permissions (programId: 7)
-//     29: true, // Add products
-//     30: true, // Edit products owned by other users
-//     31: true, // Edit the owner on a product owned by other users
-//     32: true, // Delete products
-//     33: true, // Delete product price variations
 // }

@@ -1875,48 +1875,73 @@ async function generateExistingPersonPerformanceDataForSave(
     });
   }
 
-  // Formatting and totaling logic
+  // Format the results based on whether segmentedBy is used
   let formattedResults = [];
   let totalValue = 0;
 
   if (existingSegmentedBy && existingSegmentedBy !== "none") {
+    // Group the results properly
     const groupedData = {};
+
     results.forEach((item) => {
-      let xValue =
+      // Determine grouping key based on xaxis type
+      let groupKey;
+
+      if (existingxaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (existingxaxis === "Owner" || existingxaxis === "assignedTo" || existingxaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (existingxaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
         formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, existingDurationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[xValue]) {
-        // Set proper ID based on xaxis type
+      if (!groupedData[groupKey]) {
+        // Set id based on xaxis type
         let id = null;
-
-        if (existingxaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (existingxaxis === "organization") {
-          id = item.leadOrganizationId || null;
+        if (existingxaxis === "organization") {
+          id = item.leadOrganizationId;
         } else if (
           existingxaxis === "Owner" ||
-          existingxaxis === "assignedTo"
+          existingxaxis === "assignedTo" ||
+          existingxaxis === "creator"
         ) {
-          id = item.assignedUserId || null;
+          id = item.assignedUserId;
+        } else if (existingxaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-      // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -1926,8 +1951,9 @@ async function generateExistingPersonPerformanceDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -1942,25 +1968,27 @@ async function generateExistingPersonPerformanceDataForSave(
       );
     }
 
-    // Calculate the grand total
     totalValue = formattedResults.reduce(
       (sum, group) => sum + group.totalSegmentValue,
       0
     );
   } else {
-    // Logic for non-segmented data
+    // Original format for non-segmented data
     formattedResults = results.map((item) => {
-      let label =
-        formatDateValue(item.xValue, existingDurationUnit) || "Unknown";
+      let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
-      // Set proper ID based on xaxis type
+      // Set id based on xaxis type
       let id = null;
-      if (existingxaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (existingxaxis === "organization") {
+      if (existingxaxis === "organization") {
         id = item.leadOrganizationId || null;
-      } else if (existingxaxis === "Owner" || existingxaxis === "assignedTo") {
+      } else if (
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator"
+      ) {
         id = item.assignedUserId || null;
+      } else if (existingxaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -1970,7 +1998,31 @@ async function generateExistingPersonPerformanceDataForSave(
       };
     });
 
-    // Calculate the grand total
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      ( existingxaxis === "organization" ||
+        existingxaxis === "Owner" ||
+        existingxaxis === "assignedTo" ||
+        existingxaxis === "creator" ||
+        existingxaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 
@@ -2249,41 +2301,68 @@ async function generatePersonPerformanceDataForSave(
   let totalValue = 0;
 
   if (segmentedBy && segmentedBy !== "none") {
-    // Group by xValue and then by segmentValue
+    // Group the results properly
     const groupedData = {};
 
     results.forEach((item) => {
-      let xValue = formatDateValue(item.xValue, durationUnit) || "Unknown";
+      // Determine grouping key based on xaxis type
+      let groupKey;
 
+      if (xaxis === "organization" && item.leadOrganizationId) {
+        // Group by leadOrganizationId for organization
+        groupKey = `org_${item.leadOrganizationId}`;
+      } else if (
+        (xaxis === "Owner" || xaxis === "assignedTo" || xaxis === "creator") &&
+        item.assignedUserId
+      ) {
+        // Group by assignedUserId for Owner/assignedTo/creator
+        groupKey = `user_${item.assignedUserId}`;
+      } else if (xaxis === "Team" && item.teamId) {
+        // Group by teamId for Team
+        groupKey = `team_${item.teamId}`;
+      } else {
+        // For all other cases, group by the raw xValue
+        groupKey = `label_${item.xValue || "Unknown"}`;
+      }
+
+      // Format display values
+      const displayXValue =
+        formatDateValue(item.xValue, durationUnit) || "Unknown";
       const segmentValue =
         formatDateValue(item.segmentValue, durationUnit) || "Unknown";
       const yValue = Number(item.yValue) || 0;
 
-      if (!groupedData[xValue]) {
-        // Set proper ID based on xaxis type
+      if (!groupedData[groupKey]) {
+        // Set id based on xaxis type
         let id = null;
-        if (xaxis === "contactPerson") {
-          id = item.personId || null;
-        } else if (xaxis === "organization") {
-          id = item.leadOrganizationId || null;
-        } else if (xaxis === "Owner" || xaxis === "assignedTo") {
-          id = item.assignedUserId || null;
+        if (xaxis === "organization") {
+          id = item.leadOrganizationId;
+        } else if (
+          xaxis === "Owner" ||
+          xaxis === "assignedTo" ||
+          xaxis === "creator"
+        ) {
+          id = item.assignedUserId;
+        } else if (xaxis === "Team") {
+          id = item.teamId;
         }
 
-        groupedData[xValue] = {
-          label: xValue,
-          segments: [],
+        groupedData[groupKey] = {
+          label: displayXValue,
+          segments: {},
           id: id,
+          rawXValue: item.xValue,
         };
       }
-      // Merge segments with the same labeltype
-      if (!groupedData[xValue].segments[segmentValue]) {
-        groupedData[xValue].segments[segmentValue] = 0;
+
+      // Accumulate segment values
+      if (!groupedData[groupKey].segments[segmentValue]) {
+        groupedData[groupKey].segments[segmentValue] = 0;
       }
-      groupedData[xValue].segments[segmentValue] += yValue;
+      groupedData[groupKey].segments[segmentValue] += yValue;
     });
 
-    // Convert segments object to array
+    // Convert segments object to array and create final array
     formattedResults = Object.values(groupedData).map((group) => {
       const segmentsArray = Object.entries(group.segments).map(
         ([labeltype, value]) => ({
@@ -2293,8 +2372,9 @@ async function generatePersonPerformanceDataForSave(
       );
 
       return {
-        ...group,
+        label: group.label,
         segments: segmentsArray,
+        id: group.id,
         totalSegmentValue: segmentsArray.reduce(
           (sum, seg) => sum + seg.value,
           0
@@ -2318,14 +2398,18 @@ async function generatePersonPerformanceDataForSave(
     formattedResults = results.map((item) => {
       let label = formatDateValue(item.xValue, durationUnit) || "Unknown";
 
-      // Set proper ID based on xaxis type
+      // Set id based on xaxis type
       let id = null;
-      if (xaxis === "contactPerson") {
-        id = item.personId || null;
-      } else if (xaxis === "organization") {
+      if (xaxis === "organization") {
         id = item.leadOrganizationId || null;
-      } else if (xaxis === "Owner" || xaxis === "assignedTo") {
+      } else if (
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator"
+      ) {
         id = item.assignedUserId || null;
+      } else if (xaxis === "Team") {
+        id = item.teamId || null;
       }
 
       return {
@@ -2334,6 +2418,32 @@ async function generatePersonPerformanceDataForSave(
         id: id,
       };
     });
+
+    // For non-date fields, ensure proper grouping by ID if available
+    if (
+      !isDateFieldX &&
+      ( xaxis === "organization" ||
+        xaxis === "Owner" ||
+        xaxis === "assignedTo" ||
+        xaxis === "creator" ||
+        xaxis === "Team")
+    ) {
+      // Group by ID to combine items with same ID
+      const groupedById = {};
+
+      formattedResults.forEach((item) => {
+        const key = item.id || item.label;
+        if (!groupedById[key]) {
+          groupedById[key] = { ...item };
+        } else {
+          // Sum values for same ID
+          groupedById[key].value += item.value;
+        }
+      });
+
+      formattedResults = Object.values(groupedById);
+    }
+
     totalValue = formattedResults.reduce((sum, item) => sum + item.value, 0);
   }
 

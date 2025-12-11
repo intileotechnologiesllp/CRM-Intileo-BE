@@ -1601,6 +1601,23 @@ exports.getDeals = async (req, res) => {
         };
       }
 
+      // Add activity information to the deal
+      const activityData = activityDataByDeal[dealObj.dealId] || {
+        totalActivities: 0,
+        upcomingActivities: 0,
+        completedActivities: 0,
+        nextActivityDate: null,
+        nextActivityType: null,
+        nextActivitySubject: null
+      };
+      
+      dealObj.totalActivities = activityData.totalActivities;
+      dealObj.upcomingActivities = activityData.upcomingActivities;
+      dealObj.completedActivities = activityData.completedActivities;
+      dealObj.nextActivityDate = activityData.nextActivityDate;
+      dealObj.nextActivityType = activityData.nextActivityType;
+      dealObj.nextActivitySubject = activityData.nextActivitySubject;
+
       return dealObj;
     });
 

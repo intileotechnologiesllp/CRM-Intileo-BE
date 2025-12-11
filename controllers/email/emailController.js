@@ -75,6 +75,12 @@ const { syncImapFlags } = require("../../services/imapSyncService");
 const flagSyncQueue = require("../../services/flagSyncQueueService");
 const { log } = require("console");
 
+// Import MongoDB email body service
+const emailBodyMongoService = require("../../services/emailBodyMongoService");
+
+// Import Redis service for caching
+const redisService = require("../../services/redisService");
+
 // Configuration constants
 const ICON_ATTACHMENT_SIZE_THRESHOLD = 100; // bytes - attachments smaller than this are considered icons/tracking pixels
 const MAX_BATCH_SIZE = 100; // Maximum number of emails to process in one batch
@@ -84,6 +90,141 @@ const DEFAULT_BATCH_SIZE = 50; // Default batch size for email fetching
 const pLimit = require('p-limit');
 const activeUsers = new Map(); // Track active user sessions
 const MAX_CONCURRENT_USERS = 3; // Maximum users that can fetch emails simultaneously
+
+// =================== REDIS ENHANCED HELPERS ===================
+
+/**
+ * Get UserCredential with Redis caching
+ * This replaces all UserCredential.findOne() calls for better performance
+ */
+const getUserCredentialCached = async (masterUserID, includePassword = false) => {
+  try {
+    // Try Redis cache first
+    console.log(`🔍 [CACHE] Looking for UserCredential in cache: ${masterUserID}`);
+    let cachedCredential = await redisService.getUserCredential(masterUserID);
+    
+    if (cachedCredential) {
+      console.log(`✅ [CACHE] UserCredential cache HIT for user ${masterUserID}`);
+      
+      // If password needed but not in cache, fetch from DB
+      if (includePassword) {
+        console.log(`🔐 [CACHE] Password needed, fetching full credential from DB for user ${masterUserID}`);
+        const dbCredential = await UserCredential.findOne({ where: { masterUserID } });
+        if (dbCredential) {
+          // Merge cached data with password
+          return {
+            ...cachedCredential,
+            appPassword: dbCredential.appPassword // Add password from DB
+          };
+        }
+      }
+      
+      return cachedCredential;
+    }
+    
+    // Cache miss - fetch from database
+    console.log(`❌ [CACHE] UserCredential cache MISS for user ${masterUserID}, fetching from DB`);
+    const dbCredential = await UserCredential.findOne({ where: { masterUserID } });
+    
+    if (dbCredential) {
+      // Cache the credential (without password for security)
+      await redisService.cacheUserCredential(masterUserID, dbCredential, 900); // 15 minutes
+      console.log(`✅ [CACHE] UserCredential cached for user ${masterUserID}`);
+      
+      return dbCredential;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`❌ [CACHE] Error getting UserCredential for ${masterUserID}:`, error.message);
+    // Fallback to direct DB query
+    return await UserCredential.findOne({ where: { masterUserID } });
+  }
+};
+
+/**
+ * 🔥 REDIS-Enhanced Email Body caching function
+ * This adds a Redis L1 cache layer before MongoDB L2 cache
+ * @param {string} emailID - The email ID
+ * @param {string} masterUserID - The user ID for cache key namespacing
+ * @returns {Promise<Object|null>} Email body object or null
+ */
+const getEmailBodyCached = async (emailID, masterUserID) => {
+  try {
+    // L1 Cache: Try Redis first (fastest)
+    const cachedBody = await redisService.getEmailBody(emailID, masterUserID);
+    if (cachedBody) {
+      console.log(`⚡ [L1-CACHE] Email body cache HIT for ${emailID}`);
+      return cachedBody;
+    }
+    
+    console.log(`❌ [L1-CACHE] Email body cache MISS for ${emailID}, checking MongoDB...`);
+    
+    // L2 Cache: Try MongoDB (MongoDB optimization system)
+    const mongoBody = await emailBodyMongoService.getEmailBody(emailID);
+    if (mongoBody) {
+      console.log(`📦 [L2-CACHE] MongoDB email body HIT for ${emailID}, caching in Redis...`);
+      
+      // Cache in Redis for next time (L1 cache population)
+      await redisService.setEmailBody(emailID, mongoBody, masterUserID, 1800); // 30 minutes TTL
+      return mongoBody;
+    }
+    
+    console.log(`❌ [L2-CACHE] MongoDB email body MISS for ${emailID} - requires IMAP fetch`);
+    return null;
+  } catch (error) {
+    console.error(`❌ [CACHE] Error getting email body for ${emailID}:`, error.message);
+    
+    // Fallback to MongoDB only
+    try {
+      return await emailBodyMongoService.getEmailBody(emailID);
+    } catch (mongoError) {
+      console.error(`❌ [FALLBACK] MongoDB fallback failed for ${emailID}:`, mongoError.message);
+      return null;
+    }
+  }
+};
+
+/**
+ * 🔥 REDIS-Enhanced Email Body setter function
+ * This saves email body to both Redis L1 and MongoDB L2 caches
+ * @param {string} emailID - The email ID
+ * @param {Object} bodyData - The email body data
+ * @param {string} masterUserID - The user ID for cache key namespacing
+ */
+const setEmailBodyCached = async (emailID, bodyData, masterUserID) => {
+  try {
+    // Save to MongoDB L2 cache (persistent)
+    await emailBodyMongoService.saveEmailBody(emailID, bodyData);
+    console.log(`📦 [L2-CACHE] Email body saved to MongoDB for ${emailID}`);
+    
+    // Save to Redis L1 cache (fast access)
+    await redisService.setEmailBody(emailID, bodyData, masterUserID, 1800); // 30 minutes TTL
+    console.log(`⚡ [L1-CACHE] Email body cached in Redis for ${emailID}`);
+  } catch (error) {
+    console.error(`❌ [CACHE] Error saving email body for ${emailID}:`, error.message);
+    
+    // Ensure at least MongoDB save happens
+    try {
+      await emailBodyMongoService.saveEmailBody(emailID, bodyData);
+      console.log(`📦 [FALLBACK] Email body saved to MongoDB only for ${emailID}`);
+    } catch (mongoError) {
+      console.error(`❌ [CRITICAL] Failed to save email body anywhere for ${emailID}:`, mongoError.message);
+    }
+  }
+};
+
+/**
+ * Invalidate UserCredential cache when data changes
+ */
+const invalidateUserCredentialCache = async (masterUserID) => {
+  try {
+    await redisService.invalidateUserCredential(masterUserID);
+    console.log(`🗑️ [CACHE] UserCredential cache invalidated for user ${masterUserID}`);
+  } catch (error) {
+    console.error(`❌ [CACHE] Failed to invalidate UserCredential cache for ${masterUserID}:`, error.message);
+  }
+};
 const concurrencyLimit = pLimit(MAX_CONCURRENT_USERS);
 
 // 🚀 PERFORMANCE: User session tracking
@@ -1367,10 +1508,8 @@ exports.queueFetchAllEmails = async (req, res) => {
       smtpSecure = req.body.smtpSecure;
     }
 
-    // Check if credentials already exist
-    const existingCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+    // Check if credentials already exist (Redis-cached)
+    const existingCredential = await getUserCredentialCached(masterUserID, false);
 
     if (existingCredential) {
       await existingCredential.update({
@@ -1410,9 +1549,7 @@ exports.queueFetchAllEmails = async (req, res) => {
           console.log(
             `[Queue] Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
           );
-          const existingRecord = await UserCredential.findOne({
-            where: { masterUserID },
-          });
+          const existingRecord = await getUserCredentialCached(masterUserID, false);
           if (existingRecord) {
             await existingRecord.update({
               email,
@@ -1523,10 +1660,8 @@ exports.fetchInboxEmails = async (req, res) => {
       return res.status(400).json({ message: "All fields are required." });
     }
 
-    // Check if the user already has credentials saved
-    const existingCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+    // Check if the user already has credentials saved (Redis-cached)
+    const existingCredential = await getUserCredentialCached(masterUserID, false);
     const smtpConfigByProvider = {
       gmail: { smtpHost: "smtp.gmail.com", smtpPort: 465, smtpSecure: true },
       yandex: { smtpHost: "smtp.yandex.com", smtpPort: 465, smtpSecure: true },
@@ -1593,9 +1728,7 @@ exports.fetchInboxEmails = async (req, res) => {
           console.log(
             `Duplicate detected, attempting to update existing credentials for masterUserID: ${masterUserID}`
           );
-          const existingRecord = await UserCredential.findOne({
-            where: { masterUserID },
-          });
+          const existingRecord = await getUserCredentialCached(masterUserID, false);
           if (existingRecord) {
             await existingRecord.update({
               email,
@@ -1620,10 +1753,8 @@ exports.fetchInboxEmails = async (req, res) => {
 
     // Fetch emails after saving credentials
     console.log("Fetching emails for masterUserID:", masterUserID);
-    // Fetch user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+    // Fetch user credentials (Redis-cached)
+    const userCredential = await getUserCredentialCached(masterUserID, true); // Need password for IMAP
 
     if (!userCredential) {
       console.error(
@@ -2809,10 +2940,8 @@ exports.fetchRecentEmail = async (adminId, options = {}) => {
   try {
     console.log(`[fetchRecentEmail] Starting for adminId: ${adminId}`);
 
-    // Fetch the user's email and app password from the UserCredential model
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID: adminId },
-    });
+    // Fetch the user's email and app password from the UserCredential model (Redis-cached)
+    const userCredential = await getUserCredentialCached(adminId, true); // Need password for IMAP
 
     if (!userCredential) {
       console.error("User credentials not found for adminId:", adminId);
@@ -3585,10 +3714,8 @@ async function getEmailsInternal(req, res, masterUserID) {
   if (pageSize > MAX_SAFE_PAGE_SIZE) pageSize = MAX_SAFE_PAGE_SIZE;
 
   try {
-    // Check if user has credentials in UserCredential model
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID },
-    });
+    // Check if user has credentials in UserCredential model (Redis-cached)
+    const userCredential = await getUserCredentialCached(masterUserID, false); // No password needed for this function
 
     if (!userCredential) {
       return res.status(200).json({
@@ -3667,9 +3794,7 @@ async function getEmailsInternal(req, res, masterUserID) {
     }
 
     if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
+      const userCredential = await getUserCredentialCached(masterUserID, false);
       if (!userCredential) {
         return res.status(404).json({ message: "User credentials not found." });
       }
@@ -3821,9 +3946,7 @@ async function getEmailsInternal(req, res, masterUserID) {
     if (folder) baseFilters.folder = folder;
     if (isRead !== undefined) baseFilters.isRead = isRead === "true";
     if (toMe === "true") {
-      const userCredential = await UserCredential.findOne({
-        where: { masterUserID },
-      });
+      const userCredential = await getUserCredentialCached(masterUserID, false);
       if (userCredential) {
         const userEmail = userCredential.email;
         baseFilters.recipient = { [Sequelize.Op.like]: `%${userEmail}%` };
@@ -4753,9 +4876,7 @@ exports.getEmailLabels = async (req, res) => {
 // Fetch and store emails from the Sent folder using batching
 exports.fetchSentEmails = async (adminId, batchSize = 50, page = 1) => {
   try {
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID: adminId },
-    });
+    const userCredential = await getUserCredentialCached(adminId, true); // Need password for IMAP
 
     if (!userCredential) {
       console.error("User credentials not found for adminId:", adminId);
@@ -5748,9 +5869,43 @@ const getAggregatedLinkedEntities = async (emails) => {
 // Helper function to fetch body for a single email on-demand
 const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
   try {
-    // Check if body needs fetching
-    if ((email.body && email.body.trim() !== '') &&
-        email.body_fetch_status !== 'pending') {
+    // ✅ OPTIMIZATION: Check if body needs fetching - skip IMAP if completed
+    if (email.body_fetch_status === 'completed') {
+      console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Email ${email.emailID} marked as completed (status: ${email.body_fetch_status})`);
+      
+      // If completed but no body in MySQL, try to get from MongoDB
+      if (!email.body || email.body.trim() === '') {
+        console.log(`[fetchEmailBodyOnDemandForEmail] 🗄️ MONGODB ONLY: Getting body from MongoDB for completed email ${email.emailID}...`);
+        
+        try {
+          console.log(`[fetchEmailBodyOnDemandForEmail] 🔍 MONGODB DEBUG: Calling getEmailBody with emailID=${email.emailID}, masterUserID=${masterUserID}`);
+          const mongoBody = await emailBodyMongoService.getEmailBody(email.emailID.toString(), masterUserID.toString());
+          
+          console.log(`[fetchEmailBodyOnDemandForEmail] 🔍 MONGODB DEBUG: getEmailBody result:`, {
+            found: !!mongoBody,
+            hasBody: !!(mongoBody && mongoBody.body),
+            hasProcessedBody: !!(mongoBody && mongoBody.processedBody),
+            bodyLength: mongoBody && mongoBody.body ? mongoBody.body.length : 0,
+            processedBodyLength: mongoBody && mongoBody.processedBody ? mongoBody.processedBody.length : 0
+          });
+          
+          if (mongoBody && (mongoBody.processedBody || mongoBody.body)) {
+            email.body = mongoBody.processedBody || mongoBody.body;
+            console.log(`[fetchEmailBodyOnDemandForEmail] ✅ MONGODB ONLY: Retrieved body from MongoDB for completed email ${email.emailID} (length: ${email.body.length})`);
+          } else {
+            console.log(`[fetchEmailBodyOnDemandForEmail] ⚠️ MONGODB ONLY: No body found in MongoDB for completed email ${email.emailID}`);
+          }
+        } catch (mongoError) {
+          console.error(`[fetchEmailBodyOnDemandForEmail] ❌ MONGODB ONLY: Error retrieving from MongoDB for completed email ${email.emailID}:`, mongoError.message);
+          console.error(`[fetchEmailBodyOnDemandForEmail] ❌ MONGODB STACK:`, mongoError.stack);
+        }
+      }
+      
+      return email;
+    }
+    
+    // Also skip if already has body and not pending
+    if ((email.body && email.body.trim() !== '') && email.body_fetch_status !== 'pending') {
       console.log(`[fetchEmailBodyOnDemandForEmail] ✅ Email ${email.emailID} already has body`);
       return email;
     }
@@ -5759,10 +5914,8 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
 
     const emailBodyService = require('../../services/emailBodyServiceSimple');
 
-    // Get user credentials
-    const userCredential = await UserCredential.findOne({
-      where: { masterUserID }
-    });
+    // Get user credentials (Redis-cached)
+    const userCredential = await getUserCredentialCached(masterUserID, true); // Need password for IMAP body fetching
 
     if (!userCredential) {
       console.log(`[fetchEmailBodyOnDemandForEmail] ❌ No credentials found for masterUserID ${masterUserID}`);
@@ -5789,10 +5942,41 @@ const fetchEmailBodyOnDemandForEmail = async (email, masterUserID) => {
       email.body = finalBody;
       email.body_fetch_status = 'completed';
 
-      // Update the database record
+      // 🚀 MONGODB FIRST: Save fetched body to MongoDB for future performance
+      try {
+        const EmailBodyMongoService = require('../../services/emailBodyMongoService');
+        
+        const bodyData = {
+          bodyHtml: updatedEmail.bodyHtml,
+          bodyText: updatedEmail.bodyText
+        };
+        
+        console.log(`[fetchEmailBodyOnDemandForEmail] 💾 Saving fetched body to MongoDB for email ${email.emailID}...`);
+        const mongoSaveResult = await EmailBodyMongoService.saveEmailBody(
+          email.emailID, 
+          masterUserID, 
+          bodyData, 
+          {
+            shouldClean: false, // We'll clean later in the normal flow
+            attachments: email.attachments,
+            provider: userCredential.provider || 'gmail'
+          }
+        );
+        
+        if (mongoSaveResult.success) {
+          console.log(`[fetchEmailBodyOnDemandForEmail] ✅ MONGODB: Body saved to MongoDB for email ${email.emailID}`);
+        } else {
+          console.log(`[fetchEmailBodyOnDemandForEmail] ⚠️ MONGODB: Failed to save to MongoDB:`, mongoSaveResult.error);
+        }
+      } catch (mongoError) {
+        console.log(`[fetchEmailBodyOnDemandForEmail] ❌ MONGODB: Error saving to MongoDB:`, mongoError.message);
+        // Continue with MySQL fallback
+      }
+
+      // Update the database record (but don't store full body anymore - save space)
       await Email.update(
         {
-          body: email.body || '',
+          body: '', // Clear MySQL body to save space now that we have MongoDB
           body_fetch_status: 'completed'
         },
         { where: { emailID: email.emailID } }
@@ -5950,8 +6134,10 @@ exports.getOneEmail = async (req, res) => {
     }
 
     // 🚀 PHASE 2: Hybrid body fetching - On-demand for when user opens email
-    if ((!mainEmail.body || mainEmail.body === null || mainEmail.body.trim() === '') || 
-        (mainEmail.body_fetch_status === 'pending' && (!mainEmail.body || mainEmail.body === null))) {
+    // ✅ OPTIMIZATION: Skip IMAP if body_fetch_status is 'completed' - get from MongoDB only
+    if (((!mainEmail.body || mainEmail.body === null || mainEmail.body.trim() === '') || 
+        (mainEmail.body_fetch_status === 'pending' && (!mainEmail.body || mainEmail.body === null))) &&
+        mainEmail.body_fetch_status !== 'completed') {
       // Email body not fetched yet - fetch it now using our smart service
       console.log(`[Phase 2] 🔍 ON-DEMAND: Email ${emailId} body missing or pending, fetching now...`);
       
@@ -6020,10 +6206,41 @@ exports.getOneEmail = async (req, res) => {
             mainEmail.body = finalBody;
             mainEmail.body_fetch_status = 'completed';
 
-            // Also update the database record
+            // 🚀 MONGODB FIRST: Save fetched body to MongoDB for future performance
+            try {
+              const EmailBodyMongoService = require('../../services/emailBodyMongoService');
+              
+              const bodyData = {
+                bodyHtml: updatedEmail.bodyHtml,
+                bodyText: updatedEmail.bodyText
+              };
+              
+              console.log(`[getOneEmail] 💾 Saving fetched body to MongoDB for email ${emailId}...`);
+              const mongoSaveResult = await EmailBodyMongoService.saveEmailBody(
+                emailId, 
+                masterUserID, 
+                bodyData, 
+                {
+                  shouldClean: false, // We'll clean later in the normal flow
+                  attachments: mainEmail.attachments,
+                  provider: userCredential.provider || 'gmail'
+                }
+              );
+              
+              if (mongoSaveResult.success) {
+                console.log(`[getOneEmail] ✅ MONGODB: Body saved to MongoDB for email ${emailId}`);
+              } else {
+                console.log(`[getOneEmail] ⚠️ MONGODB: Failed to save to MongoDB:`, mongoSaveResult.error);
+              }
+            } catch (mongoError) {
+              console.log(`[getOneEmail] ❌ MONGODB: Error saving to MongoDB:`, mongoError.message);
+              // Continue with MySQL fallback
+            }
+
+            // Also update the database record (but don't store full body anymore - save space)
             await Email.update(
               {
-                body: mainEmail.body || '',
+                body: '', // Clear MySQL body to save space now that we have MongoDB
                 body_fetch_status: 'completed'
               },
               { where: { emailID: mainEmail.emailID } }
@@ -6048,7 +6265,92 @@ exports.getOneEmail = async (req, res) => {
         // Continue with existing data - conversation still works!
       }
     } else {
-      console.log(`[Phase 2] ✅ BODY EXISTS: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0})`);
+      console.log(`[Phase 2] ✅ BODY EXISTS OR COMPLETED: Email ${emailId} already has body (length: ${mainEmail.body ? mainEmail.body.length : 0}) or status is completed (${mainEmail.body_fetch_status})`);
+      
+      // 🚀 OPTIMIZATION: If body_fetch_status is 'completed' but no body in MySQL, get from MongoDB only
+      if (mainEmail.body_fetch_status === 'completed' && (!mainEmail.body || mainEmail.body.trim() === '')) {
+        console.log(`[Phase 2] 🗄️ MONGODB ONLY: Email ${emailId} marked as completed but no MySQL body, retrieving from MongoDB...`);
+        
+        try {
+          console.log(`[Phase 2] 🔍 MONGODB DEBUG: Calling getEmailBody with emailID=${emailId}, masterUserID=${masterUserID}`);
+          const mongoBody = await emailBodyMongoService.getEmailBody(emailId.toString(), masterUserID.toString());
+          
+          console.log(`[Phase 2] 🔍 MONGODB DEBUG: getEmailBody result:`, {
+            found: !!mongoBody,
+            hasBody: !!(mongoBody && mongoBody.body),
+            hasProcessedBody: !!(mongoBody && mongoBody.processedBody),
+            bodyLength: mongoBody && mongoBody.body ? mongoBody.body.length : 0,
+            processedBodyLength: mongoBody && mongoBody.processedBody ? mongoBody.processedBody.length : 0
+          });
+          
+          if (mongoBody && (mongoBody.processedBody || mongoBody.body)) {
+            mainEmail.body = mongoBody.processedBody || mongoBody.body;
+            console.log(`[Phase 2] ✅ MONGODB ONLY: Successfully retrieved body from MongoDB for completed email ${emailId} (length: ${mainEmail.body.length})`);
+          } else {
+            console.log(`[Phase 2] ⚠️ MONGODB ONLY: No body found in MongoDB for completed email ${emailId}`);
+          }
+        } catch (mongoError) {
+          console.error(`[Phase 2] ❌ MONGODB ONLY: Error retrieving from MongoDB for completed email ${emailId}:`, mongoError.message);
+          console.error(`[Phase 2] ❌ MONGODB STACK:`, mongoError.stack);
+        }
+      }
+    }
+
+    // 🚀 MONGODB FIRST: Try to get processed body from MongoDB
+    let isBodyFromMongoDB = false; // Track if body comes from MongoDB (already processed)
+    try {
+      const mongoBody = await emailBodyMongoService.getEmailBody(emailId.toString(), masterUserID.toString());
+      if (mongoBody && mongoBody.processedBody) {
+        mainEmail.body = mongoBody.processedBody;
+        isBodyFromMongoDB = true; // Body is already processed
+        console.log(`[getOneEmail] 🚀 MONGODB: Successfully retrieved processed body from MongoDB for email ${emailId} (length: ${mongoBody.processedBody.length})`);
+      } else if (mongoBody && mongoBody.body) {
+        mainEmail.body = mongoBody.body;
+        console.log(`[getOneEmail] 🚀 MONGODB: Retrieved raw body from MongoDB for email ${emailId}, will process`);
+      } else {
+        console.log(`[getOneEmail] 📧 MONGODB: No body found in MongoDB for email ${emailId}, using MySQL body`);
+      }
+    } catch (mongoError) {
+      console.error(`[getOneEmail] ❌ MONGODB ERROR: Failed to get body from MongoDB for email ${emailId}:`, mongoError);
+      // Continue with MySQL body if MongoDB fails
+    }
+
+    // 🚀 MONGODB MIGRATION: If we have a body from MySQL (not MongoDB), migrate it to MongoDB for future performance
+    if (mainEmail.body && mainEmail.body.length > 0 && !isBodyFromMongoDB) {
+      try {
+        const EmailBodyMongoService = require('../../services/emailBodyMongoService');
+        
+        // Check if already in MongoDB
+        const mongoCheck = await EmailBodyMongoService.hasEmailBody(emailId, masterUserID);
+        
+        if (!mongoCheck.exists) {
+          console.log(`[getOneEmail] 💾 MIGRATION: Migrating email ${emailId} body to MongoDB for future performance...`);
+          
+          const migrationResult = await EmailBodyMongoService.migrateEmailBodyFromMySQL(
+            emailId, 
+            masterUserID, 
+            mainEmail.body, 
+            mainEmail.attachments
+          );
+          
+          if (migrationResult.success) {
+            console.log(`[getOneEmail] ✅ MIGRATION: Successfully migrated email ${emailId} body to MongoDB`);
+            
+            // Clear MySQL body to save space (background operation)
+            Email.update(
+              { body: '' },
+              { where: { emailID: mainEmail.emailID } }
+            ).catch(err => console.log(`[getOneEmail] ⚠️ MIGRATION: Error clearing MySQL body:`, err.message));
+          } else {
+            console.log(`[getOneEmail] ⚠️ MIGRATION: Failed to migrate email ${emailId} to MongoDB:`, migrationResult.error);
+          }
+        } else {
+          console.log(`[getOneEmail] ✅ MONGODB: Email ${emailId} body already exists in MongoDB`);
+        }
+      } catch (migrationError) {
+        console.log(`[getOneEmail] ❌ MIGRATION: Error during MongoDB migration for email ${emailId}:`, migrationError.message);
+        // Continue with existing logic - migration is optional
+      }
     }
 
     // Handle attachments appropriately based on type (user-uploaded vs fetched)
@@ -6066,6 +6368,9 @@ exports.getOneEmail = async (req, res) => {
     });
 
     // Clean the body of the main email AFTER processing attachments so we can replace cid: references
+    // 🚀 MONGODB: Skip cleaning if body already comes processed from MongoDB
+    const shouldSkipCleaning = isBodyFromMongoDB; // Skip if body is already processed from MongoDB
+    
     console.log(`[getOneEmail] 🔧 BEFORE CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0}`);
     console.log(`[getOneEmail] 🔍 BODY TYPE: ${mainEmail.body && mainEmail.body.includes('<') ? 'HTML' : 'TEXT'}`);
     console.log(`[getOneEmail] 📎 ATTACHMENTS: ${mainEmail.attachments.length} total`);
@@ -6088,16 +6393,22 @@ exports.getOneEmail = async (req, res) => {
     // Store original body for comparison
     const originalBodyLength = mainEmail.body ? mainEmail.body.length : 0;
     
-    if (shouldPreserveOriginal) {
-      // Minimal cleaning - only replace CID references, preserve everything else
-      console.log(`[getOneEmail] 🔒 PRESERVE MODE: Only replacing CID references, keeping signatures and formatting`);
-      mainEmail.body = replaceCidReferences(mainEmail.body || '', mainEmail.attachments);
+    // Only clean if not already processed by MongoDB
+    if (!shouldSkipCleaning) {
+      if (shouldPreserveOriginal) {
+        // Minimal cleaning - only replace CID references, preserve everything else
+        console.log(`[getOneEmail] 🔒 PRESERVE MODE: Only replacing CID references, keeping signatures and formatting`);
+        mainEmail.body = replaceCidReferences(mainEmail.body || '', mainEmail.attachments);
+      } else {
+        // Normal cleaning
+        mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments);
+      }
+      
+      console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0} (${originalBodyLength - (mainEmail.body ? mainEmail.body.length : 0)} chars removed)`);
     } else {
-      // Normal cleaning
-      mainEmail.body = cleanEmailBody(mainEmail.body || '', mainEmail.attachments);
+      console.log(`[getOneEmail] ⚡ MONGODB: Using pre-processed body from MongoDB, skipping cleaning`);
     }
     
-    console.log(`[getOneEmail] 🔧 AFTER CLEAN: Email ${emailId} body length: ${mainEmail.body ? mainEmail.body.length : 0} (${originalBodyLength - (mainEmail.body ? mainEmail.body.length : 0)} chars removed)`);
     console.log(`[getOneEmail] 🔧 BODY PREVIEW: ${mainEmail.body ? mainEmail.body.substring(0, 300) + '...' : 'No body content'}`);
 
     // Enrich main email with label information
