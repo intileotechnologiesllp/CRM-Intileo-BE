@@ -34,6 +34,7 @@ const DealProduct = require("../../models/product/dealProductModel");
 const Product = require("../../models/product/productModel");
 const multer = require('multer');
 const path = require('path');
+const GroupVisibility = require("../../models/admin/groupVisibilityModel");
 const fs = require('fs').promises;
 // Create a new deal with validation
 
@@ -889,6 +890,7 @@ exports.getDeals = async (req, res) => {
     masterUserID,
     isArchived,
     filterId,
+    groupId
   } = req.query;
 
   const offset = (page - 1) * limit;
@@ -1692,6 +1694,46 @@ exports.getDeals = async (req, res) => {
       dealCount: data.dealCount,
     }));
     summary.sort((a, b) => b.totalValue - a.totalValue);
+
+    // const filterDeals = dealsWithCustomFields.filter(deal => deal?.visibilityGroupId == groupId);
+    const findGroup = await GroupVisibility.findOne({
+      where:{
+        groupId: 1 //groupId
+      }
+    })
+
+    let filterDeals = [];
+
+    if(findGroup?.lead?.toLowerCase() == "visibilitygroup"){
+      let findParentGroup = null; 
+      if(findGroup?.parentGroupId){
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId
+          }
+        })
+      }
+      
+      const filterDeals = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == groupId ||  idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+
+      filterDeals = filterDeals;
+    }
+    else if(findGroup?.lead?.toLowerCase() == "owner"){
+      let findParentGroup = null; 
+      if(findGroup?.parentGroupId){
+        findParentGroup = await GroupVisibility.findOne({
+          where: {
+            groupId: findGroup?.parentGroupId
+          }
+        })
+      }
+
+      const filterFields = dealsWithCustomFields.filter((idx)=> idx?.ownerId == req.adminId || idx?.visibilityGroupId == findGroup?.parentGroupId || findParentGroup.memberIds?.split(",").includes(req.adminId.toString()));
+
+      filterDeals = filterFields;
+    }else{
+      filterDeals = dealsWithCustomFields;
+    }
 
     res.status(200).json({
       message: "Deals fetched successfully",

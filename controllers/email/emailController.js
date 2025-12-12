@@ -7535,6 +7535,42 @@ exports.composeEmail = [
   },
 ];
 
+// exports.groupMail = async (req, res) =>{
+// try{
+//   const {ids, sender,senderName, cc, bcc,subject, body} = req.body;
+
+//   const emails = ids;
+
+//   for(let i = 0; i < emails.length; i++){
+
+//      const emailData = {
+//         // messageId: info.messageId,
+//         draftId: null,
+//         inReplyTo: null,
+//         references: null,
+//         sender: sender,
+//         senderName: senderName,
+//         recipient: emails[i]?.email,
+//         cc: cc,
+//         bcc: bcc,
+//         subject: subject,
+//         body: body,
+//         folder: "sent", // Will be set when saved in queue worker
+//         createdAt: new Date(),
+//         masterUserID: emails[i]?.masterUserID,
+//         tempMessageId,
+//         isDraft: false,
+//         attachments,
+//         // isShared: isShared === true || isShared === "true", // ensure boolean
+//       };
+//     publishToQueue("EMAIL_QUEUE", { ...emailData, skipSend: true });
+//   } 
+
+// }catch(){
+
+// }
+// }
+
 exports.createTemplate = async (req, res) => {
   const { name, subject, content, isShared } = req.body; // Changed `body` to `content`
   const masterUserID = req.adminId; // Assuming `adminId` is set in middleware

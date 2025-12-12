@@ -13,6 +13,100 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger");
 const PROGRAMS = require("../../utils/programConstants");
 const historyLogger = require("../../utils/historyLogger").logHistory;
 
+exports.addPipelineToGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { pipelineId } = req.body;
+    // Find the group
+    const group = await GroupVisibility.findByPk(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: "Group not found"
+      });
+    }
+    // Check if pipeline exists
+    const pipeline = await Pipeline.findByPk(pipelineId);
+    if (!pipeline) {
+      return res.status(404).json({
+        success: false,
+        error: "Pipeline not found"
+      });
+    }
+    // Check if pipeline is already in the group
+    const currentPipelines = group.pipelineIds ? group.pipelineIds.split(',').map(id => id.trim()) : [];
+    if (currentPipelines.includes(pipelineId.toString())) {
+      return res.status(400).json({
+        success: false,
+        error: "Pipeline is already associated with the group"
+      });
+    }
+    // Add pipeline to the group
+    currentPipelines.push(pipelineId.toString());
+    group.pipelineIds = currentPipelines.join(',');
+    await group.save();
+    return res.status(200).json({
+      success: true,
+      message: "Pipeline added to group successfully",
+      data: group
+    });
+  } catch (error) {
+    console.error("Error adding pipeline to group:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+}
+exports.addUserToGroup = async (req, res)=>{
+  try{
+    const { groupId } = req.params;
+    const { masterUserID } = req.body;
+    // Find the group
+    const group = await GroupVisibility.findByPk(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: "Group not found"
+      });
+    }
+    // Check if user exists
+    const user = await MasterUser.findOne({ where: { masterUserID } });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+    // Check if user is already in the group
+    const currentMembers = group.memberIds ? group.memberIds.split(',').map(id => id.trim()) : [];
+    if (currentMembers.includes(masterUserID.toString())) {
+      return res.status(400).json({
+        success: false,
+        error: "User is already a member of the group"
+      });
+    }
+    // Add user to the group
+    currentMembers.push(masterUserID.toString());
+    group.memberIds = currentMembers.join(',');
+    await group.save();
+    return res.status(200).json({
+      success: true,
+      message: "User added to group successfully",
+      data: group
+    });
+    
+  }catch(error){
+    console.error("Error adding user to group:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+}
+
 exports.getVisibilityGroups = async (req, res) => {
   try {
     // Get all groups

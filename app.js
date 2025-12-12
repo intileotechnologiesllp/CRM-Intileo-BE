@@ -64,6 +64,8 @@ const productRoutes = require('./routes/product/productRoutes.js'); // Import pr
 const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import MongoDB routes
 const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const userInterfacePreferencesRoutes = require('./routes/userInterfacePreferencesRoutes.js'); // Import user interface preferences routes
+const googleDriveRoutes  = require('./routes/google-drive/googledrive.js'); // Import Google Drive routes
+
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
 // const { initRabbitMQ } = require("./services/rabbitmqService");
@@ -150,6 +152,7 @@ app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
 app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
+app.use('/api/drive', googleDriveRoutes); // Register user session/device management routes
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 

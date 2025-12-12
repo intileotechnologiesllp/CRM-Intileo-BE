@@ -247,6 +247,6 @@ const Lead = sequelize.define("Lead", {
     comment: "Reference to the owner's visibility group",
   },
 });
-
-
+// 
+// Lead.sync({ alter: true })
 module.exports = Lead;
