@@ -8,6 +8,7 @@ const { logAuditTrail } = require("../../utils/auditTrailLogger"); // Import the
 const PROGRAMS = require("../../utils/programConstants"); // Import program constants
 const historyLogger = require("../../utils/historyLogger").logHistory; // Import history logger
 const MasterUser = require("../../models/master/masterUserModel"); // Adjust path as needed
+const NotificationTriggers = require("../../services/notification/notificationTriggers"); // 🔔 Notification triggers
 const LeadColumnPreference = require("../../models/leads/leadColumnModel"); // Import LeadColumnPreference model
 //const Person = require("../../models/leads/leadPersonModel"); // Import Person model
 //const Organization = require("../../models/leads/leadOrganizationModel"); // Import Organization model
@@ -425,6 +426,56 @@ exports.createLead = async (req, res) => {
       valueCurrency: req.body.valueCurrency || "INR",
       proposalValueCurrency: req.body.proposalValueCurrency || "INR",
     });
+
+    // 🔔 Send Notification - Lead Created
+    console.log('🔔 ========== NOTIFICATION DEBUG START ==========');
+    console.log('🔔 Lead created successfully:', {
+      leadId: lead.leadId,
+      ownerId: lead.ownerId,
+      title: lead.title,
+      masterUserID: lead.masterUserID
+    });
+    
+    try {
+      console.log('🔔 Step 1: Fetching creator details for req.adminId:', req.adminId);
+      
+      // Get creator details for notification
+      const creator = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'name']
+      });
+      
+      console.log('🔔 Step 2: Creator found:', creator ? {
+        masterUserID: creator.masterUserID,
+        name: creator.name
+      } : 'NULL - Creator not found!');
+      
+      const leadObject = {
+        leadId: lead.leadId,
+        ownerId: lead.ownerId,
+        leadTitle: lead.title
+      };
+      
+      const creatorObject = {
+        userId: req.adminId,
+        name: creator ? creator.name : 'Unknown User'
+      };
+      
+      console.log('🔔 Step 3: Calling NotificationTriggers.leadCreated with:', {
+        leadObject,
+        creatorObject
+      });
+      
+      await NotificationTriggers.leadCreated(leadObject, creatorObject);
+      
+      console.log('🔔 Step 4: Notification trigger completed successfully! ✅');
+    } catch (notifError) {
+      console.error('🔔 ❌ NOTIFICATION ERROR:', notifError);
+      console.error('🔔 Error name:', notifError.name);
+      console.error('🔔 Error message:', notifError.message);
+      console.error('🔔 Error stack:', notifError.stack);
+    }
+    
+    console.log('🔔 ========== NOTIFICATION DEBUG END ==========');
 
     // Link email to lead if sourceOrgin is 0 (email-created lead)
     if ((sourceOrgin === 0 || sourceOrgin === "0") && emailID) {
@@ -3732,9 +3783,74 @@ exports.updateLead = async (req, res) => {
         }
       });
       
+      // 🔔 IMPORTANT: Store original ownerId BEFORE updating the lead
+      const originalOwnerId = lead.ownerId;
+      console.log('🔔 Original ownerId stored:', originalOwnerId);
+      
       console.log("Final leadData to update (includes synced Person/Organization fields):", leadData);
       await lead.update(leadData);
       console.log("Lead updated:", lead.toJSON());
+      
+      // 🔔 Send Notification - Lead Assigned (if ownerId changed)
+      console.log('🔔 ========== UPDATE LEAD NOTIFICATION DEBUG START ==========');
+      console.log('🔔 Checking if ownerId changed:', {
+        'leadData.ownerId': leadData.ownerId,
+        'original ownerId (stored before update)': originalOwnerId,
+        'current lead.ownerId (after update)': lead.ownerId,
+        'has changed': leadData.ownerId && leadData.ownerId !== originalOwnerId
+      });
+      
+      if (leadData.ownerId && leadData.ownerId !== originalOwnerId) {
+        console.log('🔔 ✅ Owner changed! Sending notification...');
+        try {
+          console.log('🔔 Step 1: Fetching assignedBy details for req.adminId:', req.adminId);
+          
+          // Get assignedBy details for notification
+          const assignedBy = await MasterUser.findByPk(req.adminId, {
+            attributes: ['masterUserID', 'name']
+          });
+          
+          console.log('🔔 Step 2: AssignedBy user found:', assignedBy ? {
+            masterUserID: assignedBy.masterUserID,
+            name: assignedBy.name
+          } : 'NULL - User not found!');
+          
+          const leadObject = {
+            leadId: lead.leadId,
+            leadTitle: lead.title
+          };
+          
+          const newOwnerId = leadData.ownerId;
+          
+          const assignedByObject = {
+            userId: req.adminId,
+            name: assignedBy ? assignedBy.name : 'Unknown User'
+          };
+          
+          console.log('🔔 Step 3: Calling NotificationTriggers.leadAssigned with:', {
+            leadObject,
+            newOwnerId,
+            assignedByObject
+          });
+          
+          await NotificationTriggers.leadAssigned(
+            leadObject,
+            newOwnerId,
+            assignedByObject
+          );
+          
+          console.log('🔔 Step 4: Lead assigned notification sent successfully! ✅');
+        } catch (notifError) {
+          console.error('🔔 ❌ NOTIFICATION ERROR:', notifError);
+          console.error('🔔 Error name:', notifError.name);
+          console.error('🔔 Error message:', notifError.message);
+          console.error('🔔 Error stack:', notifError.stack);
+        }
+      } else {
+        console.log('🔔 ⚠️ Owner NOT changed - no notification sent');
+      }
+      
+      console.log('🔔 ========== UPDATE LEAD NOTIFICATION DEBUG END ==========');
       
       // Synchronize relevant Lead fields to LeadDetails table
       const leadDetailsSync = {};
@@ -3773,12 +3889,23 @@ exports.updateLead = async (req, res) => {
       assigner &&
       assigner.email
     ) {
-      await sendEmail(assigner.email, {
-        from: assigner.email,
-        to: newOwner.email,
-        subject: "You have been assigned a new lead",
-        text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
-      });
+      try {
+        const emailResult = await sendEmail(assigner.email, {
+          from: assigner.email,
+          to: newOwner.email,
+          subject: "You have been assigned a new lead",
+          text: `Hello ${newOwner.name},\n\nYou have been assigned a new lead: "${lead.title}" by ${assigner.name}.\n\nPlease check your CRM dashboard for details.`,
+        });
+        
+        if (emailResult && emailResult.success === false) {
+          console.log(`⚠️ Email notification not sent: ${emailResult.message}`);
+        } else {
+          console.log(`✅ Email notification sent successfully to ${newOwner.email}`);
+        }
+      } catch (emailError) {
+        console.error(`Error sending email notification for lead ${lead.leadId}:`, emailError);
+        // Don't throw - continue with the rest of the update process
+      }
     }
 
     // Update or create LeadDetails

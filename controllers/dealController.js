@@ -6,6 +6,7 @@ const sequelize = require("../config/db");
 const { logAuditTrail } = require("../utils/auditTrailLogger");
 const PROGRAMS = require("../utils/programConstants");
 const historyLogger = require("../utils/historyLogger").logHistory;
+const NotificationTriggers = require("../services/notification/notificationTriggers");
 
 // Create a new deal with custom fields
 exports.createDeal = async (req, res) => {
@@ -161,6 +162,19 @@ exports.createDeal = async (req, res) => {
 
       // Commit the transaction
       await transaction.commit();
+
+      // 🔔 Send Notification - Deal Created
+      try {
+        const ownerId = deal.ownerId || masterUserID;
+        await NotificationTriggers.dealCreated(
+          deal.dealId,
+          ownerId,
+          masterUserID
+        );
+      } catch (notifError) {
+        console.error('Failed to send deal created notification:', notifError);
+        // Don't fail the request if notification fails
+      }
 
       // Log the creation
       await historyLogger(
@@ -520,6 +534,41 @@ exports.updateDeal = async (req, res) => {
 
       // Commit the transaction
       await transaction.commit();
+
+      // 🔔 Send Notifications - Deal Updated/Assigned/Won/Lost
+      try {
+        // Check if owner changed (deal assigned)
+        const ownerField = updatedValues.find(f => f.fieldName === 'ownerId');
+        if (ownerField && ownerField.value && ownerField.value !== deal.ownerId) {
+          await NotificationTriggers.dealAssigned(
+            dealId,
+            ownerField.value,
+            masterUserID
+          );
+        }
+
+        // Check if status changed to won
+        const statusField = updatedValues.find(f => f.fieldName === 'status');
+        if (statusField && statusField.value === 'won' && deal.status !== 'won') {
+          await NotificationTriggers.dealWon(
+            dealId,
+            deal.ownerId || masterUserID,
+            masterUserID
+          );
+        }
+
+        // Check if status changed to lost
+        if (statusField && statusField.value === 'lost' && deal.status !== 'lost') {
+          await NotificationTriggers.dealLost(
+            dealId,
+            deal.ownerId || masterUserID,
+            masterUserID
+          );
+        }
+      } catch (notifError) {
+        console.error('Failed to send deal update notification:', notifError);
+        // Don't fail the request if notification fails
+      }
 
       // Log the update
       await historyLogger(

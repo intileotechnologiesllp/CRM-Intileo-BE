@@ -32,6 +32,7 @@ const Currency = require("../../models/admin/masters/currencyModel");
 const DealFile = require("../../models/deals/dealFileModel");
 const DealProduct = require("../../models/product/dealProductModel");
 const Product = require("../../models/product/productModel");
+const NotificationTriggers = require("../../services/notification/notificationTriggers"); // 🔔 Notification triggers
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
@@ -829,6 +830,30 @@ exports.createDeal = async (req, res) => {
       `Deal is created by ${req.role}`,
       null
     );
+
+    // 🔔 Send Notification - Deal Created
+    try {
+      // Get creator details for notification
+      const creator = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'name']
+      });
+      
+      await NotificationTriggers.dealCreated(
+        {
+          dealId: deal.dealId,
+          ownerId: deal.ownerId,
+          dealTitle: deal.title,
+          dealValue: deal.value,
+          stage: deal.pipelineStage
+        },
+        {
+          userId: req.adminId,
+          name: creator ? creator.name : 'Unknown User'
+        }
+      );
+    } catch (notifError) {
+      console.error('Failed to send deal created notification:', notifError);
+    }
 
     // Prepare response with both default and custom fields
     const dealResponse = {
@@ -3847,6 +3872,60 @@ exports.updateDeal = async (req, res) => {
     }
     await deal.update({ ...updateFields });
     console.log("Deal updated:", deal.toJSON());
+    
+    // 🔔 Send Notifications - Deal Assignment, Won, Lost
+    try {
+      // Get updater details for notification
+      const updater = await MasterUser.findByPk(req.adminId, {
+        attributes: ['masterUserID', 'name']
+      });
+      
+      const updaterInfo = {
+        userId: req.adminId,
+        name: updater ? updater.name : 'Unknown User'
+      };
+      
+      // Check if ownerId changed (deal assigned)
+      if (updateFields.ownerId && updateFields.ownerId !== deal.ownerId) {
+        await NotificationTriggers.dealAssigned(
+          {
+            dealId: deal.dealId,
+            dealTitle: deal.title,
+            dealValue: deal.value
+          },
+          updateFields.ownerId,
+          updaterInfo
+        );
+      }
+      
+      // Check if status changed to 'won'
+      if (updateFields.status && updateFields.status === 'won' && deal.status !== 'won') {
+        await NotificationTriggers.dealWon(
+          {
+            dealId: deal.dealId,
+            ownerId: deal.ownerId,
+            dealTitle: deal.title,
+            dealValue: deal.value
+          },
+          updaterInfo
+        );
+      }
+      
+      // Check if status changed to 'lost'
+      if (updateFields.status && updateFields.status === 'lost' && deal.status !== 'lost') {
+        await NotificationTriggers.dealLost(
+          {
+            dealId: deal.dealId,
+            ownerId: deal.ownerId,
+            dealTitle: deal.title
+          },
+          updaterInfo,
+          updateFields.lostReason || null
+        );
+      }
+    } catch (notifError) {
+      console.error('Failed to send deal notification:', notifError);
+    }
     
     // Synchronize Deal updates to Person and Organization tables
     if (Object.keys(updateFields).length > 0) {

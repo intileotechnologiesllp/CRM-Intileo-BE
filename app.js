@@ -62,12 +62,15 @@ const permissionRoutes = require('./routes/permissionSetRoutes.js'); // Import l
 const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const productRoutes = require('./routes/product/productRoutes.js'); // Import product routes
 const mongodbRoutes = require('./routes/mongodb/mongodbRoutes.js'); // Import MongoDB routes
-const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
+//const contactSyncRoutes = require('./routes/contact/contactSyncRoutes.js'); // Import contact sync routes
 const userInterfacePreferencesRoutes = require('./routes/userInterfacePreferencesRoutes.js'); // Import user interface preferences routes
 const { loadPrograms } = require("./utils/programCache");
 const imapIdleManager = require('./services/imapIdleManager'); // IMAP IDLE for real-time sync
+const { initializeSocket } = require('./config/socket'); // Socket.IO for real-time notifications
+const http = require('http');
 // const { initRabbitMQ } = require("./services/rabbitmqService");
 const app = express();
+const server = http.createServer(app); // Create HTTP server for Socket.IO
 require("./utils/cronJob.js");
 // REMOVED: Email queue workers are now handled by dedicated PM2 processes
 // require("./utils/emailQueueWorker");
@@ -150,6 +153,11 @@ app.use('/api/mongodb', mongodbRoutes); // Register MongoDB analytics routes
 app.use('/api/interface-preferences', userInterfacePreferencesRoutes); // Register user interface preferences routes
 app.use('/api/contact-sync', contactSyncRoutes); // Register contact sync routes
 app.use('/api/user-sessions', userSessionRoutes); // Register user session/device management routes
+
+// Notification routes (will be added next)
+const notificationRoutes = require('./routes/notification/notificationRoutes.js'); // Import notification routes
+app.use('/api/notifications', notificationRoutes); // Register notification routes
+
 app.get("/track/open/:tempMessageId", async (req, res) => {
   const { tempMessageId } = req.params;
 
@@ -217,7 +225,12 @@ sequelize
     await loadPrograms();
     console.log("Program cache loaded.");
     
-    // 🚀 Initialize IMAP IDLE Manager for real-time email sync (only if MongoDB is available)
+    // � Initialize Socket.IO for real-time notifications
+    console.log("🔄 Initializing Socket.IO...");
+    initializeSocket(server);
+    console.log("✅ Socket.IO initialized for real-time notifications");
+    
+    // �🚀 Initialize IMAP IDLE Manager for real-time email sync (only if MongoDB is available)
     try {
       if (mongoConnected) {
         await imapIdleManager.initialize();
@@ -244,11 +257,12 @@ sequelize
     
     // Start server after loading programs and initializing IMAP IDLE
     const PORT = process.env.PORT || 3056;
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📊 MySQL Database: Connected via Sequelize`);
       console.log(`🍃 MongoDB: ${mongoConnected ? 'Connected' : 'Unavailable'}`);
       console.log(`🔴 Redis: ${redisConnected ? 'Connected' : 'Unavailable'}`);
+      console.log(`🔔 Socket.IO: ACTIVE (Real-time notifications)`);
       console.log(`🌐 Application URL: ${process.env.LOCALHOST_URL || `http://localhost:${PORT}`}`);
       console.log(`📧 Real-time email sync: ${imapIdleManager.isInitialized ? 'ACTIVE' : 'DISABLED'}`);
     });
