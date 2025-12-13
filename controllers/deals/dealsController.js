@@ -1544,6 +1544,11 @@ exports.getDeals = async (req, res) => {
     console.log("🔍 All active custom fields template:", Object.keys(allActiveCustomFields));
     console.log("🔍 Deals with custom field data:", Object.keys(customFieldsByDeal));
 
+    // Initialize activity data by deal (placeholder for future activity integration)
+    const activityDataByDeal = {};
+    // TODO: Fetch and populate activity data for each deal
+    // For now, this prevents the ReferenceError and returns default values
+
     const dealsWithCustomFields = deals.map((deal) => {
       const dealObj = deal.toJSON();
 

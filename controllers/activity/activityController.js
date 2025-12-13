@@ -59,7 +59,7 @@ exports.createActivity = async (req, res) => {
     let contactPerson = null;
     let email = null;
     let allContactPersons = [];
-    let finalPersonId = personId;
+    let finalPersonId = personId; 
 
     if (finalContactPersons && Array.isArray(finalContactPersons)) {
       console.log('Creating activity with multiple contact persons:', finalContactPersons);
